@@ -527,7 +527,7 @@ git commit -m "feat: add catalog aliases and customer pricing"
 - Produces: `releaseReservation(tx, reservationId, reason): Promise<void>`.
 - Produces: `adjustTotalInventory(tx, input): Promise<InventoryMovement>`.
 
-- [ ] **Step 1: Write failing inventory formula and concurrency tests**
+- [x] **Step 1: Write failing inventory formula and concurrency tests**
 
 ```ts
 test("available equals total minus active reservations", async () => {
@@ -549,17 +549,17 @@ test("two concurrent reservations cannot oversell the final unit", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `npm.cmd run test:integration -- tests/integration/inventory/concurrency.test.ts`
 
 Expected: FAIL because inventory tables and services do not exist.
 
-- [ ] **Step 3: Implement inventory schema**
+- [x] **Step 3: Implement inventory schema**
 
 `inventoryBalances` stores one non-negative `totalQuantity` per SKU. `inventoryReservations` stores `ACTIVE`, `RELEASED`, or `CONSUMED`. `inventoryMovements` stores `MANUAL_INCREASE`, `MANUAL_DECREASE`, `SHIPMENT`, or `REVERSAL` and always includes before, delta, after, actor and reason.
 
-- [ ] **Step 4: Implement reservation with row locking**
+- [x] **Step 4: Implement reservation with row locking**
 
 ```ts
 export async function reserveInventory(
@@ -577,11 +577,11 @@ export async function reserveInventory(
 
 `lockInventoryBalance` must issue `SELECT ... FOR UPDATE` inside the caller transaction.
 
-- [ ] **Step 5: Implement manual adjustment and audit event**
+- [x] **Step 5: Implement manual adjustment and audit event**
 
 `adjustTotalInventory` must reject zero delta, require a non-empty reason, prevent a result below active reservations, append an inventory movement and append an audit row in the same transaction.
 
-- [ ] **Step 6: Generate migration and run tests**
+- [x] **Step 6: Generate migration and run tests**
 
 Run: `npm.cmd run db:generate`
 
@@ -591,7 +591,7 @@ Run: `npm.cmd run test:integration -- tests/integration/inventory/concurrency.te
 
 Expected: PASS, including repeated runs of the concurrency test.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/db/schema/inventory.ts src/modules/inventory tests/integration/inventory drizzle
