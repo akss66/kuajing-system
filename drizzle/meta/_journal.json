@@ -8,6 +8,13 @@
       "when": 1786470763841,
       "tag": "0000_aromatic_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786471477963,
+      "tag": "0001_thin_yellow_claw",
+      "breakpoints": true
     }
   ]
 }

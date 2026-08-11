@@ -381,7 +381,7 @@ git commit -m "feat: add identity customer store and audit schema"
 - Produces: `requireCustomer(): Promise<CustomerPrincipal>` where `CustomerPrincipal` contains `userId` and `customerId`.
 - Produces: `assertStoreOwnership(customerId: string, storeId: string): Promise<void>`.
 
-- [ ] **Step 1: Write failing access tests**
+- [x] **Step 1: Write failing access tests**
 
 ```ts
 test("customer cannot access another customer's store", async () => {
@@ -393,19 +393,19 @@ test("customer cannot access another customer's store", async () => {
 
 Add tests that anonymous users are rejected and customer principals cannot pass `requireAdmin`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `npm.cmd run test:integration -- tests/integration/identity/access-guards.test.ts`
 
 Expected: FAIL because guard functions do not exist.
 
-- [ ] **Step 3: Configure credential authentication**
+- [x] **Step 3: Configure credential authentication**
 
 Use Better Auth with Drizzle persistence, secure HTTP-only cookies, same-site `lax`, password minimum 12 characters, and no public self-registration. Admin-created accounts are the only account provisioning path.
 
 Define the Better Auth user, account, session and verification tables in `src/db/schema/auth.ts`, export them from the schema index, then run `npm.cmd run db:generate` and `npm.cmd run db:migrate` before executing access tests.
 
-- [ ] **Step 4: Implement typed principals and ownership check**
+- [x] **Step 4: Implement typed principals and ownership check**
 
 ```ts
 export type AdminPrincipal = {
@@ -422,7 +422,7 @@ export type CustomerPrincipal = {
 
 `assertStoreOwnership` must query by both `storeId` and `customerId`; it must never load by store ID and trust a browser-supplied customer ID.
 
-- [ ] **Step 5: Run tests and quality gates**
+- [x] **Step 5: Run tests and quality gates**
 
 Run: `npm.cmd run test:integration -- tests/integration/identity/access-guards.test.ts`
 
@@ -434,7 +434,7 @@ Run: `npm.cmd lint`
 
 Expected: exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/modules/identity src/app/api/auth tests/integration/identity
