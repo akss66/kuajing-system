@@ -471,3 +471,85 @@ export async function processDueJifengCreateOrderEvents(input: {
   }
   return summary;
 }
+
+export async function retryJifengShipment(input: {
+  actorUserId: string;
+  now?: Date;
+  reason: string;
+  shipmentId: string;
+}) {
+  const reason = input.reason.trim();
+  if (!reason) throw new Error("重试极风履约必须填写原因");
+  const now = input.now ?? new Date();
+  return db.transaction(async (tx) => {
+    const rows = await tx.execute<{
+      fulfillmentId: string;
+      orderId: string;
+      status: string;
+    }>(sql`
+      select
+        f.id as "fulfillmentId",
+        f.status,
+        s.order_id as "orderId"
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      where s.id = ${input.shipmentId}
+      for update of f
+    `);
+    const fulfillment = rows[0];
+    if (!fulfillment) throw new Error("未找到极风履约包裹");
+    if (["SHIPPED", "CANCELLED"].includes(fulfillment.status)) {
+      throw new Error("已发货或已取消包裹不能重试");
+    }
+    await tx
+      .update(shipmentFulfillments)
+      .set({
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextRetryAt: now,
+        status: "PENDING",
+        updatedAt: now,
+      })
+      .where(eq(shipmentFulfillments.id, fulfillment.fulfillmentId));
+    await tx
+      .update(integrationOutbox)
+      .set({
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lockedAt: null,
+        nextAttemptAt: now,
+        status: "PENDING",
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(integrationOutbox.aggregateId, input.shipmentId),
+          eq(integrationOutbox.eventType, "JIFENG_CREATE_ORDER"),
+        ),
+      );
+    await tx
+      .update(fulfillmentOrders)
+      .set({ status: "FULFILLING", updatedAt: now })
+      .where(
+        and(
+          eq(fulfillmentOrders.id, fulfillment.orderId),
+          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
+        ),
+      );
+    await tx
+      .update(replacementRequests)
+      .set({ status: "PENDING_FULFILLMENT", updatedAt: now })
+      .where(eq(replacementRequests.replacementShipmentId, input.shipmentId));
+    await tx.insert(auditLogs).values({
+      action: "JIFENG_SHIPMENT_RETRY_REQUESTED",
+      actorId: input.actorUserId,
+      actorType: "ADMIN",
+      afterJson: { status: "PENDING" },
+      beforeJson: { status: fulfillment.status },
+      entityId: input.shipmentId,
+      entityType: "ORDER_SHIPMENT",
+      reason,
+    });
+    return { status: "PENDING" as const };
+  });
+}

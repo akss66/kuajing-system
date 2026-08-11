@@ -5,7 +5,10 @@ import {
   customers,
   fulfillmentOrders,
   orderLines,
+  orderShipments,
   paymentClaims,
+  replacementRequests,
+  shipmentFulfillments,
   stores,
 } from "@/db/schema";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
@@ -217,4 +220,85 @@ export async function listAdminOrderFilterOptions() {
       .orderBy(stores.name),
   ]);
   return { customers: customerRows, stores: storeRows };
+}
+
+export async function getAdminOrderDetail(orderId: string) {
+  const [order] = await db
+    .select({
+      cancelReason: fulfillmentOrders.cancelReason,
+      createdAt: fulfillmentOrders.createdAt,
+      customerCode: customers.code,
+      customerName: customers.name,
+      id: fulfillmentOrders.id,
+      orderNumber: fulfillmentOrders.orderNumber,
+      paymentMode: fulfillmentOrders.paymentMode,
+      status: fulfillmentOrders.status,
+      storeName: stores.name,
+      totalAmountFen: fulfillmentOrders.totalAmountFen,
+      totalPackageCount: fulfillmentOrders.totalPackageCount,
+      totalQuantity: fulfillmentOrders.totalQuantity,
+    })
+    .from(fulfillmentOrders)
+    .innerJoin(customers, eq(customers.id, fulfillmentOrders.customerId))
+    .innerJoin(stores, eq(stores.id, fulfillmentOrders.storeId))
+    .where(eq(fulfillmentOrders.id, orderId))
+    .limit(1);
+  if (!order) return null;
+
+  const [shipments, lines] = await Promise.all([
+    db
+      .select({
+        attemptCount: shipmentFulfillments.attemptCount,
+        cancelledAt: shipmentFulfillments.cancelledAt,
+        erpNo: shipmentFulfillments.erpNo,
+        externalOrderNo: orderShipments.externalOrderNo,
+        fulfillmentId: shipmentFulfillments.id,
+        fulfillmentStatus: shipmentFulfillments.status,
+        id: orderShipments.id,
+        jifengStatus: shipmentFulfillments.jifengStatus,
+        kind: orderShipments.kind,
+        lastErrorCode: shipmentFulfillments.lastErrorCode,
+        lastErrorMessage: shipmentFulfillments.lastErrorMessage,
+        logisticsCurrency: orderShipments.logisticsCurrency,
+        logisticsFeeMinor: orderShipments.logisticsFeeMinor,
+        nextRetryAt: shipmentFulfillments.nextRetryAt,
+        replacementReason: replacementRequests.reason,
+        replacementStatus: replacementRequests.status,
+        shippedAt: orderShipments.shippedAt,
+        trackingNumber: orderShipments.trackingNumber,
+      })
+      .from(orderShipments)
+      .leftJoin(
+        shipmentFulfillments,
+        eq(shipmentFulfillments.shipmentId, orderShipments.id),
+      )
+      .leftJoin(
+        replacementRequests,
+        eq(replacementRequests.replacementShipmentId, orderShipments.id),
+      )
+      .where(eq(orderShipments.orderId, orderId))
+      .orderBy(orderShipments.createdAt),
+    db
+      .select({
+        id: orderLines.id,
+        lineAmountFen: orderLines.lineAmountFen,
+        quantity: orderLines.quantity,
+        shipmentId: orderLines.shipmentId,
+        skuCode: orderLines.skuCodeSnapshot,
+        skuId: orderLines.skuId,
+        skuName: orderLines.skuNameSnapshot,
+        unitPriceFen: orderLines.unitPriceFen,
+      })
+      .from(orderLines)
+      .where(eq(orderLines.orderId, orderId))
+      .orderBy(orderLines.createdAt),
+  ]);
+
+  return {
+    ...order,
+    shipments: shipments.map((shipment) => ({
+      ...shipment,
+      lines: lines.filter((line) => line.shipmentId === shipment.id),
+    })),
+  };
 }
