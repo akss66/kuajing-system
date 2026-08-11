@@ -1,11 +1,6 @@
-import { redirect } from "next/navigation";
+import { ArrowRight, PackageSearch } from "lucide-react";
+import Link from "next/link";
 
-import { getCurrentPrincipal } from "@/modules/identity/principal";
-
-export default async function CustomerPortalPlaceholder() {
-  const principal = await getCurrentPrincipal();
-  if (!principal) redirect("/login");
-  if (principal.kind !== "CUSTOMER") redirect("/admin");
-
-  return <main><h1>客户工作台</h1></main>;
+export default function CustomerPortalPage() {
+  return <div className="space-y-6"><header><p className="text-sm font-medium text-primary">客户工作台</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">欢迎使用同舟行跨境</h1><p className="mt-2 text-sm text-muted">查看实时货盘，并按店铺提交拿货需求。</p></header><Link className="flex max-w-xl items-center gap-4 rounded-[var(--radius-surface)] border border-border bg-background p-5 hover:border-primary/30" href="/portal/catalog"><span className="flex size-10 items-center justify-center rounded-lg bg-primary-soft text-primary-hover"><PackageSearch /></span><span className="flex-1"><strong className="block text-ink">进入货盘选品</strong><span className="mt-1 block text-sm text-muted">查看自己的成交价和实时可售库存</span></span><ArrowRight className="text-primary" /></Link></div>;
 }

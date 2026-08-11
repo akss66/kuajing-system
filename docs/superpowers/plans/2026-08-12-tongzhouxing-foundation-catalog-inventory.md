@@ -685,7 +685,7 @@ git commit -m "feat: add administrator catalog and inventory workspace"
 - Consumes: `requireCustomer`, `listCustomerCatalog(customerId)`.
 - Produces: tenant-scoped customer catalog view containing SKU, image, specifications, actual price, available quantity and sale status.
 
-- [ ] **Step 1: Write failing customer isolation test**
+- [x] **Step 1: Write failing customer isolation test**
 
 ```ts
 test("customer sees own special price and never sees another customer's price", async ({ page }) => {
@@ -700,21 +700,21 @@ Add a test that total inventory 10 with 4 active reservations displays available
 
 Run the same customer path at 360×800, 390×844 and 430×932. Assert that the navigation opens as a drawer, primary touch targets are at least 44px, no page-level horizontal overflow exists, and SKU details remain readable without reducing body text below 14px.
 
-- [ ] **Step 2: Run E2E test and verify failure**
+- [x] **Step 2: Run E2E test and verify failure**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/customer-catalog.spec.ts`
 
 Expected: FAIL because customer portal routes do not exist.
 
-- [ ] **Step 3: Implement customer catalog query**
+- [x] **Step 3: Implement customer catalog query**
 
 `listCustomerCatalog` must derive price through `resolveUnitPrice`, derive available quantity through inventory queries, exclude disabled SKUs and never return default or other-customer price records as extra fields.
 
-- [ ] **Step 4: Implement responsive customer portal**
+- [x] **Step 4: Implement responsive customer portal**
 
 Use the approved navigation: 工作台、货盘选品、上传 TEMU 订单、我的订单、待付款、余额与流水、店铺数据. Later-phase entries render disabled with “即将开放”. The catalog supports SKU/name search and displays exact available quantity. Desktop uses a compact table; mobile uses grouped SKU rows with image, SKU, price, available quantity and sale status, plus a full-width filter drawer.
 
-- [ ] **Step 5: Run tests and build**
+- [x] **Step 5: Run tests and build**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/customer-catalog.spec.ts`
 
@@ -736,7 +736,7 @@ Run: `npm.cmd build`
 
 Expected: all commands exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/\(customer\) src/modules/catalog/customer-catalog.ts tests/e2e/customer-catalog.spec.ts
