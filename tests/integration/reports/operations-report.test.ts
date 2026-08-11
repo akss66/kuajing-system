@@ -1,0 +1,194 @@
+import { sql } from "drizzle-orm";
+import { afterEach, describe, expect, test } from "vitest";
+
+import { db } from "@/db/client";
+import {
+  adminUsers,
+  customers,
+  fulfillmentOrders,
+  orderLines,
+  orderShipments,
+  paymentClaims,
+  products,
+  replacementRequests,
+  skus,
+  stores,
+  walletTransactions,
+} from "@/db/schema";
+import { getOperationsReport } from "@/modules/reports/query";
+
+describe("operations reports", () => {
+  afterEach(async () => {
+    await db.execute(sql.raw(`
+      truncate table
+        audit_logs,
+        integration_attempts,
+        integration_outbox,
+        shipment_fulfillments,
+        replacement_requests,
+        payment_claims,
+        wallet_transactions,
+        order_lines,
+        order_shipments,
+        fulfillment_orders,
+        inventory_reservations,
+        inventory_balances,
+        skus,
+        products,
+        stores,
+        admin_users,
+        customers
+      restart identity cascade
+    `));
+  });
+
+  test("separates shipped sales, replacements, wallet flows, offline payments and receivables", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const [admin] = await db
+      .insert(adminUsers)
+      .values({ displayName: "报表管理员", loginIdentifier: `report-${suffix}@test.local` })
+      .returning();
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `R-${suffix}`, name: "报表客户" })
+      .returning();
+    const [storeA, storeB] = await db
+      .insert(stores)
+      .values([
+        { customerId: customer.id, name: `店铺 A ${suffix}` },
+        { customerId: customer.id, name: `店铺 B ${suffix}` },
+      ])
+      .returning();
+    const [product] = await db.insert(products).values({ name: "报表商品" }).returning();
+    const [skuA, skuB] = await db
+      .insert(skus)
+      .values([
+        { defaultUnitPriceFen: 500, name: "蓝色", productId: product.id, skuCode: `R-A-${suffix}` },
+        { defaultUnitPriceFen: 700, name: "黑色", productId: product.id, skuCode: `R-B-${suffix}` },
+      ])
+      .returning();
+    const inRange = new Date("2026-08-11T15:00:00.000Z");
+    const recipient = "encrypted-recipient";
+
+    const [directOrder, walletOrder, pendingOrder, unshippedOrder] = await db
+      .insert(fulfillmentOrders)
+      .values([
+        {
+          customerId: customer.id,
+          orderNumber: `R-DIRECT-${suffix}`,
+          paidAt: inRange,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "SHIPPED",
+          storeId: storeA.id,
+          submittedAt: inRange,
+          totalAmountFen: 900,
+          totalPackageCount: 1,
+          totalQuantity: 2,
+        },
+        {
+          customerId: customer.id,
+          orderNumber: `R-WALLET-${suffix}`,
+          paidAt: inRange,
+          paymentMode: "WALLET",
+          status: "SHIPPED",
+          storeId: storeB.id,
+          submittedAt: inRange,
+          totalAmountFen: 700,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        },
+        {
+          customerId: customer.id,
+          lockExpiresAt: new Date("2026-08-12T20:00:00.000Z"),
+          orderNumber: `R-PENDING-${suffix}`,
+          status: "PENDING_PAYMENT",
+          storeId: storeA.id,
+          submittedAt: inRange,
+          totalAmountFen: 1_200,
+          totalPackageCount: 1,
+          totalQuantity: 2,
+        },
+        {
+          customerId: customer.id,
+          orderNumber: `R-UNSHIPPED-${suffix}`,
+          paidAt: inRange,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "FULFILLING",
+          storeId: storeA.id,
+          submittedAt: inRange,
+          totalAmountFen: 4_500,
+          totalPackageCount: 1,
+          totalQuantity: 5,
+        },
+      ])
+      .returning();
+
+    const [directShipment, walletShipment, replacementShipment, unshippedShipment] = await db
+      .insert(orderShipments)
+      .values([
+        { externalOrderNo: `EXT-D-${suffix}`, orderId: directOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeA.id },
+        { externalOrderNo: `EXT-W-${suffix}`, orderId: walletOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeB.id },
+        { externalOrderNo: `EXT-R-${suffix}`, kind: "REPLACEMENT", orderId: directOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeA.id },
+        { externalOrderNo: `EXT-U-${suffix}`, orderId: unshippedOrder.id, recipientPayloadEncrypted: recipient, storeId: storeA.id },
+      ])
+      .returning();
+    await db.insert(orderLines).values([
+      { lineAmountFen: 900, orderId: directOrder.id, quantity: 2, shipmentId: directShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 450 },
+      { lineAmountFen: 700, orderId: walletOrder.id, quantity: 1, shipmentId: walletShipment.id, skuCodeSnapshot: skuB.skuCode, skuId: skuB.id, skuNameSnapshot: "报表商品 · 黑色", storeId: storeB.id, unitPriceFen: 700 },
+      { lineAmountFen: 0, orderId: directOrder.id, quantity: 1, shipmentId: replacementShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 0 },
+      { lineAmountFen: 4_500, orderId: unshippedOrder.id, quantity: 5, shipmentId: unshippedShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 900 },
+    ]);
+    await db.insert(replacementRequests).values({
+      createdByAdminUserId: admin.id,
+      orderId: directOrder.id,
+      originalShipmentId: directShipment.id,
+      reason: "运输破损",
+      replacementShipmentId: replacementShipment.id,
+      status: "SHIPPED",
+    });
+    await db.insert(paymentClaims).values({
+      amountFen: 900,
+      customerId: customer.id,
+      orderId: directOrder.id,
+      reviewedAt: inRange,
+      reviewedByAdminUserId: admin.id,
+      status: "APPROVED",
+    });
+    await db.insert(walletTransactions).values([
+      { actorType: "ADMIN", afterBalanceFen: 2_000, beforeBalanceFen: 0, customerId: customer.id, deltaFen: 2_000, reason: "充值", transactionType: "ADMIN_CREDIT", createdAt: inRange },
+      { actorType: "SYSTEM", afterBalanceFen: 1_300, beforeBalanceFen: 2_000, customerId: customer.id, deltaFen: -700, orderId: walletOrder.id, reason: "订单扣款", transactionType: "ORDER_DEBIT", createdAt: inRange },
+      { actorType: "SYSTEM", afterBalanceFen: 2_000, beforeBalanceFen: 1_300, customerId: customer.id, deltaFen: 700, orderId: walletOrder.id, reason: "订单退款", transactionType: "ORDER_REFUND", createdAt: inRange },
+      { actorType: "ADMIN", afterBalanceFen: 1_900, beforeBalanceFen: 2_000, customerId: customer.id, deltaFen: -100, reason: "人工扣减", transactionType: "ADMIN_DEBIT", createdAt: inRange },
+    ]);
+
+    const report = await getOperationsReport({
+      fromUtc: new Date("2026-08-11T04:00:00.000Z"),
+      toExclusiveUtc: new Date("2026-08-12T04:00:00.000Z"),
+    });
+
+    expect(report.summary).toEqual({
+      orderCount: 2,
+      packageCount: 2,
+      quantity: 3,
+      replacementQuantity: 1,
+      revenueFen: 1_600,
+    });
+    expect(report.skuSales).toEqual([
+      expect.objectContaining({ quantity: 2, revenueFen: 900, skuCode: skuA.skuCode }),
+      expect.objectContaining({ quantity: 1, revenueFen: 700, skuCode: skuB.skuCode }),
+    ]);
+    expect(report.stores).toEqual([
+      expect.objectContaining({ orderCount: 1, packageCount: 1, quantity: 2, revenueFen: 900, storeName: storeA.name }),
+      expect.objectContaining({ orderCount: 1, packageCount: 1, quantity: 1, revenueFen: 700, storeName: storeB.name }),
+    ]);
+    expect(report.replacements).toEqual([{ quantity: 1, reason: "运输破损", requestCount: 1 }]);
+    expect(report.funds).toEqual({
+      adminCreditsFen: 2_000,
+      adminDebitsFen: 100,
+      approvedOfflineFen: 900,
+      orderDebitsFen: 700,
+      orderRefundsFen: 700,
+      pendingReceivableFen: 1_200,
+    });
+  });
+});
