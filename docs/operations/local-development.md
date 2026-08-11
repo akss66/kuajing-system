@@ -17,6 +17,13 @@ npm.cmd run db:seed
 npm.cmd run dev
 ```
 
+另开一个终端启动后台任务。待付款订单超时释放库存依赖该常驻进程：
+
+```powershell
+$env:DATABASE_URL='postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing'
+npm.cmd run worker
+```
+
 打开 `http://127.0.0.1:3000`。本地种子账号：
 
 - 管理员：`admin@tongzhouxing.local` / `TongZhouXing-Admin-2026!`
