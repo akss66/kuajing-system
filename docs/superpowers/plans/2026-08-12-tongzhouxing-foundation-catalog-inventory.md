@@ -756,31 +756,31 @@ git commit -m "feat: add tenant-scoped customer cargo catalog"
 - Consumes: all Phase 1 domain services.
 - Produces: reproducible non-sensitive demo environment and Phase 1 acceptance evidence.
 
-- [ ] **Step 1: Write failing phase acceptance test**
+- [x] **Step 1: Write failing phase acceptance test**
 
 The test must perform this exact flow: admin logs in, creates customer and store, creates SKU `TZX-DEMO-001` with default price 690 fen, sets customer price 760 fen, maps external SKU `TEMU-DEMO-RED`, adds total inventory 10 with reason `首批测试库存`, logs in as the customer, and verifies price `¥7.60` and available quantity `10`.
 
 The acceptance suite must also capture approved baseline screenshots for login, admin overview, admin inventory, customer catalog desktop and customer catalog mobile. Review screenshots for text clipping, incorrect status colors, red primary controls, nested card grids and excessive whitespace before accepting updates.
 
-- [ ] **Step 2: Run the acceptance test and capture failure**
+- [x] **Step 2: Run the acceptance test and capture failure**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/phase-one-acceptance.spec.ts`
 
 Expected: FAIL until seed helpers and audit page exist.
 
-- [ ] **Step 3: Implement deterministic seed data**
+- [x] **Step 3: Implement deterministic seed data**
 
 `src/db/seed.ts` must create only fictional data, hash fixed local-only passwords, be idempotent by stable email/SKU keys and refuse to run when `NODE_ENV=production`.
 
-- [ ] **Step 4: Implement read-only audit page**
+- [x] **Step 4: Implement read-only audit page**
 
 The page requires admin access and filters by actor, action, entity and date. It can display audit JSON differences but offers no update or delete action.
 
-- [ ] **Step 5: Write local operations documentation**
+- [x] **Step 5: Write local operations documentation**
 
 Document exact commands for environment creation, PostgreSQL startup, migration, seed, Web startup, all test suites and database reset. Include the rule that `.env` is never committed.
 
-- [ ] **Step 6: Run the full Phase 1 verification**
+- [x] **Step 6: Run the full Phase 1 verification**
 
 Run:
 
@@ -796,7 +796,7 @@ git status --short
 
 Expected: all commands exit 0; `git status --short` shows only the intended Phase 1 files before commit.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/db/seed.ts src/modules/audit src/app/\(admin\)/admin/system docs/operations tests/e2e/phase-one-acceptance.spec.ts

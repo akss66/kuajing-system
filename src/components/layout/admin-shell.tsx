@@ -46,7 +46,7 @@ const navigation: NavigationItem[] = [
   { icon: RotateCcw, label: "补发管理" },
   { icon: Banknote, label: "收款与余额" },
   { icon: BarChart3, label: "报表分析" },
-  { icon: Settings2, label: "系统与同步" },
+  { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
 ];
 
 function Navigation({ mobile = false }: { mobile?: boolean }) {
