@@ -158,4 +158,23 @@ describe("Jifeng API client", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  test("turns an aborted request into a retryable timeout without exposing credentials", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: (_url, request) =>
+        new Promise((_resolve, reject) => {
+          request?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted", "AbortError"));
+          });
+        }),
+      timeoutMs: 5,
+    });
+
+    await expect(client.getOrder({ erpNo: "TZX-JF-TIMEOUT" })).rejects.toMatchObject({
+      code: "TIMEOUT",
+      message: "极风接口请求超时",
+      retryable: true,
+    });
+  });
 });

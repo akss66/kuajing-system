@@ -7,6 +7,7 @@ import {
   integrationOutbox,
   systemNotifications,
 } from "@/db/schema";
+import { FeishuApiError } from "@/integrations/feishu/client";
 import {
   enqueueFeishuCargoSync,
   processFeishuOutbox,
@@ -92,5 +93,85 @@ describe("Feishu integration outbox", () => {
     expect(notification).toMatchObject({ occurrenceCount: 2, status: "UNREAD" });
     expect((await db.select().from(integrationOutbox)).every((event) => event.status === "COMPLETED")).toBe(true);
     expect(await db.select().from(integrationAttempts)).toHaveLength(3);
+  });
+
+  test("records permission failures without leaking secrets", async () => {
+    const now = new Date("2026-08-12T06:00:00.000Z");
+    await enqueueFeishuCargoSync({ now, reason: "permission-check" });
+
+    const result = await processFeishuOutbox({
+      botClient: { async sendTextMessage() {} },
+      cargoClient: {
+        async listSheets() {
+          throw new FeishuApiError(
+            "1310213",
+            "飞书文档权限不足，请将应用添加为知识库或电子表格协作者",
+            false,
+          );
+        },
+        async readRange() {
+          return [];
+        },
+        async resolveWikiSpreadsheet() {
+          return { spreadsheetToken: "not-used" };
+        },
+        async writeRange() {},
+      },
+      config: { cargoWikiToken: "wiki-1", internalChatId: "chat-1" },
+      now,
+    });
+
+    expect(result).toEqual({ botCompleted: 0, cargoCompleted: 0, failed: 1 });
+    expect(await db.select().from(integrationOutbox)).toEqual([
+      expect.objectContaining({
+        lastErrorCode: "1310213",
+        lastErrorMessage: "飞书文档权限不足，请将应用添加为知识库或电子表格协作者",
+        status: "FAILED",
+      }),
+    ]);
+    expect(await db.select().from(integrationAttempts)).toEqual([
+      expect.objectContaining({ outcome: "PERMANENT_FAILURE" }),
+    ]);
+  });
+
+  test("retries a transient cargo failure after the backoff window", async () => {
+    const now = new Date("2026-08-12T06:30:00.000Z");
+    await enqueueFeishuCargoSync({ now, reason: "transient-failure" });
+    let fail = true;
+    const cargoClient = {
+      async listSheets() {
+        if (fail) throw new Error("temporary outage");
+        return [{ index: 0, sheetId: "sheet-1", title: "货盘" }];
+      },
+      async readRange() {
+        return [];
+      },
+      async resolveWikiSpreadsheet() {
+        return { spreadsheetToken: "spreadsheet-1" };
+      },
+      async writeRange() {},
+    };
+    const baseInput = {
+      botClient: { async sendTextMessage() {} },
+      cargoClient,
+      config: { cargoWikiToken: "wiki-1", internalChatId: "chat-1" },
+    };
+
+    await expect(processFeishuOutbox({ ...baseInput, now })).resolves.toMatchObject({ failed: 1 });
+    fail = false;
+    await expect(
+      processFeishuOutbox({
+        ...baseInput,
+        now: new Date(now.getTime() + 5 * 60_000),
+      }),
+    ).resolves.toMatchObject({ cargoCompleted: 1, failed: 0 });
+
+    expect(await db.select().from(integrationOutbox)).toEqual([
+      expect.objectContaining({ attemptCount: 2, status: "COMPLETED" }),
+    ]);
+    expect((await db.select().from(integrationAttempts)).map((attempt) => attempt.outcome)).toEqual([
+      "RETRYABLE_FAILURE",
+      "SUCCESS",
+    ]);
   });
 });
