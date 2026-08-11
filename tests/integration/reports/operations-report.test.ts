@@ -70,7 +70,7 @@ describe("operations reports", () => {
     const inRange = new Date("2026-08-11T15:00:00.000Z");
     const recipient = "encrypted-recipient";
 
-    const [directOrder, walletOrder, pendingOrder, unshippedOrder] = await db
+    const [directOrder, walletOrder, , unshippedOrder] = await db
       .insert(fulfillmentOrders)
       .values([
         {

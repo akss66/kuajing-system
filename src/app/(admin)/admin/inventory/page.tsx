@@ -9,11 +9,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { db } from "@/db/client";
 import { inventoryBalances, inventoryReservations, skus } from "@/db/schema";
 import { adjustInventoryAction } from "@/modules/inventory/actions";
+import { getStockCoverageReport } from "@/modules/reports/stock-coverage";
 
 export default async function InventoryPage() {
-  const rows = await db.select({ id: skus.id, skuCode: skus.skuCode, name: skus.name, total: inventoryBalances.totalQuantity }).from(inventoryBalances).innerJoin(skus, eq(skus.id, inventoryBalances.skuId)).orderBy(desc(inventoryBalances.updatedAt));
-  const reservedRows = await db.select({ skuId: inventoryReservations.skuId, quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)`.mapWith(Number) }).from(inventoryReservations).where(eq(inventoryReservations.status, "ACTIVE")).groupBy(inventoryReservations.skuId);
+  const [rows, reservedRows, coverageRows] = await Promise.all([
+    db.select({ id: skus.id, skuCode: skus.skuCode, name: skus.name, total: inventoryBalances.totalQuantity }).from(inventoryBalances).innerJoin(skus, eq(skus.id, inventoryBalances.skuId)).orderBy(desc(inventoryBalances.updatedAt)),
+    db.select({ skuId: inventoryReservations.skuId, quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)`.mapWith(Number) }).from(inventoryReservations).where(eq(inventoryReservations.status, "ACTIVE")).groupBy(inventoryReservations.skuId),
+    getStockCoverageReport(),
+  ]);
   const reserved = new Map(reservedRows.map((row) => [row.skuId, row.quantity]));
+  const coverage = new Map(coverageRows.map((row) => [row.skuId, row]));
 
   return (
     <div className="space-y-6">
@@ -25,7 +30,7 @@ export default async function InventoryPage() {
       </ActionForm>
       <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
         <DataWorkspaceToolbar description="库存调整必须填写原因，并自动记录操作前后数量。" title="实时库存" />
-        <ResponsiveDataTable><Table><TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>名称</TableHead><TableHead className="text-right">总库存</TableHead><TableHead className="text-right">订单锁定</TableHead><TableHead className="text-right">可售库存</TableHead><TableHead>状态</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => { const locked = reserved.get(row.id) ?? 0; const available = row.total - locked; return <TableRow key={row.id}><TableCell className="font-semibold">{row.skuCode}</TableCell><TableCell>{row.name}</TableCell><TableCell className="text-right tabular-nums">{row.total}</TableCell><TableCell className="text-right tabular-nums">{locked}</TableCell><TableCell className="text-right font-semibold tabular-nums">{available}</TableCell><TableCell><Badge className={available > 0 ? "bg-success/10 text-success" : "bg-danger/10 text-danger"} variant="secondary">{available > 0 ? "可售" : "不可售"}</Badge></TableCell></TableRow>; }) : <TableRow><TableCell className="h-28 text-center text-muted" colSpan={6}>暂无库存记录，请先创建 SKU 并录入初始库存。</TableCell></TableRow>}</TableBody></Table></ResponsiveDataTable>
+        <ResponsiveDataTable><Table><TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>名称</TableHead><TableHead className="text-right">总库存</TableHead><TableHead className="text-right">订单锁定</TableHead><TableHead className="text-right">可售库存</TableHead><TableHead className="text-right">7 日出库</TableHead><TableHead className="text-right">可售天数</TableHead><TableHead>库存预警</TableHead></TableRow></TableHeader><TableBody>{rows.length ? rows.map((row) => { const locked = reserved.get(row.id) ?? 0; const available = row.total - locked; const stock = coverage.get(row.id); const alert = stock?.alertLevel ?? "NO_BASELINE"; return <TableRow key={row.id}><TableCell className="font-semibold">{row.skuCode}</TableCell><TableCell>{row.name}</TableCell><TableCell className="text-right tabular-nums">{row.total}</TableCell><TableCell className="text-right tabular-nums">{locked}</TableCell><TableCell className="text-right font-semibold tabular-nums">{available}</TableCell><TableCell className="text-right tabular-nums">{stock?.shippedQuantity7d ?? 0}</TableCell><TableCell className="text-right tabular-nums">{stock?.coverageDays == null ? "暂无基线" : `${stock.coverageDays} 天`}</TableCell><TableCell><Badge className={alert === "CRITICAL" ? "bg-danger/10 text-danger" : alert === "WARNING" ? "bg-warning/10 text-warning" : alert === "NONE" ? "bg-success/10 text-success" : "bg-surface-muted text-muted"} variant="secondary">{alert === "CRITICAL" ? "不足 30 天" : alert === "WARNING" ? "不足 40 天" : alert === "NONE" ? "充足" : "暂无消耗基线"}</Badge></TableCell></TableRow>; }) : <TableRow><TableCell className="h-28 text-center text-muted" colSpan={8}>暂无库存记录，请先创建 SKU 并录入初始库存。</TableCell></TableRow>}</TableBody></Table></ResponsiveDataTable>
       </section>
     </div>
   );

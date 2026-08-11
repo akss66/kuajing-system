@@ -4,6 +4,7 @@ import { Boxes, Building2, PackageSearch, Store } from "lucide-react";
 import { ExceptionQueue } from "@/components/data-workspace/exception-queue";
 import { db } from "@/db/client";
 import { customers, inventoryBalances, inventoryReservations, skus, stores } from "@/db/schema";
+import { getStockCoverageReport } from "@/modules/reports/stock-coverage";
 
 const statConfig = [
   { icon: Building2, key: "customers", label: "合作客户", tone: "bg-info/10 text-info" },
@@ -13,7 +14,7 @@ const statConfig = [
 ] as const;
 
 export default async function AdminOverviewPage() {
-  const [[customerTotal], [storeTotal], [skuTotal], balances, reservations] = await Promise.all([
+  const [[customerTotal], [storeTotal], [skuTotal], balances, reservations, coverage] = await Promise.all([
     db.select({ value: count() }).from(customers).where(eq(customers.status, "ACTIVE")),
     db.select({ value: count() }).from(stores).where(eq(stores.status, "ACTIVE")),
     db.select({ value: count() }).from(skus).where(eq(skus.saleStatus, "SELLABLE")),
@@ -23,10 +24,11 @@ export default async function AdminOverviewPage() {
       .from(inventoryReservations)
       .where(eq(inventoryReservations.status, "ACTIVE"))
       .groupBy(inventoryReservations.skuId),
+    getStockCoverageReport(),
   ]);
   const reservedBySku = new Map(reservations.map((row) => [row.skuId, row.quantity]));
   const available = balances.reduce((sum, row) => sum + row.total - (reservedBySku.get(row.skuId) ?? 0), 0);
-  const lowStockCount = balances.filter((row) => row.total - (reservedBySku.get(row.skuId) ?? 0) < 10).length;
+  const lowStockCount = coverage.filter((row) => row.alertLevel === "CRITICAL").length;
   const values = { available, customers: customerTotal.value, skus: skuTotal.value, stores: storeTotal.value };
 
   return (

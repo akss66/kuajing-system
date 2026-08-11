@@ -47,7 +47,7 @@ const navigation: NavigationItem[] = [
   { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
   { href: "/admin/replacements", icon: RotateCcw, label: "补发管理" },
   { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
-  { icon: BarChart3, label: "报表分析" },
+  { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
   { href: "/admin/notifications", icon: BellRing, label: "系统通知" },
   { href: "/admin/system/integrations", icon: PlugZap, label: "外部集成" },
   { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
