@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db, type DbTransaction } from "@/db/client";
 import { auditLogs, walletAccounts, walletTransactions } from "@/db/schema";
@@ -153,6 +153,87 @@ export async function tryDebitWalletForOrder(
     entityId: input.customerId,
     entityType: "CUSTOMER_WALLET",
     reason: "余额充足，拿货单自动扣款",
+  });
+
+  return true;
+}
+
+export async function refundWalletForOrder(
+  tx: DbTransaction,
+  input: {
+    actorType: "ADMIN" | "CUSTOMER" | "SYSTEM";
+    actorUserId: string;
+    amountFen: number;
+    customerId: string;
+    orderId: string;
+    reason: string;
+  },
+) {
+  if (!Number.isSafeInteger(input.amountFen) || input.amountFen <= 0) {
+    throw new WalletValidationError("退款金额必须是正的人民币分整数");
+  }
+  const reason = input.reason.trim();
+  if (!reason) throw new WalletValidationError("退款必须填写原因");
+
+  const [existingRefund] = await tx
+    .select({ id: walletTransactions.id })
+    .from(walletTransactions)
+    .where(
+      and(
+        eq(walletTransactions.orderId, input.orderId),
+        eq(walletTransactions.transactionType, "ORDER_REFUND"),
+      ),
+    )
+    .limit(1);
+  if (existingRefund) return false;
+
+  const [debit] = await tx
+    .select({ deltaFen: walletTransactions.deltaFen })
+    .from(walletTransactions)
+    .where(
+      and(
+        eq(walletTransactions.orderId, input.orderId),
+        eq(walletTransactions.transactionType, "ORDER_DEBIT"),
+      ),
+    )
+    .limit(1);
+  if (!debit || debit.deltaFen !== -input.amountFen) {
+    throw new WalletValidationError("找不到与订单金额一致的原始钱包扣款");
+  }
+
+  const wallet = await ensureAndLockWallet(tx, input.customerId);
+  const afterBalanceFen = wallet.balanceFen + input.amountFen;
+  if (!Number.isSafeInteger(afterBalanceFen) || afterBalanceFen > 2_147_483_647) {
+    throw new WalletValidationError("钱包余额超出系统范围");
+  }
+  await tx
+    .update(walletAccounts)
+    .set({
+      balanceFen: afterBalanceFen,
+      updatedAt: new Date(),
+      version: wallet.version + 1,
+    })
+    .where(eq(walletAccounts.customerId, input.customerId));
+  await tx.insert(walletTransactions).values({
+    actorId: input.actorUserId,
+    actorType: input.actorType,
+    afterBalanceFen,
+    beforeBalanceFen: wallet.balanceFen,
+    customerId: input.customerId,
+    deltaFen: input.amountFen,
+    orderId: input.orderId,
+    reason,
+    transactionType: "ORDER_REFUND",
+  });
+  await tx.insert(auditLogs).values({
+    action: "WALLET_ORDER_REFUNDED",
+    actorId: input.actorUserId,
+    actorType: input.actorType,
+    afterJson: { balanceFen: afterBalanceFen, orderId: input.orderId },
+    beforeJson: { balanceFen: wallet.balanceFen },
+    entityId: input.customerId,
+    entityType: "CUSTOMER_WALLET",
+    reason,
   });
 
   return true;
