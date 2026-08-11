@@ -7,6 +7,14 @@ beforeAll(async () => {
   await db.execute(sql.raw(`
     truncate table
       audit_logs,
+      payment_claims,
+      wallet_transactions,
+      wallet_accounts,
+      order_lines,
+      order_shipments,
+      fulfillment_orders,
+      order_import_rows,
+      order_import_batches,
       inventory_movements,
       inventory_reservations,
       inventory_balances,

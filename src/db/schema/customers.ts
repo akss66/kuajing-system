@@ -41,5 +41,8 @@ export const stores = pgTable(
     status: accountStatus("status").default("ACTIVE").notNull(),
     ...timestamps,
   },
-  (table) => [uniqueIndex("stores_customer_name_unique").on(table.customerId, table.name)],
+  (table) => [
+    uniqueIndex("stores_customer_name_unique").on(table.customerId, table.name),
+    uniqueIndex("stores_id_customer_unique").on(table.id, table.customerId),
+  ],
 );
