@@ -6,7 +6,7 @@
 
 **Architecture:** 使用 Next.js 模块化一体化应用和 PostgreSQL。身份、客户、商品、定价、库存和审计各自提供领域接口；页面和路由只能调用这些接口。货盘总库存与订单锁定分开保存，可售库存始终由数据库计算。
 
-**Tech Stack:** Node.js 24、Next.js 16.3、React 19.2、TypeScript 7、PostgreSQL 18、Drizzle ORM、Better Auth、Zod、Tailwind CSS、shadcn/ui、TanStack Table/Query/Form、nuqs、Lucide、Vitest、Playwright、axe-core。
+**Tech Stack:** Node.js 24、Next.js 16.3、React 19.2、TypeScript 6.0、PostgreSQL 18、Drizzle ORM、Better Auth、Zod、Tailwind CSS、shadcn/ui、TanStack Table/Query/Form、nuqs、Lucide、Vitest、Playwright、axe-core。
 
 ## Global Constraints
 
@@ -86,7 +86,7 @@ tests/e2e/                       浏览器端到端测试
 **Interfaces:**
 - Produces: `BRAND.name`, `BRAND.logoPath`, `BUSINESS_TIME_ZONE`, approved OKLCH theme tokens and shadcn/ui primitives for all later tasks.
 
-- [ ] **Step 1: Create package metadata and commands**
+- [x] **Step 1: Create package metadata and commands**
 
 Create `package.json` with these scripts and install the referenced packages so `package-lock.json` pins exact versions:
 
@@ -113,7 +113,7 @@ Run:
 
 ```powershell
 npm.cmd install next@16.3.0 react@19.2.8 react-dom@19.2.8 drizzle-orm postgres pg-boss zod better-auth exceljs luxon @tanstack/react-table @tanstack/react-query @tanstack/react-form nuqs lucide-react recharts
-npm.cmd install -D typescript@7.0.2 @types/node @types/react @types/react-dom eslint eslint-config-next tailwindcss tsx drizzle-kit vitest @vitest/coverage-v8 @playwright/test @axe-core/playwright
+npm.cmd install -D typescript@6.0.3 @types/node @types/react @types/react-dom eslint eslint-config-next tailwindcss tsx drizzle-kit vitest @vitest/coverage-v8 @playwright/test @axe-core/playwright
 ```
 
 Initialize the open component layer and add only required primitives:
@@ -123,7 +123,7 @@ npx.cmd shadcn@4.11.0 init --base-color neutral
 npx.cmd shadcn@4.11.0 add button input table sidebar sheet tabs badge skeleton alert alert-dialog dropdown-menu select checkbox tooltip
 ```
 
-- [ ] **Step 2: Write the failing brand test**
+- [x] **Step 2: Write the failing brand test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -140,13 +140,13 @@ describe("brand configuration", () => {
 });
 ```
 
-- [ ] **Step 3: Run the test and verify failure**
+- [x] **Step 3: Run the test and verify failure**
 
 Run: `npm.cmd test -- tests/unit/shared/brand.test.ts`
 
 Expected: FAIL because `@/shared/brand` does not exist.
 
-- [ ] **Step 4: Implement the brand constants and root layout**
+- [x] **Step 4: Implement the brand constants and root layout**
 
 ```ts
 export const BRAND = {
@@ -186,7 +186,7 @@ Define these canonical light-theme roles in `src/app/globals.css`; do not create
 
 Map shadcn semantic tokens to these roles. Body uses `Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif`; numeric cells use `font-variant-numeric: tabular-nums`.
 
-- [ ] **Step 5: Copy and verify the approved PNG**
+- [x] **Step 5: Copy and verify the approved PNG**
 
 Run:
 
@@ -199,7 +199,7 @@ Verify with a test or image metadata check that the copied image is 683×656 and
 
 Add an axe smoke test for the login surface and screenshot assertions at 1440×900 and 390×844. Verify that the primary action is deep teal and the red logo is not inherited by buttons or navigation.
 
-- [ ] **Step 6: Run quality gates**
+- [x] **Step 6: Run quality gates**
 
 Run: `npm.cmd test -- tests/unit/shared/brand.test.ts`
 
@@ -213,7 +213,7 @@ Run: `npm.cmd build`
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add package.json package-lock.json tsconfig.json src/app src/shared public/brand tests/unit/shared
