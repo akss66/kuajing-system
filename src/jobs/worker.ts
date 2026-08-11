@@ -6,6 +6,7 @@ import {
   enqueuePaidOrdersForFulfillment,
   processDueJifengCreateOrderEvents,
 } from "@/modules/fulfillment/dispatch";
+import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
 
 const connectionString = process.env.DATABASE_URL;
@@ -70,10 +71,13 @@ if (configuredJifengVariables.length === jifengRequiredVariables.length) {
       client: jifengClient,
       config: jifengConfig,
     });
+    const statuses = await pollActiveJifengFulfillments({
+      client: jifengClient,
+    });
     console.info(
-      `[worker] Jifeng cycle enqueued=${enqueuedCount} completed=${processed.completed} retryScheduled=${processed.retryScheduled} failed=${processed.failed}`,
+      `[worker] Jifeng cycle enqueued=${enqueuedCount} completed=${processed.completed} retryScheduled=${processed.retryScheduled} failed=${processed.failed} shipped=${statuses.shipped} exceptions=${statuses.exceptions}`,
     );
-    return { enqueuedCount, ...processed };
+    return { enqueuedCount, processed, statuses };
   });
   console.info("[worker] Jifeng fulfillment jobs enabled");
 } else {
