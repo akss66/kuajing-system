@@ -50,6 +50,13 @@
       "when": 1786478959747,
       "tag": "0006_fearless_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786487303982,
+      "tag": "0007_bored_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

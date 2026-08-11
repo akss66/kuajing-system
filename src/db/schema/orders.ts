@@ -294,6 +294,9 @@ export const orderShipments = pgTable(
       .default("CANADA_POST")
       .notNull(),
     trackingNumber: varchar("tracking_number", { length: 160 }),
+    shippedAt: timestamp("shipped_at", { mode: "date", withTimezone: true }),
+    logisticsFeeMinor: integer("logistics_fee_minor"),
+    logisticsCurrency: varchar("logistics_currency", { length: 3 }),
     ...timestamps,
   },
   (table) => [
@@ -309,6 +312,18 @@ export const orderShipments = pgTable(
     uniqueIndex("order_shipments_id_order_unique").on(
       table.id,
       table.orderId,
+    ),
+    check(
+      "order_shipments_logistics_fee_non_negative",
+      sql`${table.logisticsFeeMinor} is null or ${table.logisticsFeeMinor} >= 0`,
+    ),
+    check(
+      "order_shipments_logistics_currency_format",
+      sql`${table.logisticsCurrency} is null or ${table.logisticsCurrency} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "order_shipments_logistics_fee_currency_pair",
+      sql`${table.logisticsFeeMinor} is null or ${table.logisticsCurrency} is not null`,
     ),
     index("order_shipments_order_index").on(table.orderId),
   ],

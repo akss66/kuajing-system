@@ -14,10 +14,10 @@
 
 ## Task 1: 履约、补发、外部调用与飞书同步 schema
 
-- [ ] 先写数据库约束测试：一个包裹仅有一条极风履约记录；`erpNo` 唯一；补发必须关联原包裹、原因和创建管理员；外部事件幂等键唯一。
-- [ ] 建立 `shipment_fulfillments`、`replacement_requests`、`integration_outbox`、`integration_attempts`。
-- [ ] 扩展包裹的补发来源、履约状态、发货时间、物流费用和币种；金额继续使用最小货币单位整数保存。
-- [ ] 生成迁移并应用开发库和测试库。
+- [x] 先写数据库约束测试：一个包裹仅有一条极风履约记录；`erpNo` 唯一；补发必须关联原包裹、原因和创建管理员；外部事件幂等键唯一。
+- [x] 建立 `shipment_fulfillments`、`replacement_requests`、`integration_outbox`、`integration_attempts`。
+- [x] 扩展包裹的补发来源、履约状态、发货时间、物流费用和币种；金额继续使用最小货币单位整数保存。
+- [x] 生成迁移并应用开发库和测试库。
 
 ## Task 2: 极风签名、客户端与凭证配置
 
