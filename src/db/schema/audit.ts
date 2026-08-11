@@ -5,7 +5,7 @@ export const actorType = pgEnum("actor_type", ["ADMIN", "CUSTOMER", "SYSTEM"]);
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   actorType: actorType("actor_type").notNull(),
-  actorId: uuid("actor_id"),
+  actorId: text("actor_id"),
   action: varchar("action", { length: 120 }).notNull(),
   entityType: varchar("entity_type", { length: 120 }).notNull(),
   entityId: varchar("entity_id", { length: 160 }).notNull(),

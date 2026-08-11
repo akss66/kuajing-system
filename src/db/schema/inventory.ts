@@ -97,7 +97,7 @@ export const inventoryMovements = pgTable(
     delta: integer("delta").notNull(),
     afterQuantity: integer("after_quantity").notNull(),
     actorType: actorType("actor_type").notNull(),
-    actorId: uuid("actor_id"),
+    actorId: text("actor_id"),
     reason: text("reason").notNull(),
     remark: text("remark"),
     referenceType: varchar("reference_type", { length: 60 }),
