@@ -14,6 +14,7 @@ import {
   processFeishuOutbox,
 } from "@/modules/feishu/outbox";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
+import { createDailyStockCoverageAlerts } from "@/modules/reports/stock-coverage";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");
@@ -21,6 +22,7 @@ if (!connectionString) throw new Error("DATABASE_URL is required");
 const EXPIRE_PENDING_ORDERS_QUEUE = "expire-pending-payment-orders";
 const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
 const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
+const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
 const boss = new PgBoss(connectionString);
 
 boss.on("error", (error) => {
@@ -44,6 +46,16 @@ await boss.work(EXPIRE_PENDING_ORDERS_QUEUE, { batchSize: 1 }, async () => {
   const expiredCount = await expirePendingPaymentOrders();
   console.info(`[worker] expired ${expiredCount} pending payment order(s)`);
   return { expiredCount };
+});
+
+await boss.createQueue(STOCK_COVERAGE_ALERT_QUEUE);
+await boss.schedule(STOCK_COVERAGE_ALERT_QUEUE, "0 9 * * *", null, {
+  tz: "America/Toronto",
+});
+await boss.work(STOCK_COVERAGE_ALERT_QUEUE, { batchSize: 1 }, async () => {
+  const createdCount = await createDailyStockCoverageAlerts();
+  console.info(`[worker] created ${createdCount} daily stock coverage alert(s)`);
+  return { createdCount };
 });
 
 const jifengRequiredVariables = [
