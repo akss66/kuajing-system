@@ -6,8 +6,6 @@ import {
   auditLogs,
   customers,
   fulfillmentOrders,
-  integrationAttempts,
-  integrationOutbox,
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,

@@ -15,6 +15,7 @@ import { enqueueCargoSyncEvent } from "./outbox";
 export async function manualFeishuCargoSyncAction(
   _previousState: ActionState,
 ): Promise<ActionState> {
+  void _previousState;
   await requireAdmin();
   await db.transaction((tx) =>
     enqueueCargoSyncEvent(tx, {
@@ -29,6 +30,7 @@ export async function manualFeishuCargoSyncAction(
 export async function testFeishuConnectionAction(
   _previousState: ActionState,
 ): Promise<ActionState> {
+  void _previousState;
   await requireAdmin();
   try {
     const config = readFeishuConfig();

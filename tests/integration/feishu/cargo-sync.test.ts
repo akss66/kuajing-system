@@ -3,7 +3,6 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
 import {
-  customers,
   inventoryBalances,
   inventoryReservations,
   products,
