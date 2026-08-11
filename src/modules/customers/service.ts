@@ -7,6 +7,7 @@ import {
   authUsers,
   customers,
   stores,
+  walletAccounts,
 } from "@/db/schema";
 
 export type ProvisionCustomerInput = {
@@ -33,6 +34,7 @@ export async function provisionCustomerWithStore(
       .insert(stores)
       .values({ customerId: customer.id, name: input.storeName })
       .returning({ id: stores.id });
+    await tx.insert(walletAccounts).values({ customerId: customer.id });
     await tx.insert(authUsers).values({
       customerId: customer.id,
       email: input.email.toLowerCase(),

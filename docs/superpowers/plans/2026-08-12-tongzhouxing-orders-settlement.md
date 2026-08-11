@@ -46,10 +46,10 @@
 
 ## Task 5: 钱包余额与自动扣款
 
-- [ ] 写并发测试证明钱包不会重复扣款或出现负余额。
+- [x] 写并发测试证明钱包不会重复扣款或出现负余额。
 - [ ] 管理员可增加或减少客户余额，必须填写原因；每次变更写钱包流水和审计。
-- [ ] 提交拿货单时锁钱包行：余额足够则自动扣款并进入 `PAID_PENDING_FULFILLMENT`；余额不足不扣款，进入 `PENDING_PAYMENT` 并锁库存 2 小时。
-- [ ] 钱包扣款以人民币分整数保存；订单保存 `paymentMode=WALLET` 或 `DIRECT_OFFLINE`。
+- [x] 提交拿货单时锁钱包行：余额足够则自动扣款并进入 `PAID_PENDING_FULFILLMENT`；余额不足不扣款，进入 `PENDING_PAYMENT` 并锁库存 2 小时。
+- [x] 钱包扣款以人民币分整数保存；订单保存 `paymentMode=WALLET` 或 `DIRECT_OFFLINE`。
 
 ## Task 6: 线下付款声明、管理员核款、取消与超时
 

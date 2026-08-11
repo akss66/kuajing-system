@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
 
+import { eq } from "drizzle-orm";
+
+import { db } from "@/db/client";
+import { walletAccounts } from "@/db/schema";
 import { auth } from "@/modules/identity/auth";
 import { getCurrentPrincipal } from "@/modules/identity/principal";
 import { provisionCustomerWithStore } from "@/modules/customers/service";
@@ -32,4 +36,9 @@ test("provisions a customer, store and sign-in account together", async () => {
     kind: "CUSTOMER",
   });
   expect(result.storeId).toMatch(/^[0-9a-f-]{36}$/);
+  const [wallet] = await db
+    .select()
+    .from(walletAccounts)
+    .where(eq(walletAccounts.customerId, result.customerId));
+  expect(wallet.balanceFen).toBe(0);
 });

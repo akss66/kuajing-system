@@ -11,6 +11,7 @@ import {
   products,
   skus,
   stores,
+  walletAccounts,
 } from "./schema";
 
 if (process.env.NODE_ENV === "production") {
@@ -86,6 +87,10 @@ async function seed() {
     .insert(stores)
     .values({ customerId: customer.id, name: "TEMU 渥太华演示店" })
     .onConflictDoNothing();
+  await db
+    .insert(walletAccounts)
+    .values({ customerId: customer.id })
+    .onConflictDoNothing({ target: walletAccounts.customerId });
 
   await upsertCredentialUser({
     email: ADMIN_EMAIL,

@@ -17,12 +17,15 @@ import {
   skuAliases,
   skus,
   stores,
+  walletAccounts,
+  walletTransactions,
 } from "@/db/schema";
 import { getAvailableQuantity } from "@/modules/inventory/queries";
 import { InsufficientInventoryError } from "@/modules/inventory/service";
 import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 import { submitTemuImportBatch } from "@/modules/orders/submission";
+import { adjustWalletBalance } from "@/modules/wallet/service";
 
 const baseRow: Record<(typeof TEMU_EXPORT_HEADERS)[number], string | number> = {
   订单号: "PO-SUBMIT-1",
@@ -311,6 +314,67 @@ describe("atomic TEMU take-order submission", () => {
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
     expect(await db.select().from(inventoryReservations)).toHaveLength(1);
+  });
+
+  test("auto-debits sufficient balance and serializes concurrent wallet decisions", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-WALLET",
+      storeId: store.id,
+      totalQuantity: 2,
+    });
+    await adjustWalletBalance({
+      actorUserId: "auth-admin-wallet",
+      customerId: customer.id,
+      deltaFen: 500,
+      reason: "并发自动扣款测试充值",
+    });
+    const first = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [{ 订单号: "PO-WALLET-1", 子订单号: "SUB-WALLET-1", SKU货号: "EXT-WALLET" }],
+    });
+    const second = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [{ 订单号: "PO-WALLET-2", 子订单号: "SUB-WALLET-2", SKU货号: "EXT-WALLET" }],
+    });
+
+    const submitted = await Promise.all([
+      submitTemuImportBatch({ actorUserId: "first", batchId: first.batchId, customerId: customer.id }),
+      submitTemuImportBatch({ actorUserId: "second", batchId: second.batchId, customerId: customer.id }),
+    ]);
+
+    expect(submitted.map((order) => order.status).sort()).toEqual([
+      "PAID_PENDING_FULFILLMENT",
+      "PENDING_PAYMENT",
+    ]);
+    const [wallet] = await db
+      .select()
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, customer.id));
+    expect(wallet.balanceFen).toBe(0);
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    expect(debits).toHaveLength(1);
+    expect(debits[0]).toMatchObject({
+      afterBalanceFen: 0,
+      beforeBalanceFen: 500,
+      deltaFen: -500,
+    });
+    const paidOrder = submitted.find(
+      (order) => order.status === "PAID_PENDING_FULFILLMENT",
+    )!;
+    expect(paidOrder.lockExpiresAt).toBeNull();
+    const [paidReservation] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, paidOrder.orderId));
+    expect(paidReservation.expiresAt).toBeNull();
   });
 
   test("rejects previews with unresolved SKUs and another customer's batch", async () => {

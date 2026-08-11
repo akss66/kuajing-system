@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
+  inventoryReservations,
   orderImportBatches,
   orderImportRows,
   orderLines,
@@ -12,6 +13,7 @@ import {
 } from "@/db/schema";
 import { resolveUnitPrice } from "@/modules/catalog/pricing";
 import { reserveInventory } from "@/modules/inventory/service";
+import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const UNPAID_LOCK_MS = 2 * 60 * 60 * 1_000;
@@ -342,6 +344,39 @@ export async function submitTemuImportBatch(input: {
       });
     }
 
+    const paidFromWallet = await tryDebitWalletForOrder(tx, {
+      actorUserId: input.actorUserId,
+      amountFen: totalAmountFen,
+      customerId: batch.customerId,
+      orderId,
+    });
+    let finalStatus: SubmittedOrderView["status"] = "PENDING_PAYMENT";
+    let finalLockExpiresAt: Date | null = lockExpiresAt;
+    if (paidFromWallet) {
+      finalStatus = "PAID_PENDING_FULFILLMENT";
+      finalLockExpiresAt = null;
+      await tx
+        .update(fulfillmentOrders)
+        .set({
+          lockExpiresAt: null,
+          paidAt: now,
+          paymentMode: "WALLET",
+          status: "PAID_PENDING_FULFILLMENT",
+          updatedAt: now,
+        })
+        .where(eq(fulfillmentOrders.id, orderId));
+      await tx
+        .update(inventoryReservations)
+        .set({ expiresAt: null, updatedAt: now })
+        .where(
+          and(
+            eq(inventoryReservations.referenceType, "FULFILLMENT_ORDER"),
+            eq(inventoryReservations.referenceId, orderId),
+            eq(inventoryReservations.status, "ACTIVE"),
+          ),
+        );
+    }
+
     const insertedShipments = await tx
       .insert(orderShipments)
       .values(
@@ -388,8 +423,9 @@ export async function submitTemuImportBatch(input: {
       actorId: input.actorUserId,
       actorType: "CUSTOMER",
       afterJson: {
-        lockExpiresAt: lockExpiresAt.toISOString(),
-        status: "PENDING_PAYMENT",
+        lockExpiresAt: finalLockExpiresAt?.toISOString() ?? null,
+        paymentMode: paidFromWallet ? "WALLET" : null,
+        status: finalStatus,
         totalAmountFen,
         totalPackageCount: shipmentRows.size,
         totalQuantity,
@@ -403,10 +439,10 @@ export async function submitTemuImportBatch(input: {
     return {
       kind: "ORDER",
       order: {
-        lockExpiresAt,
+        lockExpiresAt: finalLockExpiresAt,
         orderId,
         orderNumber: number,
-        status: "PENDING_PAYMENT",
+        status: finalStatus,
         totalAmountFen,
         totalPackageCount: shipmentRows.size,
         totalQuantity,
