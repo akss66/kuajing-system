@@ -617,7 +617,7 @@ git commit -m "feat: add auditable concurrency-safe inventory"
 - Produces: server actions for customer, store, SKU, price, alias and inventory management.
 - Produces: reusable `AdminShell`, `DataWorkspaceToolbar`, `ResponsiveDataTable` and `ExceptionQueue` patterns.
 
-- [ ] **Step 1: Write failing Playwright authorization test**
+- [x] **Step 1: Write failing Playwright authorization test**
 
 ```ts
 test("customer cannot open administrator inventory", async ({ page }) => {
@@ -631,13 +631,13 @@ Add an admin scenario that creates a customer and store, creates a SKU, assigns 
 
 Add `toHaveScreenshot` checks for the admin shell, data workspace and error state at 1440×900. Add axe assertions with zero serious or critical violations.
 
-- [ ] **Step 2: Run E2E test and verify failure**
+- [x] **Step 2: Run E2E test and verify failure**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts`
 
 Expected: FAIL because admin routes do not exist.
 
-- [ ] **Step 3: Implement admin layout and navigation**
+- [x] **Step 3: Implement admin layout and navigation**
 
 Use A“运营台账”的 approved left navigation with the brand logo and these entries: 运营总览、客户与店铺、商品与 SKU、货盘库存、订单管理、补发管理、收款与余额、报表分析、系统与同步. Unimplemented later-phase entries must render disabled labels, not dead links. At desktop width the label remains visible; at mobile width the navigation becomes a Sheet drawer.
 
@@ -645,13 +645,13 @@ Use A“运营台账”的 approved left navigation with the brand logo and thes
 
 All server actions must call `requireAdmin`, validate with Zod, invoke domain services and return field-level Chinese errors. They must not execute direct table updates in route files. Forms use consistent labels, help text, error placement, loading width and visible keyboard focus.
 
-- [ ] **Step 5: Implement inventory page**
+- [x] **Step 5: Implement inventory page**
 
 Display total, active reservations and available quantity separately. Use C“任务指挥栏”的 tabs, URL-synced filters, search, batch action placement and fixed key columns. Manual adjustment requires quantity, reason and optional remark; after success show movement time, operator, before and after values. Loading uses structural skeletons; empty and error states explain the next action.
 
 Implement the B-inspired `ExceptionQueue` only on the operations overview; it must not consume horizontal space on inventory or catalog pages.
 
-- [ ] **Step 6: Run browser and quality tests**
+- [x] **Step 6: Run browser and quality tests**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts`
 
@@ -665,7 +665,7 @@ Run: `npm.cmd build`
 
 Expected: exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/\(admin\) tests/e2e/admin-management.spec.ts
