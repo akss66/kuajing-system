@@ -15,6 +15,13 @@
       "when": 1786471477963,
       "tag": "0001_thin_yellow_claw",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786472379227,
+      "tag": "0002_daily_eternals",
+      "breakpoints": true
     }
   ]
 }

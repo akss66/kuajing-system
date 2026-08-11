@@ -455,7 +455,7 @@ git commit -m "feat: add secure tenant-aware authentication"
 - Produces: `resolveStandardSku(tx, input): Promise<string | null>` where input is `{ storeId, externalSku }`.
 - Produces: `listCustomerCatalog(customerId): Promise<CustomerCatalogItem[]>`.
 
-- [ ] **Step 1: Write failing price-priority tests**
+- [x] **Step 1: Write failing price-priority tests**
 
 ```ts
 test.each([
@@ -469,17 +469,17 @@ test.each([
 
 Add tests proving store-specific aliases beat global aliases and unknown aliases return `null` without guessing transformations.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `npm.cmd run test:integration -- tests/integration/catalog/pricing.test.ts`
 
 Expected: FAIL because catalog schema and resolvers do not exist.
 
-- [ ] **Step 3: Implement catalog schema**
+- [x] **Step 3: Implement catalog schema**
 
 Store prices and declaration prices as non-negative integer fen. Create unique constraints on standard `skuCode`, `(customerId, skuId)` customer price, and `(storeId, externalSku)` alias. SKU sale status values are `SELLABLE` and `NOT_SELLABLE`.
 
-- [ ] **Step 4: Implement price and alias resolvers**
+- [x] **Step 4: Implement price and alias resolvers**
 
 ```ts
 export async function resolveUnitPrice(
@@ -495,7 +495,7 @@ export async function resolveUnitPrice(
 
 Validate the override as an integer greater than or equal to zero before entering the service.
 
-- [ ] **Step 5: Generate migration and run tests**
+- [x] **Step 5: Generate migration and run tests**
 
 Run: `npm.cmd run db:generate`
 
@@ -505,7 +505,7 @@ Run: `npm.cmd run test:integration -- tests/integration/catalog/pricing.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/db/schema/catalog.ts src/modules/catalog tests/integration/catalog drizzle
