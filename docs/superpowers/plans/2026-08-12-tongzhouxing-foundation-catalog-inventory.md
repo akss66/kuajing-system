@@ -2,16 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 交付可登录的“同舟行跨境”Web 平台，使超级管理员能够管理客户、店铺、SKU、价格、别名和货盘库存，使客户只能查看自己的成交价与可售库存。
+**Goal:** 交付生产级高保真的“同舟行跨境”响应式 Web 平台，使超级管理员能够管理客户、店铺、SKU、价格、别名和货盘库存，使客户只能查看自己的成交价与可售库存。
 
 **Architecture:** 使用 Next.js 模块化一体化应用和 PostgreSQL。身份、客户、商品、定价、库存和审计各自提供领域接口；页面和路由只能调用这些接口。货盘总库存与订单锁定分开保存，可售库存始终由数据库计算。
 
-**Tech Stack:** Node.js 24、Next.js 16.3、React 19.2、TypeScript 7、PostgreSQL 18、Drizzle ORM、Better Auth、Zod、Tailwind CSS、Vitest、Playwright。
+**Tech Stack:** Node.js 24、Next.js 16.3、React 19.2、TypeScript 7、PostgreSQL 18、Drizzle ORM、Better Auth、Zod、Tailwind CSS、shadcn/ui、TanStack Table/Query/Form、nuqs、Lucide、Vitest、Playwright、axe-core。
 
 ## Global Constraints
 
 - 平台名称固定为“同舟行跨境”。
 - 品牌原图来自 `C:\Users\AKSSINA\Desktop\同舟行logo.png`，683×656 透明 PNG；必须保持宽高比例和透明背景。
+- UI 必须遵守 `PRODUCT.md`、`DESIGN.md` 和 `docs/superpowers/specs/2026-08-12-tongzhouxing-ui-design-brief.md`。
+- 第一版只做浅色主题；深海青绿用于主操作，Logo 红不得用于按钮、导航选中或链接。
+- 全站使用 A 的左侧导航骨架，数据工作区吸收 C 的工具栏与表格模式，运营总览吸收 B 的异常队列。
+- 管理端中等偏紧凑；客户门户增加触控尺寸和局部间距。
+- 360px、390px、430px 手机宽度必须真实浏览器验收，关键触控目标不小于 44px。
+- 所有页面达到 WCAG 2.2 AA，并覆盖加载、空、错误、成功、禁用、权限拒绝和 API 降级状态。
 - 第一阶段后台只有超级管理员角色；客户访问必须按 `customerId` 隔离。
 - 所有金额使用人民币分整数保存；所有库存数量使用整数。
 - 数据库时间保存 UTC；业务时区常量为 `America/Toronto`。
@@ -28,6 +34,9 @@ src/app/                         Next.js 页面和路由
 src/app/(auth)/login/            登录页面
 src/app/(admin)/admin/           超级管理员页面
 src/app/(customer)/portal/       客户页面
+src/components/ui/               shadcn/ui 基础组件
+src/components/layout/           同舟行跨境应用框架和响应式导航
+src/components/data-workspace/   工具栏、筛选、批量操作和数据表格
 src/modules/identity/            登录和访问主体
 src/modules/customers/           客户及店铺
 src/modules/catalog/             商品、SKU、别名与价格
@@ -51,15 +60,31 @@ tests/e2e/                       浏览器端到端测试
 - Create: `vitest.config.ts`
 - Create: `vitest.integration.config.ts`
 - Create: `playwright.config.ts`
+- Create: `components.json`
 - Create: `src/shared/brand.ts`
 - Create: `src/app/layout.tsx`
 - Create: `src/app/page.tsx`
 - Create: `src/app/globals.css`
+- Create: `src/components/ui/button.tsx`
+- Create: `src/components/ui/input.tsx`
+- Create: `src/components/ui/table.tsx`
+- Create: `src/components/ui/sidebar.tsx`
+- Create: `src/components/ui/sheet.tsx`
+- Create: `src/components/ui/tabs.tsx`
+- Create: `src/components/ui/badge.tsx`
+- Create: `src/components/ui/skeleton.tsx`
+- Create: `src/components/ui/alert.tsx`
+- Create: `src/components/ui/alert-dialog.tsx`
+- Create: `src/components/ui/dropdown-menu.tsx`
+- Create: `src/components/ui/select.tsx`
+- Create: `src/components/ui/checkbox.tsx`
+- Create: `src/components/ui/tooltip.tsx`
 - Copy: `C:\Users\AKSSINA\Desktop\同舟行logo.png` -> `public/brand/tongzhouxing-logo.png`
 - Test: `tests/unit/shared/brand.test.ts`
+- Test: `tests/e2e/login-visual.spec.ts`
 
 **Interfaces:**
-- Produces: `BRAND.name`, `BRAND.logoPath`, `BUSINESS_TIME_ZONE` for all later UI and reporting tasks.
+- Produces: `BRAND.name`, `BRAND.logoPath`, `BUSINESS_TIME_ZONE`, approved OKLCH theme tokens and shadcn/ui primitives for all later tasks.
 
 - [ ] **Step 1: Create package metadata and commands**
 
@@ -87,8 +112,15 @@ Create `package.json` with these scripts and install the referenced packages so 
 Run:
 
 ```powershell
-npm.cmd install next@16.3.0 react@19.2.8 react-dom@19.2.8 drizzle-orm postgres pg-boss zod better-auth exceljs luxon
-npm.cmd install -D typescript@7.0.2 @types/node @types/react @types/react-dom eslint eslint-config-next tailwindcss tsx drizzle-kit vitest @vitest/coverage-v8 @playwright/test
+npm.cmd install next@16.3.0 react@19.2.8 react-dom@19.2.8 drizzle-orm postgres pg-boss zod better-auth exceljs luxon @tanstack/react-table @tanstack/react-query @tanstack/react-form nuqs lucide-react recharts
+npm.cmd install -D typescript@7.0.2 @types/node @types/react @types/react-dom eslint eslint-config-next tailwindcss tsx drizzle-kit vitest @vitest/coverage-v8 @playwright/test @axe-core/playwright
+```
+
+Initialize the open component layer and add only required primitives:
+
+```powershell
+npx.cmd shadcn@4.11.0 init --base-color neutral
+npx.cmd shadcn@4.11.0 add button input table sidebar sheet tabs badge skeleton alert alert-dialog dropdown-menu select checkbox tooltip
 ```
 
 - [ ] **Step 2: Write the failing brand test**
@@ -129,6 +161,31 @@ The root layout metadata title must use `BRAND.name`; its logo image must use `o
 
 Configure the `@/*` path alias, Next.js ESLint rules, separate unit/integration Vitest environments, and Playwright desktop plus mobile projects. `src/app/page.tsx` must redirect authenticated users to `/admin` or `/portal` and anonymous users to `/login`.
 
+Define these canonical light-theme roles in `src/app/globals.css`; do not create a dark theme block:
+
+```css
+:root {
+  --color-primary: oklch(0.43 0.09 170);
+  --color-primary-hover: oklch(0.37 0.085 170);
+  --color-primary-soft: oklch(0.95 0.025 170);
+  --color-background: oklch(1 0 0);
+  --color-surface: oklch(0.975 0.004 180);
+  --color-surface-muted: oklch(0.955 0.006 180);
+  --color-ink: oklch(0.22 0.018 175);
+  --color-muted: oklch(0.49 0.015 175);
+  --color-border: oklch(0.89 0.008 175);
+  --color-success: oklch(0.46 0.11 145);
+  --color-warning: oklch(0.65 0.14 70);
+  --color-danger: oklch(0.55 0.18 25);
+  --color-info: oklch(0.52 0.13 245);
+  --radius-control: 8px;
+  --radius-surface: 10px;
+  --duration-fast: 160ms;
+}
+```
+
+Map shadcn semantic tokens to these roles. Body uses `Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif`; numeric cells use `font-variant-numeric: tabular-nums`.
+
 - [ ] **Step 5: Copy and verify the approved PNG**
 
 Run:
@@ -139,6 +196,8 @@ Copy-Item -LiteralPath 'C:\Users\AKSSINA\Desktop\同舟行logo.png' -Destination
 ```
 
 Verify with a test or image metadata check that the copied image is 683×656 and has an alpha channel.
+
+Add an axe smoke test for the login surface and screenshot assertions at 1440×900 and 390×844. Verify that the primary action is deep teal and the red logo is not inherited by buttons or navigation.
 
 - [ ] **Step 6: Run quality gates**
 
@@ -542,7 +601,12 @@ git commit -m "feat: add auditable concurrency-safe inventory"
 ### Task 7: 构建超级管理员管理界面
 
 **Files:**
+- Create: `src/components/layout/admin-shell.tsx`
+- Create: `src/components/data-workspace/data-workspace-toolbar.tsx`
+- Create: `src/components/data-workspace/responsive-data-table.tsx`
+- Create: `src/components/data-workspace/exception-queue.tsx`
 - Create: `src/app/(admin)/admin/layout.tsx`
+- Create: `src/app/(admin)/admin/page.tsx`
 - Create: `src/app/(admin)/admin/customers/page.tsx`
 - Create: `src/app/(admin)/admin/catalog/page.tsx`
 - Create: `src/app/(admin)/admin/inventory/page.tsx`
@@ -551,6 +615,7 @@ git commit -m "feat: add auditable concurrency-safe inventory"
 **Interfaces:**
 - Consumes: `requireAdmin`, customer/store repositories, catalog repositories, `adjustTotalInventory`.
 - Produces: server actions for customer, store, SKU, price, alias and inventory management.
+- Produces: reusable `AdminShell`, `DataWorkspaceToolbar`, `ResponsiveDataTable` and `ExceptionQueue` patterns.
 
 - [ ] **Step 1: Write failing Playwright authorization test**
 
@@ -564,6 +629,8 @@ test("customer cannot open administrator inventory", async ({ page }) => {
 
 Add an admin scenario that creates a customer and store, creates a SKU, assigns a customer price, adds an alias and increases inventory with a required reason.
 
+Add `toHaveScreenshot` checks for the admin shell, data workspace and error state at 1440×900. Add axe assertions with zero serious or critical violations.
+
 - [ ] **Step 2: Run E2E test and verify failure**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts`
@@ -572,15 +639,17 @@ Expected: FAIL because admin routes do not exist.
 
 - [ ] **Step 3: Implement admin layout and navigation**
 
-Use the approved brand logo and these entries: 运营总览、客户与店铺、商品与 SKU、货盘库存、订单管理、补发管理、收款与余额、报表分析、系统与同步. Unimplemented later-phase entries must render disabled labels, not dead links.
+Use A“运营台账”的 approved left navigation with the brand logo and these entries: 运营总览、客户与店铺、商品与 SKU、货盘库存、订单管理、补发管理、收款与余额、报表分析、系统与同步. Unimplemented later-phase entries must render disabled labels, not dead links. At desktop width the label remains visible; at mobile width the navigation becomes a Sheet drawer.
 
 - [ ] **Step 4: Implement customer and catalog forms**
 
-All server actions must call `requireAdmin`, validate with Zod, invoke domain services and return field-level Chinese errors. They must not execute direct table updates in route files.
+All server actions must call `requireAdmin`, validate with Zod, invoke domain services and return field-level Chinese errors. They must not execute direct table updates in route files. Forms use consistent labels, help text, error placement, loading width and visible keyboard focus.
 
 - [ ] **Step 5: Implement inventory page**
 
-Display total, active reservations and available quantity separately. Manual adjustment requires quantity, reason and optional remark; after success show movement time, operator, before and after values.
+Display total, active reservations and available quantity separately. Use C“任务指挥栏”的 tabs, URL-synced filters, search, batch action placement and fixed key columns. Manual adjustment requires quantity, reason and optional remark; after success show movement time, operator, before and after values. Loading uses structural skeletons; empty and error states explain the next action.
+
+Implement the B-inspired `ExceptionQueue` only on the operations overview; it must not consume horizontal space on inventory or catalog pages.
 
 - [ ] **Step 6: Run browser and quality tests**
 
@@ -629,6 +698,8 @@ test("customer sees own special price and never sees another customer's price", 
 
 Add a test that total inventory 10 with 4 active reservations displays available quantity 6, and total inventory 4 with 4 reservations displays `不可售`.
 
+Run the same customer path at 360×800, 390×844 and 430×932. Assert that the navigation opens as a drawer, primary touch targets are at least 44px, no page-level horizontal overflow exists, and SKU details remain readable without reducing body text below 14px.
+
 - [ ] **Step 2: Run E2E test and verify failure**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/customer-catalog.spec.ts`
@@ -641,13 +712,17 @@ Expected: FAIL because customer portal routes do not exist.
 
 - [ ] **Step 4: Implement responsive customer portal**
 
-Use the approved navigation: 工作台、货盘选品、上传 TEMU 订单、我的订单、待付款、余额与流水、店铺数据. Later-phase entries render disabled with “即将开放”. The catalog supports SKU/name search and displays exact available quantity.
+Use the approved navigation: 工作台、货盘选品、上传 TEMU 订单、我的订单、待付款、余额与流水、店铺数据. Later-phase entries render disabled with “即将开放”. The catalog supports SKU/name search and displays exact available quantity. Desktop uses a compact table; mobile uses grouped SKU rows with image, SKU, price, available quantity and sale status, plus a full-width filter drawer.
 
 - [ ] **Step 5: Run tests and build**
 
 Run: `npm.cmd run test:e2e -- tests/e2e/customer-catalog.spec.ts`
 
 Expected: PASS on desktop and mobile Playwright projects.
+
+Run axe checks and visual screenshots for 1440×900, 390×844 and 360×800.
+
+Expected: no serious/critical accessibility violations and no unintended screenshot difference.
 
 Run: `npm.cmd test`
 
@@ -684,6 +759,8 @@ git commit -m "feat: add tenant-scoped customer cargo catalog"
 - [ ] **Step 1: Write failing phase acceptance test**
 
 The test must perform this exact flow: admin logs in, creates customer and store, creates SKU `TZX-DEMO-001` with default price 690 fen, sets customer price 760 fen, maps external SKU `TEMU-DEMO-RED`, adds total inventory 10 with reason `首批测试库存`, logs in as the customer, and verifies price `¥7.60` and available quantity `10`.
+
+The acceptance suite must also capture approved baseline screenshots for login, admin overview, admin inventory, customer catalog desktop and customer catalog mobile. Review screenshots for text clipping, incorrect status colors, red primary controls, nested card grids and excessive whitespace before accepting updates.
 
 - [ ] **Step 2: Run the acceptance test and capture failure**
 
@@ -736,3 +813,8 @@ git commit -m "test: complete phase one platform acceptance"
 - 库存调整、客户、店铺、商品和价格变化有审计记录。
 - 全部单元、集成、E2E、类型检查、lint 和构建通过。
 - 浏览器分别以桌面和手机尺寸验收管理员与客户页面。
+- 页面视觉符合 A 骨架 + C 数据工作区 + B 总览异常队列的已批准组合。
+- 第一版只有浅色主题；主操作使用深海青绿，Logo 红未扩散为操作色。
+- 360px、390px、430px 无页面级横向溢出，关键触控目标不小于 44px。
+- axe 检查无 serious/critical 问题，键盘焦点和减少动画模式有效。
+- 加载、空、错误、成功、禁用和 API 降级状态均有真实组件与自动化覆盖。
