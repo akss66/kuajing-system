@@ -3,8 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
+import { submitImportBatchAction } from "@/modules/orders/actions";
 import {
   ImportPreviewError,
   getCustomerImportPreview,
@@ -154,9 +155,7 @@ export default async function ImportPreviewPage({
         <p className="text-sm text-muted">
           {blocking ? "处理全部未知 SKU 和格式错误后再提交。" : `已核对 ${preview.summary.ready} 行可提交订单。`}
         </p>
-        <Button className="min-h-11 px-5" disabled>
-          确认提交拿货单
-        </Button>
+        <OrderSubmitButton action={submitImportBatchAction} batchId={preview.batchId} disabled={blocking > 0 || preview.summary.ready === 0} />
       </div>
     </div>
   );

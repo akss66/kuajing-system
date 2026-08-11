@@ -1,0 +1,15 @@
+import { ArrowDownLeft, ArrowUpRight, WalletCards } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { requireCustomer } from "@/modules/identity/guards";
+import { getCustomerWalletView } from "@/modules/wallet/queries";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
+
+function money(fen: number) { return `¥${(fen / 100).toFixed(2)}`; }
+function dateTime(value: Date) { return new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(value); }
+
+export default async function CustomerWalletPage() {
+  const principal = await requireCustomer();
+  const wallet = await getCustomerWalletView(principal.customerId);
+  return <div className="space-y-6"><header><p className="text-sm font-medium text-primary">资金账户</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">余额与流水</h1><p className="mt-2 text-sm text-muted">余额足够时提交拿货单会自动扣款；充值仍通过线下微信联系管理员。</p></header><section className="relative overflow-hidden rounded-[var(--radius-surface)] bg-primary p-5 text-white sm:p-6"><div className="absolute -right-10 -top-10 size-40 rounded-full bg-white/10" /><div className="relative"><div className="flex items-center gap-2 text-sm text-white/80"><WalletCards className="size-4" />可用余额</div><p className="mt-4 text-3xl font-semibold tabular-nums sm:text-4xl">{money(wallet.balanceFen)}</p><p className="mt-3 text-sm text-white/75">人民币 · 线下充值</p></div></section><section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"><div className="border-b border-border px-4 py-4 sm:px-5"><h2 className="font-semibold text-ink">账户流水</h2><p className="mt-1 text-sm text-muted">每笔资金变化均不可修改，并关联对应拿货单。</p></div>{wallet.transactions.length ? <div className="divide-y divide-border">{wallet.transactions.map((transaction) => <article className="flex items-start gap-3 p-4 sm:px-5" key={transaction.id}><span className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${transaction.deltaFen > 0 ? "bg-success/10 text-success" : "bg-danger/10 text-danger"}`}>{transaction.deltaFen > 0 ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}</span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-ink">{transaction.reason}</p><p className="mt-1 text-xs text-muted">{dateTime(transaction.createdAt)}（渥太华）</p></div><p className={`shrink-0 font-semibold tabular-nums ${transaction.deltaFen > 0 ? "text-success" : "text-danger"}`}>{transaction.deltaFen > 0 ? "+" : "−"}{money(Math.abs(transaction.deltaFen))}</p></div><div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-muted">余额 {money(transaction.afterBalanceFen)}</span>{transaction.orderNumber ? <Badge variant="secondary">{transaction.orderNumber}</Badge> : null}</div></div></article>)}</div> : <div className="px-5 py-16 text-center"><p className="font-medium text-ink">暂无资金流水</p><p className="mt-1 text-sm text-muted">管理员充值或订单扣款后会显示在这里。</p></div>}</section></div>;
+}

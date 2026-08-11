@@ -44,7 +44,7 @@ const navigation: NavigationItem[] = [
   { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
   { icon: ClipboardList, label: "订单管理" },
   { icon: RotateCcw, label: "补发管理" },
-  { icon: Banknote, label: "收款与余额" },
+  { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
   { icon: BarChart3, label: "报表分析" },
   { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
 ];

@@ -1,10 +1,11 @@
 "use client";
 
-import { Banknote, ClipboardList, LayoutDashboard, Menu, PackageSearch, Store, Upload } from "lucide-react";
+import { Banknote, ClipboardList, Clock3, LayoutDashboard, Menu, PackageSearch, Store, Upload } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,17 +17,25 @@ const items: Array<{ href?: string; icon: LucideIcon; label: string }> = [
   { href: "/portal", icon: LayoutDashboard, label: "工作台" },
   { href: "/portal/catalog", icon: PackageSearch, label: "货盘选品" },
   { href: "/portal/imports/new", icon: Upload, label: "上传 TEMU 订单" },
-  { icon: ClipboardList, label: "我的订单" },
-  { icon: Banknote, label: "余额与流水" },
+  { href: "/portal/orders", icon: ClipboardList, label: "我的订单" },
+  { href: "/portal/orders?status=PENDING_PAYMENT", icon: Clock3, label: "待付款" },
+  { href: "/portal/wallet", icon: Banknote, label: "余额与流水" },
   { icon: Store, label: "店铺数据" },
 ];
 
 function PortalNavigation({ mobile = false }: { mobile?: boolean }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   return <nav aria-label="客户主导航" className="space-y-1 px-3">{items.map((item) => {
     const content = <><item.icon aria-hidden="true" className="size-[18px]" /><span className="flex-1">{item.label}</span>{!item.href ? <span className="text-[10px] text-muted">即将开放</span> : null}</>;
     if (!item.href) return <div aria-disabled="true" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-muted/65" key={item.label}>{content}</div>;
-    const active = item.href === "/portal" ? pathname === item.href : pathname.startsWith(item.href);
+    const [itemPath, itemQuery] = item.href.split("?");
+    const active = itemQuery
+      ? pathname === itemPath && searchParams.toString() === itemQuery
+      : item.href === "/portal"
+        ? pathname === item.href
+        : pathname.startsWith(item.href) &&
+          !(item.href === "/portal/orders" && searchParams.has("status"));
     const link = <Link className={cn("flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium", active ? "bg-primary-soft text-primary-hover" : "text-muted hover:bg-surface-muted hover:text-ink")} href={item.href}>{content}</Link>;
     return mobile ? <SheetClose asChild key={item.label}>{link}</SheetClose> : <div key={item.label}>{link}</div>;
   })}</nav>;
