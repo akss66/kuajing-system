@@ -15,6 +15,8 @@ import {
   skuAliases,
   skus,
   stores,
+  walletAccounts,
+  walletTransactions,
 } from "@/db/schema";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
@@ -48,6 +50,12 @@ async function cleanupPhaseFixture() {
       await db.delete(authAccounts).where(inArray(authAccounts.userId, userIds));
       await db.delete(authUsers).where(inArray(authUsers.id, userIds));
     }
+    await db
+      .delete(walletTransactions)
+      .where(eq(walletTransactions.customerId, customer.id));
+    await db
+      .delete(walletAccounts)
+      .where(eq(walletAccounts.customerId, customer.id));
     await db.delete(stores).where(eq(stores.customerId, customer.id));
     await db.delete(customers).where(eq(customers.id, customer.id));
   }

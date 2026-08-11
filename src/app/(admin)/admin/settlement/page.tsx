@@ -1,10 +1,12 @@
-import { ArrowDownLeft, ArrowUpRight, Banknote, History, WalletCards } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Banknote, Clock3, History, WalletCards } from "lucide-react";
 
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { ActionForm } from "@/components/forms/action-form";
+import { PaymentClaimReview } from "@/components/orders/payment-claim-review";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { listPendingPaymentClaims } from "@/modules/orders/queries";
 import { adjustWalletAction } from "@/modules/wallet/actions";
 import { listAdminWalletAccounts, listAdminWalletTransactions } from "@/modules/wallet/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
@@ -22,9 +24,10 @@ function dateTime(value: Date) {
 }
 
 export default async function SettlementPage() {
-  const [accounts, transactions] = await Promise.all([
+  const [accounts, transactions, pendingClaims] = await Promise.all([
     listAdminWalletAccounts(),
     listAdminWalletTransactions(),
+    listPendingPaymentClaims(),
   ]);
   const totalBalanceFen = accounts.reduce((sum, account) => sum + account.balanceFen, 0);
 
@@ -36,10 +39,39 @@ export default async function SettlementPage() {
         <p className="mt-2 text-sm text-muted">线下微信收款后可为客户充值；所有增加和扣减都会留下不可变流水。</p>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <article className="rounded-[var(--radius-surface)] border border-primary/20 bg-primary-soft p-4"><div className="flex items-center justify-between text-sm text-primary-hover"><span>待核款</span><Clock3 className="size-4" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{pendingClaims.length}</p></article>
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>客户余额合计</span><WalletCards className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{money(totalBalanceFen)}</p></article>
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>钱包账户</span><Banknote className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{accounts.length}</p></article>
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>最近流水</span><History className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{transactions.length}</p></article>
+      </section>
+
+      <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
+        <div className="border-b border-border px-4 py-4 sm:px-5">
+          <h2 className="font-semibold text-ink">待核款</h2>
+          <p className="mt-1 text-sm text-muted">只核对客户为当前拿货单支付的微信款；确认后直接进入待发货，不经过钱包。</p>
+        </div>
+        {pendingClaims.length ? (
+          <div className="divide-y divide-border">
+            {pendingClaims.map((claim) => (
+              <article className="grid gap-4 p-4 sm:p-5 xl:grid-cols-[1fr_1.45fr] xl:items-center" key={claim.claimId}>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-ink">{claim.orderNumber}</p>
+                    <Badge className="bg-warning/10 text-warning" variant="secondary">待核款</Badge>
+                  </div>
+                  <p className="mt-2 text-sm text-muted">{claim.customerCode} · {claim.customerName} · {claim.storeName}</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums text-ink">{money(claim.amountFen)}</p>
+                  <p className="mt-1 text-xs text-muted">申报于 {dateTime(claim.createdAt)}（渥太华）</p>
+                  {claim.note ? <p className="mt-2 rounded-lg bg-surface-muted px-3 py-2 text-sm text-ink">备注：{claim.note}</p> : null}
+                </div>
+                <PaymentClaimReview amountFen={claim.amountFen} claimId={claim.claimId} orderNumber={claim.orderNumber} />
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无需要核对的微信付款。</div>
+        )}
       </section>
 
       <ActionForm action={adjustWalletAction} className="grid gap-4 rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:grid-cols-2 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end xl:p-5" submitLabel="确认调整余额">

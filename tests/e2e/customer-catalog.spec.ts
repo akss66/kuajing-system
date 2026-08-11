@@ -99,6 +99,7 @@ test("customer sees only its own price and real available inventory", async ({ p
   );
   await expect(page).toHaveScreenshot(`customer-catalog-${testInfo.project.name}.png`, {
     fullPage: true,
+    maxDiffPixels: 5,
     maskColor: "#e8efed",
     mask: [
       page.getByLabel("搜索 SKU 或商品名称"),

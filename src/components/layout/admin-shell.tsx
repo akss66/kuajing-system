@@ -42,7 +42,7 @@ const navigation: NavigationItem[] = [
   { href: "/admin/customers", icon: Building2, label: "客户与店铺" },
   { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
   { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
-  { icon: ClipboardList, label: "订单管理" },
+  { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
   { icon: RotateCcw, label: "补发管理" },
   { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
   { icon: BarChart3, label: "报表分析" },
