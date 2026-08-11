@@ -8,6 +8,7 @@ if (!new URL(process.env.DATABASE_URL).pathname.toLowerCase().includes("test")) 
 }
 process.env.BETTER_AUTH_SECRET ??= "test-only-secret-with-at-least-32-characters";
 process.env.BETTER_AUTH_URL ??= "http://127.0.0.1:3000";
+process.env.PII_ENCRYPTION_KEY ??= Buffer.alloc(32, 11).toString("base64");
 export default defineConfig({
   resolve: {
     alias: {

@@ -13,6 +13,7 @@ import {
   skus,
 } from "@/db/schema";
 import { requireAdmin } from "@/modules/identity/guards";
+import { refreshActiveImportPreviewsForAlias } from "@/modules/order-import/service";
 import type { ActionState } from "@/shared/action-state";
 
 const moneySchema = z
@@ -161,6 +162,12 @@ export async function createSkuAliasAction(
       entityId: input.skuId,
       entityType: "SKU_ALIAS",
       reason: "管理员建立店铺 SKU 映射",
+    });
+    await refreshActiveImportPreviewsForAlias(tx, {
+      actorUserId: principal.userId,
+      externalSku: input.externalSku,
+      skuId: input.skuId,
+      storeId: input.storeId,
     });
     });
   } catch {
