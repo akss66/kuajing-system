@@ -232,7 +232,7 @@ git commit -m "feat: initialize tongzhouxing web application"
 **Interfaces:**
 - Produces: `db`, `DbTransaction`, `withTransaction()` for all domain modules.
 
-- [ ] **Step 1: Define local PostgreSQL and environment contract**
+- [x] **Step 1: Define local PostgreSQL and environment contract**
 
 `compose.yaml` must expose PostgreSQL 18 only to localhost and persist data in a named volume. `.env.example` must define:
 
@@ -243,7 +243,7 @@ BETTER_AUTH_SECRET=replace-with-at-least-32-random-bytes
 BETTER_AUTH_URL=http://localhost:3000
 ```
 
-- [ ] **Step 2: Write the failing database health test**
+- [x] **Step 2: Write the failing database health test**
 
 ```ts
 import { expect, test } from "vitest";
@@ -256,7 +256,7 @@ test("connects to PostgreSQL", async () => {
 });
 ```
 
-- [ ] **Step 3: Start PostgreSQL and verify the test fails**
+- [x] **Step 3: Start PostgreSQL and verify the test fails**
 
 Run: `docker compose up -d postgres`
 
@@ -264,7 +264,7 @@ Run: `npm.cmd run test:integration -- tests/integration/db-health.test.ts`
 
 Expected: FAIL because `src/db/client.ts` does not exist.
 
-- [ ] **Step 4: Implement the database client**
+- [x] **Step 4: Implement the database client**
 
 ```ts
 import postgres from "postgres";
@@ -279,7 +279,7 @@ export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export const withTransaction = db.transaction.bind(db);
 ```
 
-- [ ] **Step 5: Run integration and quality tests**
+- [x] **Step 5: Run integration and quality tests**
 
 Run: `npm.cmd run test:integration -- tests/integration/db-health.test.ts`
 
@@ -291,7 +291,7 @@ Run: `npm.cmd lint`
 
 Expected: exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add compose.yaml .env.example drizzle.config.ts src/db tests/integration

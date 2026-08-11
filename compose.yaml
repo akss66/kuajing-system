@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: tongzhouxing
+      POSTGRES_PASSWORD: tongzhouxing
+      POSTGRES_USER: tongzhouxing
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tongzhouxing -d tongzhouxing"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    volumes:
+      - tongzhouxing_postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init-test-database.sql:/docker-entrypoint-initdb.d/init-test-database.sql:ro
+
+volumes:
+  tongzhouxing_postgres_data:
