@@ -8,6 +8,7 @@ import {
   inventoryMovements,
   inventoryReservations,
   orderShipments,
+  replacementRequests,
   shipmentFulfillments,
 } from "@/db/schema";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
@@ -43,6 +44,7 @@ export async function applyJifengOrderStatus(input: {
       kind: string;
       orderId: string;
       orderStatus: string;
+      replacementRequestId: string | null;
       shipmentId: string;
     }>(sql`
       select
@@ -51,10 +53,12 @@ export async function applyJifengOrderStatus(input: {
         s.id as "shipmentId",
         s.kind,
         o.id as "orderId",
-        o.status as "orderStatus"
+        o.status as "orderStatus",
+        r.id as "replacementRequestId"
       from shipment_fulfillments f
       inner join order_shipments s on s.id = f.shipment_id
       inner join fulfillment_orders o on o.id = s.order_id
+      left join replacement_requests r on r.replacement_shipment_id = s.id
       where f.erp_no = ${input.detail.erpNo}
       for update of f, s, o
     `);
@@ -90,14 +94,19 @@ export async function applyJifengOrderStatus(input: {
           where sku_id = ${line.skuId}
           for update
         `);
+        const reservationType = current.replacementRequestId
+          ? "REPLACEMENT_REQUEST"
+          : "FULFILLMENT_ORDER";
+        const reservationReferenceId =
+          current.replacementRequestId ?? current.orderId;
         const reservationRows = await tx.execute<{
           id: string;
           quantity: number;
         }>(sql`
           select id, quantity
           from inventory_reservations
-          where reference_type = 'FULFILLMENT_ORDER'
-            and reference_id = ${current.orderId}
+          where reference_type = ${reservationType}
+            and reference_id = ${reservationReferenceId}
             and sku_id = ${line.skuId}
             and status = 'ACTIVE'
           for update
@@ -173,6 +182,12 @@ export async function applyJifengOrderStatus(input: {
           updatedAt: now,
         })
         .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      if (current.replacementRequestId) {
+        await tx
+          .update(replacementRequests)
+          .set({ status: "SHIPPED", updatedAt: now })
+          .where(eq(replacementRequests.id, current.replacementRequestId));
+      }
 
       const remainingNormal = await tx.execute<{ count: number }>(sql`
         select count(*)::int as count
@@ -223,6 +238,12 @@ export async function applyJifengOrderStatus(input: {
           updatedAt: now,
         })
         .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      if (current.replacementRequestId) {
+        await tx
+          .update(replacementRequests)
+          .set({ status: "EXCEPTION", updatedAt: now })
+          .where(eq(replacementRequests.id, current.replacementRequestId));
+      }
       if (orderStatus !== current.orderStatus) {
         await tx
           .update(fulfillmentOrders)
@@ -263,6 +284,15 @@ export async function applyJifengOrderStatus(input: {
         updatedAt: now,
       })
       .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+    if (current.replacementRequestId) {
+      await tx
+        .update(replacementRequests)
+        .set({
+          status: status === "CANCELLED" ? "CANCELLED" : "FULFILLING",
+          updatedAt: now,
+        })
+        .where(eq(replacementRequests.id, current.replacementRequestId));
+    }
     if (current.orderStatus !== "SHIPPED" && status !== "CANCELLED") {
       await tx
         .update(fulfillmentOrders)

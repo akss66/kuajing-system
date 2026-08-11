@@ -9,6 +9,7 @@ import {
   integrationOutbox,
   orderLines,
   orderShipments,
+  replacementRequests,
   shipmentFulfillments,
   stores,
 } from "@/db/schema";
@@ -228,9 +229,13 @@ async function buildCreateOrderInput(
   const address2 = [recipient.addressLine2, recipient.addressLine3]
     .filter((value): value is string => Boolean(value))
     .join(", ");
+  const amountFen = lines.reduce(
+    (sum, line) => sum + line.priceFen * line.quantity,
+    0,
+  );
 
   return {
-    amount: lines.reduce((sum, line) => sum + line.priceFen * line.quantity, 0) / 100,
+    amount: amountFen > 0 ? amountFen / 100 : undefined,
     buyerName: recipient.name,
     buyerPhone: recipient.phone,
     currency: "CNY",
@@ -306,6 +311,10 @@ export async function processJifengCreateOrderEvent(input: {
             eq(fulfillmentOrders.status, "PAID_PENDING_FULFILLMENT"),
           ),
         );
+      await tx
+        .update(replacementRequests)
+        .set({ status: "FULFILLING", updatedAt: now })
+        .where(eq(replacementRequests.replacementShipmentId, claimed.shipmentId));
       await tx.insert(integrationAttempts).values({
         attemptNumber: claimed.attemptNumber,
         finishedAt: now,
@@ -367,7 +376,16 @@ export async function processJifengCreateOrderEvent(input: {
       await tx
         .update(fulfillmentOrders)
         .set({ status: "FULFILLMENT_EXCEPTION", updatedAt: now })
-        .where(eq(fulfillmentOrders.id, claimed.orderId));
+        .where(
+          and(
+            eq(fulfillmentOrders.id, claimed.orderId),
+            sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
+          ),
+        );
+      await tx
+        .update(replacementRequests)
+        .set({ status: "EXCEPTION", updatedAt: now })
+        .where(eq(replacementRequests.replacementShipmentId, claimed.shipmentId));
       await tx.insert(integrationAttempts).values({
         attemptNumber: claimed.attemptNumber,
         errorCode: failure.code,
