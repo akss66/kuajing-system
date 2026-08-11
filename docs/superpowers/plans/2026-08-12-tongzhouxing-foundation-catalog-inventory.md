@@ -641,7 +641,7 @@ Expected: FAIL because admin routes do not exist.
 
 Use A“运营台账”的 approved left navigation with the brand logo and these entries: 运营总览、客户与店铺、商品与 SKU、货盘库存、订单管理、补发管理、收款与余额、报表分析、系统与同步. Unimplemented later-phase entries must render disabled labels, not dead links. At desktop width the label remains visible; at mobile width the navigation becomes a Sheet drawer.
 
-- [ ] **Step 4: Implement customer and catalog forms**
+- [x] **Step 4: Implement customer and catalog forms**
 
 All server actions must call `requireAdmin`, validate with Zod, invoke domain services and return field-level Chinese errors. They must not execute direct table updates in route files. Forms use consistent labels, help text, error placement, loading width and visible keyboard focus.
 

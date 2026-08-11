@@ -13,6 +13,7 @@ import {
   skus,
 } from "@/db/schema";
 import { requireAdmin } from "@/modules/identity/guards";
+import type { ActionState } from "@/shared/action-state";
 
 const moneySchema = z
   .string()
@@ -27,16 +28,29 @@ const schema = z.object({
   defaultPriceFen: moneySchema,
 });
 
-export async function createSkuAction(formData: FormData) {
+function validationError(error: z.ZodError): ActionState {
+  return {
+    fieldErrors: z.flattenError(error).fieldErrors as Record<string, string[]>,
+    status: "error",
+  };
+}
+
+export async function createSkuAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const principal = await requireAdmin();
-  const input = schema.parse({
+  const parsed = schema.safeParse({
     defaultPriceFen: formData.get("defaultPriceYuan"),
     productName: formData.get("productName"),
     skuCode: formData.get("skuCode"),
     skuName: formData.get("skuName"),
   });
+  if (!parsed.success) return validationError(parsed.error);
+  const input = parsed.data;
 
-  await db.transaction(async (tx) => {
+  try {
+    await db.transaction(async (tx) => {
     const [product] = await tx
       .insert(products)
       .values({ name: input.productName })
@@ -61,11 +75,15 @@ export async function createSkuAction(formData: FormData) {
       entityType: "SKU",
       reason: "管理员创建标准 SKU",
     });
-  });
+    });
+  } catch {
+    return { message: "标准 SKU 已存在或数据保存失败。", status: "error" };
+  }
 
   revalidatePath("/admin/catalog");
   revalidatePath("/admin/inventory");
   revalidatePath("/admin");
+  return { message: "SKU 已创建，并初始化为 0 库存。", status: "success" };
 }
 
 const customerPriceSchema = z.object({
@@ -74,14 +92,20 @@ const customerPriceSchema = z.object({
   unitPriceFen: moneySchema,
 });
 
-export async function setCustomerPriceAction(formData: FormData) {
+export async function setCustomerPriceAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const principal = await requireAdmin();
-  const input = customerPriceSchema.parse({
+  const parsed = customerPriceSchema.safeParse({
     customerId: formData.get("customerId"),
     skuId: formData.get("skuId"),
     unitPriceFen: formData.get("unitPriceYuan"),
   });
-  await db.transaction(async (tx) => {
+  if (!parsed.success) return validationError(parsed.error);
+  const input = parsed.data;
+  try {
+    await db.transaction(async (tx) => {
     await tx
       .insert(customerSkuPrices)
       .values(input)
@@ -99,8 +123,12 @@ export async function setCustomerPriceAction(formData: FormData) {
       entityType: "SKU_PRICE",
       reason: "管理员设置客户专属价",
     });
-  });
+    });
+  } catch {
+    return { message: "客户专属价保存失败，请检查客户和 SKU。", status: "error" };
+  }
   revalidatePath("/admin/catalog");
+  return { message: "客户专属价已保存。", status: "success" };
 }
 
 const aliasSchema = z.object({
@@ -109,14 +137,20 @@ const aliasSchema = z.object({
   storeId: z.string().uuid(),
 });
 
-export async function createSkuAliasAction(formData: FormData) {
+export async function createSkuAliasAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const principal = await requireAdmin();
-  const input = aliasSchema.parse({
+  const parsed = aliasSchema.safeParse({
     externalSku: formData.get("externalSku"),
     skuId: formData.get("aliasSkuId"),
     storeId: formData.get("storeId"),
   });
-  await db.transaction(async (tx) => {
+  if (!parsed.success) return validationError(parsed.error);
+  const input = parsed.data;
+  try {
+    await db.transaction(async (tx) => {
     await tx.insert(skuAliases).values(input);
     await tx.insert(auditLogs).values({
       action: "SKU_ALIAS_CREATED",
@@ -128,6 +162,10 @@ export async function createSkuAliasAction(formData: FormData) {
       entityType: "SKU_ALIAS",
       reason: "管理员建立店铺 SKU 映射",
     });
-  });
+    });
+  } catch {
+    return { message: "该店铺 SKU 映射已存在，请勿重复添加。", status: "error" };
+  }
   revalidatePath("/admin/catalog");
+  return { message: "店铺 SKU 映射已保存。", status: "success" };
 }

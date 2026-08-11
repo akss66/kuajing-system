@@ -75,6 +75,13 @@ test("an administrator can create a sellable SKU and its initial inventory", asy
   await loginThroughUi(page, admin);
   await expect(page).toHaveURL(/\/admin$/);
   await page.goto("/admin/customers");
+  await page.getByLabel("客户编号").fill("A");
+  await page.getByLabel("客户名称").fill("X");
+  await page.getByLabel("店铺名称").fill("Y");
+  await page.getByRole("button", { name: "创建客户与店铺" }).click();
+  const formAlert = page.getByRole("alert").filter({ hasText: "客户编号至少 2 个字符" });
+  await expect(formAlert).toContainText("请填写客户名称");
+  await expect(formAlert).toContainText("请填写店铺名称");
   await page.getByLabel("客户编号").fill(customerCode);
   await page.getByLabel("客户名称").fill(`测试客户 ${suffix}`);
   await page.getByLabel("店铺名称").fill(`TEMU 渥太华 ${suffix}`);
