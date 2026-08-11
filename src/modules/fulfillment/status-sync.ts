@@ -12,6 +12,8 @@ import {
   shipmentFulfillments,
 } from "@/db/schema";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
+import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
+import { createSystemNotification } from "@/modules/notifications/service";
 
 type StatusSource = "POLL" | "WEBHOOK";
 
@@ -75,9 +77,13 @@ export async function applyJifengOrderStatus(input: {
     if (input.detail.status === 7) {
       const lineQuantities = await tx.execute<{
         quantity: number;
+        skuCode: string;
         skuId: string;
       }>(sql`
-        select sku_id as "skuId", sum(quantity)::int as quantity
+        select
+          sku_id as "skuId",
+          max(sku_code_snapshot) as "skuCode",
+          sum(quantity)::int as quantity
         from order_lines
         where shipment_id = ${current.shipmentId}
         group by sku_id
@@ -151,6 +157,18 @@ export async function applyJifengOrderStatus(input: {
           referenceType: "ORDER_SHIPMENT",
           skuId: line.skuId,
         });
+        if (afterQuantity < 10) {
+          await createSystemNotification(tx, {
+            deduplicationKey: `low-stock:${line.skuId}`,
+            entityId: line.skuId,
+            entityType: "SKU",
+            message: `${line.skuCode} 总库存仅剩 ${afterQuantity} 件，请核对锁定量并安排补货。`,
+            now,
+            severity: afterQuantity === 0 ? "ERROR" : "WARNING",
+            title: "低库存预警",
+            type: "LOW_STOCK",
+          });
+        }
       }
 
       const shippedAt = parsedShippedAt(input.detail.shippedTime, now);
@@ -221,6 +239,23 @@ export async function applyJifengOrderStatus(input: {
         entityType: "ORDER_SHIPMENT",
         reason: "极风确认包裹已发货，已正式扣减库存",
       });
+      await enqueueCargoSyncEvent(tx, {
+        idempotencyKey: `shipment-shipped:${current.shipmentId}`,
+        now,
+        reason: "shipment-inventory-consumed",
+      });
+      if (current.replacementRequestId) {
+        await createSystemNotification(tx, {
+          deduplicationKey: `replacement-shipped:${current.replacementRequestId}`,
+          entityId: current.replacementRequestId,
+          entityType: "REPLACEMENT_REQUEST",
+          message: "补发包裹已由极风确认发货，可在系统订单详情查看运单。",
+          now,
+          severity: "INFO",
+          title: "补发已发货",
+          type: "REPLACEMENT_SHIPPED",
+        });
+      }
       return { orderStatus, status: "SHIPPED" as const };
     }
 
@@ -267,6 +302,16 @@ export async function applyJifengOrderStatus(input: {
         entityId: current.shipmentId,
         entityType: "ORDER_SHIPMENT",
         reason: "极风返回履约异常状态",
+      });
+      await createSystemNotification(tx, {
+        deduplicationKey: `jifeng-exception:${current.fulfillmentId}:${input.detail.status}`,
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        message: `极风包裹状态异常（状态码 ${input.detail.status}），请进入履约详情处理。`,
+        now,
+        severity: "ERROR",
+        title: "极风履约异常",
+        type: "JIFENG_EXCEPTION",
       });
       return { orderStatus, status: "EXCEPTION" as const };
     }
@@ -386,6 +431,16 @@ export async function pollActiveJifengFulfillments(input: {
           entityId: row.fulfillmentId,
           entityType: "SHIPMENT_FULFILLMENT",
           reason: "极风状态查询失败，已安排重试",
+        });
+        await createSystemNotification(tx, {
+          deduplicationKey: `jifeng-poll-failed:${row.fulfillmentId}`,
+          entityId: row.fulfillmentId,
+          entityType: "SHIPMENT_FULFILLMENT",
+          message: "极风状态查询连续失败，系统已安排重试，请检查极风连接。",
+          now,
+          severity: "ERROR",
+          title: "极风状态查询失败",
+          type: "JIFENG_POLL_FAILED",
         });
       });
       summary.exceptions += 1;

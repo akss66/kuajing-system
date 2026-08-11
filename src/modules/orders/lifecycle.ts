@@ -7,6 +7,7 @@ import {
   inventoryReservations,
   paymentClaims,
 } from "@/db/schema";
+import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refundWalletForOrder } from "@/modules/wallet/service";
 
 const PAYMENT_CLAIM_LOCK_MS = 12 * 60 * 60 * 1000;
@@ -450,6 +451,11 @@ export async function cancelFulfillmentOrder(input: {
       entityType: "FULFILLMENT_ORDER",
       reason,
     });
+    await enqueueCargoSyncEvent(tx, {
+      idempotencyKey: `order-cancelled:${input.orderId}`,
+      now,
+      reason: "order-inventory-released",
+    });
 
     return { orderId: input.orderId, status: "CANCELLED" as const };
   });
@@ -526,6 +532,11 @@ export async function expirePendingPaymentOrders(input?: {
         entityId: order.id,
         entityType: "FULFILLMENT_ORDER",
         reason: "待付款或待核款订单超过库存锁定期限",
+      });
+      await enqueueCargoSyncEvent(tx, {
+        idempotencyKey: `order-expired:${order.id}`,
+        now,
+        reason: "expired-order-inventory-released",
       });
     }
 

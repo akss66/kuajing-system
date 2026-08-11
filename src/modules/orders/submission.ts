@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { resolveUnitPrice } from "@/modules/catalog/pricing";
 import { reserveInventory } from "@/modules/inventory/service";
+import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -434,6 +435,11 @@ export async function submitTemuImportBatch(input: {
       entityId: orderId,
       entityType: "FULFILLMENT_ORDER",
       reason: "客户确认 TEMU 导入并提交拿货单",
+    });
+    await enqueueCargoSyncEvent(tx, {
+      idempotencyKey: `order-submitted:${orderId}`,
+      now,
+      reason: "order-inventory-reserved",
     });
 
     return {

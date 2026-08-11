@@ -16,6 +16,7 @@ import {
 import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 import { decryptPii } from "@/shared/pii-crypto";
+import { createSystemNotification } from "@/modules/notifications/service";
 
 const recipientSchema = z.object({
   addressLine1: z.string().min(1),
@@ -410,6 +411,18 @@ export async function processJifengCreateOrderEvent(input: {
         entityType: "FULFILLMENT_ORDER",
         reason: "极风履约提交失败，已记录安全错误摘要",
       });
+      if (claimed.attemptNumber >= 3) {
+        await createSystemNotification(tx, {
+          deduplicationKey: `jifeng-submit-failed:${claimed.fulfillmentId}`,
+          entityId: claimed.fulfillmentId,
+          entityType: "SHIPMENT_FULFILLMENT",
+          message: `极风推单已失败 ${claimed.attemptNumber} 次，请检查配置或在后台重试。`,
+          now,
+          severity: "ERROR",
+          title: "极风推单连续失败",
+          type: "JIFENG_SUBMIT_FAILED",
+        });
+      }
     });
 
     return {

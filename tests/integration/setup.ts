@@ -6,6 +6,11 @@ import { db } from "@/db/client";
 beforeAll(async () => {
   await db.execute(sql.raw(`
     truncate table
+      system_notifications,
+      integration_attempts,
+      integration_outbox,
+      replacement_requests,
+      shipment_fulfillments,
       audit_logs,
       payment_claims,
       wallet_transactions,

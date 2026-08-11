@@ -5,4 +5,5 @@ export * from "./customers";
 export * from "./fulfillment";
 export * from "./identity";
 export * from "./inventory";
+export * from "./notifications";
 export * from "./orders";

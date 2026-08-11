@@ -1,5 +1,7 @@
 import { PgBoss } from "pg-boss";
 
+import { FeishuClient } from "@/integrations/feishu/client";
+import { readFeishuConfig } from "@/integrations/feishu/config";
 import { JifengClient } from "@/integrations/jifeng/client";
 import { readJifengConfig } from "@/integrations/jifeng/config";
 import {
@@ -7,6 +9,10 @@ import {
   processDueJifengCreateOrderEvents,
 } from "@/modules/fulfillment/dispatch";
 import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
+import {
+  enqueueFeishuCargoSync,
+  processFeishuOutbox,
+} from "@/modules/feishu/outbox";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
 
 const connectionString = process.env.DATABASE_URL;
@@ -14,6 +20,7 @@ if (!connectionString) throw new Error("DATABASE_URL is required");
 
 const EXPIRE_PENDING_ORDERS_QUEUE = "expire-pending-payment-orders";
 const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
+const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
 const boss = new PgBoss(connectionString);
 
 boss.on("error", (error) => {
@@ -82,6 +89,47 @@ if (configuredJifengVariables.length === jifengRequiredVariables.length) {
   console.info("[worker] Jifeng fulfillment jobs enabled");
 } else {
   console.info("[worker] Jifeng fulfillment jobs disabled: credentials not configured");
+}
+
+const feishuRequiredVariables = [
+  "FEISHU_APP_ID",
+  "FEISHU_APP_SECRET",
+  "FEISHU_CARGO_WIKI_TOKEN",
+  "FEISHU_INTERNAL_CHAT_ID",
+] as const;
+const configuredFeishuVariables = feishuRequiredVariables.filter(
+  (name) => Boolean(process.env[name]),
+);
+if (
+  configuredFeishuVariables.length > 0 &&
+  configuredFeishuVariables.length !== feishuRequiredVariables.length
+) {
+  throw new Error("飞书集成仅配置了部分环境变量，请补齐后再启动任务进程");
+}
+
+if (configuredFeishuVariables.length === feishuRequiredVariables.length) {
+  const feishuConfig = readFeishuConfig();
+  const feishuClient = new FeishuClient({
+    appId: feishuConfig.appId,
+    appSecret: feishuConfig.appSecret,
+  });
+  await boss.createQueue(FEISHU_SYNC_QUEUE);
+  await boss.schedule(FEISHU_SYNC_QUEUE, "* * * * *", null, { tz: "UTC" });
+  await boss.work(FEISHU_SYNC_QUEUE, { batchSize: 1 }, async () => {
+    await enqueueFeishuCargoSync({ reason: "five-minute-reconciliation" });
+    const result = await processFeishuOutbox({
+      botClient: feishuClient,
+      cargoClient: feishuClient,
+      config: feishuConfig,
+    });
+    console.info(
+      `[worker] Feishu cycle cargo=${result.cargoCompleted} bot=${result.botCompleted} failed=${result.failed}`,
+    );
+    return result;
+  });
+  console.info("[worker] Feishu sheet and bot jobs enabled");
+} else {
+  console.info("[worker] Feishu jobs disabled: credentials not configured");
 }
 
 console.info("[worker] background jobs started");

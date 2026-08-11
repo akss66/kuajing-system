@@ -7,6 +7,7 @@ import {
   inventoryMovements,
   inventoryReservations,
 } from "@/db/schema";
+import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 
 import { getReservedQuantity } from "./queries";
 import type {
@@ -177,6 +178,10 @@ export async function adjustTotalInventory(
     entityId: input.skuId,
     entityType: "SKU_INVENTORY",
     reason,
+  });
+  await enqueueCargoSyncEvent(tx, {
+    idempotencyKey: `inventory-movement:${movement.id}`,
+    reason: "manual-inventory-adjustment",
   });
 
   return movement;

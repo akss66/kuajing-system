@@ -15,6 +15,8 @@ import {
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
 import { reserveInventory } from "@/modules/inventory/service";
+import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
+import { createSystemNotification } from "@/modules/notifications/service";
 
 export class ReplacementError extends Error {
   constructor(
@@ -190,6 +192,21 @@ export async function createReplacementRequest(input: {
       entityId: replacementRequestId,
       entityType: "REPLACEMENT_REQUEST",
       reason,
+    });
+    await enqueueCargoSyncEvent(tx, {
+      idempotencyKey: `replacement-created:${replacementRequestId}`,
+      now,
+      reason: "replacement-inventory-reserved",
+    });
+    await createSystemNotification(tx, {
+      deduplicationKey: `replacement-created:${replacementRequestId}`,
+      entityId: replacementRequestId,
+      entityType: "REPLACEMENT_REQUEST",
+      message: `补发单已创建，包含 ${input.items.length} 个 SKU，等待极风履约。`,
+      now,
+      severity: "INFO",
+      title: "补发单已创建",
+      type: "REPLACEMENT_CREATED",
     });
     return { replacementRequestId, replacementShipmentId };
   });
@@ -377,6 +394,11 @@ export async function cancelJifengShipment(input: {
       entityId: input.shipmentId,
       entityType: "ORDER_SHIPMENT",
       reason,
+    });
+    await enqueueCargoSyncEvent(tx, {
+      idempotencyKey: `shipment-cancelled:${input.shipmentId}`,
+      now,
+      reason: "cancelled-shipment-inventory-released",
     });
     return { status: "CANCELLED" as const };
   });
