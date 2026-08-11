@@ -311,7 +311,7 @@ git commit -m "feat: add PostgreSQL development foundation"
 - Produces: `adminUsers`, `customerUsers`, `customers`, `stores`, `auditLogs` tables.
 - Produces: foreign-key rule that every store belongs to exactly one customer.
 
-- [ ] **Step 1: Write failing schema tests**
+- [x] **Step 1: Write failing schema tests**
 
 ```ts
 test("a store cannot reference a missing customer", async () => {
@@ -328,13 +328,13 @@ test("a store cannot reference a missing customer", async () => {
 
 Add a second test that verifies audit rows require `actorType`, `action`, `entityType`, `entityId`, `beforeJson`, `afterJson`, `reason`, and `createdAt`.
 
-- [ ] **Step 2: Run the tests and verify failure**
+- [x] **Step 2: Run the tests and verify failure**
 
 Run: `npm.cmd run test:integration -- tests/integration/schema/identity-customers.test.ts`
 
 Expected: FAIL because the schema exports do not exist.
 
-- [ ] **Step 3: Implement schema and enums**
+- [x] **Step 3: Implement schema and enums**
 
 Use UUID primary keys, `timestamp with time zone`, unique login identifiers, and these exact status values:
 
@@ -345,7 +345,7 @@ export const actorType = pgEnum("actor_type", ["ADMIN", "CUSTOMER", "SYSTEM"]);
 
 `stores.customerId` must be a non-null foreign key with `onDelete: "restrict"`. Audit records must not have update or delete repository methods.
 
-- [ ] **Step 4: Generate and apply the migration**
+- [x] **Step 4: Generate and apply the migration**
 
 Run: `npm.cmd run db:generate`
 
@@ -353,13 +353,13 @@ Run: `npm.cmd run db:migrate`
 
 Expected: migration completes without manual SQL edits.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `npm.cmd run test:integration -- tests/integration/schema/identity-customers.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/db/schema drizzle tests/integration/schema
