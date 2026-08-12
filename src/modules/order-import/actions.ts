@@ -31,6 +31,7 @@ export async function uploadTemuOrdersAction(
       buffer: new Uint8Array(await uploaded.arrayBuffer()),
       customerId: principal.customerId,
       fileName: uploaded.name,
+      mimeType: uploaded.type,
       storeId: parsedStoreId.data,
     });
 

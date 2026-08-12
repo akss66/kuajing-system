@@ -37,7 +37,9 @@ export const TEMU_EXPORT_HEADERS = [
 ] as const;
 
 export const TEMU_MAX_FILE_BYTES = 10 * 1024 * 1024;
-export const TEMU_MAX_DATA_ROWS = 10_000;
+export const TEMU_MAX_DATA_ROWS = 50_000;
+export const TEMU_XLSX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 type TemuHeader = (typeof TEMU_EXPORT_HEADERS)[number];
 type ImportRowStatus = "READY" | "DUPLICATE" | "UNKNOWN_SKU";
@@ -262,8 +264,12 @@ function parseDataRow(
 export async function parseTemuOrderWorkbook(input: {
   buffer: Uint8Array;
   fileName: string;
+  mimeType?: string;
 }): Promise<TemuParseResult> {
-  if (!input.fileName.toLowerCase().endsWith(".xlsx")) {
+  if (
+    !input.fileName.toLowerCase().endsWith(".xlsx") ||
+    (input.mimeType !== undefined && input.mimeType !== TEMU_XLSX_MIME_TYPE)
+  ) {
     throw new TemuWorkbookError(
       "INVALID_FILE_TYPE",
       "仅支持 TEMU 导出的 .xlsx 文件",

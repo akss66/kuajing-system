@@ -259,4 +259,19 @@ describe("customer-scoped TEMU import preview", () => {
       getCustomerImportPreview(fixture.customer.id, created.batchId),
     ).resolves.toMatchObject({ batchId: created.batchId });
   });
+
+  test("rejects a legacy single-store upload whose MIME is not XLSX", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      createTemuImportPreview({
+        actorUserId: "auth-customer-1",
+        buffer: await workbookBuffer([{}]),
+        customerId: fixture.customer.id,
+        fileName: "orders.xlsx",
+        mimeType: "application/octet-stream",
+        storeId: fixture.store.id,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_FILE_TYPE" });
+  });
 });

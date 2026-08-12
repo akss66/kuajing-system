@@ -78,12 +78,13 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
 }
 
 async function exactAliasMap(
+  tx: DbTransaction,
   storeId: string,
   externalSkus: readonly string[],
 ) {
   if (externalSkus.length === 0) return new Map<string, string>();
 
-  const aliases = await db
+  const aliases = await tx
     .select({
       externalSku: skuAliases.externalSku,
       skuId: skuAliases.skuId,
@@ -109,12 +110,13 @@ async function exactAliasMap(
 }
 
 async function duplicateSubOrders(
+  tx: DbTransaction,
   storeId: string,
   externalSubOrderNumbers: readonly string[],
 ) {
   if (externalSubOrderNumbers.length === 0) return new Set<string>();
 
-  const duplicates = await db
+  const duplicates = await tx
     .select({ externalSubOrderNo: orderLines.externalSubOrderNo })
     .from(orderLines)
     .where(
@@ -204,6 +206,7 @@ export async function createTemuImportPreview(input: {
   customerId: string;
   storeId: string;
   fileName: string;
+  mimeType?: string;
   buffer: Uint8Array;
 }): Promise<ImportPreviewView> {
   await assertStoreOwnership(input.customerId, input.storeId);
@@ -216,6 +219,28 @@ export async function createTemuImportPreview(input: {
   if (!store || store.status !== "ACTIVE") {
     throw new ImportPreviewError("STORE_DISABLED", "该店铺已停用，不能导入订单");
   }
+  return db.transaction((tx) =>
+    createTemuImportPreviewInTransaction(tx, {
+      ...input,
+      storeName: store.name,
+    }),
+  );
+}
+
+export async function createTemuImportPreviewInTransaction(
+  tx: DbTransaction,
+  input: {
+    actorUserId: string | null;
+    customerId: string;
+    storeId: string;
+    storeName: string;
+    storeGroupId?: string;
+    fileName: string;
+    mimeType?: string;
+    buffer: Uint8Array;
+    expiresAt?: Date;
+  },
+): Promise<ImportPreviewView> {
   if (!input.fileName || input.fileName.length > 255) {
     throw new ImportPreviewError("INVALID_FILE_NAME", "Excel 文件名无效");
   }
@@ -223,6 +248,7 @@ export async function createTemuImportPreview(input: {
   const parsed = await parseTemuOrderWorkbook({
     buffer: input.buffer,
     fileName: input.fileName,
+    mimeType: input.mimeType,
   });
   if (parsed.rows.length === 0 && parsed.issues.length === 0) {
     throw new ImportPreviewError("EMPTY_DATA", "Excel 文件中没有订单数据");
@@ -230,10 +256,12 @@ export async function createTemuImportPreview(input: {
 
   const [skuIdByExactAlias, duplicateSubOrderNumbers] = await Promise.all([
     exactAliasMap(
+      tx,
       input.storeId,
       parsed.rows.map((row) => row.externalSku),
     ),
     duplicateSubOrders(
+      tx,
       input.storeId,
       parsed.rows.map((row) => row.externalSubOrderNo),
     ),
@@ -244,61 +272,59 @@ export async function createTemuImportPreview(input: {
   });
   const piiKey = parsePiiEncryptionKey();
   const rowsForStorage = classifiedRowsForStorage(classified, piiKey);
-  const expiresAt = new Date(Date.now() + PREVIEW_LIFETIME_MS);
+  const expiresAt = input.expiresAt ?? new Date(Date.now() + PREVIEW_LIFETIME_MS);
   const fileSha256 = createHash("sha256").update(input.buffer).digest("hex");
 
-  const batchId = await db.transaction(async (tx) => {
-    const [batch] = await tx
-      .insert(orderImportBatches)
-      .values({
-        customerId: input.customerId,
-        duplicateRows: classified.summary.duplicate,
-        expiresAt,
-        fileSha256,
-        fileSizeBytes: input.buffer.byteLength,
-        invalidRows: classified.summary.invalid,
-        originalFileName: input.fileName,
-        readyRows: classified.summary.ready,
-        storeId: input.storeId,
-        totalRows: classified.summary.total,
-        unknownSkuRows: classified.summary.unknownSku,
-      })
-      .returning({ id: orderImportBatches.id });
+  const [batch] = await tx
+    .insert(orderImportBatches)
+    .values({
+      customerId: input.customerId,
+      duplicateRows: classified.summary.duplicate,
+      expiresAt,
+      fileSha256,
+      fileSizeBytes: input.buffer.byteLength,
+      invalidRows: classified.summary.invalid,
+      originalFileName: input.fileName,
+      readyRows: classified.summary.ready,
+      storeGroupId: input.storeGroupId,
+      storeId: input.storeId,
+      totalRows: classified.summary.total,
+      unknownSkuRows: classified.summary.unknownSku,
+    })
+    .returning({ id: orderImportBatches.id });
 
-    for (const rowChunk of chunks(rowsForStorage, INSERT_CHUNK_SIZE)) {
-      await tx.insert(orderImportRows).values(
-        rowChunk.map((row) => ({
-          ...row,
-          batchId: batch.id,
-        })),
-      );
-    }
+  for (const rowChunk of chunks(rowsForStorage, INSERT_CHUNK_SIZE)) {
+    await tx.insert(orderImportRows).values(
+      rowChunk.map((row) => ({
+        ...row,
+        batchId: batch.id,
+      })),
+    );
+  }
 
-    await tx.insert(auditLogs).values({
-      action: "TEMU_IMPORT_PREVIEW_CREATED",
-      actorId: input.actorUserId,
-      actorType: "CUSTOMER",
-      afterJson: {
-        fileSha256,
-        storeId: input.storeId,
-        summary: classified.summary,
-      },
-      beforeJson: {},
-      entityId: batch.id,
-      entityType: "ORDER_IMPORT_BATCH",
-      reason: "客户上传 TEMU 原始订单并生成预览",
-    });
-
-    return batch.id;
+  await tx.insert(auditLogs).values({
+    action: "TEMU_IMPORT_PREVIEW_CREATED",
+    actorId: input.actorUserId,
+    actorType: "CUSTOMER",
+    afterJson: {
+      fileSha256,
+      storeGroupId: input.storeGroupId ?? null,
+      storeId: input.storeId,
+      summary: classified.summary,
+    },
+    beforeJson: {},
+    entityId: batch.id,
+    entityType: "ORDER_IMPORT_BATCH",
+    reason: "客户上传 TEMU 原始订单并生成预览",
   });
 
   return {
-    batchId,
+    batchId: batch.id,
     expiresAt,
     fileName: input.fileName,
     rows: previewRows(classified),
     storeId: input.storeId,
-    storeName: store.name,
+    storeName: input.storeName,
     summary: classified.summary,
   };
 }
