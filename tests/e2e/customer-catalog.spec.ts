@@ -216,6 +216,19 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
     await expect(page.getByTestId(`catalog-${fixture.availableSku.id}`)).toBeVisible();
+    if (width === 390) {
+      const metricStrip = page.locator("[data-metric-strip]");
+      const gridTemplateColumns = await metricStrip.evaluate((node) =>
+        window.getComputedStyle(node).gridTemplateColumns,
+      );
+      expect(gridTemplateColumns.split(" ").filter(Boolean)).toHaveLength(2);
+
+      const searchInput = page.locator('input[name="q"]');
+      await expect(searchInput).toBeVisible();
+      const box = await searchInput.boundingBox();
+      expect(box).not.toBeNull();
+      expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
+    }
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );

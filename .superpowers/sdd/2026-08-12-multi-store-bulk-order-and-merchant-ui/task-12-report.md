@@ -233,3 +233,72 @@ Visual evidence refresh:
 
 Notes:
 - Running `merchant-center-visual.spec.ts` with the default 10 workers produced intermittent seeded-customer login failures on mobile (`/login` instead of `/portal`). Re-running the same suite with `--workers=1` passed 14/14, so the issue was treated as test-environment concurrency noise rather than a product regression.
+
+## Fix round 2 - 2026-08-12
+
+Scope:
+- compacted the customer mobile workspaces without changing route, field, selection, upload, or submit behavior
+- kept evidence and staging scoped to Task12 sources, tests, snapshots, and task evidence only
+
+Changed UI/state paths:
+- `src/components/bulk-order/bulk-order-workspace.tsx`
+  - moved mobile store-group disclosure state into the parent workspace so the draft view controls which groups start collapsed
+  - default-expanded only the first store group on mobile; all remaining groups now open from summary cards via explicit disclosure instead of rendering every details form at once
+  - auto-expands the targeted group before restoring focus for checkbox/file-input error flows, preserving Task8 selection and idempotency behavior
+- `src/components/bulk-order/store-group-card.tsx`
+  - removed child-local collapse state in favor of controlled disclosure props
+  - added `aria-controls`, stable `data-group-id`, and retained `min-h-11` disclosure buttons for mobile touch targets
+- `tests/unit/bulk-order/bulk-order-workspace.test.tsx`
+  - added RED/GREEN coverage for:
+    - eight `SUBMITTABLE` groups render with only the first expanded on mobile
+    - submit-error focus restores the targeted collapsed group before focusing the checkbox
+    - operators can manually collapse/reopen a submittable group
+- `tests/e2e/customer-catalog.spec.ts`
+  - replaced the flaky mojibake label locator with `input[name="q"]`
+  - added a real render assertion at width `390`:
+    - `data-metric-strip` computes to two columns
+    - the catalog search field remains within the first `390x844` viewport
+
+RED / GREEN:
+- RED on 2026-08-12:
+  - `npm.cmd test -- tests/unit/bulk-order/bulk-order-workspace.test.tsx`
+    - failed because all eight `SUBMITTABLE` store groups rendered expanded, the second group had no manual disclosure control, and focus-restoration could not reopen a collapsed group
+  - `npm.cmd run test:e2e -- --project=mobile-chromium -g "customer catalog remains usable at approved mobile widths" tests/e2e/customer-catalog.spec.ts`
+    - failed because the old label-based locator could not prove the real `390` viewport render state
+- GREEN on 2026-08-12:
+  - `npm.cmd test -- tests/unit/bulk-order/bulk-order-workspace.test.tsx`
+    - passed: 1 file / 11 tests
+  - `npm.cmd run test:e2e -- --project=mobile-chromium -g "customer catalog remains usable at approved mobile widths" tests/e2e/customer-catalog.spec.ts`
+    - passed
+  - `npm.cmd run test:e2e -- --workers=1 --project=mobile-chromium -g "customer bulk workspace stays usable at approved mobile widths" tests/e2e/multi-store-bulk-order.spec.ts`
+    - passed
+
+Verification for fix round 2:
+- `npm.cmd run test:e2e -- --workers=1 --project=desktop-chromium --project=mobile-chromium tests/e2e/customer-catalog.spec.ts --update-snapshots=changed`
+  - passed: 6 tests
+- `npm.cmd run test:e2e -- --workers=1 --project=<desktop|mobile> -g "<merchant-center route>" tests/e2e/merchant-center-visual.spec.ts --update-snapshots=changed`
+  - passed all 14 route/project combinations when executed one route at a time
+- `npm.cmd test`
+  - passed: 30 files / 101 tests
+- `npm.cmd run typecheck`
+  - passed
+- `npm.cmd run lint`
+  - passed
+- `git diff --check`
+  - no whitespace or conflict-marker findings; only LF->CRLF warnings in touched files
+
+Visual evidence refresh:
+- refreshed `.superpowers/sdd/2026-08-12-multi-store-bulk-order-and-merchant-ui/task-12-visual/` with current render outputs:
+  - `bulk-workspace-390.png`
+  - `bulk-workspace-1440.png`
+  - `customer-catalog-mobile-chromium-mobile-chromium-win32.png`
+- confirmed dimensions:
+  - `bulk-workspace-390.png`: `1073x12375`
+  - `customer-catalog-mobile-chromium-mobile-chromium-win32.png`: `390x844`
+- manual review:
+  - `bulk-workspace-390.png` now shows only the first store group expanded in the opening viewport; groups 2-8 stay in summary form with `展开详情`
+  - `customer-catalog-mobile-chromium-mobile-chromium-win32.png` shows KPI cards in a 2x2 grid and keeps the search field inside the first mobile viewport
+
+Environment note:
+- running the entire `merchant-center-visual.spec.ts` file in one Playwright invocation still hit an unstable local web-server lifecycle after the first route (`ERR_CONNECTION_REFUSED` on later routes)
+- the route-by-route reruns used the same assertions, snapshots, and local code against a clean Playwright-managed server per invocation, and all 14 cases passed without code changes

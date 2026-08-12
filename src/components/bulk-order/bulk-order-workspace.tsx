@@ -92,6 +92,11 @@ type SelectionState = {
   submittableGroupIds: Set<string>;
 };
 
+type MobileDisclosureState = {
+  collapsedGroupIds: Set<string>;
+  signature: string;
+};
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
@@ -145,6 +150,15 @@ function getSubmittableGroupIds(groups: readonly BulkOrderWorkspaceGroup[]) {
       .filter((group) => group.status === "SUBMITTABLE")
       .map((group) => group.groupId),
   );
+}
+
+function createMobileDisclosureState(
+  groups: readonly BulkOrderWorkspaceGroup[],
+): MobileDisclosureState {
+  return {
+    collapsedGroupIds: new Set(groups.slice(1).map((group) => group.groupId)),
+    signature: buildGroupSignature(groups),
+  };
 }
 
 function draftStatusLabel(status: BulkOrderWorkspaceDraft["status"]) {
@@ -226,6 +240,8 @@ export function BulkOrderWorkspace({
     signature: buildGroupSignature(draft.groups),
     submittableGroupIds: getSubmittableGroupIds(draft.groups),
   }));
+  const [mobileDisclosureState, setMobileDisclosureState] =
+    useState<MobileDisclosureState>(() => createMobileDisclosureState(draft.groups));
   const [walletState, setWalletState] = useState(() => ({
     signature: buildGroupSignature(draft.groups),
     value: "0",
@@ -261,6 +277,14 @@ export function BulkOrderWorkspace({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWalletState({ signature: groupSignature, value: "0" });
   }, [groupSignature, walletState.signature]);
+
+  useEffect(() => {
+    if (mobileDisclosureState.signature === groupSignature) return;
+    // Refreshes can add or remove store groups. Rebuild the default mobile
+    // disclosure so the first actionable group stays expanded.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMobileDisclosureState(createMobileDisclosureState(groups));
+  }, [groupSignature, groups, mobileDisclosureState.signature]);
 
   const activeSelection = selectionState.selectedGroupIds;
   const walletInput = walletState.value;
@@ -320,6 +344,7 @@ export function BulkOrderWorkspace({
   }
 
   function focusGroupInput(groupId: string) {
+    expandGroupDetails(groupId);
     queueMicrotask(() => {
       fileInputRefs.current[groupId]?.focus();
     });
@@ -334,6 +359,7 @@ export function BulkOrderWorkspace({
       return;
     }
 
+    expandGroupDetails(firstSelectableGroup.groupId);
     queueMicrotask(() => {
       checkboxRefs.current[firstSelectableGroup.groupId]?.focus();
     });
@@ -370,6 +396,32 @@ export function BulkOrderWorkspace({
     updater: (current: SelectionState) => SelectionState,
   ) {
     setSelectionState((current) => updater(current));
+  }
+
+  function toggleGroupDetails(groupId: string) {
+    setMobileDisclosureState((current) => {
+      const next = new Set(current.collapsedGroupIds);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return { collapsedGroupIds: next, signature: groupSignature };
+    });
+  }
+
+  function expandGroupDetails(groupId: string) {
+    setMobileDisclosureState((current) => {
+      if (!current.collapsedGroupIds.has(groupId)) {
+        return current.signature === groupSignature
+          ? current
+          : { collapsedGroupIds: new Set(current.collapsedGroupIds), signature: groupSignature };
+      }
+
+      const next = new Set(current.collapsedGroupIds);
+      next.delete(groupId);
+      return { collapsedGroupIds: next, signature: groupSignature };
+    });
   }
 
   function setWalletInput(value: string) {
@@ -613,44 +665,30 @@ export function BulkOrderWorkspace({
         </section>
       ) : (
         <div className="space-y-4">
-          {(() => {
-            let idleGroupCount = 0;
-
-            return groups.map((group) => {
-              const isIdleGroup =
-                group.status === "EMPTY" ||
-                group.status === "ALREADY_SUBMITTED" ||
-                group.status === "EXPIRED";
-              const defaultCollapsed = isIdleGroup && idleGroupCount > 0;
-
-              if (isIdleGroup) {
-                idleGroupCount += 1;
-              }
-
-              return (
-                <StoreGroupCard
-                  defaultCollapsed={defaultCollapsed}
-                  fileInputKey={fileInputKeys[group.groupId] ?? 0}
-                  fileInputRef={(node) => {
-                    fileInputRefs.current[group.groupId] = node;
-                  }}
-                  fileSelection={selectedFiles[group.groupId] ?? []}
-                  group={group}
-                  key={group.groupId}
-                  onFilesSelected={handleFilesSelected}
-                  onRemoveFile={onRemoveFile}
-                  onSelectedChange={toggleGroup}
-                  onUpload={onUpload}
-                  removingBatchId={removingBatchId}
-                  selected={activeSelection.has(group.groupId)}
-                  selectionControlRef={(node) => {
-                    checkboxRefs.current[group.groupId] = node;
-                  }}
-                  uploading={uploadingGroupId === group.groupId}
-                />
-              );
-            });
-          })()}
+          {groups.map((group) => (
+            <StoreGroupCard
+              detailsCollapsed={mobileDisclosureState.collapsedGroupIds.has(group.groupId)}
+              fileInputKey={fileInputKeys[group.groupId] ?? 0}
+              fileInputRef={(node) => {
+                fileInputRefs.current[group.groupId] = node;
+              }}
+              fileSelection={selectedFiles[group.groupId] ?? []}
+              group={group}
+              key={group.groupId}
+              onDetailsToggle={toggleGroupDetails}
+              onFilesSelected={handleFilesSelected}
+              onRemoveFile={onRemoveFile}
+              onSelectedChange={toggleGroup}
+              onUpload={onUpload}
+              removingBatchId={removingBatchId}
+              selected={activeSelection.has(group.groupId)}
+              selectionControlRef={(node) => {
+                checkboxRefs.current[group.groupId] = node;
+              }}
+              showMobileDisclosure={groups.length > 1}
+              uploading={uploadingGroupId === group.groupId}
+            />
+          ))}
         </div>
       )}
 

@@ -1,6 +1,4 @@
 "use client";
-
-import { useState } from "react";
 import {
   AlertCircle,
   ChevronDown,
@@ -75,11 +73,12 @@ const statusTone: Record<
 };
 
 export function StoreGroupCard({
-  defaultCollapsed = false,
+  detailsCollapsed = false,
   fileInputKey,
   fileInputRef,
   fileSelection,
   group,
+  onDetailsToggle,
   onFilesSelected,
   onRemoveFile,
   onSelectedChange,
@@ -87,13 +86,15 @@ export function StoreGroupCard({
   removingBatchId,
   selected,
   selectionControlRef,
+  showMobileDisclosure = false,
   uploading,
 }: {
-  defaultCollapsed?: boolean;
+  detailsCollapsed?: boolean;
   fileInputKey: number;
   fileInputRef?: (node: HTMLInputElement | null) => void;
   fileSelection: readonly File[];
   group: BulkOrderWorkspaceGroup;
+  onDetailsToggle?: (groupId: string) => void;
   onFilesSelected: (groupId: string, files: FileList | null) => void;
   onRemoveFile: (batchId: string) => void;
   onSelectedChange: (groupId: string, selected: boolean) => void;
@@ -101,6 +102,7 @@ export function StoreGroupCard({
   removingBatchId?: string | null;
   selected: boolean;
   selectionControlRef?: (node: HTMLButtonElement | null) => void;
+  showMobileDisclosure?: boolean;
   uploading: boolean;
 }) {
   const tone = statusTone[group.status];
@@ -108,11 +110,13 @@ export function StoreGroupCard({
   const selectable = group.status === "SUBMITTABLE";
   const editable =
     group.status !== "ALREADY_SUBMITTED" && group.status !== "EXPIRED";
-  const [detailsCollapsed, setDetailsCollapsed] = useState(defaultCollapsed);
-  const shouldShowMobileDisclosure = defaultCollapsed || detailsCollapsed;
+  const detailsId = `group-details-${group.groupId}`;
 
   return (
-    <article className="rounded-[var(--radius-surface)] border border-border bg-background">
+    <article
+      className="rounded-[var(--radius-surface)] border border-border bg-background"
+      data-group-id={group.groupId}
+    >
       <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
@@ -177,11 +181,12 @@ export function StoreGroupCard({
                 "继续上传 TEMU 原始 Excel，系统会按店铺跨文件去重并保留失败文件。"}
             </p>
           </div>
-          {shouldShowMobileDisclosure ? (
+          {showMobileDisclosure ? (
             <Button
+              aria-controls={detailsId}
               aria-expanded={!detailsCollapsed}
               className="min-h-11 px-3 lg:hidden"
-              onClick={() => setDetailsCollapsed((current) => !current)}
+              onClick={() => onDetailsToggle?.(group.groupId)}
               type="button"
               variant="ghost"
             >
@@ -196,6 +201,7 @@ export function StoreGroupCard({
       </div>
 
       <div
+        id={detailsId}
         className={cn("space-y-4 px-4 py-4 sm:px-5", detailsCollapsed ? "hidden lg:block" : "")}
         data-collapsed={detailsCollapsed ? "true" : "false"}
       >

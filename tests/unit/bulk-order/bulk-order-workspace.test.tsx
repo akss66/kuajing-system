@@ -195,6 +195,28 @@ describe("BulkOrderWorkspace", () => {
     });
   });
 
+  it("keeps only the first submittable group expanded on mobile by default", () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft(
+          Array.from({ length: 8 }, (_, index) =>
+            createGroup({
+              groupId: `group-${index + 1}`,
+              storeId: `store-${index + 1}`,
+              storeName: `店铺 ${index + 1}`,
+            }),
+          ),
+        )}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    expect(document.querySelectorAll('[data-collapsed="false"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(7);
+    expect(screen.getAllByRole("button", { name: "展开详情" })).toHaveLength(7);
+  });
+
   it("collapses mobile details for idle store cards after the first one", async () => {
     render(
       <BulkOrderWorkspace
@@ -229,15 +251,89 @@ describe("BulkOrderWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "展开详情" })).toBeInTheDocument();
+    expect(
+      document.querySelector('[aria-controls="group-details-group-b"]'),
+    ).toHaveTextContent("展开详情");
     const collapsedSections = document.querySelectorAll('[data-collapsed="true"]');
     expect(collapsedSections).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
+    fireEvent.click(
+      document.querySelector('[aria-controls="group-details-group-b"]') as HTMLButtonElement,
+    );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "收起详情" })).toBeInTheDocument();
+      expect(
+        document.querySelector('[aria-controls="group-details-group-b"]'),
+      ).toHaveTextContent("收起详情");
       expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(0);
+    });
+  });
+
+  it("auto-expands the target group before restoring focus after a submit error", async () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({ groupId: "group-b", storeId: "store-b", storeName: "杭州店" }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    fireEvent.click(
+      document.querySelector('[aria-controls="group-details-group-a"]') as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择深圳店" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择杭州店" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(1);
+      expect(screen.getByRole("checkbox", { name: "选择深圳店" })).toHaveFocus();
+    });
+  });
+
+  it("lets operators manually collapse and reopen submittable groups", async () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({ groupId: "group-b", storeId: "store-b", storeName: "杭州店" }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    fireEvent.click(
+      document.querySelector('[aria-controls="group-details-group-b"]') as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-collapsed="false"]')).toHaveLength(2);
+      expect(
+        document.querySelector('[aria-controls="group-details-group-b"]'),
+      ).toHaveTextContent("收起详情");
+    });
+
+    fireEvent.click(
+      document.querySelector('[aria-controls="group-details-group-b"]') as HTMLButtonElement,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(1);
+      expect(
+        document.querySelector('[aria-controls="group-details-group-b"]'),
+      ).toHaveTextContent("展开详情");
     });
   });
 
