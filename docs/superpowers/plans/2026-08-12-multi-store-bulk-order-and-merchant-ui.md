@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在保留同舟行既有信息结构和单店流程的前提下，交付多店铺分组批量拿货、统一结算与余额冻结，并把管理员后台和客户门户整体升级为已批准的“同舟行商家工作台”视觉。
+**Goal:** 在保留同舟行既有单店流程的前提下，交付多店铺分组批量拿货、统一结算与余额冻结，补齐超级管理员账号/客户/店铺治理，并把管理员后台和客户门户整体升级为已批准的“同舟行商家工作台”视觉。
 
-**Architecture:** PostgreSQL 继续作为订单、库存和资金的唯一事实源。批量草稿包含多个店铺分组和多个现有导入批次，提交服务在一个事务中完成最终去重、短缺店铺集合计算、逐店拿货单创建、库存锁定和结算批次建立；纯余额批次直接扣款，混合付款批次冻结余额并由统一线下付款声明驱动核款。UI 先扩展共享设计令牌和双端壳，再在不改变路由、权限和功能名称的条件下迁移各业务页面。
+**Architecture:** PostgreSQL 继续作为订单、库存、资金和账号归属的唯一事实源。批量提交在事务中完成去重、短缺集合、逐店拿货单、库存和结算；账号服务在 Better Auth 之上增加唯一超级管理员、普通管理员、客户一对一账号、软停用和会话撤销边界。UI 先补齐账号/客户/店铺管理，再扩展共享设计令牌、双端壳和本地字体，最后迁移各业务页面。
 
 **Tech Stack:** Next.js 16 App Router、React 19、TypeScript 6 严格模式、PostgreSQL、Drizzle ORM、ExcelJS、Zod 4、Tailwind CSS 4、shadcn/Radix、Vitest、Testing Library、Playwright、axe-core。
 
@@ -13,6 +13,11 @@
 - 平台名称固定为“同舟行跨境”，正式 Logo 使用 `public/brand/tongzhouxing-logo.png`。
 - TikTok Shop 商家中心只作为 UI 美学和组件质感参考；不得复制其信息架构、栏目、角色或业务命名。
 - 管理员和客户现有路由、权限、菜单功能与核心流程保持兼容；批量拿货作为客户默认推荐入口，单店上传继续可用。
+- 系统只有一个不可停用、删除或降级的超级管理员；可有多个普通管理员，普通管理员无账号管理权限。
+- 一位客户只能有一个登录账号，一个账号可访问该客户名下全部店铺；账号、客户和店铺只软停用，不物理删除。
+- 停用任何普通管理员或客户账号必须立即撤销其全部会话；管理员端和客户端都必须提供退出登录。
+- 全站字体固定为项目本地打包的 Geist Variable + Noto Sans SC Variable；所有页面和图表共享字体令牌，禁止页面单独覆盖字体。
+- 登录页主标题固定为“加拿大本地货盘，选品拿货更简单。”，辅助说明固定为“连接 TEMU 多店铺、同舟行货盘与人民币结算，让选品、拿货、付款和发货记录都清晰可查。”
 - 第一阶段只做浅色主题；深炭黑只用于全局工具顶栏和选中导航，不扩展为全页面深色主题。
 - Logo 红不用于主操作；深海青绿继续作为主操作、链接和焦点色。
 - 每个批量草稿最多 20 个店铺分组、每店 10 个文件、总计 100 个文件、单文件 10 MB、单文件最多 50,000 行，草稿有效期 24 小时。
@@ -81,9 +86,23 @@
 - Modify `src/components/layout/admin-shell.tsx`: 增加批量拿货诊断和统一结算入口，不删除原模块。
 - Modify `src/app/(admin)/admin/settlement/page.tsx`: 链接新结算批次并保留原单订单核款。
 
+### Account, customer and store management
+
+- Modify `src/db/schema/auth.ts` and `identity.ts`: 客户账号唯一归属、超级管理员角色和管理员身份映射。
+- Create `drizzle/0011_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
+- Create `src/modules/accounts/service.ts`, `queries.ts`, `actions.ts`: 账号列表、创建普通管理员、资料修改、密码重置、停用/恢复和会话撤销。
+- Modify `src/modules/identity/principal.ts` and `guards.ts`: 区分 `SUPER_ADMIN` 与普通 `ADMIN`，新增 `requireSuperAdmin()`。
+- Expand `src/modules/customers/service.ts`, `actions.ts`, `queries.ts`: 客户和店铺完整资料维护、停用/恢复与审计。
+- Create `src/app/(admin)/admin/accounts/page.tsx`: 仅超级管理员可见的管理员/客户账号管理。
+- Create `src/app/(admin)/admin/customers/[customerId]/page.tsx`: 客户详情、唯一账号和多店铺管理。
+- Modify `src/app/(admin)/admin/customers/page.tsx`: 显示账号状态、店铺数量和详情入口。
+
 ### Merchant-center UI system
 
-- Modify `src/app/globals.css`: 落实深炭黑顶栏、浅色侧栏/画布、面板、表格和状态令牌。
+- Install `@fontsource-variable/geist` and `@fontsource-variable/noto-sans-sc`: 字体资源随构建本地打包。
+- Modify `src/app/globals.css` and `src/app/layout.tsx`: 落实本地字体、深炭黑顶栏、浅色侧栏/画布、面板、表格和状态令牌。
+- Modify `src/app/(auth)/login/page.tsx`: 使用确认后的加拿大本地货盘文案。
+- Create `src/components/auth/sign-out-button.tsx`: 双端明确退出入口。
 - Create `src/components/layout/merchant-topbar.tsx`: 双端共享全局工具顶栏。
 - Create `src/components/layout/page-heading.tsx`: 面包屑、标题、说明和单主操作。
 - Create `src/components/data-workspace/metric-strip.tsx`: 连续指标带。
@@ -98,6 +117,8 @@
 - Create `tests/integration/bulk-order/schema.test.ts`, `draft.test.ts`, `validation.test.ts`, `submission.test.ts`, `concurrency.test.ts`.
 - Create `tests/integration/settlement/batch-lifecycle.test.ts`.
 - Create `tests/unit/ui/merchant-shell.test.tsx`.
+- Create `tests/integration/accounts/governance.test.ts` and `tests/unit/accounts/account-management.test.tsx`.
+- Modify `tests/integration/customers/provisioning.test.ts` and `tests/integration/identity/access-guards.test.ts`.
 - Create `tests/e2e/multi-store-bulk-order.spec.ts` and `merchant-center-visual.spec.ts` plus approved snapshots.
 - Modify `tests/e2e/phase-two-payment.spec.ts`, `tests/e2e/admin-management.spec.ts`, `tests/e2e/customer-catalog.spec.ts`: 兼容新壳和原流程回归。
 - Modify `docs/operations/local-development.md` and `docs/releases/v0.2.0.md`: 迁移、运行和功能说明。
@@ -667,10 +688,94 @@ git add src/app/\(admin\) src/components/settlement src/components/layout/admin-
 git commit -m "feat: add admin bulk settlement workspace"
 ```
 
-### Task 10: 商家中心设计令牌、共享顶栏与双端壳
+### Task 10: 超级管理员账号、客户与店铺完整管理
 
 **Files:**
+- Modify: `src/db/schema/auth.ts`
+- Modify: `src/db/schema/identity.ts`
+- Modify: `src/db/schema/index.ts`
+- Create: `drizzle/0011_account_governance.sql`
+- Modify: `drizzle/meta/_journal.json`
+- Create: `src/modules/accounts/service.ts`
+- Create: `src/modules/accounts/queries.ts`
+- Create: `src/modules/accounts/actions.ts`
+- Modify: `src/modules/identity/auth.ts`
+- Modify: `src/modules/identity/principal.ts`
+- Modify: `src/modules/identity/guards.ts`
+- Modify: `src/modules/customers/service.ts`
+- Create: `src/modules/customers/queries.ts`
+- Modify: `src/modules/customers/actions.ts`
+- Create: `src/app/(admin)/admin/accounts/page.tsx`
+- Modify: `src/app/(admin)/admin/customers/page.tsx`
+- Create: `src/app/(admin)/admin/customers/[customerId]/page.tsx`
+- Modify: `src/components/layout/admin-shell.tsx`
+- Test: `tests/integration/accounts/governance.test.ts`
+- Modify: `tests/integration/customers/provisioning.test.ts`
+- Modify: `tests/integration/identity/access-guards.test.ts`
+- Test: `tests/unit/accounts/account-management.test.tsx`
+- Modify: `tests/e2e/admin-management.spec.ts`
+
+**Interfaces:**
+- Produces: `requireSuperAdmin(): Promise<SuperAdminPrincipal>` while `requireAdmin()` continues to accept both administrator roles.
+- Produces: `listManagedAccounts()`, `createAdminAccount()`, `updateManagedAccount()`, `resetManagedAccountPassword()`, `setManagedAccountStatus()`.
+- Produces: `getCustomerManagementDetail()`, `updateCustomer()`, `createStore()`, `updateStore()`, `setCustomerStatus()`, `setStoreStatus()`.
+
+- [ ] **Step 1: 写唯一超级管理员和客户账号一对一失败测试**
+
+```ts
+await expect(createAdminAccount({ role: "SUPER_ADMIN", ...input })).rejects.toThrow("SUPER_ADMIN_IMMUTABLE");
+await expect(createCustomerAccount({ customerId, ...secondAccount })).rejects.toThrow();
+await expect(setManagedAccountStatus({ actor: ordinaryAdmin, userId, status: "DISABLED" })).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+```
+
+测试同时断言：超级管理员自身不能停用/降级；普通管理员不能访问账号服务；客户账号行返回所属客户与 `storeCount`。
+
+- [ ] **Step 2: 运行并确认权限与数据库约束缺失**
+
+Run: `npm run test:integration -- tests/integration/accounts/governance.test.ts tests/integration/identity/access-guards.test.ts`
+
+Expected: FAIL，提示 `requireSuperAdmin` 或唯一约束尚不存在。
+
+- [ ] **Step 3: 增加 0011 前向迁移和角色边界**
+
+`auth_users.role` 固定使用 `super_admin | admin | user`；迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
+
+Better Auth 的管理员插件只把 `super_admin` 配置为拥有用户管理权限；`admin` 由应用 `requireAdmin()` 识别为日常运营角色，但不能调用账号管理 API。`SuperAdminPrincipal` 与 `AdminPrincipal` 明确区分，`requireAdmin()` 接受二者，`requireSuperAdmin()` 只接受前者。
+
+- [ ] **Step 4: 实现账号服务与软停用**
+
+所有账号写操作由 `requireSuperAdmin()` 保护并写审计。创建普通管理员固定 `role = 'admin'`；客户账号固定与一个客户一对一。更新显示名称/邮箱时同步 Better Auth 与身份映射；重置密码使用 Better Auth 密码能力；停用使用 ban/status 并在同一业务操作中撤销该用户全部会话；恢复解除 ban/status。任何服务均拒绝修改唯一超级管理员的角色或状态，不暴露物理删除入口。
+
+- [ ] **Step 5: 补齐客户与多店铺管理服务**
+
+客户列表查询返回唯一账号状态和店铺数量；详情返回客户资料、账号摘要和全部店铺。支持修改客户编号/名称/联系人/微信，客户与店铺启用/停用，添加店铺，修改店铺名称、平台、外部编号。停用客户同时停用唯一客户账号并撤销会话；停用店铺只禁止新拿货，不删除历史数据。每次变更记录前后值、操作者和原因。
+
+- [ ] **Step 6: 实现账号页和客户详情页**
+
+`/admin/accounts` 使用“管理员账号/客户账号”标签；每行显示显示名称、邮箱、角色/所属客户、状态、最近登录、客户店铺数和允许操作。超级管理员行不显示停用/角色操作。`/admin/customers` 显示账号状态、店铺数量和详情入口；详情页承载资料编辑、唯一账号摘要与多店铺新增/编辑/停用/恢复。普通管理员访问 `/admin/accounts` 返回安全拒绝页，且侧栏不显示“账号管理”；其他客户与店铺日常管理继续对管理员开放。
+
+- [ ] **Step 7: 通过账号、客户、权限和浏览器回归**
+
+Run: `npm run test:integration -- tests/integration/accounts/governance.test.ts tests/integration/customers/provisioning.test.ts tests/integration/identity/access-guards.test.ts && npm test -- tests/unit/accounts/account-management.test.tsx && npm run test:e2e -- tests/e2e/admin-management.spec.ts`
+
+Expected: PASS；普通管理员不能看账号管理，超级管理员能完成创建、修改、重置密码、停用和恢复；停用账号旧会话失效；客户店铺数量准确。
+
+- [ ] **Step 8: 提交账号、客户与店铺治理**
+
+```bash
+git add src/db/schema src/modules/accounts src/modules/identity src/modules/customers src/app/\(admin\)/admin/accounts src/app/\(admin\)/admin/customers src/components/layout/admin-shell.tsx drizzle tests
+git commit -m "feat: add super admin account governance"
+```
+
+### Task 11: 商家中心设计令牌、共享顶栏、字体与会话入口
+
+**Files:**
+- Modify: `package.json`
+- Modify: `package-lock.json`
+- Modify: `src/app/layout.tsx`
 - Modify: `src/app/globals.css`
+- Modify: `src/app/(auth)/login/page.tsx`
+- Create: `src/components/auth/sign-out-button.tsx`
 - Create: `src/components/layout/merchant-topbar.tsx`
 - Create: `src/components/layout/page-heading.tsx`
 - Create: `src/components/data-workspace/metric-strip.tsx`
@@ -683,11 +788,15 @@ git commit -m "feat: add admin bulk settlement workspace"
 - Modify: `src/components/ui/table.tsx`
 - Modify: `src/components/ui/tabs.tsx`
 - Test: `tests/unit/ui/merchant-shell.test.tsx`
+- Modify: `tests/unit/ui/login-page.test.tsx`
+- Test: `tests/unit/auth/sign-out-button.test.tsx`
 
 **Interfaces:**
 - Produces: `<MerchantTopbar audience="admin" | "customer" />`
 - Produces: `<PageHeading breadcrumbs title description action />`
 - Produces: `<MetricStrip items />`
+- Produces: one global `--font-product` token backed by local Geist Variable + Noto Sans SC Variable assets.
+- Produces: `<SignOutButton />` used by both authenticated shells.
 
 - [ ] **Step 1: 写结构和令牌失败测试**
 
@@ -700,11 +809,13 @@ expect(screen.getByText("运营总览")).toBeVisible();
 
 测试同时断言客户壳不出现管理员栏目，原路由标签都存在。
 
+测试还断言登录页出现“加拿大本地货盘，选品拿货更简单。”和确认后的辅助说明，双端壳都有“退出登录”，全局布局导入两套本地字体且页面源代码没有独立 `font-family` 覆盖。
+
 - [ ] **Step 2: 运行并确认新顶栏不存在**
 
-Run: `npm test -- tests/unit/ui/merchant-shell.test.tsx`
+Run: `npm test -- tests/unit/ui/merchant-shell.test.tsx tests/unit/ui/login-page.test.tsx tests/unit/auth/sign-out-button.test.tsx`
 
-Expected: FAIL。
+Expected: FAIL，新顶栏、退出按钮或字体资源尚不存在。
 
 - [ ] **Step 3: 落实设计令牌**
 
@@ -719,11 +830,11 @@ Expected: FAIL。
 }
 ```
 
-完整令牌还必须定义顶栏文字、侧栏悬停/选中、面板边框、表头、焦点、语义状态及 reduced-motion。
+安装 `@fontsource-variable/geist@5.3.0` 和 `@fontsource-variable/noto-sans-sc@5.3.0`。根布局导入本地字体 CSS，`--font-product` 固定为 `Geist Variable`, `Noto Sans SC Variable`, metric-compatible system fallbacks；`body`、Tailwind `font-sans/font-heading`、表单、按钮、表格、浮层和图表继承同一令牌。完整令牌还必须定义顶栏文字、侧栏悬停/选中、面板边框、表头、焦点、语义状态及 reduced-motion。运行 `rg -n "font-family|font-\[" src`，除 `globals.css` 的令牌声明外不得存在页面级覆盖。
 
 - [ ] **Step 4: 实现共享顶栏和双端壳**
 
-桌面使用 48–52px 深炭黑顶栏和 208–224px 浅色侧栏；顶栏只含品牌/帮助/消息/通知/账号。管理员与客户各自保留原业务导航；移动端侧栏变抽屉，顶栏压缩为菜单、品牌、通知、账号。
+桌面使用 48–52px 深炭黑顶栏和 208–224px 浅色侧栏；顶栏只含品牌/帮助/消息/通知/账号。账号菜单包含明确的“退出登录”，调用 `authClient.signOut()`，成功后替换到 `/login` 并刷新；管理员与客户各自保留原业务导航；移动端侧栏变抽屉，顶栏压缩为菜单、品牌、通知、账号。登录页主标题和辅助说明使用已确认的固定文案。
 
 - [ ] **Step 5: 收敛核心组件外观**
 
@@ -731,18 +842,18 @@ Expected: FAIL。
 
 - [ ] **Step 6: 通过壳测试、类型和 lint**
 
-Run: `npm test -- tests/unit/ui/merchant-shell.test.tsx && npm run typecheck && npm run lint`
+Run: `npm test -- tests/unit/ui/merchant-shell.test.tsx tests/unit/ui/login-page.test.tsx tests/unit/auth/sign-out-button.test.tsx && npm run typecheck && npm run lint`
 
 Expected: PASS，且没有丢失现有导航项。
 
 - [ ] **Step 7: 提交设计系统基础**
 
 ```bash
-git add src/app/globals.css src/components/layout src/components/data-workspace src/components/ui tests/unit/ui
-git commit -m "feat: add merchant center design system"
+git add package.json package-lock.json src/app src/components/auth src/components/layout src/components/data-workspace src/components/ui tests/unit
+git commit -m "feat: add merchant workspace typography and shell"
 ```
 
-### Task 11: 全系统页面视觉迁移
+### Task 12: 全系统页面视觉迁移
 
 **Files:**
 - Modify: all `page.tsx` files under `src/app/(admin)/admin/**`
@@ -801,7 +912,7 @@ git add src/app src/components tests/e2e
 git commit -m "feat: redesign application as merchant workspace"
 ```
 
-### Task 12: 安全、兼容、运维文档与完整验收
+### Task 13: 安全、兼容、运维文档与完整验收
 
 **Files:**
 - Modify: `docs/operations/local-development.md`
@@ -814,7 +925,7 @@ git commit -m "feat: redesign application as merchant workspace"
 
 - [ ] **Step 1: 增加最终安全回归断言**
 
-验证客户 A 不能读写客户 B 的草稿、文件、店铺、结算和订单；批量错误/审计/日志不含真实姓名、电话、邮箱或地址；重复提交/核款/worker 重试不重复扣款和锁库存。
+验证客户 A 不能读写客户 B 的草稿、文件、店铺、结算和订单；普通管理员不能进入账号管理或修改账号；唯一超级管理员不能被停用、删除或降级；停用账号的全部会话失效；批量错误/审计/日志不含真实姓名、电话、邮箱或地址；重复提交/核款/worker 重试不重复扣款和锁库存。
 
 - [ ] **Step 2: 执行完整单元测试**
 
@@ -842,7 +953,7 @@ Expected: 全部桌面、360/390/430px、视觉快照和可访问性测试 PASS�
 
 - [ ] **Step 6: 更新操作与发布说明**
 
-`local-development.md` 写明 0010 迁移、批量草稿/结算超时 worker 和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
+`local-development.md` 写明 0010/0011 迁移、批量草稿/结算超时 worker、本地字体依赖和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、账号/客户/店铺治理、退出登录、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
 
 - [ ] **Step 7: 检查版本库范围并提交验收**
 
@@ -862,6 +973,9 @@ git commit -m "chore: complete bulk ordering and merchant UI acceptance"
 - 最终提交防止重复和超卖，允许店铺级部分成功，并为每个成功店铺生成独立拿货单和共同结算批次。
 - 自定义余额抵扣、比例分摊、纯余额直扣、混合付款冻结和零余额线下付款均与规范一致。
 - 一笔统一付款声明由管理员一次确认；拒绝、撤回和超时原子释放冻结与库存；旧单店付款流程继续工作。
+- 系统只有一个受保护的超级管理员；超级管理员可管理普通管理员和客户账号，普通管理员不能进入账号管理。
+- 一位客户只有一个登录账号并可管理多个店铺；账号、客户和店铺均采用保留历史的软停用，停用账号立即撤销会话。
 - 管理员和客户全系统均采用商家中心视觉，保留同舟行原信息结构，无 TikTok 特有业务栏目。
+- 登录页使用已确认的加拿大本地货盘文案；双端均可退出登录；全站统一使用项目本地打包的 Geist Variable + Noto Sans SC Variable 字体令牌。
 - PII、客户隔离、幂等、并发、资金流水和库存流水通过自动化测试。
 - 完整 unit、integration、typecheck、lint、build、E2E、axe 和视觉快照门禁全部通过。
