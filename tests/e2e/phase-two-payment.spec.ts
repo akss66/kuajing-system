@@ -91,13 +91,9 @@ async function seedPendingPaymentOrder() {
   return { admin, customerUser, order };
 }
 
-test("customer declares an exact WeChat payment and admin confirms it without using wallet", async ({
+test("customer declares an exact WeChat payment and admin confirms it without using wallet @desktop-only", async ({
   page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "desktop-chromium",
-    "The state-changing acceptance flow runs once on desktop",
-  );
+}) => {
   const fixture = await seedPendingPaymentOrder();
 
   await loginThroughUi(page, fixture.customerUser);
@@ -160,13 +156,9 @@ test("customer declares an exact WeChat payment and admin confirms it without us
   ).toBeVisible();
 });
 
-test("customer order payment controls remain usable at approved mobile widths", async ({
+test("customer order payment controls remain usable at approved mobile widths @mobile-only", async ({
   page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "mobile-chromium",
-    "Mobile acceptance runs only in the mobile project",
-  );
+}) => {
   const fixture = await seedPendingPaymentOrder();
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal/);

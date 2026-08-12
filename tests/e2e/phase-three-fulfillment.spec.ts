@@ -115,10 +115,9 @@ async function seedShippedOrder() {
   return { admin, adminProfile, order, shipment, sku };
 }
 
-test("administrator can inspect a shipped package and create a replacement", async ({
+test("administrator can inspect a shipped package and create a replacement @desktop-only", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "Mutation runs once on desktop");
+}) => {
   const fixture = await seedShippedOrder();
   await loginThroughUi(page, fixture.admin);
   await expect(page).toHaveURL(/\/admin$/);
@@ -156,10 +155,9 @@ test("administrator can inspect a shipped package and create a replacement", asy
   expect(accessibility.violations.filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))).toEqual([]);
 });
 
-test("fulfillment detail and integration settings fit approved mobile widths", async ({
+test("fulfillment detail and integration settings fit approved mobile widths @mobile-only", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "mobile-chromium", "Mobile acceptance runs once");
+}) => {
   const fixture = await seedShippedOrder();
   await loginThroughUi(page, fixture.admin);
   await expect(page).toHaveURL(/\/admin$/);

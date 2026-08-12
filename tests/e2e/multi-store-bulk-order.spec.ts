@@ -206,13 +206,9 @@ async function seedSubmittedBulkWorkspace() {
   };
 }
 
-test("customer submits an eight-store bulk workspace and lands on unified settlement", async ({
+test("customer submits an eight-store bulk workspace and lands on unified settlement @desktop-only", async ({
   page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "desktop-chromium",
-    "The state-changing bulk submission flow runs once on desktop",
-  );
+}) => {
 
   const fixture = await seedBulkWorkspace();
 
@@ -260,13 +256,9 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   });
 });
 
-test("customer bulk workspace stays usable at approved mobile widths", async ({
+test("customer bulk workspace stays usable at approved mobile widths @mobile-only", async ({
   page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "mobile-chromium",
-    "Mobile acceptance runs only in the mobile project",
-  );
+}) => {
 
   const fixture = await seedBulkWorkspace();
 

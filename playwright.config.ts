@@ -18,8 +18,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
-    { name: "mobile-chromium", use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } } },
+    {
+      grepInvert: /@mobile-only/,
+      name: "desktop-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      grepInvert: /@desktop-only/,
+      name: "mobile-chromium",
+      use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } },
+    },
   ],
   webServer: {
     command: "npm run dev",

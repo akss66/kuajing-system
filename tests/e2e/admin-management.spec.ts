@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -19,6 +19,50 @@ const seededSuperAdmin = {
   password: "TongZhouXing-Admin-2026!",
   userId: "00000000-0000-4000-8000-00000000a001",
 };
+
+async function resetAdminManagementBaseline() {
+  await db.execute(sql.raw(`
+    truncate table
+      system_notifications,
+      integration_attempts,
+      integration_outbox,
+      replacement_requests,
+      shipment_fulfillments,
+      audit_logs,
+      settlement_payment_claims,
+      settlement_batch_orders,
+      settlement_batches,
+      wallet_holds,
+      payment_claims,
+      wallet_transactions,
+      wallet_accounts,
+      order_lines,
+      order_shipments,
+      fulfillment_orders,
+      bulk_submission_requests,
+      bulk_import_store_groups,
+      bulk_import_drafts,
+      order_import_rows,
+      order_import_batches,
+      inventory_movements,
+      inventory_reservations,
+      inventory_balances,
+      sku_aliases,
+      customer_sku_prices,
+      auth_sessions,
+      auth_accounts,
+      auth_verifications,
+      auth_users,
+      customer_users,
+      admin_users,
+      stores,
+      skus,
+      products,
+      customers
+    restart identity cascade
+  `));
+  await seed();
+}
 
 async function openAdminNavigationIfNeeded(page: Page) {
   if ((page.viewportSize()?.width ?? 1440) < 1024) {
@@ -107,14 +151,15 @@ async function visibleStoreStatusForm(page: Page, storeId: string, nextStatus: "
 }
 
 async function confirmDialog(scope: Locator, page: Page, buttonName: string) {
+  const trigger = scope.getByRole("button", { name: buttonName });
   const dialog = page.getByRole("alertdialog");
-  await expect
-    .poll(async () => {
-      if (await dialog.count()) return 1;
-      await scope.getByRole("button", { name: buttonName }).click();
-      return await dialog.count();
-    })
-    .toBe(1);
+
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toBeEnabled();
+  await trigger.scrollIntoViewIfNeeded();
+  await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+  await expect(dialog).toHaveCount(0);
+  await trigger.click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: buttonName }).click();
 }
@@ -126,7 +171,7 @@ function loginErrorMessage(page: Page) {
 test("super admin can govern admin accounts and ordinary admins are denied account governance", async ({
   page,
 }) => {
-  await seed();
+  await resetAdminManagementBaseline();
   const suffix = crypto.randomUUID().slice(0, 8);
   const createdEmail = `ops-${suffix}@e2e.tongzhouxing.local`;
   const updatedEmail = `ops-${suffix}-updated@e2e.tongzhouxing.local`;
@@ -297,6 +342,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
 });
 
 test("ordinary admins can manage customer details and multi-store operations", async ({ page }) => {
+  await resetAdminManagementBaseline();
   const admin = await createManagedUser({ role: "admin" });
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
   const customerCode = `E2E-${suffix}`;

@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const guardMocks = vi.hoisted(() => ({
@@ -130,5 +130,35 @@ describe("AccountsPage", () => {
       screen.getByText("只有超级管理员可以查看、创建或停用账号。"),
     ).toBeVisible();
     expect(queryMocks.listManagedAccounts).not.toHaveBeenCalled();
+  });
+
+  it("opens the account status confirmation dialog from the managed account row", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue([
+      {
+        customerId: null,
+        customerName: null,
+        displayName: "Operations Admin",
+        email: "ops-admin@test.local",
+        kind: "ADMIN",
+        lastLoginAt: null,
+        status: "ACTIVE",
+        storeCount: 0,
+        userId: "admin-user-1",
+      },
+    ]);
+
+    render(await AccountsPage());
+
+    fireEvent.click(screen.getAllByRole("button", { name: "停用账号" })[0]!);
+
+    expect(screen.getByRole("alertdialog")).toBeVisible();
+    expect(screen.getByText("确认停用这个账号？")).toBeVisible();
+    expect(
+      screen.getByText("停用后该账号的现有会话会立即失效，但历史订单、客户关系和审计日志不会删除。"),
+    ).toBeVisible();
   });
 });

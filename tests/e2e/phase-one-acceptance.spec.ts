@@ -65,8 +65,7 @@ async function cleanupPhaseFixture() {
   }
 }
 
-test("phase one customer, price and inventory flow is operational", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "One deterministic acceptance run is sufficient");
+test("phase one customer, price and inventory flow is operational @desktop-only", async ({ page }) => {
   await cleanupPhaseFixture();
   const admin = await createManagedUser({ role: "admin" });
   const customerEmail = "phase-customer@e2e.tongzhouxing.local";

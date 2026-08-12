@@ -1,7 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { sql } from "drizzle-orm";
 
 import { seed } from "@/db/seed";
+import { db } from "@/db/client";
 
 import { loginThroughUi } from "./support/managed-user";
 
@@ -19,6 +21,7 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "运营总览",
+    expectedTexts: ["合作客户", "TEMU 店铺", "在售 SKU", "当前可售件数", "10"],
     path: "/admin",
     screenshot: "admin-overview",
     shouldShowMetricStrip: true,
@@ -26,6 +29,7 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "订单管理",
+    expectedTexts: ["订单总数", "没有符合条件的拿货单。"],
     path: "/admin/orders",
     screenshot: "admin-orders",
     shouldShowMetricStrip: true,
@@ -33,6 +37,7 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "货盘库存",
+    expectedTexts: ["TZX-DEMO-001", "黑色 10 件装", "暂无基线"],
     path: "/admin/inventory",
     screenshot: "admin-inventory",
     shouldShowMetricStrip: true,
@@ -40,6 +45,7 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "收款与余额",
+    expectedTexts: ["DEMO-CUSTOMER", "渥太华演示客户", "暂无资金流水。"],
     path: "/admin/settlement",
     screenshot: "admin-settlement",
     shouldShowMetricStrip: true,
@@ -47,6 +53,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "欢迎使用同舟行跨境",
+    expectedTexts: ["上传 TEMU 订单", "多店铺批量拿货", "快捷入口"],
     path: "/portal",
     screenshot: "customer-home",
     shouldShowMetricStrip: true,
@@ -54,6 +61,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "货盘选品",
+    expectedTexts: ["TZX-DEMO-001", "¥7.60", "可售 10"],
     path: "/portal/catalog",
     screenshot: "customer-catalog",
     shouldShowMetricStrip: true,
@@ -61,6 +69,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "多店铺批量拿货",
+    expectedTexts: ["还没有批量草稿", "新建批量草稿"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
     shouldShowMetricStrip: true,
@@ -71,7 +80,7 @@ async function loginAsAudience(
   audience: "admin" | "customer",
   page: import("@playwright/test").Page,
 ) {
-  await seed();
+  await resetVisualBaseline();
   await loginThroughUi(page, audience === "admin" ? seededSuperAdmin : seededCustomer);
   await expect(page).toHaveURL(audience === "admin" ? /\/admin$/ : /\/portal$/);
 }
@@ -85,65 +94,68 @@ async function waitForVisualStability(page: import("@playwright/test").Page) {
   );
 }
 
-async function normalizeDynamicVisuals(
+async function expectAnyVisibleText(
   page: import("@playwright/test").Page,
-  path: string,
+  text: string,
 ) {
-  const sharedMetricStyles = `
-    [data-metric-strip] article p:nth-child(2),
-    [data-metric-strip] article p:nth-child(3) {
-      color: transparent !important;
-      text-shadow: none !important;
-    }
-  `;
+  const matches = page.getByText(text, { exact: false });
 
-  const routeSpecificStyles: Record<string, string> = {
-    "/admin": `
-      ${sharedMetricStyles}
-      [data-workspace-panel] .rounded-full {
-        color: transparent !important;
-        text-shadow: none !important;
+  await expect
+    .poll(async () => {
+      const count = await matches.count();
+      for (let index = 0; index < count; index += 1) {
+        if (await matches.nth(index).isVisible()) return true;
       }
-    `,
-    "/admin/orders": `
-      ${sharedMetricStyles}
-      tbody td {
-        color: transparent !important;
-        text-shadow: none !important;
-      }
-    `,
-    "/admin/inventory": `
-      ${sharedMetricStyles}
-      tbody td {
-        color: transparent !important;
-        text-shadow: none !important;
-      }
-    `,
-    "/admin/settlement": `
-      ${sharedMetricStyles}
-      article .tabular-nums,
-      article .text-xs,
-      article .text-sm,
-      article .text-xl,
-      tbody td {
-        color: transparent !important;
-        text-shadow: none !important;
-      }
-    `,
-    "/portal/catalog": `
-      ${sharedMetricStyles}
-      [data-testid^="catalog-"] * {
-        color: transparent !important;
-        text-shadow: none !important;
-      }
-    `,
-  };
-
-  const style = routeSpecificStyles[path];
-  if (!style) return;
-
-  await page.addStyleTag({ content: style });
+      return false;
+    })
+    .toBe(true);
 }
+
+async function resetVisualBaseline() {
+  await db.execute(sql.raw(`
+    truncate table
+      system_notifications,
+      integration_attempts,
+      integration_outbox,
+      replacement_requests,
+      shipment_fulfillments,
+      audit_logs,
+      settlement_payment_claims,
+      settlement_batch_orders,
+      settlement_batches,
+      wallet_holds,
+      payment_claims,
+      wallet_transactions,
+      wallet_accounts,
+      order_lines,
+      order_shipments,
+      fulfillment_orders,
+      bulk_submission_requests,
+      bulk_import_store_groups,
+      bulk_import_drafts,
+      order_import_rows,
+      order_import_batches,
+      inventory_movements,
+      inventory_reservations,
+      inventory_balances,
+      sku_aliases,
+      customer_sku_prices,
+      auth_sessions,
+      auth_accounts,
+      auth_verifications,
+      auth_users,
+      customer_users,
+      admin_users,
+      stores,
+      skus,
+      products,
+      customers
+    restart identity cascade
+  `));
+  await seed();
+}
+
+test.describe.configure({ mode: "serial" });
 
 for (const route of workspaceRoutes) {
   test(`${route.audience} workspace route ${route.path} uses the shared merchant-center visual structure`, async ({
@@ -162,6 +174,10 @@ for (const route of workspaceRoutes) {
       await expect(page.locator("[data-metric-strip]")).toBeVisible();
     }
 
+    for (const text of route.expectedTexts) {
+      await expectAnyVisibleText(page, text);
+    }
+
     const workspacePanelCount = await page.locator("[data-workspace-panel]").count();
     expect(workspacePanelCount).toBeGreaterThan(0);
 
@@ -178,7 +194,6 @@ for (const route of workspaceRoutes) {
     ).toEqual([]);
 
     await waitForVisualStability(page);
-    await normalizeDynamicVisuals(page, route.path);
     await expect(page).toHaveScreenshot(`${route.screenshot}-${testInfo.project.name}.png`, {
       animations: "disabled",
       fullPage: false,

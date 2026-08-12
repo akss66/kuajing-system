@@ -85,8 +85,7 @@ async function seedReportFixture() {
   return { admin, sku, store };
 }
 
-test("administrator can read the shipped SKU and store report", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "Desktop report acceptance runs once");
+test("administrator can read the shipped SKU and store report @desktop-only", async ({ page }) => {
   const fixture = await seedReportFixture();
   await loginThroughUi(page, fixture.admin);
   await expect(page).toHaveURL(/\/admin$/);
@@ -104,8 +103,7 @@ test("administrator can read the shipped SKU and store report", async ({ page },
   ).toEqual([]);
 });
 
-test("reports and stock coverage fit approved mobile widths", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "mobile-chromium", "Mobile report acceptance runs once");
+test("reports and stock coverage fit approved mobile widths @mobile-only", async ({ page }) => {
   const fixture = await seedReportFixture();
   await loginThroughUi(page, fixture.admin);
   await expect(page).toHaveURL(/\/admin$/);
@@ -131,11 +129,10 @@ test("reports and stock coverage fit approved mobile widths", async ({ page }, t
   ).toBeLessThanOrEqual(0);
 });
 
-test("public health is minimal and administrator health details are protected", async ({
+test("public health is minimal and administrator health details are protected @desktop-only", async ({
   page,
   request,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "Security acceptance runs once");
+}) => {
   const publicHealth = await request.get("/api/health");
   expect(publicHealth.status()).toBe(200);
   expect(await publicHealth.json()).toEqual({ status: "ok" });
