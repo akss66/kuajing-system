@@ -207,4 +207,105 @@ describe("customer management actions", () => {
     });
     expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
   });
+
+  it("returns a safe duplicate constraint error when provisioning a customer with an existing code, store, or email", async () => {
+    serviceMocks.provisionCustomerWithStore.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        cause: {
+          code: "23505",
+          constraint_name: "customers_code_unique",
+        },
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("code", "EXISTING-CUSTOMER");
+    formData.set("customerName", "Existing Customer");
+    formData.set("email", "existing-customer@test.local");
+    formData.set("password", "valid-customer-password-2026");
+    formData.set("reason", "Attempt duplicate provisioning");
+    formData.set("storeName", "Existing Store");
+
+    const result = await createCustomerWithStoreAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      message: "客户编号、店铺名称或登录邮箱已存在，请核对后重试。",
+      status: "error",
+    });
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe stale-customer error when the customer profile no longer exists", async () => {
+    serviceMocks.updateCustomer.mockRejectedValue(
+      Object.assign(new Error("Customer not found"), {
+        code: "CUSTOMER_NOT_FOUND",
+        name: "CustomerManagementError",
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("customerId", "11111111-1111-4111-8111-111111111111");
+    formData.set("code", "UPDATED-CUSTOMER");
+    formData.set("name", "Updated Customer");
+    formData.set("reason", "Refresh profile");
+
+    const result = await updateCustomerAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      message: "客户记录不存在，页面可能已过期，请刷新后重试。",
+      status: "error",
+    });
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe duplicate store error when creating a store with an existing name", async () => {
+    serviceMocks.createStore.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        cause: {
+          code: "23505",
+          constraint_name: "stores_customer_name_unique",
+        },
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("customerId", "22222222-2222-4222-8222-222222222222");
+    formData.set("name", "North Store");
+    formData.set("platform", "TEMU");
+    formData.set("externalStoreCode", "TEMU-NORTH-001");
+    formData.set("reason", "Add duplicate store");
+
+    const result = await createStoreAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      message: "该客户下已存在同名店铺，请调整后重试。",
+      status: "error",
+    });
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe stale-store error when updating a store that no longer exists", async () => {
+    serviceMocks.updateStore.mockRejectedValue(
+      Object.assign(new Error("Store not found"), {
+        code: "STORE_NOT_FOUND",
+        name: "CustomerManagementError",
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("customerId", "66666666-6666-4666-8666-666666666666");
+    formData.set("storeId", "77777777-7777-4777-8777-777777777777");
+    formData.set("name", "Updated Store");
+    formData.set("platform", "TEMU");
+    formData.set("externalStoreCode", "TEMU-777");
+    formData.set("reason", "Refresh store metadata");
+
+    const result = await updateStoreAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      message: "店铺记录不存在，页面可能已过期，请刷新后重试。",
+      status: "error",
+    });
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
 });

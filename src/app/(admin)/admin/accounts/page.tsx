@@ -288,7 +288,7 @@ export default async function AccountsPage() {
         </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <SummaryCard count={adminAccounts.length} description="包含受保护超级管理员与普通管理员。" title="管理员账号" />
         <SummaryCard count={customerAccounts.length} description="一位客户绑定唯一账号，直接覆盖其名下店铺。" title="客户账号" />
         <SummaryCard count={customerAccounts.filter((item) => item.status === "DISABLED").length} description="停用后旧会话立即失效，历史订单不会删除。" title="已停用账号" />

@@ -15,6 +15,14 @@ import {
   updateStore,
 } from "./service";
 
+type ErrorLike = {
+  cause?: unknown;
+  code?: unknown;
+  constraint?: unknown;
+  constraint_name?: unknown;
+  message?: unknown;
+};
+
 const createCustomerSchema = z.object({
   code: z.string().trim().min(2).max(40),
   customerName: z.string().trim().min(2).max(160),
@@ -74,6 +82,69 @@ function revalidateCustomerManagement(customerId: string) {
   revalidatePath(`/admin/customers/${customerId}`);
 }
 
+function errorChain(error: unknown): ErrorLike[] {
+  const chain: ErrorLike[] = [];
+  let current: unknown = error;
+  let depth = 0;
+
+  while (current && typeof current === "object" && depth < 6) {
+    const typed = current as ErrorLike;
+    chain.push(typed);
+    current = typed.cause;
+    depth += 1;
+  }
+
+  return chain;
+}
+
+function errorCode(error: unknown) {
+  return errorChain(error).find((entry) => typeof entry.code === "string")?.code as
+    | string
+    | undefined;
+}
+
+function isUniqueConstraint(error: unknown, constraints: string[]) {
+  return errorChain(error).some((entry) => {
+    const constraint =
+      typeof entry.constraint_name === "string"
+        ? entry.constraint_name
+        : typeof entry.constraint === "string"
+          ? entry.constraint
+          : undefined;
+    const mentionsUnique =
+      typeof entry.message === "string" &&
+      entry.message.toLowerCase().includes("unique constraint");
+
+    if (constraint) {
+      return constraints.includes(constraint);
+    }
+
+    return entry.code === "23505" || mentionsUnique;
+  });
+}
+
+function customerErrorState(error: unknown): ActionState | null {
+  switch (errorCode(error)) {
+    case "CUSTOMER_NOT_FOUND":
+      return {
+        message: "客户记录不存在，页面可能已过期，请刷新后重试。",
+        status: "error",
+      };
+    case "STORE_NOT_FOUND":
+      return {
+        message: "店铺记录不存在，页面可能已过期，请刷新后重试。",
+        status: "error",
+      };
+    case "INVALID_REASON":
+      return {
+        message: "请填写本次操作原因后再提交。",
+        status: "error",
+      };
+    default:
+      return null;
+  }
+}
+
 export async function createCustomerWithStoreAction(
   _previousState: ActionState,
   formData: FormData,
@@ -95,12 +166,26 @@ export async function createCustomerWithStoreAction(
     await provisionCustomerWithStore({
       actorId: principal.userId,
       ...parsed.data,
+      email: parsed.data.email.trim().toLowerCase(),
     });
-  } catch {
-    return {
-      message: "客户编号、店铺名称或登录邮箱已存在。",
-      status: "error",
-    };
+  } catch (error) {
+    if (
+      isUniqueConstraint(error, [
+        "auth_users_email_unique",
+        "customer_users_login_identifier_unique",
+        "customers_code_unique",
+        "stores_customer_name_unique",
+      ])
+    ) {
+      return {
+        message: "客户编号、店铺名称或登录邮箱已存在，请核对后重试。",
+        status: "error",
+      };
+    }
+
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
   }
 
   revalidatePath("/admin/customers");
@@ -125,7 +210,21 @@ export async function updateCustomerAction(
     return validationState(parsed.error);
   }
 
-  await updateCustomer({ actor, ...parsed.data });
+  try {
+    await updateCustomer({ actor, ...parsed.data });
+  } catch (error) {
+    if (isUniqueConstraint(error, ["customers_code_unique"])) {
+      return {
+        message: "客户编号已存在，请更换后重试。",
+        status: "error",
+      };
+    }
+
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateCustomerManagement(parsed.data.customerId);
   return { message: "客户资料已更新。", status: "success" };
 }
@@ -146,7 +245,21 @@ export async function createStoreAction(
     return validationState(parsed.error);
   }
 
-  await createStore({ actor, ...parsed.data });
+  try {
+    await createStore({ actor, ...parsed.data });
+  } catch (error) {
+    if (isUniqueConstraint(error, ["stores_customer_name_unique"])) {
+      return {
+        message: "该客户下已存在同名店铺，请调整后重试。",
+        status: "error",
+      };
+    }
+
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateCustomerManagement(parsed.data.customerId);
   return { message: "店铺已新增。", status: "success" };
 }
@@ -168,7 +281,21 @@ export async function updateStoreAction(
     return validationState(parsed.error);
   }
 
-  await updateStore({ actor, ...parsed.data });
+  try {
+    await updateStore({ actor, ...parsed.data });
+  } catch (error) {
+    if (isUniqueConstraint(error, ["stores_customer_name_unique"])) {
+      return {
+        message: "该客户下已存在同名店铺，请调整后重试。",
+        status: "error",
+      };
+    }
+
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateCustomerManagement(customerId);
   return { message: "店铺资料已更新。", status: "success" };
 }
@@ -187,7 +314,14 @@ export async function setCustomerStatusAction(
     return validationState(parsed.error);
   }
 
-  await setCustomerStatus({ actor, ...parsed.data });
+  try {
+    await setCustomerStatus({ actor, ...parsed.data });
+  } catch (error) {
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateCustomerManagement(parsed.data.customerId);
   return {
     message: parsed.data.status === "DISABLED" ? "客户已停用。" : "客户已恢复。",
@@ -210,12 +344,19 @@ export async function setStoreStatusAction(
     return validationState(parsed.error);
   }
 
-  await setStoreStatus({
-    actor,
-    reason: parsed.data.reason,
-    status: parsed.data.status,
-    storeId: parsed.data.storeId,
-  });
+  try {
+    await setStoreStatus({
+      actor,
+      reason: parsed.data.reason,
+      status: parsed.data.status,
+      storeId: parsed.data.storeId,
+    });
+  } catch (error) {
+    const state = customerErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateCustomerManagement(parsed.data.customerId);
   return {
     message: parsed.data.status === "DISABLED" ? "店铺已停用。" : "店铺已恢复。",

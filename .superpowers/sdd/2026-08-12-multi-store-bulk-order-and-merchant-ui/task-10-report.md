@@ -102,3 +102,45 @@ Visual evidence:
 
 UI concerns:
 - `console-1440.json` captures repeatable React hydration warnings on form-heavy pages. The diff is consistently a browser-side `style="caret-color: transparent"` attribute appearing on inputs/hidden inputs before hydration. Mobile capture (`console-390.json`) is clean. No page-level runtime exceptions or horizontal overflow were observed in either viewport.
+
+UI Fix Round 1:
+- Hardened server action error handling in `src/modules/accounts/actions.ts` and `src/modules/customers/actions.ts`:
+  - duplicate login email, duplicate customer/store, and stale account/customer/store IDs now map to operator-safe Chinese `ActionState` errors
+  - unknown exceptions still throw so error boundaries continue to catch real faults instead of silently swallowing them
+  - success paths still revalidate the affected admin/customer routes
+- Refined customer detail UI in `src/app/(admin)/admin/customers/[customerId]/page.tsx`:
+  - mobile store management now uses collapsed summary cards via native `details`, with edit fields hidden by default until the operator expands `编辑店铺`
+  - desktop keeps direct inline editing for stores without shrinking table text
+  - customer and store dangerous operations now include grouped consequence copy with `AlertTriangle` instead of large red slabs
+  - summary KPI cards are compact 2x2 on mobile for both customer detail and `/admin/accounts`
+- Added/updated tests:
+  - `tests/unit/accounts/account-management-actions.test.ts`
+  - `tests/unit/customers/customer-management-actions.test.ts`
+  - `tests/unit/customers/customer-management-pages.test.tsx`
+  - `tests/e2e/admin-management.spec.ts`
+
+Fix Round 1 verification:
+- `npm.cmd test -- tests/unit/accounts/account-management-actions.test.ts tests/unit/customers/customer-management-actions.test.ts`
+- `npm.cmd test -- tests/unit/customers/customer-management-pages.test.tsx tests/unit/accounts/account-management-actions.test.ts tests/unit/customers/customer-management-actions.test.ts`
+- `npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts --project=desktop-chromium`
+- `npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts --project=mobile-chromium`
+- `npm.cmd test`
+- `npm.cmd run test:integration -- --maxWorkers 1 tests/integration/accounts/governance.test.ts tests/integration/customers/provisioning.test.ts`
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+- `git diff --check`
+
+Isolated browser evidence:
+- Refreshed `.superpowers/sdd/2026-08-12-multi-store-bulk-order-and-merchant-ui/task-10-visual/`
+  - `accounts-1440.png`
+  - `accounts-390.png`
+  - `customer-detail-1440.png`
+  - `customer-detail-390.png`
+  - `console-1440.json`
+  - `console-390.json`
+- In the isolated Playwright Chromium runs on August 12, 2026, both console captures were clean apart from dev-only React DevTools and HMR messages.
+- No hydration warnings, page errors, or overflow regressions reproduced in the isolated browser.
+- Based on that evidence, the earlier `caret-color: transparent` hydration mismatch is deferred as an external browser-environment artifact rather than a confirmed product-code defect.
+
+Deferred note:
+- `lastLoginAt` remains derived from the newest active session and is not a durable login history field. When no data exists, the UI now continues to show `暂无记录`. A future schema pass should add a dedicated `last_login_at` or successful-login event ledger.

@@ -26,24 +26,79 @@ async function openAdminNavigationIfNeeded(page: Page) {
   }
 }
 
+function accountCreationForm(page: Page) {
+  return page
+    .locator('form:has(input[name="displayName"]):has(input[name="password"]):not(:has(input[name="userId"]))')
+    .first();
+}
+
 function accountUpdateForm(userId: string, page: Page) {
-  return page.locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="displayName"])`).first();
+  return page
+    .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="displayName"])`)
+    .first();
 }
 
 function accountResetPasswordForm(userId: string, page: Page) {
-  return page.locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="newPassword"])`).first();
+  return page
+    .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="newPassword"])`)
+    .first();
 }
 
 function accountStatusForm(userId: string, page: Page) {
-  return page.locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="status"])`).first();
+  return page
+    .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="status"])`)
+    .first();
 }
 
 function customerProfileForm(customerId: string, page: Page) {
-  return page.locator(`form:has(input[name="customerId"][value="${customerId}"]):has(input[name="code"])`).first();
+  return page
+    .locator(`form:has(input[name="customerId"][value="${customerId}"]):has(input[name="code"])`)
+    .first();
 }
 
 function addStoreForm(customerId: string, page: Page) {
-  return page.locator(`form:has(input[name="customerId"][value="${customerId}"]):has(input[name="platform"]):not(:has(input[name="storeId"]))`).first();
+  return page
+    .locator(
+      `form:has(input[name="customerId"][value="${customerId}"]):has(input[name="platform"]):not(:has(input[name="storeId"]))`,
+    )
+    .first();
+}
+
+async function visibleStoreUpdateForm(
+  page: Page,
+  input: {
+    storeId: string;
+    storeName: string;
+  },
+) {
+  if ((page.viewportSize()?.width ?? 1440) < 1024) {
+    const card = page
+      .locator("details")
+      .filter({ has: page.locator(`input[name="storeId"][value="${input.storeId}"]`) })
+      .first();
+
+    await expect(card).toBeVisible();
+    await expect(card.locator('input[name="name"]')).not.toBeVisible();
+    await card.getByText("编辑店铺").click();
+    await expect(card.locator('input[name="name"]')).toBeVisible();
+    await expect(card.locator(`text=${input.storeName}`)).toBeVisible();
+
+    return card
+      .locator(`form:visible:has(input[name="storeId"][value="${input.storeId}"]):has(input[name="name"])`)
+      .first();
+  }
+
+  return page
+    .locator(`form:visible:has(input[name="storeId"][value="${input.storeId}"]):has(input[name="name"])`)
+    .first();
+}
+
+async function visibleStoreStatusForm(page: Page, storeId: string, nextStatus: "ACTIVE" | "DISABLED") {
+  return page
+    .locator(
+      `form:visible:has(input[name="storeId"][value="${storeId}"]):has(input[name="status"][value="${nextStatus}"])`,
+    )
+    .first();
 }
 
 async function confirmDialog(scope: Locator, page: Page, buttonName: string) {
@@ -77,6 +132,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await expect(page).toHaveURL(/\/admin\/accounts$/);
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
   await expect(page.getByText("只允许创建普通管理员")).toBeVisible();
+  await expect(page.locator('input[name="role"],select[name="role"]')).toHaveCount(0);
   await expect(
     page.locator(
       `form:has(input[name="userId"][value="${seededSuperAdmin.userId}"]):has(input[name="newPassword"])`,
@@ -88,11 +144,12 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
     ),
   ).toHaveCount(0);
 
-  await page.getByLabel("管理员姓名").fill("E2E 值班管理员");
-  await page.getByLabel("登录邮箱").fill(createdEmail);
-  await page.getByLabel("初始密码").fill(initialPassword);
-  await page.getByLabel("创建原因").fill("E2E 创建普通管理员");
-  await page.getByRole("button", { name: "创建管理员账号" }).click();
+  const createForm = accountCreationForm(page);
+  await createForm.locator('input[name="displayName"]').fill("E2E 值班管理员");
+  await createForm.locator('input[name="email"]').fill(createdEmail);
+  await createForm.locator('input[name="password"]').fill(initialPassword);
+  await createForm.locator('input[name="reason"]').fill("E2E 创建普通管理员");
+  await createForm.getByRole("button", { name: "创建管理员账号" }).click();
   await expect(page.getByText("普通管理员账号已创建。")).toBeVisible();
 
   await expect.poll(async () => {
@@ -115,10 +172,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   });
 
   const createdUserId = (
-    await db
-      .select({ id: authUsers.id })
-      .from(authUsers)
-      .where(eq(authUsers.email, createdEmail))
+    await db.select({ id: authUsers.id }).from(authUsers).where(eq(authUsers.email, createdEmail))
   )[0]!.id;
 
   await expect.poll(async () => {
@@ -138,9 +192,9 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   });
 
   const updateForm = accountUpdateForm(createdUserId, page);
-  await updateForm.getByLabel("姓名").fill("E2E 运营管理员");
-  await updateForm.getByLabel("账号邮箱").fill(updatedEmail);
-  await updateForm.getByLabel("修改原因").fill("E2E 修改管理员资料");
+  await updateForm.locator('input[name="displayName"]').fill("E2E 运营管理员");
+  await updateForm.locator('input[name="email"]').fill(updatedEmail);
+  await updateForm.locator('input[name="reason"]').fill("E2E 修改管理员资料");
   await updateForm.getByRole("button", { name: "保存资料" }).click();
   await expect(page.getByText("账号资料已更新。")).toBeVisible();
 
@@ -159,8 +213,8 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   });
 
   const resetForm = accountResetPasswordForm(createdUserId, page);
-  await resetForm.getByLabel("新密码").fill(resetPassword);
-  await resetForm.getByLabel("重置原因").fill("E2E 重置密码");
+  await resetForm.locator('input[name="newPassword"]').fill(resetPassword);
+  await resetForm.locator('input[name="reason"]').fill("E2E 重置密码");
   await resetForm.getByRole("button", { name: "重置密码" }).click();
   await expect(page.getByText("登录密码已重置。")).toBeVisible();
 
@@ -188,22 +242,16 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
 
   const disableForm = accountStatusForm(createdUserId, page);
-  await disableForm.getByLabel("操作原因").fill("E2E 停用管理员");
+  await disableForm.locator('input[name="reason"]').fill("E2E 停用管理员");
   await confirmDialog(disableForm, page, "停用账号");
   await expect(page.getByText("账号已停用。")).toBeVisible();
 
   await expect.poll(async () => {
-    const [user] = await db
-      .select({ banned: authUsers.banned })
-      .from(authUsers)
-      .where(eq(authUsers.id, createdUserId));
+    const [user] = await db.select({ banned: authUsers.banned }).from(authUsers).where(eq(authUsers.id, createdUserId));
     return user?.banned;
   }).toBe(true);
   await expect.poll(async () => {
-    const sessions = await db
-      .select({ id: authSessions.id })
-      .from(authSessions)
-      .where(eq(authSessions.userId, createdUserId));
+    const sessions = await db.select({ id: authSessions.id }).from(authSessions).where(eq(authSessions.userId, createdUserId));
     return sessions.length;
   }).toBe(0);
 
@@ -219,15 +267,12 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
 
   const restoreForm = accountStatusForm(createdUserId, page);
-  await restoreForm.getByLabel("操作原因").fill("E2E 恢复管理员");
+  await restoreForm.locator('input[name="reason"]').fill("E2E 恢复管理员");
   await confirmDialog(restoreForm, page, "恢复账号");
   await expect(page.getByText("账号已恢复。")).toBeVisible();
 
   await expect.poll(async () => {
-    const [user] = await db
-      .select({ banned: authUsers.banned })
-      .from(authUsers)
-      .where(eq(authUsers.id, createdUserId));
+    const [user] = await db.select({ banned: authUsers.banned }).from(authUsers).where(eq(authUsers.id, createdUserId));
     return user?.banned;
   }).toBe(false);
 
@@ -240,9 +285,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await expect(page).toHaveURL(/\/admin$/);
 });
 
-test("ordinary admins can manage customer details and multi-store operations", async ({
-  page,
-}) => {
+test("ordinary admins can manage customer details and multi-store operations", async ({ page }) => {
   const admin = await createManagedUser({ role: "admin" });
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
   const customerCode = `E2E-${suffix}`;
@@ -284,10 +327,7 @@ test("ordinary admins can manage customer details and multi-store operations", a
   });
 
   const customerId = (
-    await db
-      .select({ id: customers.id })
-      .from(customers)
-      .where(eq(customers.code, customerCode))
+    await db.select({ id: customers.id }).from(customers).where(eq(customers.code, customerCode))
   )[0]!.id;
 
   await expect.poll(async () => {
@@ -348,30 +388,22 @@ test("ordinary admins can manage customer details and multi-store operations", a
   await expect(page.getByText("店铺已新增。")).toBeVisible();
 
   await expect.poll(async () => {
-    const [store] = await db
-      .select({ id: stores.id })
-      .from(stores)
-      .where(eq(stores.name, secondStoreName));
+    const [store] = await db.select({ id: stores.id }).from(stores).where(eq(stores.name, secondStoreName));
     return store?.id ?? null;
   }).not.toBeNull();
   const secondStoreId = (
-    await db
-      .select({ id: stores.id })
-      .from(stores)
-      .where(eq(stores.name, secondStoreName))
+    await db.select({ id: stores.id }).from(stores).where(eq(stores.name, secondStoreName))
   )[0]!.id;
 
   await expect.poll(async () => {
-    const customerStores = await db
-      .select({ id: stores.id })
-      .from(stores)
-      .where(eq(stores.customerId, customerId));
+    const customerStores = await db.select({ id: stores.id }).from(stores).where(eq(stores.customerId, customerId));
     return customerStores.length;
   }).toBe(2);
 
-  const updateStoreForm = page
-    .locator(`form:has(input[name="storeId"][value="${secondStoreId}"]):has(input[name="name"])`)
-    .first();
+  const updateStoreForm = await visibleStoreUpdateForm(page, {
+    storeId: secondStoreId,
+    storeName: secondStoreName,
+  });
   await updateStoreForm.getByLabel("店铺名称").fill(secondStoreUpdatedName);
   await updateStoreForm.getByLabel("平台").fill("TEMU");
   await updateStoreForm.getByLabel("外部店铺编号").fill(`TEMU-${suffix}-002-UPDATED`);
@@ -386,40 +418,30 @@ test("ordinary admins can manage customer details and multi-store operations", a
         name: stores.name,
       })
       .from(stores)
-      .where(eq(stores.id, secondStoreId as string));
+      .where(eq(stores.id, secondStoreId));
     return store;
   }).toMatchObject({
     externalStoreCode: `TEMU-${suffix}-002-UPDATED`,
     name: secondStoreUpdatedName,
   });
 
-  const disableStoreForm = page
-    .locator(`form:has(input[name="storeId"][value="${secondStoreId}"]):has(input[name="status"][value="DISABLED"])`)
-    .first();
+  const disableStoreForm = await visibleStoreStatusForm(page, secondStoreId, "DISABLED");
   await disableStoreForm.getByLabel("操作原因").fill("E2E 停用第二家店铺");
   await confirmDialog(disableStoreForm, page, "停用店铺");
   await expect(page.getByText("店铺已停用。")).toBeVisible();
 
   await expect.poll(async () => {
-    const [store] = await db
-      .select({ status: stores.status })
-      .from(stores)
-      .where(eq(stores.id, secondStoreId));
+    const [store] = await db.select({ status: stores.status }).from(stores).where(eq(stores.id, secondStoreId));
     return store?.status;
   }).toBe("DISABLED");
 
-  const restoreStoreForm = page
-    .locator(`form:has(input[name="storeId"][value="${secondStoreId}"]):has(input[name="status"][value="ACTIVE"])`)
-    .first();
+  const restoreStoreForm = await visibleStoreStatusForm(page, secondStoreId, "ACTIVE");
   await restoreStoreForm.getByLabel("操作原因").fill("E2E 恢复第二家店铺");
   await confirmDialog(restoreStoreForm, page, "恢复店铺");
   await expect(page.getByText("店铺已恢复。")).toBeVisible();
 
   await expect.poll(async () => {
-    const [store] = await db
-      .select({ status: stores.status })
-      .from(stores)
-      .where(eq(stores.id, secondStoreId));
+    const [store] = await db.select({ status: stores.status }).from(stores).where(eq(stores.id, secondStoreId));
     return store?.status;
   }).toBe("ACTIVE");
 

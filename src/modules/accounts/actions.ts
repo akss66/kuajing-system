@@ -13,6 +13,14 @@ import {
   updateManagedAccount,
 } from "./service";
 
+type ErrorLike = {
+  cause?: unknown;
+  code?: unknown;
+  constraint?: unknown;
+  constraint_name?: unknown;
+  message?: unknown;
+};
+
 function validationState(error: z.ZodError): ActionState {
   return {
     fieldErrors: z.flattenError(error).fieldErrors as Record<string, string[]>,
@@ -23,6 +31,97 @@ function validationState(error: z.ZodError): ActionState {
 function revalidateAccountManagement() {
   revalidatePath("/admin");
   revalidatePath("/admin/accounts");
+}
+
+function errorChain(error: unknown): ErrorLike[] {
+  const chain: ErrorLike[] = [];
+  let current: unknown = error;
+  let depth = 0;
+
+  while (current && typeof current === "object" && depth < 6) {
+    const typed = current as ErrorLike;
+    chain.push(typed);
+    current = typed.cause;
+    depth += 1;
+  }
+
+  return chain;
+}
+
+function errorCode(error: unknown) {
+  return errorChain(error).find((entry) => typeof entry.code === "string")?.code as
+    | string
+    | undefined;
+}
+
+function isUniqueConstraint(error: unknown, constraints: string[]) {
+  return errorChain(error).some((entry) => {
+    const constraint =
+      typeof entry.constraint_name === "string"
+        ? entry.constraint_name
+        : typeof entry.constraint === "string"
+          ? entry.constraint
+          : undefined;
+    const mentionsUnique =
+      typeof entry.message === "string" &&
+      entry.message.toLowerCase().includes("unique constraint");
+
+    if (constraint) {
+      return constraints.includes(constraint);
+    }
+
+    return entry.code === "23505" || mentionsUnique;
+  });
+}
+
+function governanceErrorState(error: unknown): ActionState | null {
+  if (
+    isUniqueConstraint(error, [
+      "admin_users_login_identifier_unique",
+      "auth_users_email_unique",
+      "customer_users_login_identifier_unique",
+    ])
+  ) {
+    return {
+      message: "登录邮箱已存在，请更换后重试。",
+      status: "error",
+    };
+  }
+
+  switch (errorCode(error)) {
+    case "ACCOUNT_NOT_FOUND":
+      return {
+        message: "账号记录不存在，页面可能已过期，请刷新后重试。",
+        status: "error",
+      };
+    case "FORBIDDEN_SUPER_ADMIN":
+      return {
+        message: "只有超级管理员可以执行账号治理操作。",
+        status: "error",
+      };
+    case "INVALID_PASSWORD":
+      return {
+        message: "新密码至少需要 12 位，请重新输入。",
+        status: "error",
+      };
+    case "INVALID_REASON":
+      return {
+        message: "请填写本次操作原因后再提交。",
+        status: "error",
+      };
+    case "PROHIBITED_SUPER_ADMIN_CREATION":
+      return {
+        message: "这里只允许创建或维护普通管理员账号。",
+        status: "error",
+      };
+    case "SUPER_ADMIN_IMMUTABLE":
+      return {
+        message: "受保护的超级管理员不支持此操作。",
+        status: "error",
+      };
+    default:
+      return null;
+  }
 }
 
 const createAdminSchema = z.object({
@@ -44,7 +143,19 @@ export async function createAdminAccountAction(
     reason: formData.get("reason"),
   });
   if (!parsed.success) return validationState(parsed.error);
-  await createAdminAccount({ actor, ...parsed.data });
+
+  try {
+    await createAdminAccount({
+      actor,
+      ...parsed.data,
+      email: parsed.data.email.trim().toLowerCase(),
+    });
+  } catch (error) {
+    const state = governanceErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateAccountManagement();
   return { message: "普通管理员账号已创建。", status: "success" };
 }
@@ -68,7 +179,19 @@ export async function updateManagedAccountAction(
     userId: formData.get("userId"),
   });
   if (!parsed.success) return validationState(parsed.error);
-  await updateManagedAccount({ actor, ...parsed.data });
+
+  try {
+    await updateManagedAccount({
+      actor,
+      ...parsed.data,
+      email: parsed.data.email.trim().toLowerCase(),
+    });
+  } catch (error) {
+    const state = governanceErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateAccountManagement();
   return { message: "账号资料已更新。", status: "success" };
 }
@@ -90,7 +213,15 @@ export async function resetManagedAccountPasswordAction(
     userId: formData.get("userId"),
   });
   if (!parsed.success) return validationState(parsed.error);
-  await resetManagedAccountPassword({ actor, ...parsed.data });
+
+  try {
+    await resetManagedAccountPassword({ actor, ...parsed.data });
+  } catch (error) {
+    const state = governanceErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   return { message: "登录密码已重置。", status: "success" };
 }
 
@@ -111,7 +242,15 @@ export async function setManagedAccountStatusAction(
     userId: formData.get("userId"),
   });
   if (!parsed.success) return validationState(parsed.error);
-  await setManagedAccountStatus({ actor, ...parsed.data });
+
+  try {
+    await setManagedAccountStatus({ actor, ...parsed.data });
+  } catch (error) {
+    const state = governanceErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
   revalidateAccountManagement();
   return {
     message: parsed.data.status === "DISABLED" ? "账号已停用。" : "账号已恢复。",

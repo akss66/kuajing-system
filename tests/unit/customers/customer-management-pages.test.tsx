@@ -82,12 +82,13 @@ describe("customer management pages", () => {
     const pausedRow = screen.getByRole("row", { name: /暂停合作客户/ });
     expect(within(pausedRow).getByText("账号已停用")).toBeVisible();
     expect(within(pausedRow).getByText("1 家店铺")).toBeVisible();
-    expect(
-      within(pausedRow).getByRole("link", { name: "查看详情" }),
-    ).toHaveAttribute("href", "/admin/customers/customer-2");
+    expect(within(pausedRow).getByRole("link", { name: "查看详情" })).toHaveAttribute(
+      "href",
+      "/admin/customers/customer-2",
+    );
   });
 
-  it("renders customer detail editing, a single account summary, and multi-store actions", async () => {
+  it("renders desktop store editing and mobile collapsed store cards on the detail page", async () => {
     detailQueryMocks.getCustomerManagementDetail.mockResolvedValue({
       account: {
         displayName: "北区负责人",
@@ -135,24 +136,23 @@ describe("customer management pages", () => {
     expect(screen.getByRole("button", { name: "保存客户资料" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "新增店铺" })).toBeEnabled();
 
-    const disabledStoreSummaryRow = screen.getAllByRole("row", {
-      name: /华北二店.*已停用/,
-    })[0];
-    const disabledStoreActionsRow = screen
-      .getByDisplayValue("华北二店")
-      .closest("tr");
+    const desktopSummaryRow = screen.getAllByRole("row", { name: /华北二店.*已停用/ })[0];
+    expect(within(desktopSummaryRow).getByText("已停用")).toBeVisible();
 
-    expect(disabledStoreActionsRow).not.toBeNull();
-    expect(within(disabledStoreSummaryRow).getByText("已停用")).toBeVisible();
-    expect(
-      within(disabledStoreActionsRow as HTMLElement).getByRole("button", {
-        name: "恢复店铺",
-      }),
-    ).toBeEnabled();
-    expect(
-      within(disabledStoreActionsRow as HTMLElement).getByRole("button", {
-        name: "保存店铺资料",
-      }),
-    ).toBeEnabled();
+    const storeCard = screen
+      .getAllByText("华北二店")
+      .map((node) => node.closest("details"))
+      .find((node): node is HTMLDetailsElement => node instanceof HTMLDetailsElement);
+    expect(storeCard).not.toBeNull();
+    const storeCardScope = within(storeCard as HTMLDetailsElement);
+
+    expect(storeCardScope.getByText("编辑店铺")).toBeVisible();
+    expect(storeCardScope.getByDisplayValue("华北二店")).not.toBeVisible();
+
+    (storeCard as HTMLDetailsElement).open = true;
+
+    expect(storeCardScope.getByDisplayValue("华北二店")).toBeVisible();
+    expect(storeCardScope.getByRole("button", { name: "保存店铺资料" })).toBeEnabled();
+    expect(storeCardScope.getByRole("button", { name: "恢复店铺" })).toBeEnabled();
   });
 });
