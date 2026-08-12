@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
 
+import AxeBuilder from "@axe-core/playwright";
 import ExcelJS from "exceljs";
 import { expect, test } from "@playwright/test";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
+  bulkImportStoreGroups,
   customerSkuPrices,
   customers,
   inventoryBalances,
@@ -19,6 +22,7 @@ import {
   createBulkDraft,
   uploadGroupFiles,
 } from "@/modules/bulk-order/draft-service";
+import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
@@ -172,7 +176,34 @@ async function seedBulkWorkspace() {
     });
   }
 
-  return { customerUser, draftId: draft.id };
+  return { customerId: customer.id, customerUser, draftId: draft.id };
+}
+
+async function seedSubmittedBulkWorkspace() {
+  const fixture = await seedBulkWorkspace();
+  const groups = await db
+    .select({ id: bulkImportStoreGroups.id })
+    .from(bulkImportStoreGroups)
+    .where(eq(bulkImportStoreGroups.draftId, fixture.draftId))
+    .orderBy(bulkImportStoreGroups.createdAt);
+
+  const submission = await submitBulkDraft({
+    actorUserId: fixture.customerUser.userId,
+    customerId: fixture.customerId,
+    draftId: fixture.draftId,
+    idempotencyKey: crypto.randomUUID(),
+    requestedWalletFen: 0,
+    selectedGroupIds: groups.map((group) => group.id),
+  });
+
+  if (!submission.settlementBatchId) {
+    throw new Error("Multi-store bulk submission did not create a settlement batch");
+  }
+
+  return {
+    ...fixture,
+    settlementBatchId: submission.settlementBatchId,
+  };
 }
 
 test("customer submits an eight-store bulk workspace and lands on unified settlement", async ({
@@ -273,4 +304,92 @@ test("customer bulk workspace stays usable at approved mobile widths", async ({
   }
 
   expect(hydrationErrors).toEqual([]);
+});
+
+test("administrator can open unified settlement/bulk diagnostics routes", async ({ page }) => {
+  const admin = await createManagedUser({ role: "admin" });
+  const fixture = await seedSubmittedBulkWorkspace();
+  const consoleErrors: string[] = [];
+
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  await loginThroughUi(page, admin);
+  await expect(page).toHaveURL(/\/admin$/);
+
+  await page.goto("/admin/settlement");
+  await expect(page.locator("main h1")).toBeVisible();
+  const settlementShortcut = page.locator("main a[href='/admin/settlement-batches']").last();
+  await expect(settlementShortcut).toBeVisible();
+  await expect(settlementShortcut).toContainText(/\d+/);
+
+  await page.goto("/admin/settlement-batches");
+  await expect(page.locator("main h1")).toBeVisible();
+
+  await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);
+  await expect(page).toHaveURL(
+    new RegExp(`/admin/settlement-batches/${fixture.settlementBatchId}`),
+  );
+  await expect(page.getByRole("heading").first()).toBeVisible();
+  await page.screenshot({
+    fullPage: true,
+    path: `${VISUAL_REVIEW_DIR}/admin-settlement-review-1440.png`,
+  });
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+
+  await page.goto("/admin/bulk-orders");
+  await expect(page.locator("main h1")).toBeVisible();
+  await page.goto(`/admin/bulk-orders/${fixture.draftId}`);
+  await expect(page.getByRole("heading").first()).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Recipient");
+  await expect(page.locator("body")).not.toContainText("+1 416 555 0100");
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);
+  await expect(page.getByRole("heading").first()).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+  const touchHeights = await page
+    .locator("button:visible")
+    .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  expect(touchHeights).not.toHaveLength(0);
+  expect(touchHeights.every((height) => height >= 44)).toBe(true);
+  await page.screenshot({
+    fullPage: true,
+    path: `${VISUAL_REVIEW_DIR}/admin-settlement-review-390.png`,
+  });
+  expect(consoleErrors).toEqual([]);
+});
+
+test("customer cannot access admin settlement and bulk settlement routes", async ({ page }) => {
+  const fixture = await seedSubmittedBulkWorkspace();
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto("/admin/settlement");
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto("/admin/settlement-batches");
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto("/admin/bulk-orders");
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto(`/admin/bulk-orders/${fixture.draftId}`);
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
 });

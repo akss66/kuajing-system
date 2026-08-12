@@ -8,12 +8,14 @@ import {
   Boxes,
   Building2,
   ClipboardList,
+  FileSearch,
   LayoutDashboard,
   Menu,
   PackageSearch,
   RotateCcw,
   PlugZap,
   Settings2,
+  WalletCards,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
@@ -46,8 +48,10 @@ const navigation: NavigationItem[] = [
   { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
   { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
   { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
+  { href: "/admin/bulk-orders", icon: FileSearch, label: "批量草稿诊断" },
   { href: "/admin/replacements", icon: RotateCcw, label: "补发管理" },
   { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
+  { href: "/admin/settlement-batches", icon: WalletCards, label: "统一结算批次" },
   { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
   { href: "/admin/notifications", icon: BellRing, label: "系统通知" },
   { href: "/admin/system/integrations", icon: PlugZap, label: "外部集成" },

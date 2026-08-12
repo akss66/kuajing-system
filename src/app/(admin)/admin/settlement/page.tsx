@@ -1,11 +1,14 @@
 import { ArrowDownLeft, ArrowUpRight, Banknote, Clock3, History, WalletCards } from "lucide-react";
+import Link from "next/link";
 
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { ActionForm } from "@/components/forms/action-form";
 import { PaymentClaimReview } from "@/components/orders/payment-claim-review";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { listAdminSettlementBatches } from "@/modules/settlement/admin-queries";
 import { listPendingPaymentClaims } from "@/modules/orders/queries";
 import { adjustWalletAction } from "@/modules/wallet/actions";
 import { listAdminWalletAccounts, listAdminWalletTransactions } from "@/modules/wallet/queries";
@@ -29,6 +32,9 @@ export default async function SettlementPage() {
     listAdminWalletTransactions(),
     listPendingPaymentClaims(),
   ]);
+  const pendingBatchCount = (
+    await listAdminSettlementBatches({ status: "PAYMENT_REPORTED" })
+  ).length;
   const totalBalanceFen = accounts.reduce((sum, account) => sum + account.balanceFen, 0);
 
   return (
@@ -44,6 +50,39 @@ export default async function SettlementPage() {
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>客户余额合计</span><WalletCards className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{money(totalBalanceFen)}</p></article>
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>钱包账户</span><Banknote className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{accounts.length}</p></article>
         <article className="rounded-[var(--radius-surface)] border border-border bg-background p-4"><div className="flex items-center justify-between text-sm text-muted"><span>最近流水</span><History className="size-4 text-primary" /></div><p className="mt-3 text-2xl font-semibold tabular-nums text-ink">{transactions.length}</p></article>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <Link
+          className="rounded-[var(--radius-surface)] border border-border bg-background p-5 transition-colors hover:bg-surface"
+          href="/admin/settlement-batches"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-ink">统一结算批次</h2>
+              <p className="mt-1 text-sm text-muted">
+                进入批次级统一核款工作台，查看余额抵扣、微信待付、审计与整批确认/拒绝。
+              </p>
+            </div>
+            <Badge variant="secondary">{`待审核 ${pendingBatchCount}`}</Badge>
+          </div>
+        </Link>
+        <Link
+          className="rounded-[var(--radius-surface)] border border-border bg-background p-5 transition-colors hover:bg-surface"
+          href="/admin/bulk-orders"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-ink">批量草稿诊断</h2>
+              <p className="mt-1 text-sm text-muted">
+                只读查看客户多店铺草稿的文件摘要、冲突、错误码与部分提交结果，不提供上传或修改入口。
+              </p>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <span>查看批量草稿</span>
+            </Button>
+          </div>
+        </Link>
       </section>
 
       <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
