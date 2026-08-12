@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import type { DbTransaction } from "@/db/client";
 import {
@@ -37,6 +37,22 @@ export class InsufficientInventoryError extends Error {
     this.name = "InsufficientInventoryError";
   }
 }
+
+export type InventoryGroupReservationRequest = {
+  expiresAt: Date | null;
+  groupId: string;
+  quantityBySku: ReadonlyMap<string, number>;
+  referenceId: string;
+  referenceType: string;
+};
+
+export type InventoryGroupReservationResult = {
+  blockedGroupIds: Set<string>;
+  shortageBySku: Map<
+    string,
+    { availableQuantity: number; requiredQuantity: number }
+  >;
+};
 
 async function lockInventoryBalance(
   tx: DbTransaction,
@@ -89,6 +105,110 @@ export async function reserveInventory(
     });
 
   return reservation;
+}
+
+/**
+ * Locks every requested SKU balance in stable ID order, then applies the bulk
+ * submission rule: if a SKU is short, every group using it is excluded while
+ * unrelated groups keep their reservations.
+ */
+export async function reserveInventoryForGroups(
+  tx: DbTransaction,
+  groups: readonly InventoryGroupReservationRequest[],
+): Promise<InventoryGroupReservationResult> {
+  const groupIds = groups.map((group) => group.groupId);
+  if (new Set(groupIds).size !== groupIds.length) {
+    throw new InventoryValidationError("Inventory reservation group IDs must be unique");
+  }
+
+  const requiredBySku = new Map<string, number>();
+  const groupIdsBySku = new Map<string, Set<string>>();
+  for (const group of groups) {
+    for (const [skuId, quantity] of group.quantityBySku) {
+      assertPositiveQuantity(quantity);
+      const required = (requiredBySku.get(skuId) ?? 0) + quantity;
+      if (!Number.isSafeInteger(required)) {
+        throw new InventoryValidationError("Inventory demand exceeds the safe integer range");
+      }
+      requiredBySku.set(skuId, required);
+      const owners = groupIdsBySku.get(skuId) ?? new Set<string>();
+      owners.add(group.groupId);
+      groupIdsBySku.set(skuId, owners);
+    }
+  }
+
+  const skuIds = [...requiredBySku.keys()].sort();
+  if (skuIds.length === 0) {
+    return { blockedGroupIds: new Set(), shortageBySku: new Map() };
+  }
+
+  const balances = await tx
+    .select({
+      skuId: inventoryBalances.skuId,
+      totalQuantity: inventoryBalances.totalQuantity,
+    })
+    .from(inventoryBalances)
+    .where(inArray(inventoryBalances.skuId, skuIds))
+    .orderBy(asc(inventoryBalances.skuId))
+    .for("update");
+  const totalBySku = new Map(
+    balances.map((balance) => [balance.skuId, balance.totalQuantity]),
+  );
+  const reservedRows = await tx
+    .select({
+      quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)::int`.mapWith(
+        Number,
+      ),
+      skuId: inventoryReservations.skuId,
+    })
+    .from(inventoryReservations)
+    .where(
+      and(
+        inArray(inventoryReservations.skuId, skuIds),
+        eq(inventoryReservations.status, "ACTIVE"),
+      ),
+    )
+    .groupBy(inventoryReservations.skuId);
+  const reservedBySku = new Map(
+    reservedRows.map((row) => [row.skuId, row.quantity]),
+  );
+
+  const blockedGroupIds = new Set<string>();
+  const shortageBySku = new Map<
+    string,
+    { availableQuantity: number; requiredQuantity: number }
+  >();
+  for (const skuId of skuIds) {
+    const availableQuantity = Math.max(
+      0,
+      (totalBySku.get(skuId) ?? 0) - (reservedBySku.get(skuId) ?? 0),
+    );
+    const requiredQuantity = requiredBySku.get(skuId)!;
+    if (requiredQuantity <= availableQuantity) continue;
+    shortageBySku.set(skuId, { availableQuantity, requiredQuantity });
+    for (const groupId of groupIdsBySku.get(skuId) ?? []) {
+      blockedGroupIds.add(groupId);
+    }
+  }
+
+  const reservationValues = groups
+    .filter((group) => !blockedGroupIds.has(group.groupId))
+    .flatMap((group) =>
+      [...group.quantityBySku]
+        .sort(([first], [second]) => first.localeCompare(second))
+        .map(([skuId, quantity]) => ({
+          expiresAt: group.expiresAt,
+          quantity,
+          referenceId: group.referenceId,
+          referenceType: group.referenceType,
+          skuId,
+        })),
+    );
+  if (reservationValues.length > 0) {
+    await tx.insert(inventoryReservations).values(reservationValues);
+  }
+
+  return { blockedGroupIds, shortageBySku };
 }
 
 export async function releaseReservation(

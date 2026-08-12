@@ -17,7 +17,7 @@ import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
-const UNPAID_LOCK_MS = 2 * 60 * 60 * 1_000;
+export const UNPAID_ORDER_LOCK_MS = 2 * 60 * 60 * 1_000;
 
 type OrderSubmissionErrorCode =
   | "BATCH_NOT_FOUND"
@@ -59,7 +59,7 @@ type SubmissionOutcome =
   | { kind: "ORDER"; order: SubmittedOrderView }
   | { kind: "ERROR"; code: OrderSubmissionErrorCode; message: string };
 
-function orderNumber(now: Date) {
+export function createFulfillmentOrderNumber(now: Date) {
   const date = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
     month: "2-digit",
@@ -319,8 +319,8 @@ export async function submitTemuImportBatch(input: {
     }
 
     const orderId = crypto.randomUUID();
-    const lockExpiresAt = new Date(now.getTime() + UNPAID_LOCK_MS);
-    const number = orderNumber(now);
+    const lockExpiresAt = new Date(now.getTime() + UNPAID_ORDER_LOCK_MS);
+    const number = createFulfillmentOrderNumber(now);
     await tx.insert(fulfillmentOrders).values({
       customerId: batch.customerId,
       id: orderId,
