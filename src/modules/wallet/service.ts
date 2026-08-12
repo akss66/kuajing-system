@@ -228,7 +228,12 @@ export async function releaseWalletHold(
   const now = input.now ?? new Date();
   await lockWalletFunding(tx, input.customerId);
   const hold = await lockWalletHold(tx, input);
-  if (hold.status === "RELEASED") return;
+  if (hold.status === "RELEASED") {
+    if (hold.releaseReason !== reason) {
+      throw new WalletValidationError("已释放的钱包冻结原因与重放请求不一致");
+    }
+    return;
+  }
   if (hold.status === "CONSUMED") {
     throw new WalletValidationError("已核销的钱包冻结不能释放");
   }

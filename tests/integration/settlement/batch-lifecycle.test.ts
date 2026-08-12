@@ -35,6 +35,55 @@ import {
 
 const future = () => new Date(Date.now() + 60 * 60 * 1_000);
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitForBlockedAllocationRead() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await db.execute<{ waiting: boolean }>(sql`
+      select exists (
+        select 1
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and state = 'active'
+          and wait_event_type = 'Lock'
+          and query ilike '%settlement_batch_orders%'
+      ) as waiting
+    `);
+    if (rows[0]?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("allocation read did not reach the coordinated table lock");
+}
+
+function expectContinuousDebitLedger(
+  rows: readonly {
+    afterBalanceFen: number;
+    beforeBalanceFen: number;
+    deltaFen: number;
+  }[],
+  input: { endingFen: number; startingFen: number; totalDeltaFen: number },
+) {
+  const byBefore = new Map(rows.map((row) => [row.beforeBalanceFen, row]));
+  let balanceFen = input.startingFen;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = byBefore.get(balanceFen);
+    expect(row).toBeDefined();
+    expect(row!.afterBalanceFen).toBe(row!.beforeBalanceFen + row!.deltaFen);
+    balanceFen = row!.afterBalanceFen;
+  }
+  expect(balanceFen).toBe(input.endingFen);
+  expect(rows.reduce((total, row) => total + row.deltaFen, 0)).toBe(
+    input.totalDeltaFen,
+  );
+}
+
 async function createSubmissionFixture(prices: readonly number[]) {
   const [customer] = await db
     .insert(customers)
@@ -236,6 +285,28 @@ describe("bulk settlement wallet lifecycle", () => {
     expect(await db.select().from(walletHolds)).toEqual([]);
     const reservations = await db.select().from(inventoryReservations);
     expect(reservations.every((row) => row.expiresAt === null)).toBe(true);
+    const allocation = await getSettlementBatchAllocation(
+      fixture.customer.id,
+      result.settlementBatchId!,
+    );
+    expect(allocation).toMatchObject({
+      offlineAmountFen: 0,
+      status: "PAID",
+      totalAmountFen: 300,
+      walletAmountFen: 300,
+      walletHold: null,
+    });
+    expect(
+      allocation?.orders.map((order) => [
+        order.status,
+        order.totalAmountFen,
+        order.walletAmountFen,
+        order.offlineAmountFen,
+      ]),
+    ).toEqual([
+      ["PAID_PENDING_FULFILLMENT", 100, 100, 0],
+      ["PAID_PENDING_FULFILLMENT", 200, 200, 0],
+    ]);
   });
 
   test("mixed funding uses current available balance for one ACTIVE hold without ledger debit", async () => {
@@ -333,6 +404,25 @@ describe("bulk settlement wallet lifecycle", () => {
         .from(walletTransactions)
         .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
     ).toEqual([]);
+    const allocation = await getSettlementBatchAllocation(
+      fixture.customer.id,
+      result.settlementBatchId!,
+    );
+    expect(allocation).toMatchObject({
+      offlineAmountFen: 100,
+      status: "PENDING_PAYMENT",
+      totalAmountFen: 100,
+      walletAmountFen: 0,
+      walletHold: null,
+    });
+    expect(
+      allocation?.orders.map((order) => [
+        order.status,
+        order.totalAmountFen,
+        order.walletAmountFen,
+        order.offlineAmountFen,
+      ]),
+    ).toEqual([["PENDING_PAYMENT", 100, 0, 100]]);
   });
 
   test("offline-only submission does not create a wallet account", async () => {
@@ -568,7 +658,106 @@ describe("bulk settlement wallet lifecycle", () => {
       .from(walletTransactions)
       .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
     expect(debits).toHaveLength(2);
-    expect(debits.reduce((total, row) => total + row.deltaFen, 0)).toBe(-150);
+    expectContinuousDebitLedger(debits, {
+      endingFen: 50,
+      startingFen: 200,
+      totalDeltaFen: -150,
+    });
+  });
+
+  test("serializes concurrent consume replays into one terminal effect", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "concurrent consume fixture",
+    });
+    const result = await submitFixture(fixture, 150);
+    const consume = () =>
+      db.transaction((tx) =>
+        consumeWalletHold(tx, {
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      );
+
+    const attempts = await Promise.allSettled([consume(), consume()]);
+
+    expect(attempts.every((attempt) => attempt.status === "fulfilled")).toBe(
+      true,
+    );
+    const [hold] = await db.select().from(walletHolds);
+    expect(hold.status).toBe("CONSUMED");
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    expect(debits).toHaveLength(2);
+    expectContinuousDebitLedger(debits, {
+      endingFen: 50,
+      startingFen: 200,
+      totalDeltaFen: -150,
+    });
+    const consumeAudits = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "WALLET_SETTLEMENT_HOLD_CONSUMED"));
+    expect(consumeAudits).toHaveLength(1);
+  });
+
+  test("allows exactly one terminal winner when consume races release", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "consume release race fixture",
+    });
+    const result = await submitFixture(fixture, 150);
+
+    const attempts = await Promise.allSettled([
+      db.transaction((tx) =>
+        consumeWalletHold(tx, {
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      ),
+      db.transaction((tx) =>
+        releaseWalletHold(tx, {
+          actorType: "SYSTEM",
+          actorUserId: "settlement-timeout",
+          customerId: fixture.customer.id,
+          reason: "payment expired",
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      ),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    const [loser] = attempts.filter((attempt) => attempt.status === "rejected");
+    expect(loser).toMatchObject({ reason: expect.any(WalletValidationError) });
+    const [hold] = await db.select().from(walletHolds);
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    const [wallet] = await db.select().from(walletAccounts);
+    if (hold.status === "CONSUMED") {
+      expect(debits).toHaveLength(2);
+      expectContinuousDebitLedger(debits, {
+        endingFen: 50,
+        startingFen: 200,
+        totalDeltaFen: -150,
+      });
+      expect(wallet.balanceFen).toBe(50);
+    } else {
+      expect(hold.status).toBe("RELEASED");
+      expect(debits).toEqual([]);
+      expect(wallet.balanceFen).toBe(200);
+    }
   });
 
   test("releases a hold exactly once without changing the wallet balance", async () => {
@@ -581,18 +770,29 @@ describe("bulk settlement wallet lifecycle", () => {
     });
     const result = await submitFixture(fixture, 200);
 
-    const release = () =>
+    const release = (reason: string) =>
       db.transaction((tx) =>
         releaseWalletHold(tx, {
           actorType: "SYSTEM",
           actorUserId: "settlement-admin",
           customerId: fixture.customer.id,
-          reason: "offline payment expired",
+          reason,
           settlementBatchId: result.settlementBatchId!,
         }),
       );
-    await release();
-    await release();
+    await release("offline payment expired");
+    await release("  offline payment expired  ");
+    await expect(
+      db.transaction((tx) =>
+        releaseWalletHold(tx, {
+          actorType: "SYSTEM",
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          reason: "customer cancelled",
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WalletValidationError);
 
     const [hold] = await db.select().from(walletHolds);
     expect(hold).toMatchObject({
@@ -679,4 +879,63 @@ describe("bulk settlement wallet lifecycle", () => {
       [300, 113, 187],
     ]);
   });
+
+  test(
+    "returns one repeatable allocation snapshot while a terminal writer commits",
+    async () => {
+      const fixture = await createSubmissionFixture([400]);
+      await adjustWalletBalance({
+        actorUserId: "wallet-admin",
+        customerId: fixture.customer.id,
+        deltaFen: 200,
+        reason: "allocation snapshot fixture",
+      });
+      const result = await submitFixture(fixture, 200);
+      const blockerReady = deferred();
+      const releaseBlocker = deferred();
+      const blocker = db.transaction(async (tx) => {
+        await tx.execute(
+          sql.raw(
+            "lock table settlement_batch_orders in access exclusive mode",
+          ),
+        );
+        blockerReady.resolve();
+        await releaseBlocker.promise;
+      });
+      await blockerReady.promise;
+
+      try {
+        const allocationPromise = getSettlementBatchAllocation(
+          fixture.customer.id,
+          result.settlementBatchId!,
+        );
+        await waitForBlockedAllocationRead();
+        const now = new Date();
+        await db.transaction(async (tx) => {
+          await tx
+            .update(settlementBatches)
+            .set({ paidAt: now, status: "PAID", updatedAt: now })
+            .where(eq(settlementBatches.id, result.settlementBatchId!));
+          await tx
+            .update(walletHolds)
+            .set({ consumedAt: now, status: "CONSUMED", updatedAt: now })
+            .where(
+              eq(walletHolds.settlementBatchId, result.settlementBatchId!),
+            );
+        });
+        releaseBlocker.resolve();
+        await blocker;
+        const allocation = await allocationPromise;
+
+        expect([
+          ["PENDING_PAYMENT", "ACTIVE"],
+          ["PAID", "CONSUMED"],
+        ]).toContainEqual([allocation?.status, allocation?.walletHold?.status]);
+      } finally {
+        releaseBlocker.resolve();
+        await blocker;
+      }
+    },
+    15_000,
+  );
 });
