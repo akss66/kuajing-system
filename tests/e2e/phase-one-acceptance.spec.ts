@@ -7,6 +7,7 @@ import {
   authSessions,
   authUsers,
   customerSkuPrices,
+  customerUsers,
   customers,
   inventoryBalances,
   inventoryMovements,
@@ -56,6 +57,9 @@ async function cleanupPhaseFixture() {
     await db
       .delete(walletAccounts)
       .where(eq(walletAccounts.customerId, customer.id));
+    await db
+      .delete(customerUsers)
+      .where(eq(customerUsers.customerId, customer.id));
     await db.delete(stores).where(eq(stores.customerId, customer.id));
     await db.delete(customers).where(eq(customers.id, customer.id));
   }
@@ -76,8 +80,9 @@ test("phase one customer, price and inventory flow is operational", async ({ pag
   await page.getByLabel("店铺名称").fill("TEMU 阶段一验收店");
   await page.getByLabel("登录邮箱").fill(customerEmail);
   await page.getByLabel("初始密码").fill(customerPassword);
+  await page.getByLabel("创建原因").fill("E2E 阶段一验收初始化客户与首店");
   await page.getByRole("button", { name: "创建客户与店铺" }).click();
-  await expect(page.getByText("客户与店铺已创建。")).toBeVisible();
+  await expect(page.getByText("客户与首家店铺已创建。")).toBeVisible();
 
   await page.goto("/admin/catalog");
   await page.getByLabel("标准 SKU", { exact: true }).fill("TZX-DEMO-001");

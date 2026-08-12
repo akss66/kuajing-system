@@ -22,6 +22,7 @@ import {
   expirePendingPaymentOrders,
   reviewOfflinePayment,
 } from "@/modules/orders/lifecycle";
+import { getCustomerOrderDetail } from "@/modules/orders/queries";
 
 const initialNow = new Date("2026-08-12T10:00:00.000Z");
 
@@ -391,6 +392,20 @@ describe("offline payment and order lifecycle", () => {
       .from(fulfillmentOrders)
       .where(eq(fulfillmentOrders.id, order.id));
     expect(savedOrder.status).toBe("PENDING_PAYMENT");
+  });
+
+  test("customer order detail returns null for another customer's order", async () => {
+    const { customer, order } = await createOrder();
+    const [otherCustomer] = await db
+      .insert(customers)
+      .values({ code: `OTHER-${crypto.randomUUID().slice(0, 24)}`, name: "Other customer" })
+      .returning();
+
+    await expect(getCustomerOrderDetail(otherCustomer.id, order.id)).resolves.toBeNull();
+    await expect(getCustomerOrderDetail(customer.id, order.id)).resolves.toMatchObject({
+      id: order.id,
+      orderNumber: order.orderNumber,
+    });
   });
 
   test("expiration is idempotent and releases stale reservations", async () => {

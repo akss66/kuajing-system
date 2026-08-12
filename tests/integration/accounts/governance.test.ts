@@ -252,6 +252,35 @@ describe("account governance", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
   });
 
+  test("ordinary admins cannot update or disable managed accounts", async () => {
+    const created = await createAdminAccount({
+      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+      displayName: "Warehouse Admin",
+      email: `warehouse-${crypto.randomUUID()}@tongzhouxing.local`,
+      password: "valid-admin-password-2026",
+      reason: "Provision warehouse admin",
+    });
+
+    await expect(
+      updateManagedAccount({
+        actor: { kind: "ADMIN", userId: created.userId },
+        displayName: "Updated by ordinary admin",
+        email: created.email,
+        reason: "Should fail",
+        userId: created.userId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+
+    await expect(
+      setManagedAccountStatus({
+        actor: { kind: "ADMIN", userId: created.userId },
+        reason: "Should fail",
+        status: "DISABLED",
+        userId: created.userId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+  });
+
   test("managed account listing returns customer ownership and store counts", async () => {
     const [customer] = await db
       .insert(customers)

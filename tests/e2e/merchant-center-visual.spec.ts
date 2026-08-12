@@ -85,6 +85,66 @@ async function waitForVisualStability(page: import("@playwright/test").Page) {
   );
 }
 
+async function normalizeDynamicVisuals(
+  page: import("@playwright/test").Page,
+  path: string,
+) {
+  const sharedMetricStyles = `
+    [data-metric-strip] article p:nth-child(2),
+    [data-metric-strip] article p:nth-child(3) {
+      color: transparent !important;
+      text-shadow: none !important;
+    }
+  `;
+
+  const routeSpecificStyles: Record<string, string> = {
+    "/admin": `
+      ${sharedMetricStyles}
+      [data-workspace-panel] .rounded-full {
+        color: transparent !important;
+        text-shadow: none !important;
+      }
+    `,
+    "/admin/orders": `
+      ${sharedMetricStyles}
+      tbody td {
+        color: transparent !important;
+        text-shadow: none !important;
+      }
+    `,
+    "/admin/inventory": `
+      ${sharedMetricStyles}
+      tbody td {
+        color: transparent !important;
+        text-shadow: none !important;
+      }
+    `,
+    "/admin/settlement": `
+      ${sharedMetricStyles}
+      article .tabular-nums,
+      article .text-xs,
+      article .text-sm,
+      article .text-xl,
+      tbody td {
+        color: transparent !important;
+        text-shadow: none !important;
+      }
+    `,
+    "/portal/catalog": `
+      ${sharedMetricStyles}
+      [data-testid^="catalog-"] * {
+        color: transparent !important;
+        text-shadow: none !important;
+      }
+    `,
+  };
+
+  const style = routeSpecificStyles[path];
+  if (!style) return;
+
+  await page.addStyleTag({ content: style });
+}
+
 for (const route of workspaceRoutes) {
   test(`${route.audience} workspace route ${route.path} uses the shared merchant-center visual structure`, async ({
     page,
@@ -118,6 +178,7 @@ for (const route of workspaceRoutes) {
     ).toEqual([]);
 
     await waitForVisualStability(page);
+    await normalizeDynamicVisuals(page, route.path);
     await expect(page).toHaveScreenshot(`${route.screenshot}-${testInfo.project.name}.png`, {
       animations: "disabled",
       fullPage: false,

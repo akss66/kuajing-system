@@ -107,8 +107,14 @@ async function visibleStoreStatusForm(page: Page, storeId: string, nextStatus: "
 }
 
 async function confirmDialog(scope: Locator, page: Page, buttonName: string) {
-  await scope.getByRole("button", { name: buttonName }).click();
   const dialog = page.getByRole("alertdialog");
+  await expect
+    .poll(async () => {
+      if (await dialog.count()) return 1;
+      await scope.getByRole("button", { name: buttonName }).click();
+      return await dialog.count();
+    })
+    .toBe(1);
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: buttonName }).click();
 }

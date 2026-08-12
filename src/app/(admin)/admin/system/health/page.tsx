@@ -113,7 +113,7 @@ export default async function SystemHealthPage() {
         <div className="flex items-start gap-3">
           <Activity aria-hidden="true" className="mt-0.5 size-5 text-primary" />
           <div>
-            <h2 className="font-semibold text-ink">检查说明</h2>
+            <h2 className="font-semibold text-ink">只读运营检查说明</h2>
             <p className="mt-1 text-sm leading-6 text-muted">
               失败或超时任务需要到外部集成页面查看安全错误摘要；库存与余额不一致时应先停止人工调整，再核对审计记录。
             </p>

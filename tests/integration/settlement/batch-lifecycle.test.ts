@@ -615,6 +615,25 @@ describe("bulk settlement wallet lifecycle", () => {
     });
   });
 
+  test("settlement allocation returns null for another customer", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    const result = await submitFixture(fixture, 0);
+    const [otherCustomer] = await db
+      .insert(customers)
+      .values({ code: crypto.randomUUID(), name: "Other settlement customer" })
+      .returning();
+
+    await expect(
+      getSettlementBatchAllocation(otherCustomer.id, result.settlementBatchId!),
+    ).resolves.toBeNull();
+    await expect(
+      getSettlementBatchAllocation(fixture.customer.id, result.settlementBatchId!),
+    ).resolves.toMatchObject({
+      customerId: fixture.customer.id,
+      id: result.settlementBatchId,
+    });
+  });
+
   test("creates a hold once when the same request is replayed", async () => {
     const fixture = await createSubmissionFixture([1_000]);
     await adjustWalletBalance({
