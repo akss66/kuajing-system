@@ -308,4 +308,45 @@ describe("customer management actions", () => {
     });
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
+
+  it("rethrows an unknown 23505 customer duplication error when no allowlisted constraint name is present", async () => {
+    serviceMocks.provisionCustomerWithStore.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        cause: {
+          code: "23505",
+        },
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("code", "EXISTING-CUSTOMER");
+    formData.set("customerName", "Existing Customer");
+    formData.set("email", "existing-customer@test.local");
+    formData.set("password", "valid-customer-password-2026");
+    formData.set("reason", "Attempt duplicate provisioning");
+    formData.set("storeName", "Existing Store");
+
+    await expect(createCustomerWithStoreAction({ status: "idle" }, formData)).rejects.toThrow(
+      "duplicate key value violates unique constraint",
+    );
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a customer duplication error that only mentions unique constraint text without metadata", async () => {
+    serviceMocks.createStore.mockRejectedValue(
+      new Error("some unique constraint text without a known constraint name"),
+    );
+
+    const formData = new FormData();
+    formData.set("customerId", "22222222-2222-4222-8222-222222222222");
+    formData.set("name", "North Store");
+    formData.set("platform", "TEMU");
+    formData.set("externalStoreCode", "TEMU-NORTH-001");
+    formData.set("reason", "Add duplicate store");
+
+    await expect(createStoreAction({ status: "idle" }, formData)).rejects.toThrow(
+      "some unique constraint text without a known constraint name",
+    );
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
 });

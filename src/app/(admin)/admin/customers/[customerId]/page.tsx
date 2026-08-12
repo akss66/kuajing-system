@@ -35,6 +35,12 @@ function statusLabel(status: "ACTIVE" | "DISABLED") {
   return status === "ACTIVE" ? "启用中" : "已停用";
 }
 
+function storeSummaryConsequence(status: "ACTIVE" | "DISABLED") {
+  return status === "ACTIVE"
+    ? "停用后将禁止新拿货，历史数据会继续保留。"
+    : "已停用后新拿货已关闭，历史数据会继续保留。";
+}
+
 function DangerHint({
   children,
   tone = "warning",
@@ -218,6 +224,7 @@ function MobileStoreCard({
             <div className="grid gap-1 text-sm text-muted">
               <p>外部编号：{store.externalStoreCode ?? "暂无记录"}</p>
               <p>状态：{statusLabel(store.status)}</p>
+              <p>{storeSummaryConsequence(store.status)}</p>
             </div>
           </div>
           <div className="space-y-2 text-right">

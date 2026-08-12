@@ -18,8 +18,13 @@ type ErrorLike = {
   code?: unknown;
   constraint?: unknown;
   constraint_name?: unknown;
-  message?: unknown;
 };
+
+const ACCOUNT_DUPLICATE_CONSTRAINTS = new Set([
+  "admin_users_login_identifier_unique",
+  "auth_users_email_unique",
+  "customer_users_login_identifier_unique",
+]);
 
 function validationState(error: z.ZodError): ActionState {
   return {
@@ -54,7 +59,7 @@ function errorCode(error: unknown) {
     | undefined;
 }
 
-function isUniqueConstraint(error: unknown, constraints: string[]) {
+function hasAllowedConstraint(error: unknown, constraints: Set<string>) {
   return errorChain(error).some((entry) => {
     const constraint =
       typeof entry.constraint_name === "string"
@@ -62,26 +67,13 @@ function isUniqueConstraint(error: unknown, constraints: string[]) {
         : typeof entry.constraint === "string"
           ? entry.constraint
           : undefined;
-    const mentionsUnique =
-      typeof entry.message === "string" &&
-      entry.message.toLowerCase().includes("unique constraint");
 
-    if (constraint) {
-      return constraints.includes(constraint);
-    }
-
-    return entry.code === "23505" || mentionsUnique;
+    return constraint !== undefined && constraints.has(constraint);
   });
 }
 
 function governanceErrorState(error: unknown): ActionState | null {
-  if (
-    isUniqueConstraint(error, [
-      "admin_users_login_identifier_unique",
-      "auth_users_email_unique",
-      "customer_users_login_identifier_unique",
-    ])
-  ) {
+  if (hasAllowedConstraint(error, ACCOUNT_DUPLICATE_CONSTRAINTS)) {
     return {
       message: "登录邮箱已存在，请更换后重试。",
       status: "error",

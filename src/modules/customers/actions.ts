@@ -20,8 +20,17 @@ type ErrorLike = {
   code?: unknown;
   constraint?: unknown;
   constraint_name?: unknown;
-  message?: unknown;
 };
+
+const CUSTOMER_DUPLICATE_CONSTRAINTS = new Set([
+  "auth_users_email_unique",
+  "customer_users_login_identifier_unique",
+  "customers_code_unique",
+  "stores_customer_name_unique",
+]);
+
+const CUSTOMER_CODE_DUPLICATE_CONSTRAINTS = new Set(["customers_code_unique"]);
+const STORE_NAME_DUPLICATE_CONSTRAINTS = new Set(["stores_customer_name_unique"]);
 
 const createCustomerSchema = z.object({
   code: z.string().trim().min(2).max(40),
@@ -103,7 +112,7 @@ function errorCode(error: unknown) {
     | undefined;
 }
 
-function isUniqueConstraint(error: unknown, constraints: string[]) {
+function hasAllowedConstraint(error: unknown, constraints: Set<string>) {
   return errorChain(error).some((entry) => {
     const constraint =
       typeof entry.constraint_name === "string"
@@ -111,15 +120,8 @@ function isUniqueConstraint(error: unknown, constraints: string[]) {
         : typeof entry.constraint === "string"
           ? entry.constraint
           : undefined;
-    const mentionsUnique =
-      typeof entry.message === "string" &&
-      entry.message.toLowerCase().includes("unique constraint");
 
-    if (constraint) {
-      return constraints.includes(constraint);
-    }
-
-    return entry.code === "23505" || mentionsUnique;
+    return constraint !== undefined && constraints.has(constraint);
   });
 }
 
@@ -169,14 +171,7 @@ export async function createCustomerWithStoreAction(
       email: parsed.data.email.trim().toLowerCase(),
     });
   } catch (error) {
-    if (
-      isUniqueConstraint(error, [
-        "auth_users_email_unique",
-        "customer_users_login_identifier_unique",
-        "customers_code_unique",
-        "stores_customer_name_unique",
-      ])
-    ) {
+    if (hasAllowedConstraint(error, CUSTOMER_DUPLICATE_CONSTRAINTS)) {
       return {
         message: "客户编号、店铺名称或登录邮箱已存在，请核对后重试。",
         status: "error",
@@ -213,7 +208,7 @@ export async function updateCustomerAction(
   try {
     await updateCustomer({ actor, ...parsed.data });
   } catch (error) {
-    if (isUniqueConstraint(error, ["customers_code_unique"])) {
+    if (hasAllowedConstraint(error, CUSTOMER_CODE_DUPLICATE_CONSTRAINTS)) {
       return {
         message: "客户编号已存在，请更换后重试。",
         status: "error",
@@ -248,7 +243,7 @@ export async function createStoreAction(
   try {
     await createStore({ actor, ...parsed.data });
   } catch (error) {
-    if (isUniqueConstraint(error, ["stores_customer_name_unique"])) {
+    if (hasAllowedConstraint(error, STORE_NAME_DUPLICATE_CONSTRAINTS)) {
       return {
         message: "该客户下已存在同名店铺，请调整后重试。",
         status: "error",
@@ -284,7 +279,7 @@ export async function updateStoreAction(
   try {
     await updateStore({ actor, ...parsed.data });
   } catch (error) {
-    if (isUniqueConstraint(error, ["stores_customer_name_unique"])) {
+    if (hasAllowedConstraint(error, STORE_NAME_DUPLICATE_CONSTRAINTS)) {
       return {
         message: "该客户下已存在同名店铺，请调整后重试。",
         status: "error",

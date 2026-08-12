@@ -17,14 +17,12 @@ const serviceMocks = vi.hoisted(() => ({
 
 vi.mock("next/cache", () => cacheMocks);
 vi.mock("@/modules/identity/guards", () => guardMocks);
-vi.mock("@/modules/accounts/service", () => {
-  return {
-    createAdminAccount: serviceMocks.createAdminAccount,
-    resetManagedAccountPassword: serviceMocks.resetManagedAccountPassword,
-    setManagedAccountStatus: serviceMocks.setManagedAccountStatus,
-    updateManagedAccount: serviceMocks.updateManagedAccount,
-  };
-});
+vi.mock("@/modules/accounts/service", () => ({
+  createAdminAccount: serviceMocks.createAdminAccount,
+  resetManagedAccountPassword: serviceMocks.resetManagedAccountPassword,
+  setManagedAccountStatus: serviceMocks.setManagedAccountStatus,
+  updateManagedAccount: serviceMocks.updateManagedAccount,
+}));
 
 import {
   createAdminAccountAction,
@@ -114,6 +112,44 @@ describe("account management actions", () => {
       message: "受保护的超级管理员不支持此操作。",
       status: "error",
     });
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rethrows an unknown 23505 account error when no allowlisted constraint name is present", async () => {
+    serviceMocks.createAdminAccount.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        cause: {
+          code: "23505",
+        },
+      }),
+    );
+
+    const formData = new FormData();
+    formData.set("displayName", "值班管理员");
+    formData.set("email", "ops@test.local");
+    formData.set("password", "valid-admin-password-2026");
+    formData.set("reason", "新增值班账号");
+
+    await expect(createAdminAccountAction({ status: "idle" }, formData)).rejects.toThrow(
+      "duplicate key value violates unique constraint",
+    );
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rethrows an account error that only mentions unique constraint text without an allowlisted constraint", async () => {
+    serviceMocks.createAdminAccount.mockRejectedValue(
+      new Error("some downstream unique constraint issue without constraint metadata"),
+    );
+
+    const formData = new FormData();
+    formData.set("displayName", "值班管理员");
+    formData.set("email", "ops@test.local");
+    formData.set("password", "valid-admin-password-2026");
+    formData.set("reason", "新增值班账号");
+
+    await expect(createAdminAccountAction({ status: "idle" }, formData)).rejects.toThrow(
+      "some downstream unique constraint issue without constraint metadata",
+    );
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 });
