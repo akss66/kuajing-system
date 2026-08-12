@@ -2,7 +2,14 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
-import { auditLogs, customers, walletAccounts, walletTransactions } from "@/db/schema";
+import {
+  auditLogs,
+  customers,
+  settlementBatches,
+  walletAccounts,
+  walletHolds,
+  walletTransactions,
+} from "@/db/schema";
 import {
   WalletInsufficientFundsError,
   adjustWalletBalance,
@@ -14,7 +21,9 @@ describe("wallet administration", () => {
       truncate table
         audit_logs,
         wallet_transactions,
+        wallet_holds,
         wallet_accounts,
+        settlement_batches,
         customers
       restart identity cascade
     `));
@@ -85,5 +94,53 @@ describe("wallet administration", () => {
       .where(eq(walletAccounts.customerId, customer.id));
     expect(wallet.balanceFen).toBe(0);
     expect(await db.select().from(walletTransactions)).toEqual([]);
+  });
+
+  test("never allows an administrative debit to consume ACTIVE held funds", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `W-${crypto.randomUUID()}`, name: "Held balance customer" })
+      .returning();
+    await adjustWalletBalance({
+      actorUserId: "admin-wallet",
+      customerId: customer.id,
+      deltaFen: 100,
+      reason: "held funds regression fixture",
+    });
+    const [settlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `ADMIN-HELD-${crypto.randomUUID()}`,
+        customerId: customer.id,
+        idempotencyKey: `admin-held-${crypto.randomUUID()}`,
+        offlineAmountFen: 0,
+        paymentDueAt: new Date(Date.now() + 60_000),
+        totalAmountFen: 80,
+        walletAmountFen: 80,
+      })
+      .returning();
+    await db.insert(walletHolds).values({
+      amountFen: 80,
+      customerId: customer.id,
+      settlementBatchId: settlement.id,
+    });
+
+    await expect(
+      adjustWalletBalance({
+        actorUserId: "admin-wallet",
+        customerId: customer.id,
+        deltaFen: -50,
+        reason: "must preserve held balance",
+      }),
+    ).rejects.toBeInstanceOf(WalletInsufficientFundsError);
+
+    const [wallet] = await db
+      .select()
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, customer.id));
+    expect(wallet.balanceFen).toBe(100);
+    const transactions = await db.select().from(walletTransactions);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0].transactionType).toBe("ADMIN_CREDIT");
   });
 });

@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import postgres from "postgres";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
@@ -16,6 +17,7 @@ import {
   settlementBatches,
   skus,
   stores,
+  walletAccounts,
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
 
@@ -320,6 +322,72 @@ describe("bulk submission concurrency", () => {
     ]);
     expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
     expect(await db.select().from(settlementBatches)).toHaveLength(1);
+  });
+
+  test("offline-only drafts do not wait for the customer's locked wallet row", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: crypto.randomUUID(), name: "Offline lock isolation customer" })
+      .returning();
+    await db.insert(walletAccounts).values({ customerId: customer.id });
+    const firstSku = await createSku("OFFLINE-A", 1);
+    const secondSku = await createSku("OFFLINE-B", 1);
+    const first = await createDraft({
+      customerId: customer.id,
+      groups: [{ name: "offline-a", rows: [{ skuId: firstSku.id }] }],
+    });
+    const second = await createDraft({
+      customerId: customer.id,
+      groups: [{ name: "offline-b", rows: [{ skuId: secondSku.id }] }],
+    });
+    const locker = postgres(process.env.DATABASE_URL!, { max: 1 });
+    let releaseWalletLock!: () => void;
+    let markWalletLocked!: () => void;
+    const walletLocked = new Promise<void>((resolve) => {
+      markWalletLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseWalletLock = resolve;
+    });
+    const lockTask = locker.begin(async (connection) => {
+      await connection`
+        select customer_id
+        from wallet_accounts
+        where customer_id = ${customer.id}
+        for update
+      `;
+      markWalletLocked();
+      await release;
+    });
+    await walletLocked;
+
+    const submissions = Promise.all([
+      submitBulkDraft(
+        submissionInput({ customerId: customer.id, draft: first, key: "offline-a" }),
+      ),
+      submitBulkDraft(
+        submissionInput({ customerId: customer.id, draft: second, key: "offline-b" }),
+      ),
+    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let observation: "completed" | "blocked";
+    try {
+      observation = await Promise.race([
+        submissions.then(() => "completed" as const),
+        new Promise<"blocked">((resolve) => {
+          timer = setTimeout(() => resolve("blocked"), 1_000);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      releaseWalletLock();
+    }
+    const results = await submissions;
+    await lockTask;
+    await locker.end();
+
+    expect(observation).toBe("completed");
+    expect(results.every((result) => result.createdOrders.length === 1)).toBe(true);
   });
 });
 

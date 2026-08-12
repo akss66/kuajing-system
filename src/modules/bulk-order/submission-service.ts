@@ -29,7 +29,7 @@ import {
 } from "@/modules/orders/submission";
 import {
   applyBulkSettlementWallet,
-  lockWalletForBulkSettlement,
+  lockWalletFunding,
 } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -415,11 +415,14 @@ async function createSubmissionSettlement(
     (total, order) => safeAdd(total, order.totalAmountFen),
     0,
   );
-  const wallet = await lockWalletForBulkSettlement(tx, input.customerId);
+  const wallet =
+    input.requestedWalletFen === 0
+      ? null
+      : await lockWalletFunding(tx, input.customerId);
   const actualWalletFen = Math.min(
     input.requestedWalletFen,
     totalAmountFen,
-    wallet.availableFen,
+    wallet?.availableFen ?? 0,
   );
   const allocations = allocateWalletFen(
     input.createdOrders.map((order) => ({
@@ -460,16 +463,18 @@ async function createSubmissionSettlement(
       walletAmountFen: allocation.walletFen,
     })),
   );
-  await applyBulkSettlementWallet(tx, {
-    actorUserId: input.actorUserId,
-    allocations,
-    customerId: input.customerId,
-    now: input.now,
-    settlementBatchId: settlement.id,
-    snapshot: wallet,
-    totalAmountFen,
-    walletAmountFen,
-  });
+  if (wallet) {
+    await applyBulkSettlementWallet(tx, {
+      actorUserId: input.actorUserId,
+      allocations,
+      customerId: input.customerId,
+      now: input.now,
+      settlementBatchId: settlement.id,
+      snapshot: wallet,
+      totalAmountFen,
+      walletAmountFen,
+    });
+  }
   if (isPureWallet) {
     const orderIds = input.createdOrders.map((order) => order.orderId);
     await tx

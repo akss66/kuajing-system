@@ -47,7 +47,7 @@ export type LockedWalletFunding = {
   version: number;
 };
 
-export async function lockWalletForBulkSettlement(
+export async function lockWalletFunding(
   tx: DbTransaction,
   customerId: string,
 ): Promise<LockedWalletFunding> {
@@ -194,9 +194,14 @@ export async function adjustWalletBalance(input: {
     .onConflictDoNothing({ target: walletAccounts.customerId });
 
   return db.transaction(async (tx) => {
-    const wallet = await ensureAndLockWallet(tx, input.customerId);
+    const wallet = await lockWalletFunding(tx, input.customerId);
     const afterBalanceFen = wallet.balanceFen + input.deltaFen;
-    if (afterBalanceFen < 0) throw new WalletInsufficientFundsError();
+    if (
+      afterBalanceFen < 0 ||
+      (input.deltaFen < 0 && -input.deltaFen > wallet.availableFen)
+    ) {
+      throw new WalletInsufficientFundsError();
+    }
     if (!Number.isSafeInteger(afterBalanceFen) || afterBalanceFen > 2_147_483_647) {
       throw new WalletValidationError("钱包余额超出系统范围");
     }
@@ -251,8 +256,8 @@ export async function tryDebitWalletForOrder(
   },
 ) {
   assertFen(input.amountFen, true);
-  const wallet = await ensureAndLockWallet(tx, input.customerId);
-  if (wallet.balanceFen < input.amountFen) return false;
+  const wallet = await lockWalletFunding(tx, input.customerId);
+  if (wallet.availableFen < input.amountFen) return false;
   if (input.amountFen === 0) return true;
 
   const afterBalanceFen = wallet.balanceFen - input.amountFen;

@@ -14,10 +14,12 @@ import {
   orderLines,
   orderShipments,
   products,
+  settlementBatches,
   skuAliases,
   skus,
   stores,
   walletAccounts,
+  walletHolds,
   walletTransactions,
 } from "@/db/schema";
 import { getAvailableQuantity } from "@/modules/inventory/queries";
@@ -146,7 +148,9 @@ describe("atomic TEMU take-order submission", () => {
       truncate table
         audit_logs,
         wallet_transactions,
+        wallet_holds,
         wallet_accounts,
+        settlement_batches,
         order_lines,
         order_shipments,
         fulfillment_orders,
@@ -375,6 +379,72 @@ describe("atomic TEMU take-order submission", () => {
       .from(inventoryReservations)
       .where(eq(inventoryReservations.referenceId, paidOrder.orderId));
     expect(paidReservation.expiresAt).toBeNull();
+  });
+
+  test("does not auto-debit balance reserved by an ACTIVE settlement hold", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 50,
+      externalSku: "EXT-HELD-WALLET",
+      storeId: store.id,
+      totalQuantity: 1,
+    });
+    await adjustWalletBalance({
+      actorUserId: "auth-admin-wallet",
+      customerId: customer.id,
+      deltaFen: 100,
+      reason: "held funds regression fixture",
+    });
+    const [settlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `HELD-${crypto.randomUUID()}`,
+        customerId: customer.id,
+        idempotencyKey: `held-${crypto.randomUUID()}`,
+        offlineAmountFen: 0,
+        paymentDueAt: new Date(Date.now() + 60_000),
+        totalAmountFen: 80,
+        walletAmountFen: 80,
+      })
+      .returning();
+    await db.insert(walletHolds).values({
+      amountFen: 80,
+      customerId: customer.id,
+      settlementBatchId: settlement.id,
+    });
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [
+        {
+          订单号: "PO-HELD-WALLET",
+          子订单号: "SUB-HELD-WALLET",
+          SKU货号: "EXT-HELD-WALLET",
+        },
+      ],
+    });
+
+    const submitted = await submitTemuImportBatch({
+      actorUserId: "held-wallet-order",
+      batchId: preview.batchId,
+      customerId: customer.id,
+    });
+
+    expect(submitted.status).toBe("PENDING_PAYMENT");
+    const [wallet] = await db
+      .select()
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, customer.id));
+    expect(wallet.balanceFen).toBe(100);
+    const transactions = await db.select().from(walletTransactions);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]).toMatchObject({
+      afterBalanceFen: 100,
+      beforeBalanceFen: 0,
+      deltaFen: 100,
+      transactionType: "ADMIN_CREDIT",
+    });
   });
 
   test("rejects previews with unresolved SKUs and another customer's batch", async () => {

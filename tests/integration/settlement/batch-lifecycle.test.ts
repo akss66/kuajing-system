@@ -324,4 +324,21 @@ describe("bulk settlement wallet lifecycle", () => {
         .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
     ).toEqual([]);
   });
+
+  test("offline-only submission does not create a wallet account", async () => {
+    const fixture = await createSubmissionFixture([100]);
+
+    const result = await submitFixture(fixture, 0);
+
+    const [settlement] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    expect(settlement).toMatchObject({
+      offlineAmountFen: 100,
+      totalAmountFen: 100,
+      walletAmountFen: 0,
+    });
+    expect(await db.select().from(walletAccounts)).toEqual([]);
+  });
 });
