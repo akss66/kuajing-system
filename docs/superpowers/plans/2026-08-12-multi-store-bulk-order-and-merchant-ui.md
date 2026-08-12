@@ -4,7 +4,7 @@
 
 **Goal:** 在保留同舟行既有单店流程的前提下，交付多店铺分组批量拿货、统一结算与余额冻结，补齐超级管理员账号/客户/店铺治理，并把管理员后台和客户门户整体升级为已批准的“同舟行商家工作台”视觉。
 
-**Architecture:** PostgreSQL 继续作为订单、库存、资金和账号归属的唯一事实源。批量提交在事务中完成去重、短缺集合、逐店拿货单、库存和结算；账号服务在 Better Auth 之上增加唯一超级管理员、普通管理员、客户一对一账号、软停用和会话撤销边界。UI 先补齐账号/客户/店铺管理，再扩展共享设计令牌、双端壳和本地字体，最后迁移各业务页面。
+**Architecture:** PostgreSQL 继续作为订单、库存、资金和账号归属的唯一事实源。批量提交在事务中完成去重、短缺集合、逐店拿货单、库存和结算；账号服务在 Better Auth 之上保护初始化创建的超级管理员，禁止账号管理再创建或升级产生超级管理员，并增加普通管理员、客户一对一账号、软停用和会话撤销边界。UI 先补齐账号/客户/店铺管理，再扩展共享设计令牌、双端壳和本地字体，最后迁移各业务页面。
 
 **Tech Stack:** Next.js 16 App Router、React 19、TypeScript 6 严格模式、PostgreSQL、Drizzle ORM、ExcelJS、Zod 4、Tailwind CSS 4、shadcn/Radix、Vitest、Testing Library、Playwright、axe-core。
 
@@ -13,7 +13,7 @@
 - 平台名称固定为“同舟行跨境”，正式 Logo 使用 `public/brand/tongzhouxing-logo.png`。
 - TikTok Shop 商家中心只作为 UI 美学和组件质感参考；不得复制其信息架构、栏目、角色或业务命名。
 - 管理员和客户现有路由、权限、菜单功能与核心流程保持兼容；批量拿货作为客户默认推荐入口，单店上传继续可用。
-- 系统只有一个不可停用、删除或降级的超级管理员；可有多个普通管理员，普通管理员无账号管理权限。
+- 系统初始化只创建一个不可停用、删除或降级的超级管理员；账号管理/API 不提供创建第二个超级管理员或把普通管理员升级为超级管理员的能力，但不使用数据库唯一索引强制超级管理员行数；可有多个普通管理员，普通管理员无账号管理权限。
 - 一位客户只能有一个登录账号，一个账号可访问该客户名下全部店铺；账号、客户和店铺只软停用，不物理删除。
 - 停用任何普通管理员或客户账号必须立即撤销其全部会话；管理员端和客户端都必须提供退出登录。
 - 全站字体固定为项目本地打包的 Geist Variable + Noto Sans SC Variable；所有页面和图表共享字体令牌，禁止页面单独覆盖字体。
@@ -42,7 +42,7 @@
 - Create `drizzle/0011_bulk_submission_requests.sql`: 批量提交专用幂等请求表和客户作用域唯一约束。
 - Create `drizzle/0012_settlement_timeout_review.sql`: 允许系统超时拒绝不伪造管理员身份，同时保留人工审核约束。
 - Create `drizzle/0013_jifeng_reconciliation_claim.sql`: 极风对账租约所有权令牌，支持崩溃恢复与旧 worker 条件落账。
-- Create `drizzle/0014_account_governance.sql`: 账号治理、唯一超级管理员与客户账号一对一约束。
+- Create `drizzle/0014_account_governance.sql`: 账号治理、超级管理员保护与客户账号一对一约束；不得添加超级管理员唯一索引。
 - Modify `drizzle/meta/_journal.json`: 记录迁移序号。
 
 ### Bulk import domain
@@ -93,7 +93,7 @@
 ### Account, customer and store management
 
 - Modify `src/db/schema/auth.ts` and `identity.ts`: 客户账号唯一归属、超级管理员角色和管理员身份映射。
-- Create `drizzle/0014_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
+- Create `drizzle/0014_account_governance.sql`: 前向增加账号约束、超级管理员角色兼容回填和客户账号唯一索引；不得添加超级管理员唯一索引。
 - Create `src/modules/accounts/service.ts`, `queries.ts`, `actions.ts`: 账号列表、创建普通管理员、资料修改、密码重置、停用/恢复和会话撤销。
 - Modify `src/modules/identity/principal.ts` and `guards.ts`: 区分 `SUPER_ADMIN` 与普通 `ADMIN`，新增 `requireSuperAdmin()`。
 - Expand `src/modules/customers/service.ts`, `actions.ts`, `queries.ts`: 客户和店铺完整资料维护、停用/恢复与审计。
@@ -747,7 +747,7 @@ git commit -m "feat: add admin bulk settlement workspace"
 - Produces: `listManagedAccounts()`, `createAdminAccount()`, `updateManagedAccount()`, `resetManagedAccountPassword()`, `setManagedAccountStatus()`.
 - Produces: `getCustomerManagementDetail()`, `updateCustomer()`, `createStore()`, `updateStore()`, `setCustomerStatus()`, `setStoreStatus()`.
 
-- [ ] **Step 1: 写唯一超级管理员和客户账号一对一失败测试**
+- [ ] **Step 1: 写超级管理员保护和客户账号一对一失败测试**
 
 ```ts
 await expect(createAdminAccount({ role: "SUPER_ADMIN", ...input })).rejects.toThrow("SUPER_ADMIN_IMMUTABLE");
@@ -765,13 +765,13 @@ Expected: FAIL，提示 `requireSuperAdmin` 或唯一约束尚不存在。
 
 - [ ] **Step 3: 增加 0014 前向迁移和角色边界**
 
-`auth_users.role` 固定使用 `super_admin | admin | user`；0014 迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
+`auth_users.role` 固定使用 `super_admin | admin | user`；0014 迁移把现有初始化管理员账号提升为 `super_admin`，但不得对 `role = 'super_admin'` 建立唯一索引。系统只在初始化/种子流程创建一个超级管理员，账号管理服务固定只能创建 `admin`，并拒绝创建或升级为 `super_admin`。迁移对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`；不得删除现有账号、会话或审计历史。
 
 Better Auth 的管理员插件只把 `super_admin` 配置为拥有用户管理权限；`admin` 由应用 `requireAdmin()` 识别为日常运营角色，但不能调用账号管理 API。`SuperAdminPrincipal` 与 `AdminPrincipal` 明确区分，`requireAdmin()` 接受二者，`requireSuperAdmin()` 只接受前者。
 
 - [ ] **Step 4: 实现账号服务与软停用**
 
-所有账号写操作由 `requireSuperAdmin()` 保护并写审计。创建普通管理员固定 `role = 'admin'`；客户账号固定与一个客户一对一。更新显示名称/邮箱时同步 Better Auth 与身份映射；重置密码使用 Better Auth 密码能力；停用使用 ban/status 并在同一业务操作中撤销该用户全部会话；恢复解除 ban/status。任何服务均拒绝修改唯一超级管理员的角色或状态，不暴露物理删除入口。
+所有账号写操作由 `requireSuperAdmin()` 保护并写审计。创建管理员固定 `role = 'admin'`，不接受角色输入；任何创建或更新服务均拒绝产生新的 `super_admin`。客户账号固定与一个客户一对一。更新显示名称/邮箱时同步 Better Auth 与身份映射；重置密码使用 Better Auth 密码能力；停用使用 ban/status 并在同一业务操作中撤销该用户全部会话；恢复解除 ban/status。任何服务均拒绝修改初始化超级管理员的角色或状态，不暴露物理删除入口。
 
 - [ ] **Step 5: 补齐客户与多店铺管理服务**
 
@@ -952,7 +952,7 @@ git commit -m "feat: redesign application as merchant workspace"
 
 - [ ] **Step 1: 增加最终安全回归断言**
 
-验证客户 A 不能读写客户 B 的草稿、文件、店铺、结算和订单；普通管理员不能进入账号管理或修改账号；唯一超级管理员不能被停用、删除或降级；停用账号的全部会话失效；批量错误/审计/日志不含真实姓名、电话、邮箱或地址；重复提交/核款/worker 重试不重复扣款和锁库存。
+验证客户 A 不能读写客户 B 的草稿、文件、店铺、结算和订单；普通管理员不能进入账号管理或修改账号；初始化超级管理员不能被停用、删除或降级，账号管理不能创建或升级产生新的超级管理员；停用账号的全部会话失效；批量错误/审计/日志不含真实姓名、电话、邮箱或地址；重复提交/核款/worker 重试不重复扣款和锁库存。
 
 - [ ] **Step 2: 执行完整单元测试**
 
@@ -1000,7 +1000,7 @@ git commit -m "chore: complete bulk ordering and merchant UI acceptance"
 - 最终提交防止重复和超卖，允许店铺级部分成功，并为每个成功店铺生成独立拿货单和共同结算批次。
 - 自定义余额抵扣、比例分摊、纯余额直扣、混合付款冻结和零余额线下付款均与规范一致。
 - 一笔统一付款声明由管理员一次确认；拒绝、撤回和超时原子释放冻结与库存；旧单店付款流程继续工作。
-- 系统只有一个受保护的超级管理员；超级管理员可管理普通管理员和客户账号，普通管理员不能进入账号管理。
+- 系统初始化创建一个受保护的超级管理员；账号管理不能创建第二个或把普通管理员升级为超级管理员。超级管理员可管理普通管理员和客户账号，普通管理员不能进入账号管理。
 - 一位客户只有一个登录账号并可管理多个店铺；账号、客户和店铺均采用保留历史的软停用，停用账号立即撤销会话。
 - 管理员和客户全系统均采用商家中心视觉，保留同舟行原信息结构，无 TikTok 特有业务栏目。
 - 登录页使用已确认的加拿大本地货盘文案；双端均可退出登录；全站统一使用项目本地打包的 Geist Variable + Noto Sans SC Variable 字体令牌。
