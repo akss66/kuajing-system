@@ -6,8 +6,10 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -49,6 +51,7 @@ export const fulfillmentOrderStatus = pgEnum("fulfillment_order_status", [
 export const fulfillmentPaymentMode = pgEnum("fulfillment_payment_mode", [
   "WALLET",
   "DIRECT_OFFLINE",
+  "MIXED",
 ]);
 
 export const shipmentKind = pgEnum("shipment_kind", [
@@ -69,6 +72,34 @@ export const paymentClaimStatus = pgEnum("payment_claim_status", [
   "REJECTED",
 ]);
 
+export const bulkImportDraftStatus = pgEnum("bulk_import_draft_status", [
+  "DRAFT",
+  "PARTIALLY_SUBMITTED",
+  "COMPLETED",
+  "EXPIRED",
+]);
+
+export const walletHoldStatus = pgEnum("wallet_hold_status", [
+  "ACTIVE",
+  "CONSUMED",
+  "RELEASED",
+]);
+
+export const settlementBatchStatus = pgEnum("settlement_batch_status", [
+  "PENDING_PAYMENT",
+  "PAYMENT_REPORTED",
+  "PAID",
+  "REJECTED",
+  "WITHDRAWN",
+  "CANCELLED",
+  "EXPIRED",
+]);
+
+export const settlementPaymentClaimStatus = pgEnum(
+  "settlement_payment_claim_status",
+  ["PENDING", "APPROVED", "REJECTED", "WITHDRAWN"],
+);
+
 const timestamps = {
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
     .defaultNow()
@@ -77,6 +108,79 @@ const timestamps = {
     .defaultNow()
     .notNull(),
 };
+
+export const bulkImportDrafts = pgTable(
+  "bulk_import_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    status: bulkImportDraftStatus("status").default("DRAFT").notNull(),
+    version: integer("version").default(0).notNull(),
+    expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true })
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique("bulk_import_drafts_id_customer_unique").on(
+      table.id,
+      table.customerId,
+    ),
+    check("bulk_import_drafts_version_non_negative", sql`${table.version} >= 0`),
+    index("bulk_import_drafts_customer_status_index").on(
+      table.customerId,
+      table.status,
+      table.expiresAt,
+    ),
+  ],
+);
+
+export const bulkImportStoreGroups = pgTable(
+  "bulk_import_store_groups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    draftId: uuid("draft_id").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    storeId: uuid("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "restrict" }),
+    status: orderImportStatus("status").default("PREVIEW").notNull(),
+    errorSummary: text("error_summary"),
+    submittedAt: timestamp("submitted_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "bulk_import_store_groups_draft_customer_fk",
+      columns: [table.draftId, table.customerId],
+      foreignColumns: [bulkImportDrafts.id, bulkImportDrafts.customerId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "bulk_import_store_groups_store_customer_fk",
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [stores.id, stores.customerId],
+    }).onDelete("restrict"),
+    uniqueIndex("bulk_import_store_groups_draft_store_unique").on(
+      table.draftId,
+      table.storeId,
+    ),
+    unique("bulk_import_store_groups_id_store_customer_unique").on(
+      table.id,
+      table.storeId,
+      table.customerId,
+    ),
+    index("bulk_import_store_groups_draft_status_index").on(
+      table.draftId,
+      table.status,
+    ),
+  ],
+);
 
 export const orderImportBatches = pgTable(
   "order_import_batches",
@@ -88,6 +192,7 @@ export const orderImportBatches = pgTable(
     storeId: uuid("store_id")
       .notNull()
       .references(() => stores.id, { onDelete: "restrict" }),
+    storeGroupId: uuid("store_group_id"),
     status: orderImportStatus("status").default("PREVIEW").notNull(),
     originalFileName: varchar("original_file_name", { length: 255 }).notNull(),
     fileSha256: varchar("file_sha256", { length: 64 }).notNull(),
@@ -110,6 +215,15 @@ export const orderImportBatches = pgTable(
       name: "order_import_batches_store_customer_fk",
       columns: [table.storeId, table.customerId],
       foreignColumns: [stores.id, stores.customerId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "order_import_batches_store_group_fk",
+      columns: [table.storeGroupId, table.storeId, table.customerId],
+      foreignColumns: [
+        bulkImportStoreGroups.id,
+        bulkImportStoreGroups.storeId,
+        bulkImportStoreGroups.customerId,
+      ],
     }).onDelete("restrict"),
     check(
       "order_import_batches_file_size_non_negative",
@@ -276,6 +390,252 @@ export const fulfillmentOrders = pgTable(
     index("fulfillment_orders_status_submitted_index").on(
       table.status,
       table.submittedAt,
+    ),
+  ],
+);
+
+export const fulfillmentOrderImportBatches = pgTable(
+  "fulfillment_order_import_batches",
+  {
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => fulfillmentOrders.id, { onDelete: "restrict" }),
+    importBatchId: uuid("import_batch_id")
+      .notNull()
+      .references(() => orderImportBatches.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "fulfillment_order_import_batches_pk",
+      columns: [table.orderId, table.importBatchId],
+    }),
+    uniqueIndex("fulfillment_order_import_batches_import_batch_unique").on(
+      table.importBatchId,
+    ),
+  ],
+);
+
+export const settlementBatches = pgTable(
+  "settlement_batches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchNumber: varchar("batch_number", { length: 64 }).notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    status: settlementBatchStatus("status")
+      .default("PENDING_PAYMENT")
+      .notNull(),
+    statusReason: text("status_reason"),
+    totalAmountFen: integer("total_amount_fen").notNull(),
+    walletAmountFen: integer("wallet_amount_fen").notNull(),
+    offlineAmountFen: integer("offline_amount_fen").notNull(),
+    paymentDueAt: timestamp("payment_due_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    paymentReportedAt: timestamp("payment_reported_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    paidAt: timestamp("paid_at", { mode: "date", withTimezone: true }),
+    closedAt: timestamp("closed_at", { mode: "date", withTimezone: true }),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("settlement_batches_batch_number_unique").on(table.batchNumber),
+    uniqueIndex("settlement_batches_idempotency_key_unique").on(
+      table.idempotencyKey,
+    ),
+    unique("settlement_batches_id_customer_unique").on(
+      table.id,
+      table.customerId,
+    ),
+    check(
+      "settlement_batches_total_positive",
+      sql`${table.totalAmountFen} > 0`,
+    ),
+    check(
+      "settlement_batches_allocations_non_negative",
+      sql`${table.walletAmountFen} >= 0 and ${table.offlineAmountFen} >= 0`,
+    ),
+    check(
+      "settlement_batches_allocation_equation",
+      sql`${table.totalAmountFen} = ${table.walletAmountFen} + ${table.offlineAmountFen}`,
+    ),
+    check(
+      "settlement_batches_terminal_reason_required",
+      sql`${table.status} not in ('REJECTED', 'WITHDRAWN', 'CANCELLED', 'EXPIRED') or nullif(trim(${table.statusReason}), '') is not null`,
+    ),
+    index("settlement_batches_customer_created_index").on(
+      table.customerId,
+      table.createdAt,
+    ),
+    index("settlement_batches_status_due_index").on(
+      table.status,
+      table.paymentDueAt,
+    ),
+  ],
+);
+
+export const settlementBatchOrders = pgTable(
+  "settlement_batch_orders",
+  {
+    settlementBatchId: uuid("settlement_batch_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    totalAmountFen: integer("total_amount_fen").notNull(),
+    walletAmountFen: integer("wallet_amount_fen").notNull(),
+    offlineAmountFen: integer("offline_amount_fen").notNull(),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "settlement_batch_orders_pk",
+      columns: [table.settlementBatchId, table.orderId],
+    }),
+    foreignKey({
+      name: "settlement_batch_orders_batch_customer_fk",
+      columns: [table.settlementBatchId, table.customerId],
+      foreignColumns: [settlementBatches.id, settlementBatches.customerId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "settlement_batch_orders_order_customer_fk",
+      columns: [table.orderId, table.customerId],
+      foreignColumns: [fulfillmentOrders.id, fulfillmentOrders.customerId],
+    }).onDelete("restrict"),
+    uniqueIndex("settlement_batch_orders_order_unique").on(table.orderId),
+    check(
+      "settlement_batch_orders_total_positive",
+      sql`${table.totalAmountFen} > 0`,
+    ),
+    check(
+      "settlement_batch_orders_allocations_non_negative",
+      sql`${table.walletAmountFen} >= 0 and ${table.offlineAmountFen} >= 0`,
+    ),
+    check(
+      "settlement_batch_orders_allocation_equation",
+      sql`${table.totalAmountFen} = ${table.walletAmountFen} + ${table.offlineAmountFen}`,
+    ),
+    index("settlement_batch_orders_batch_index").on(table.settlementBatchId),
+  ],
+);
+
+export const walletHolds = pgTable(
+  "wallet_holds",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    settlementBatchId: uuid("settlement_batch_id").notNull(),
+    amountFen: integer("amount_fen").notNull(),
+    status: walletHoldStatus("status").default("ACTIVE").notNull(),
+    consumedAt: timestamp("consumed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    releasedAt: timestamp("released_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    releaseReason: text("release_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "wallet_holds_batch_customer_fk",
+      columns: [table.settlementBatchId, table.customerId],
+      foreignColumns: [settlementBatches.id, settlementBatches.customerId],
+    }).onDelete("restrict"),
+    check("wallet_holds_amount_positive", sql`${table.amountFen} > 0`),
+    check(
+      "wallet_holds_consumed_at_required",
+      sql`${table.status} <> 'CONSUMED' or ${table.consumedAt} is not null`,
+    ),
+    check(
+      "wallet_holds_release_details_required",
+      sql`${table.status} <> 'RELEASED' or (${table.releasedAt} is not null and nullif(trim(${table.releaseReason}), '') is not null)`,
+    ),
+    uniqueIndex("wallet_holds_settlement_active_unique")
+      .on(table.settlementBatchId)
+      .where(sql`${table.status} = 'ACTIVE'`),
+    index("wallet_holds_customer_status_index").on(
+      table.customerId,
+      table.status,
+    ),
+  ],
+);
+
+export const settlementPaymentClaims = pgTable(
+  "settlement_payment_claims",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    settlementBatchId: uuid("settlement_batch_id").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    status: settlementPaymentClaimStatus("status")
+      .default("PENDING")
+      .notNull(),
+    amountFen: integer("amount_fen").notNull(),
+    note: text("note"),
+    rejectionReason: text("rejection_reason"),
+    withdrawalReason: text("withdrawal_reason"),
+    reviewedByAdminUserId: uuid("reviewed_by_admin_user_id").references(
+      () => adminUsers.id,
+      { onDelete: "restrict" },
+    ),
+    reviewedAt: timestamp("reviewed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    withdrawnAt: timestamp("withdrawn_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "settlement_payment_claims_batch_customer_fk",
+      columns: [table.settlementBatchId, table.customerId],
+      foreignColumns: [settlementBatches.id, settlementBatches.customerId],
+    }).onDelete("restrict"),
+    check(
+      "settlement_payment_claims_amount_positive",
+      sql`${table.amountFen} > 0`,
+    ),
+    check(
+      "settlement_payment_claims_review_details_required",
+      sql`${table.status} not in ('APPROVED', 'REJECTED') or (${table.reviewedAt} is not null and ${table.reviewedByAdminUserId} is not null)`,
+    ),
+    check(
+      "settlement_payment_claims_rejection_reason_required",
+      sql`${table.status} <> 'REJECTED' or nullif(trim(${table.rejectionReason}), '') is not null`,
+    ),
+    check(
+      "settlement_payment_claims_withdrawal_details_required",
+      sql`${table.status} <> 'WITHDRAWN' or (${table.withdrawnAt} is not null and nullif(trim(${table.withdrawalReason}), '') is not null)`,
+    ),
+    uniqueIndex("settlement_payment_claims_batch_pending_unique")
+      .on(table.settlementBatchId)
+      .where(sql`${table.status} = 'PENDING'`),
+    index("settlement_payment_claims_status_created_index").on(
+      table.status,
+      table.createdAt,
+    ),
+    index("settlement_payment_claims_status_reviewed_index").on(
+      table.status,
+      table.reviewedAt,
     ),
   ],
 );

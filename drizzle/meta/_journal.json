@@ -71,6 +71,13 @@
       "when": 1786493426641,
       "tag": "0009_foamy_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786504305353,
+      "tag": "0010_multi_store_bulk_order",
+      "breakpoints": true
     }
   ]
 }
