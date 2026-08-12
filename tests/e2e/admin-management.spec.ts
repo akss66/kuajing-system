@@ -26,6 +26,11 @@ async function openAdminNavigationIfNeeded(page: Page) {
   }
 }
 
+async function signOutThroughShell(page: Page) {
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("button", { name: "退出登录" }).click();
+}
+
 function accountCreationForm(page: Page) {
   return page
     .locator('form:has(input[name="displayName"]):has(input[name="password"]):not(:has(input[name="userId"]))')
@@ -218,7 +223,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await resetForm.getByRole("button", { name: "重置密码" }).click();
   await expect(page.getByText("登录密码已重置。")).toBeVisible();
 
-  await page.getByRole("button", { name: "退出系统" }).click();
+  await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
 
   await loginThroughUi(page, { email: updatedEmail, password: initialPassword });
@@ -233,7 +238,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await expect(page).toHaveURL(/\/admin\/accounts$/);
   await expect(page.getByRole("heading", { name: "账号管理受限" })).toBeVisible();
 
-  await page.getByRole("button", { name: "退出系统" }).click();
+  await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
 
   await loginThroughUi(page, seededSuperAdmin);
@@ -255,7 +260,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
     return sessions.length;
   }).toBe(0);
 
-  await page.getByRole("button", { name: "退出系统" }).click();
+  await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
 
   await loginThroughUi(page, { email: updatedEmail, password: resetPassword });
@@ -276,7 +281,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
     return user?.banned;
   }).toBe(false);
 
-  await page.getByRole("button", { name: "退出系统" }).click();
+  await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/login$/);
@@ -445,7 +450,7 @@ test("ordinary admins can manage customer details and multi-store operations", a
     return store?.status;
   }).toBe("ACTIVE");
 
-  await page.getByRole("button", { name: "退出系统" }).click();
+  await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/admin/customers");
   await expect(page).toHaveURL(/\/login$/);

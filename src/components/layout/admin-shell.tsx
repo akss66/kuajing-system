@@ -10,10 +10,9 @@ import {
   ClipboardList,
   FileSearch,
   LayoutDashboard,
-  Menu,
   PackageSearch,
-  RotateCcw,
   PlugZap,
+  RotateCcw,
   Settings2,
   WalletCards,
 } from "lucide-react";
@@ -24,19 +23,11 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { SheetClose } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/shared/brand";
 
-import { LogoutButton } from "./logout-button";
+import { MerchantTopbar } from "./merchant-topbar";
 
 type NavigationItem = {
   href?: string;
@@ -66,6 +57,18 @@ function navigationForRole(principalKind: "ADMIN" | "SUPER_ADMIN"): NavigationIt
   ];
 }
 
+function BrandBlock() {
+  return (
+    <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+      <Image alt="" className="h-9 w-auto object-contain" height={36} priority src={BRAND.logoPath} width={38} />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold tracking-tight text-foreground">{BRAND.name}</p>
+        <p className="text-[11px] text-muted-foreground">商家运营后台</p>
+      </div>
+    </div>
+  );
+}
+
 function Navigation({
   mobile = false,
   principalKind,
@@ -77,7 +80,7 @@ function Navigation({
   const navigation = navigationForRole(principalKind);
 
   return (
-    <nav aria-label="管理员主导航" className="space-y-1 px-3">
+    <nav aria-label="管理员主导航" className="space-y-1.5 px-3 py-3">
       {navigation.map((item) => {
         const active = item.href
           ? item.href === "/admin"
@@ -89,7 +92,7 @@ function Navigation({
             <item.icon aria-hidden="true" className="size-[18px]" />
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
             {!item.href ? (
-              <Badge className="border-0 bg-surface-muted px-1.5 text-[10px] font-normal text-muted" variant="outline">
+              <Badge className="rounded-md border-0 bg-surface-muted px-1.5 text-[10px] font-medium text-muted-foreground" variant="outline">
                 后续
               </Badge>
             ) : null}
@@ -100,7 +103,7 @@ function Navigation({
           return (
             <div
               aria-disabled="true"
-              className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm text-muted/65"
+              className="flex min-h-10 items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm text-muted-foreground/70"
               key={item.label}
             >
               {content}
@@ -111,10 +114,10 @@ function Navigation({
         const link = (
           <Link
             className={cn(
-              "flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors",
+              "flex min-h-10 items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm font-medium transition-colors",
               active
-                ? "bg-primary-soft text-primary-hover"
-                : "text-muted hover:bg-surface-muted hover:text-ink",
+                ? "bg-[var(--merchant-nav-active)] text-[var(--merchant-nav-active-foreground)]"
+                : "text-muted-foreground hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
             )}
             href={item.href}
           >
@@ -134,15 +137,12 @@ function Navigation({
   );
 }
 
-function BrandBlock() {
+function MobileNavigation({ principalKind }: { principalKind: "ADMIN" | "SUPER_ADMIN" }) {
   return (
-    <div className="flex h-18 items-center gap-3 border-b border-border px-5">
-      <Image alt="" className="h-9 w-auto object-contain" height={36} priority src={BRAND.logoPath} width={38} />
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold tracking-tight text-ink">{BRAND.name}</p>
-        <p className="text-[11px] text-muted">运营管理后台</p>
-      </div>
-    </div>
+    <>
+      <BrandBlock />
+      <Navigation mobile principalKind={principalKind} />
+    </>
   );
 }
 
@@ -153,57 +153,34 @@ export function AdminShell({
   children: ReactNode;
   principalKind: "ADMIN" | "SUPER_ADMIN";
 }) {
+  const badgeLabel = principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员";
+  const helperText =
+    principalKind === "SUPER_ADMIN" ? "可管理账号、客户与店铺" : "负责客户、订单与店铺日常运营";
+
   return (
     <div className="min-h-svh bg-surface">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-background lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 border-r border-border bg-[var(--merchant-sidebar)] lg:block">
         <BrandBlock />
-        <div className="py-4">
-          <p className="mb-2 px-6 text-[11px] font-semibold tracking-[0.1em] text-muted">运营工作台</p>
+        <div className="py-3">
+          <p className="px-6 text-[11px] font-semibold tracking-[0.1em] text-muted-foreground">运营工作台</p>
           <Navigation principalKind={principalKind} />
         </div>
-        <div className="absolute inset-x-3 bottom-3 rounded-lg border border-border bg-surface px-3 py-3">
-          <p className="text-xs font-medium text-ink">
-            {principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员"}
-          </p>
-          <p className="mt-0.5 text-[11px] text-muted">
-            {principalKind === "SUPER_ADMIN" ? "可管理账号、客户与店铺" : "负责客户与店铺日常运营"}
-          </p>
+        <div className="absolute inset-x-3 bottom-3 rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-3 py-3">
+          <p className="text-xs font-semibold text-foreground">{badgeLabel}</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{helperText}</p>
         </div>
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button aria-label="打开导航" className="min-h-11 min-w-11 lg:hidden" size="icon" variant="outline">
-                  <Menu aria-hidden="true" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent className="w-[296px] p-0" side="left">
-                <SheetHeader className="sr-only">
-                  <SheetTitle>管理员导航</SheetTitle>
-                </SheetHeader>
-                <BrandBlock />
-                <div className="py-4">
-                  <Navigation mobile principalKind={principalKind} />
-                </div>
-              </SheetContent>
-            </Sheet>
-            <div>
-              <p className="text-sm font-medium text-ink">同舟行运营中心</p>
-              <p className="hidden text-xs text-muted sm:block">加拿大货盘 · TEMU 一件代发</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden rounded-full bg-primary-soft px-3 py-1.5 text-xs font-medium text-primary-hover sm:inline-flex">
-              {principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员"}
-            </span>
-            <LogoutButton />
-          </div>
-        </header>
-
-        <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+      <div className="lg:pl-56">
+        <MerchantTopbar
+          audience="admin"
+          badgeLabel={badgeLabel}
+          mobileNavigation={<MobileNavigation principalKind={principalKind} />}
+          mobileNavigationTitle="管理员导航"
+          subtitle="加拿大本地货盘 · TEMU 一件代发"
+          title="同舟行运营中心"
+        />
+        <main className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">{children}</main>
       </div>
     </div>
   );

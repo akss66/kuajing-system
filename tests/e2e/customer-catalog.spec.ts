@@ -117,6 +117,7 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
   for (const width of [360, 390, 430]) {
     await page.setViewportSize({ height: 844, width });
     await page.goto("/portal/catalog");
+    await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
     await expect(page.getByTestId(`catalog-${fixture.availableSku.id}`)).toBeVisible();
     const overflow = await page.evaluate(
@@ -124,4 +125,8 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
     );
     expect(overflow).toBeLessThanOrEqual(0);
   }
+
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await expect(page).toHaveURL(/\/login$/);
 });

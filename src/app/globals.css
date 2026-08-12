@@ -3,19 +3,33 @@
 @import "shadcn/tailwind.css";
 
 :root {
-  --tzx-primary: oklch(0.43 0.09 170);
-  --tzx-primary-hover: oklch(0.37 0.085 170);
-  --tzx-primary-soft: oklch(0.95 0.025 170);
-  --tzx-background: oklch(1 0 0);
-  --tzx-surface: oklch(0.975 0.004 180);
-  --tzx-surface-muted: oklch(0.955 0.006 180);
-  --tzx-ink: oklch(0.22 0.018 175);
-  --tzx-muted: oklch(0.49 0.015 175);
-  --tzx-border: oklch(0.89 0.008 175);
-  --tzx-success: oklch(0.46 0.11 145);
-  --tzx-warning: oklch(0.46 0.11 70);
-  --tzx-danger: oklch(0.55 0.18 25);
-  --tzx-info: oklch(0.52 0.13 245);
+  --font-product: "Geist Variable", "Noto Sans SC Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --merchant-topbar: oklch(0.21 0.008 195);
+  --merchant-topbar-foreground: oklch(0.985 0.002 180);
+  --merchant-topbar-muted: oklch(0.82 0.01 190);
+  --merchant-canvas: oklch(0.968 0.003 190);
+  --merchant-sidebar: oklch(0.989 0.002 180);
+  --merchant-panel: oklch(1 0 0);
+  --merchant-panel-border: oklch(0.9 0.007 185);
+  --merchant-table-header: oklch(0.958 0.004 190);
+  --merchant-nav-hover: oklch(0.955 0.008 188);
+  --merchant-nav-active: oklch(0.924 0.025 182);
+  --merchant-nav-active-foreground: oklch(0.33 0.055 182);
+  --merchant-focus-ring: oklch(0.55 0.105 180);
+  --tzx-primary: oklch(0.55 0.105 180);
+  --tzx-primary-hover: oklch(0.47 0.093 180);
+  --tzx-primary-soft: oklch(0.942 0.028 182);
+  --tzx-background: var(--merchant-panel);
+  --tzx-surface: var(--merchant-canvas);
+  --tzx-surface-muted: oklch(0.95 0.004 188);
+  --tzx-ink: oklch(0.24 0.015 185);
+  --tzx-muted: oklch(0.47 0.012 185);
+  --tzx-border: var(--merchant-panel-border);
+  --tzx-success: oklch(0.54 0.11 151);
+  --tzx-warning: oklch(0.69 0.13 83);
+  --tzx-danger: oklch(0.59 0.19 28);
+  --tzx-info: oklch(0.57 0.11 245);
   --color-primary: var(--tzx-primary);
   --color-primary-hover: var(--tzx-primary-hover);
   --color-primary-soft: var(--tzx-primary-soft);
@@ -29,41 +43,41 @@
   --color-warning: var(--tzx-warning);
   --color-danger: var(--tzx-danger);
   --color-info: var(--tzx-info);
-  --radius-control: 8px;
-  --radius-surface: 10px;
+  --radius-control: 0.5rem;
+  --radius-surface: 0.375rem;
   --duration-fast: 160ms;
   --background: var(--tzx-background);
   --foreground: var(--tzx-ink);
-  --card: var(--tzx-background);
+  --card: var(--merchant-panel);
   --card-foreground: var(--tzx-ink);
-  --popover: var(--tzx-background);
+  --popover: var(--merchant-panel);
   --popover-foreground: var(--tzx-ink);
   --primary: var(--tzx-primary);
   --primary-foreground: oklch(1 0 0);
-  --secondary: var(--tzx-surface-muted);
+  --secondary: var(--merchant-nav-hover);
   --secondary-foreground: var(--tzx-ink);
-  --muted: var(--tzx-surface-muted);
+  --muted: var(--merchant-nav-hover);
   --muted-foreground: var(--tzx-muted);
-  --accent: var(--tzx-primary-soft);
-  --accent-foreground: var(--tzx-primary-hover);
+  --accent: var(--merchant-nav-active);
+  --accent-foreground: var(--merchant-nav-active-foreground);
   --destructive: var(--tzx-danger);
   --border: var(--tzx-border);
   --input: var(--tzx-border);
-  --ring: var(--tzx-primary);
+  --ring: var(--merchant-focus-ring);
   --chart-1: var(--tzx-primary);
   --chart-2: var(--tzx-info);
   --chart-3: var(--tzx-success);
   --chart-4: var(--tzx-warning);
   --chart-5: var(--tzx-muted);
-  --radius: 0.625rem;
-  --sidebar: var(--tzx-surface);
+  --radius: var(--radius-surface);
+  --sidebar: var(--merchant-sidebar);
   --sidebar-foreground: var(--tzx-ink);
-  --sidebar-primary: var(--tzx-primary);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: var(--tzx-primary-soft);
-  --sidebar-accent-foreground: var(--tzx-primary-hover);
+  --sidebar-primary: var(--merchant-nav-active);
+  --sidebar-primary-foreground: var(--merchant-nav-active-foreground);
+  --sidebar-accent: var(--merchant-nav-hover);
+  --sidebar-accent-foreground: var(--tzx-ink);
   --sidebar-border: var(--tzx-border);
-  --sidebar-ring: var(--tzx-primary);
+  --sidebar-ring: var(--merchant-focus-ring);
 }
 
 @theme inline {
@@ -80,8 +94,8 @@
   --color-warning: var(--tzx-warning);
   --color-danger: var(--tzx-danger);
   --color-info: var(--tzx-info);
-  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-heading: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-sans: var(--font-product);
+  --font-heading: var(--font-product);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -109,13 +123,13 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
   --color-foreground: var(--foreground);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.33);
+  --radius-xl: calc(var(--radius) * 1.67);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 2.33);
+  --radius-4xl: calc(var(--radius) * 2.66);
 }
 
 * {
@@ -123,14 +137,14 @@
 }
 
 html {
-  background: var(--color-background);
+  background: var(--merchant-canvas);
 }
 
 body {
   min-height: 100svh;
-  background: var(--color-background);
+  background: var(--merchant-canvas);
   color: var(--color-ink);
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: var(--font-product);
   text-rendering: optimizeLegibility;
 }
 
@@ -142,7 +156,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 3px solid color-mix(in oklch, var(--color-primary), white 35%);
+  outline: 3px solid color-mix(in oklch, var(--merchant-focus-ring), white 38%);
   outline-offset: 2px;
 }
 
@@ -165,13 +179,18 @@ textarea {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
-  button:not(:disabled), [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
+
   html {
     @apply font-sans;
+  }
+
+  body {
+    @apply text-foreground;
+    background: var(--merchant-canvas);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
