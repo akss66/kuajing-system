@@ -58,6 +58,15 @@ describe("tenant-aware access guards", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN_ADMIN" });
   });
 
+  test("super admin principals can pass an admin guard", async () => {
+    await expect(
+      requireAdmin(async () => ({
+        kind: "SUPER_ADMIN",
+        userId: crypto.randomUUID(),
+      })),
+    ).resolves.toMatchObject({ kind: "SUPER_ADMIN" });
+  });
+
   test("admin principals cannot pass a customer guard", async () => {
     await expect(
       requireCustomer(async () => ({ kind: "ADMIN", userId: crypto.randomUUID() })),

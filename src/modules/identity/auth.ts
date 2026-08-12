@@ -2,6 +2,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { admin } from "better-auth/plugins";
+import { adminAc, userAc } from "better-auth/plugins/admin/access";
 
 import { db } from "@/db/client";
 import { betterAuthSchema } from "@/db/schema";
@@ -57,5 +58,14 @@ export const auth = betterAuth({
       },
     },
   },
-  plugins: [admin()],
+  plugins: [
+    admin({
+      adminRoles: ["super_admin"],
+      roles: {
+        admin: userAc,
+        super_admin: adminAc,
+        user: userAc,
+      },
+    }),
+  ],
 });

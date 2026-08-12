@@ -1,10 +1,13 @@
 import {
   boolean,
+  check,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { customers } from "./customers";
 
@@ -17,21 +20,37 @@ const timestamps = {
     .notNull(),
 };
 
-export const authUsers = pgTable("auth_users", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
-  role: text("role").default("user"),
-  banned: boolean("banned").default(false),
-  banReason: text("ban_reason"),
-  banExpires: timestamp("ban_expires", { mode: "date", withTimezone: true }),
-  customerId: uuid("customer_id").references(() => customers.id, {
-    onDelete: "restrict",
-  }),
-  ...timestamps,
-});
+export const authUsers = pgTable(
+  "auth_users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    role: text("role").default("user").notNull(),
+    banned: boolean("banned").default(false).notNull(),
+    banReason: text("ban_reason"),
+    banExpires: timestamp("ban_expires", { mode: "date", withTimezone: true }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "restrict",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("auth_users_customer_unique")
+      .on(table.customerId)
+      .where(sql`${table.customerId} is not null`),
+    check(
+      "auth_users_role_check",
+      sql`${table.role} in ('super_admin', 'admin', 'user')`,
+    ),
+    check(
+      "auth_users_customer_role_check",
+      sql`(${table.role} = 'user' and ${table.customerId} is not null) or (${table.role} in ('super_admin', 'admin') and ${table.customerId} is null)`,
+    ),
+  ],
+);
 
 export const authSessions = pgTable("auth_sessions", {
   id: text("id").primaryKey(),

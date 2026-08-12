@@ -3,9 +3,11 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "./client";
 import {
+  adminUsers,
   authAccounts,
   authUsers,
   customerSkuPrices,
+  customerUsers,
   customers,
   inventoryBalances,
   products,
@@ -29,7 +31,7 @@ async function upsertCredentialUser(input: {
   id: string;
   name: string;
   password: string;
-  role: "admin" | "user";
+  role: "admin" | "super_admin" | "user";
 }) {
   const password = await hashPassword(input.password);
   await db
@@ -74,7 +76,7 @@ async function upsertCredentialUser(input: {
   }
 }
 
-async function seed() {
+export async function seed() {
   const [customer] = await db
     .insert(customers)
     .values({ code: "DEMO-CUSTOMER", name: "渥太华演示客户" })
@@ -97,8 +99,23 @@ async function seed() {
     id: "00000000-0000-4000-8000-00000000a001",
     name: "本地演示管理员",
     password: ADMIN_PASSWORD,
-    role: "admin",
+    role: "super_admin",
   });
+  await db
+    .insert(adminUsers)
+    .values({
+      displayName: "本地演示管理员",
+      loginIdentifier: ADMIN_EMAIL,
+      status: "ACTIVE",
+    })
+    .onConflictDoUpdate({
+      set: {
+        displayName: "本地演示管理员",
+        status: "ACTIVE",
+        updatedAt: new Date(),
+      },
+      target: adminUsers.loginIdentifier,
+    });
   await upsertCredentialUser({
     customerId: customer.id,
     email: CUSTOMER_EMAIL,
@@ -107,6 +124,24 @@ async function seed() {
     password: CUSTOMER_PASSWORD,
     role: "user",
   });
+  await db
+    .insert(customerUsers)
+    .values({
+      customerId: customer.id,
+      displayName: "渝太华演示客户",
+      loginIdentifier: CUSTOMER_EMAIL,
+      status: "ACTIVE",
+    })
+    .onConflictDoUpdate({
+      set: {
+        customerId: customer.id,
+        displayName: "渝太华演示客户",
+        loginIdentifier: CUSTOMER_EMAIL,
+        status: "ACTIVE",
+        updatedAt: new Date(),
+      },
+      target: customerUsers.loginIdentifier,
+    });
 
   let [product] = await db
     .select({ id: products.id })
@@ -150,4 +185,6 @@ async function seed() {
   console.log("Seed complete: admin@tongzhouxing.local / customer@tongzhouxing.local");
 }
 
-await seed();
+if (import.meta.url === new URL(process.argv[1], "file://").href) {
+  await seed();
+}

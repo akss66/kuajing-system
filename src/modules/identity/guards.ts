@@ -7,6 +7,7 @@ import type {
   AdminPrincipal,
   CustomerPrincipal,
   PrincipalResolver,
+  SuperAdminPrincipal,
 } from "./principal";
 import { getCurrentPrincipal } from "./principal";
 
@@ -29,10 +30,23 @@ const resolveAuthenticatedPrincipal: PrincipalResolver = () =>
 
 export async function requireAdmin(
   resolvePrincipal: PrincipalResolver = resolveAuthenticatedPrincipal,
-): Promise<AdminPrincipal> {
+): Promise<AdminPrincipal | SuperAdminPrincipal> {
   const principal = await resolvePrincipal();
   if (!principal) throw new AccessError("UNAUTHENTICATED", 401);
-  if (principal.kind !== "ADMIN") throw new AccessError("FORBIDDEN_ADMIN", 403);
+  if (principal.kind !== "ADMIN" && principal.kind !== "SUPER_ADMIN") {
+    throw new AccessError("FORBIDDEN_ADMIN", 403);
+  }
+  return principal;
+}
+
+export async function requireSuperAdmin(
+  resolvePrincipal: PrincipalResolver = resolveAuthenticatedPrincipal,
+): Promise<SuperAdminPrincipal> {
+  const principal = await resolvePrincipal();
+  if (!principal) throw new AccessError("UNAUTHENTICATED", 401);
+  if (principal.kind !== "SUPER_ADMIN") {
+    throw new AccessError("FORBIDDEN_ADMIN", 403);
+  }
   return principal;
 }
 

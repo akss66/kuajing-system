@@ -99,6 +99,13 @@
       "when": 1786526841961,
       "tag": "0013_jifeng_reconciliation_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786536000000,
+      "tag": "0014_account_governance",
+      "breakpoints": true
     }
   ]
 }

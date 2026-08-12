@@ -5,13 +5,18 @@ export type AdminPrincipal = {
   userId: string;
 };
 
+export type SuperAdminPrincipal = {
+  kind: "SUPER_ADMIN";
+  userId: string;
+};
+
 export type CustomerPrincipal = {
   kind: "CUSTOMER";
   userId: string;
   customerId: string;
 };
 
-export type Principal = AdminPrincipal | CustomerPrincipal;
+export type Principal = AdminPrincipal | CustomerPrincipal | SuperAdminPrincipal;
 export type PrincipalResolver = () => Promise<Principal | null>;
 
 export async function getCurrentPrincipal(
@@ -27,6 +32,10 @@ export async function getCurrentPrincipal(
     ?.split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+
+  if (role?.includes("super_admin")) {
+    return { kind: "SUPER_ADMIN", userId: session.user.id };
+  }
 
   if (role?.includes("admin")) {
     return { kind: "ADMIN", userId: session.user.id };
