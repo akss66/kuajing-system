@@ -12,6 +12,7 @@ const baseURL = process.env.BETTER_AUTH_URL;
 
 if (!secret) throw new Error("BETTER_AUTH_SECRET is required");
 if (!baseURL) throw new Error("BETTER_AUTH_URL is required");
+const useSecureCookies = baseURL.startsWith("https://");
 
 export const auth = betterAuth({
   appName: BRAND.name,
@@ -31,7 +32,7 @@ export const auth = betterAuth({
     defaultCookieAttributes: {
       httpOnly: true,
       sameSite: "lax",
-      secure: true,
+      secure: useSecureCookies,
     },
   },
   hooks: {

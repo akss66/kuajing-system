@@ -1,5 +1,8 @@
 "use server";
 
+import crypto from "node:crypto";
+
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireCustomer } from "@/modules/identity/guards";
@@ -15,6 +18,11 @@ import {
   removeGroupFile,
   uploadGroupFiles,
 } from "./draft-service";
+import {
+  BulkSubmissionError,
+  submitBulkDraft,
+  type BulkSubmissionResult,
+} from "./submission-service";
 
 const idSchema = z.string().uuid();
 const groupInputSchema = z.object({
@@ -29,6 +37,27 @@ const uploadedFileSchema = z
       file.name.toLowerCase().endsWith(".xlsx") &&
       file.type === TEMU_XLSX_MIME_TYPE,
   );
+const submitDraftSchema = z.object({
+  draftId: idSchema,
+  requestedWalletFen: z.number().int().min(0).max(2_147_483_647),
+  selectedGroupIds: z.array(idSchema).min(1).max(20),
+});
+
+export type SubmitBulkDraftActionResult =
+  | { ok: true; result: BulkSubmissionResult }
+  | { message: string; ok: false };
+
+function draftErrorMessage(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "批量拿货草稿处理失败，请稍后重试。";
+}
 
 export async function createBulkDraftAction() {
   const principal = await requireCustomer();
@@ -81,4 +110,40 @@ export async function removeGroupFileAction(batchId: unknown) {
     batchId: idSchema.parse(batchId),
     customerId: principal.customerId,
   });
+}
+
+export async function submitBulkDraftAction(
+  input: unknown,
+): Promise<SubmitBulkDraftActionResult> {
+  const principal = await requireCustomer();
+  const parsed = submitDraftSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      message: "请至少选择一个可提交店铺，并确认余额抵扣金额有效。",
+      ok: false,
+    };
+  }
+
+  try {
+    const result = await submitBulkDraft({
+      actorUserId: principal.userId,
+      customerId: principal.customerId,
+      draftId: parsed.data.draftId,
+      idempotencyKey: crypto.randomUUID(),
+      requestedWalletFen: parsed.data.requestedWalletFen,
+      selectedGroupIds: parsed.data.selectedGroupIds,
+    });
+    revalidatePath(`/portal/bulk-orders/${parsed.data.draftId}`);
+    revalidatePath("/portal/orders");
+    revalidatePath("/portal/wallet");
+    if (result.settlementBatchId) {
+      revalidatePath(`/portal/settlements/${result.settlementBatchId}`);
+    }
+    return { ok: true, result };
+  } catch (error) {
+    if (error instanceof BulkSubmissionError) {
+      return { message: error.message, ok: false };
+    }
+    return { message: draftErrorMessage(error), ok: false };
+  }
 }

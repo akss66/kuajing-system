@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import {
   customers,
   fulfillmentOrders,
+  settlementBatches,
   walletAccounts,
   walletHolds,
   walletTransactions,
@@ -92,6 +93,25 @@ export async function getCustomerWalletView(customerId: string) {
     .where(eq(walletTransactions.customerId, customerId))
     .orderBy(desc(walletTransactions.createdAt))
     .limit(100);
+  const holds = await db
+    .select({
+      amountFen: walletHolds.amountFen,
+      batchNumber: settlementBatches.batchNumber,
+      createdAt: walletHolds.createdAt,
+      id: walletHolds.id,
+      releaseReason: walletHolds.releaseReason,
+      releasedAt: walletHolds.releasedAt,
+      settlementBatchId: walletHolds.settlementBatchId,
+      status: walletHolds.status,
+    })
+    .from(walletHolds)
+    .innerJoin(
+      settlementBatches,
+      eq(settlementBatches.id, walletHolds.settlementBatchId),
+    )
+    .where(eq(walletHolds.customerId, customerId))
+    .orderBy(desc(walletHolds.createdAt))
+    .limit(50);
 
-  return { ...position, transactions };
+  return { ...position, holds, transactions };
 }

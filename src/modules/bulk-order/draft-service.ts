@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  desc,
   eq,
   inArray,
   sql,
@@ -62,6 +63,17 @@ export type BulkDraftView = {
   updatedAt: Date;
   expiresAt: Date;
   groups: StoreGroupView[];
+};
+
+export type BulkDraftListItem = {
+  createdAt: Date;
+  expiresAt: Date;
+  fileCount: number;
+  groupCount: number;
+  id: string;
+  status: BulkDraftStatus;
+  submittableGroupCount: number;
+  updatedAt: Date;
 };
 
 export class BulkDraftError extends Error {
@@ -442,6 +454,56 @@ export async function getBulkDraft(
     status,
     updatedAt,
   };
+}
+
+export async function listBulkDrafts(customerId: string): Promise<BulkDraftListItem[]> {
+  const drafts = await db
+    .select({
+      createdAt: bulkImportDrafts.createdAt,
+      expiresAt: bulkImportDrafts.expiresAt,
+      id: bulkImportDrafts.id,
+      status: bulkImportDrafts.status,
+      updatedAt: bulkImportDrafts.updatedAt,
+    })
+    .from(bulkImportDrafts)
+    .where(eq(bulkImportDrafts.customerId, customerId))
+    .orderBy(desc(bulkImportDrafts.updatedAt));
+
+  if (!drafts.length) return [];
+
+  const groupRows = await db
+    .select({
+      draftId: bulkImportStoreGroups.draftId,
+      fileCount: sql<number>`count(${orderImportBatches.id})::int`.mapWith(Number),
+      groupId: bulkImportStoreGroups.id,
+      status: bulkImportStoreGroups.status,
+    })
+    .from(bulkImportStoreGroups)
+    .leftJoin(
+      orderImportBatches,
+      eq(orderImportBatches.storeGroupId, bulkImportStoreGroups.id),
+    )
+    .where(
+      inArray(
+        bulkImportStoreGroups.draftId,
+        drafts.map((draft) => draft.id),
+      ),
+    )
+    .groupBy(bulkImportStoreGroups.draftId, bulkImportStoreGroups.id, bulkImportStoreGroups.status);
+
+  return drafts.map((draft) => {
+    const draftGroups = groupRows.filter((group) => group.draftId === draft.id);
+    return {
+      createdAt: draft.createdAt,
+      expiresAt: draft.expiresAt,
+      fileCount: draftGroups.reduce((total, group) => total + group.fileCount, 0),
+      groupCount: draftGroups.length,
+      id: draft.id,
+      status: draft.status,
+      submittableGroupCount: draftGroups.filter((group) => group.status === "PREVIEW").length,
+      updatedAt: draft.updatedAt,
+    };
+  });
 }
 
 export async function removeGroupFile(input: {
