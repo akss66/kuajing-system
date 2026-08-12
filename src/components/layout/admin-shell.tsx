@@ -36,31 +36,45 @@ import {
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/shared/brand";
 
+import { LogoutButton } from "./logout-button";
+
 type NavigationItem = {
   href?: string;
   icon: LucideIcon;
   label: string;
 };
 
-const navigation: NavigationItem[] = [
-  { href: "/admin", icon: LayoutDashboard, label: "运营总览" },
-  { href: "/admin/customers", icon: Building2, label: "客户与店铺" },
-  { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
-  { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
-  { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
-  { href: "/admin/bulk-orders", icon: FileSearch, label: "批量草稿诊断" },
-  { href: "/admin/replacements", icon: RotateCcw, label: "补发管理" },
-  { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
-  { href: "/admin/settlement-batches", icon: WalletCards, label: "统一结算批次" },
-  { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
-  { href: "/admin/notifications", icon: BellRing, label: "系统通知" },
-  { href: "/admin/system/integrations", icon: PlugZap, label: "外部集成" },
-  { href: "/admin/system/health", icon: Activity, label: "系统健康" },
-  { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
-];
+function navigationForRole(principalKind: "ADMIN" | "SUPER_ADMIN"): NavigationItem[] {
+  return [
+    { href: "/admin", icon: LayoutDashboard, label: "运营总览" },
+    { href: "/admin/customers", icon: Building2, label: "客户与店铺" },
+    ...(principalKind === "SUPER_ADMIN"
+      ? [{ href: "/admin/accounts", icon: Settings2, label: "账号管理" } satisfies NavigationItem]
+      : []),
+    { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
+    { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
+    { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
+    { href: "/admin/bulk-orders", icon: FileSearch, label: "批量草稿诊断" },
+    { href: "/admin/replacements", icon: RotateCcw, label: "补发管理" },
+    { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
+    { href: "/admin/settlement-batches", icon: WalletCards, label: "统一结算批次" },
+    { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
+    { href: "/admin/notifications", icon: BellRing, label: "系统通知" },
+    { href: "/admin/system/integrations", icon: PlugZap, label: "外部集成" },
+    { href: "/admin/system/health", icon: Activity, label: "系统健康" },
+    { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
+  ];
+}
 
-function Navigation({ mobile = false }: { mobile?: boolean }) {
+function Navigation({
+  mobile = false,
+  principalKind,
+}: {
+  mobile?: boolean;
+  principalKind: "ADMIN" | "SUPER_ADMIN";
+}) {
   const pathname = usePathname();
+  const navigation = navigationForRole(principalKind);
 
   return (
     <nav aria-label="管理员主导航" className="space-y-1 px-3">
@@ -132,18 +146,28 @@ function BrandBlock() {
   );
 }
 
-export function AdminShell({ children }: { children: ReactNode }) {
+export function AdminShell({
+  children,
+  principalKind,
+}: {
+  children: ReactNode;
+  principalKind: "ADMIN" | "SUPER_ADMIN";
+}) {
   return (
     <div className="min-h-svh bg-surface">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-background lg:block">
         <BrandBlock />
         <div className="py-4">
           <p className="mb-2 px-6 text-[11px] font-semibold tracking-[0.1em] text-muted">运营工作台</p>
-          <Navigation />
+          <Navigation principalKind={principalKind} />
         </div>
         <div className="absolute inset-x-3 bottom-3 rounded-lg border border-border bg-surface px-3 py-3">
-          <p className="text-xs font-medium text-ink">超级管理员</p>
-          <p className="mt-0.5 text-[11px] text-muted">全部管理权限</p>
+          <p className="text-xs font-medium text-ink">
+            {principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员"}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted">
+            {principalKind === "SUPER_ADMIN" ? "可管理账号、客户与店铺" : "负责客户与店铺日常运营"}
+          </p>
         </div>
       </aside>
 
@@ -162,17 +186,20 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 </SheetHeader>
                 <BrandBlock />
                 <div className="py-4">
-                  <Navigation mobile />
+                  <Navigation mobile principalKind={principalKind} />
                 </div>
               </SheetContent>
             </Sheet>
             <div>
               <p className="text-sm font-medium text-ink">同舟行运营中心</p>
-              <p className="hidden text-xs text-muted sm:block">加拿大货盘 · 一件代发</p>
+              <p className="hidden text-xs text-muted sm:block">加拿大货盘 · TEMU 一件代发</p>
             </div>
           </div>
-          <div className="flex size-9 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary-hover" aria-label="超级管理员">
-            管
+          <div className="flex items-center gap-3">
+            <span className="hidden rounded-full bg-primary-soft px-3 py-1.5 text-xs font-medium text-primary-hover sm:inline-flex">
+              {principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员"}
+            </span>
+            <LogoutButton />
           </div>
         </header>
 

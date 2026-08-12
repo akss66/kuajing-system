@@ -98,14 +98,14 @@ export async function createCustomerWithStoreAction(
     });
   } catch {
     return {
-      message: "Customer code, store name, or login email already exists.",
+      message: "客户编号、店铺名称或登录邮箱已存在。",
       status: "error",
     };
   }
 
   revalidatePath("/admin/customers");
   revalidatePath("/admin");
-  return { message: "Customer and store created.", status: "success" };
+  return { message: "客户与首家店铺已创建。", status: "success" };
 }
 
 export async function updateCustomerAction(
@@ -127,7 +127,7 @@ export async function updateCustomerAction(
 
   await updateCustomer({ actor, ...parsed.data });
   revalidateCustomerManagement(parsed.data.customerId);
-  return { status: "success" };
+  return { message: "客户资料已更新。", status: "success" };
 }
 
 export async function createStoreAction(
@@ -148,7 +148,7 @@ export async function createStoreAction(
 
   await createStore({ actor, ...parsed.data });
   revalidateCustomerManagement(parsed.data.customerId);
-  return { status: "success" };
+  return { message: "店铺已新增。", status: "success" };
 }
 
 export async function updateStoreAction(
@@ -170,7 +170,7 @@ export async function updateStoreAction(
 
   await updateStore({ actor, ...parsed.data });
   revalidateCustomerManagement(customerId);
-  return { status: "success" };
+  return { message: "店铺资料已更新。", status: "success" };
 }
 
 export async function setCustomerStatusAction(
@@ -189,7 +189,10 @@ export async function setCustomerStatusAction(
 
   await setCustomerStatus({ actor, ...parsed.data });
   revalidateCustomerManagement(parsed.data.customerId);
-  return { status: "success" };
+  return {
+    message: parsed.data.status === "DISABLED" ? "客户已停用。" : "客户已恢复。",
+    status: "success",
+  };
 }
 
 export async function setStoreStatusAction(
@@ -214,5 +217,8 @@ export async function setStoreStatusAction(
     storeId: parsed.data.storeId,
   });
   revalidateCustomerManagement(parsed.data.customerId);
-  return { status: "success" };
+  return {
+    message: parsed.data.status === "DISABLED" ? "店铺已停用。" : "店铺已恢复。",
+    status: "success",
+  };
 }

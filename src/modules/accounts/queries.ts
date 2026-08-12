@@ -8,6 +8,7 @@ export type ManagedAccountSummary = {
   displayName: string;
   email: string;
   kind: "ADMIN" | "CUSTOMER" | "SUPER_ADMIN";
+  lastLoginAt: Date | null;
   status: "ACTIVE" | "DISABLED";
   storeCount: number;
   userId: string;
@@ -30,12 +31,15 @@ export async function listManagedAccounts(): Promise<ManagedAccountSummary[]> {
         when u.banned then 'DISABLED'
         else 'ACTIVE'
       end as "status",
-      coalesce(count(s.id), 0)::int as "storeCount"
+      max(sessions.updated_at) as "lastLoginAt",
+      coalesce(count(distinct s.id), 0)::int as "storeCount"
     from auth_users u
     left join customers c
       on c.id = u.customer_id
     left join stores s
       on s.customer_id = u.customer_id
+    left join auth_sessions sessions
+      on sessions.user_id = u.id
     group by u.id, c.id
     order by
       case
@@ -48,6 +52,7 @@ export async function listManagedAccounts(): Promise<ManagedAccountSummary[]> {
 
   return rows.map((row) => ({
     ...row,
+    lastLoginAt: row.lastLoginAt ? new Date(row.lastLoginAt) : null,
     storeCount: Number(row.storeCount),
   }));
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireSuperAdmin } from "@/modules/identity/guards";
@@ -17,6 +18,11 @@ function validationState(error: z.ZodError): ActionState {
     fieldErrors: z.flattenError(error).fieldErrors as Record<string, string[]>,
     status: "error",
   };
+}
+
+function revalidateAccountManagement() {
+  revalidatePath("/admin");
+  revalidatePath("/admin/accounts");
 }
 
 const createAdminSchema = z.object({
@@ -39,7 +45,8 @@ export async function createAdminAccountAction(
   });
   if (!parsed.success) return validationState(parsed.error);
   await createAdminAccount({ actor, ...parsed.data });
-  return { status: "success" };
+  revalidateAccountManagement();
+  return { message: "普通管理员账号已创建。", status: "success" };
 }
 
 const updateSchema = z.object({
@@ -62,7 +69,8 @@ export async function updateManagedAccountAction(
   });
   if (!parsed.success) return validationState(parsed.error);
   await updateManagedAccount({ actor, ...parsed.data });
-  return { status: "success" };
+  revalidateAccountManagement();
+  return { message: "账号资料已更新。", status: "success" };
 }
 
 const passwordSchema = z.object({
@@ -83,7 +91,7 @@ export async function resetManagedAccountPasswordAction(
   });
   if (!parsed.success) return validationState(parsed.error);
   await resetManagedAccountPassword({ actor, ...parsed.data });
-  return { status: "success" };
+  return { message: "登录密码已重置。", status: "success" };
 }
 
 const statusSchema = z.object({
@@ -104,5 +112,9 @@ export async function setManagedAccountStatusAction(
   });
   if (!parsed.success) return validationState(parsed.error);
   await setManagedAccountStatus({ actor, ...parsed.data });
-  return { status: "success" };
+  revalidateAccountManagement();
+  return {
+    message: parsed.data.status === "DISABLED" ? "账号已停用。" : "账号已恢复。",
+    status: "success",
+  };
 }

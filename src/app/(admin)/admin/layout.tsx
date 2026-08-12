@@ -7,7 +7,7 @@ import { getCurrentPrincipal } from "@/modules/identity/principal";
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const principal = await getCurrentPrincipal();
   if (!principal) redirect("/login");
-  if (principal.kind !== "ADMIN") redirect("/portal");
+  if (principal.kind !== "ADMIN" && principal.kind !== "SUPER_ADMIN") redirect("/portal");
 
-  return <AdminShell>{children}</AdminShell>;
+  return <AdminShell principalKind={principal.kind}>{children}</AdminShell>;
 }

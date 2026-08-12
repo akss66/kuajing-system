@@ -58,7 +58,7 @@ describe("customer management actions", () => {
 
     const result = await updateCustomerAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ message: "客户资料已更新。", status: "success" });
     expect(serviceMocks.updateCustomer).toHaveBeenCalledWith({
       actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       code: "UPDATED-CUSTOMER",
@@ -84,7 +84,7 @@ describe("customer management actions", () => {
 
     const result = await createStoreAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ message: "店铺已新增。", status: "success" });
     expect(serviceMocks.createStore).toHaveBeenCalledWith({
       actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       customerId: "22222222-2222-4222-8222-222222222222",
@@ -108,7 +108,7 @@ describe("customer management actions", () => {
 
     const result = await setStoreStatusAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ message: "店铺已停用。", status: "success" });
     expect(serviceMocks.setStoreStatus).toHaveBeenCalledWith({
       actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       reason: "Pause new orders",
@@ -129,7 +129,7 @@ describe("customer management actions", () => {
 
     const result = await setCustomerStatusAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ message: "客户已停用。", status: "success" });
     expect(serviceMocks.setCustomerStatus).toHaveBeenCalledWith({
       actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       customerId: "55555555-5555-4555-8555-555555555555",
@@ -153,7 +153,7 @@ describe("customer management actions", () => {
 
     const result = await updateStoreAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ message: "店铺资料已更新。", status: "success" });
     expect(serviceMocks.updateStore).toHaveBeenCalledWith({
       actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       externalStoreCode: "TEMU-777",
@@ -179,7 +179,7 @@ describe("customer management actions", () => {
 
     const result = await createCustomerWithStoreAction({ status: "idle" }, formData);
 
-    expect(result.status).toBe("success");
+    expect(result).toEqual({ message: "客户与首家店铺已创建。", status: "success" });
     expect(serviceMocks.provisionCustomerWithStore).toHaveBeenCalledWith({
       actorId: "super-admin-auth-user",
       code: "NEW-CUSTOMER",

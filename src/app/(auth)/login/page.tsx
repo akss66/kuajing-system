@@ -22,14 +22,14 @@ export default function LoginPage() {
         </div>
 
         <div className="relative max-w-xl pb-10">
-          <p className="mb-4 text-sm font-semibold tracking-[0.14em] text-primary">跨境履约运营平台</p>
+          <p className="mb-4 text-sm font-semibold tracking-[0.14em] text-primary">跨境拿货运营平台</p>
           <h2 className="text-balance text-[clamp(2.25rem,4vw,4.5rem)] font-semibold leading-[1.06] tracking-[-0.045em] text-ink">
-            库存、订单与履约，
+            库存、订单与发货，
             <br />
-            始终清晰可追溯。
+            始终清晰可追踪。
           </h2>
           <p className="mt-7 max-w-lg text-base leading-7 text-muted">
-            连接 TEMU 店铺、同舟行货盘与加拿大仓履约，让每一笔拿货、付款和发货都有准确记录。
+            连接 TEMU 店铺、同舟行货盘与加拿大仓发货流程，让每一笔拿货、付款和出库都有准确记录。
           </p>
         </div>
 
