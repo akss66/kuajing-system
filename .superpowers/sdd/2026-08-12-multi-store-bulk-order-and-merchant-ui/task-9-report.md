@@ -25,3 +25,39 @@ Artifacts:
 
 Notes:
 - Playwright webserver logs include expected `FORBIDDEN_ADMIN` server errors during customer-denial route coverage; the denial assertions pass and no admin data is rendered to the customer page.
+
+Follow-up SQL filter fix:
+- Moved customer, store, status, and business-time-zone date constraints into the admin bulk draft and settlement batch SQL queries before descending timestamp ordering and the 50-row limit. Store constraints use correlated `exists` queries to avoid duplicate list rows.
+- Added real PostgreSQL regression coverage that seeds 51 newer non-matches and verifies an older matching bulk draft and settlement batch are returned for customer/store/status/date filters.
+
+Verification:
+- `npm.cmd run test:integration -- tests/integration/admin/bulk-workspace-queries.test.ts`
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+
+Derived status limit-safety follow-up:
+- Added real PostgreSQL regression coverage for admin bulk diagnostic derived-status filters under pagination pressure.
+- Verified that `BLOCKED_UNKNOWN_SKU` and `EMPTY` queries still return the newest matching draft even when 51 newer same-customer, same-date drafts do not match the derived status.
+- Changed admin bulk draft querying to keep customer/store/date filtering in SQL and use bounded newest-first overfetch for derived validation statuses, capped at 50 returned matches without unbounded memory growth.
+
+Verification:
+- RED: `npm.cmd run test:integration -- tests/integration/admin/bulk-workspace-queries.test.ts` (2 new failures returning `[]` for older `BLOCKED_UNKNOWN_SKU` and `EMPTY` matches)
+- GREEN: `npm.cmd run test:integration -- tests/integration/admin/bulk-workspace-queries.test.ts`
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+- `git diff --check`
+
+Terminal settlement review guard follow-up:
+- Settlement audit actions for payment reported, approved, rejected, withdrawn, and expired now use explicit Chinese labels; unknown audit actions render the safe fallback “结算记录已更新” rather than a backend enum.
+- Admin bulk draft lifecycle status now maps `DRAFT`/`PARTIALLY_SUBMITTED`/`COMPLETED` independently from validation diagnostics, and the list presents both labels.
+- The settlement review page derives `reviewable` from the authoritative batch status. Only `PAYMENT_REPORTED` renders the approve/reject forms; all terminal batches show a read-only Chinese completion message.
+
+TDD evidence:
+- RED: `npm.cmd run test -- tests/unit/settlement/admin-settlement-review.test.tsx tests/unit/settlement/admin-ui-labels.test.ts` (three expected failures: terminal guard absent, audit mapper absent, lifecycle label absent).
+- GREEN: the same focused command (4 passing tests).
+
+Verification:
+- `npm.cmd run test` (21 files, 64 tests passing)
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+- `git diff --check`

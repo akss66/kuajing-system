@@ -22,6 +22,18 @@ import {
   validateBulkDraft,
 } from "./validation-service";
 
+const BULK_DRAFT_MATCH_LIMIT = 50;
+const BULK_DRAFT_PAGE_SIZE = 100;
+
+const paginatedDerivedStatuses: BulkDraftValidationStatus[] = [
+  "SUBMITTABLE",
+  "BLOCKED_CROSS_STORE",
+  "BLOCKED_UNKNOWN_SKU",
+  "BLOCKED_INVALID",
+  "BLOCKED_INVENTORY",
+  "EMPTY",
+];
+
 export type AdminBulkDraftFilters = {
   customerId?: string;
   dateFrom?: string;
@@ -36,9 +48,7 @@ function isIsoDate(value: string) {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
-  await requireAdmin();
-
+function buildAdminBulkDraftConditions(filters: AdminBulkDraftFilters) {
   const conditions: SQL[] = [];
   if (filters.customerId) {
     conditions.push(eq(bulkImportDrafts.customerId, filters.customerId));
@@ -102,7 +112,17 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
     );
   }
 
-  const drafts = await db
+  return conditions;
+}
+
+async function selectAdminBulkDraftRows(
+  filters: AdminBulkDraftFilters,
+  limit: number,
+  offset: number,
+) {
+  const conditions = buildAdminBulkDraftConditions(filters);
+
+  return db
     .select({
       createdAt: bulkImportDrafts.createdAt,
       customerCode: customers.code,
@@ -116,8 +136,15 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
     .from(bulkImportDrafts)
     .innerJoin(customers, eq(customers.id, bulkImportDrafts.customerId))
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(bulkImportDrafts.updatedAt))
-    .limit(50);
+    .orderBy(desc(bulkImportDrafts.updatedAt), desc(bulkImportDrafts.id))
+    .limit(limit)
+    .offset(offset);
+}
+
+async function decorateAdminBulkDraftRows(
+  drafts: Awaited<ReturnType<typeof selectAdminBulkDraftRows>>,
+) {
+  if (drafts.length === 0) return [];
 
   const draftIds = drafts.map((draft) => draft.id);
   const counts =
@@ -196,11 +223,41 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
         storeIds: draftGroups.map((group) => group.storeId),
         validationStatusLabel: getAdminBulkDraftValidationLabel(dominantStatus),
       };
-    })
-    .filter((draft) => {
-      if (filters.status && draft.diagnosticStatus !== filters.status) return false;
-      return true;
     });
+}
+
+export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
+  await requireAdmin();
+
+  const shouldPaginateDerivedStatus = Boolean(
+    filters.status && paginatedDerivedStatuses.includes(filters.status),
+  );
+
+  if (!shouldPaginateDerivedStatus) {
+    const drafts = await selectAdminBulkDraftRows(filters, BULK_DRAFT_MATCH_LIMIT, 0);
+    const decorated = await decorateAdminBulkDraftRows(drafts);
+    return filters.status
+      ? decorated.filter((draft) => draft.diagnosticStatus === filters.status)
+      : decorated;
+  }
+
+  const matchingDrafts: Awaited<ReturnType<typeof decorateAdminBulkDraftRows>> = [];
+  let offset = 0;
+
+  while (matchingDrafts.length < BULK_DRAFT_MATCH_LIMIT) {
+    const drafts = await selectAdminBulkDraftRows(filters, BULK_DRAFT_PAGE_SIZE, offset);
+    if (drafts.length === 0) break;
+
+    const decorated = await decorateAdminBulkDraftRows(drafts);
+    matchingDrafts.push(
+      ...decorated.filter((draft) => draft.diagnosticStatus === filters.status),
+    );
+
+    offset += drafts.length;
+    if (drafts.length < BULK_DRAFT_PAGE_SIZE) break;
+  }
+
+  return matchingDrafts.slice(0, BULK_DRAFT_MATCH_LIMIT);
 }
 
 export async function getAdminBulkDraftDetail(draftId: string) {
