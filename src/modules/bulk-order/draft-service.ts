@@ -24,7 +24,7 @@ const MAX_DRAFT_GROUPS = 20;
 const MAX_GROUP_FILES = 10;
 const MAX_DRAFT_FILES = 100;
 
-type BulkDraftStatus =
+export type BulkDraftStatus =
   | "DRAFT"
   | "PARTIALLY_SUBMITTED"
   | "COMPLETED"
