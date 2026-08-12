@@ -46,7 +46,9 @@ const refreshResponseSchema = responseSchema.extend({
 });
 
 const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
-const retryableCodes = new Set([-1, 1, 10017, 10018, 50038]);
+// Official business codes 50019 (ERP order exists) and 50038 (processing)
+// require an order query/reconciliation; blind create retries can duplicate orders.
+const retryableCodes = new Set([-1, 1, 10017, 10018]);
 
 export class JifengApiError extends Error {
   readonly code: string;

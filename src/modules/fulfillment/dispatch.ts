@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db } from "@/db/client";
+import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
@@ -14,7 +14,10 @@ import {
   stores,
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
-import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
+import type {
+  JifengCreateOrderInput,
+  JifengOrderDetail,
+} from "@/integrations/jifeng/types";
 import { decryptPii } from "@/shared/pii-crypto";
 import { createSystemNotification } from "@/modules/notifications/service";
 
@@ -40,6 +43,7 @@ export type JifengCreateOrderPort = {
     data: unknown;
     requestId?: string;
   }>;
+  getOrder?(input: { erpNo: string }): Promise<JifengOrderDetail>;
 };
 
 type DispatchConfig = {
@@ -54,6 +58,20 @@ type ClaimedEvent = {
   shipmentId: string;
   startedAt: Date;
 };
+
+type RetryInspection = {
+  attemptCount: number;
+  erpNo: string;
+  fulfillmentId: string;
+  lastErrorCode: string | null;
+  orderId: string;
+  shipmentId: string;
+  status: string;
+};
+
+const MANUAL_CONFIRMED_RETRY = "MANUAL_CONFIRMED_FAILURE_RETRY";
+const RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED";
+const CONFIRMED_NOT_FOUND_CODES = new Set(["50017", "50071"]);
 
 function erpNumberForShipment(shipmentId: string) {
   return `TZX-${shipmentId.replaceAll("-", "")}`;
@@ -164,6 +182,8 @@ async function claimEvent(eventId: string, now: Date) {
       fulfillmentId: string;
       lastErrorCode: string | null;
       orderId: string;
+      replacementRequestId: string | null;
+      replacementStatus: string | null;
       shipmentId: string;
       status: string;
     }>(sql`
@@ -173,10 +193,13 @@ async function claimEvent(eventId: string, now: Date) {
         e.last_error_code as "lastErrorCode",
         f.id as "fulfillmentId",
         s.id as "shipmentId",
-        s.order_id as "orderId"
+        s.order_id as "orderId",
+        r.id as "replacementRequestId",
+        r.status as "replacementStatus"
       from integration_outbox e
       inner join shipment_fulfillments f on f.shipment_id::text = e.aggregate_id
       inner join order_shipments s on s.id = f.shipment_id
+      left join replacement_requests r on r.replacement_shipment_id = s.id
       where e.id = ${eventId}
         and e.target = 'JIFENG'
         and e.event_type = 'JIFENG_CREATE_ORDER'
@@ -189,7 +212,12 @@ async function claimEvent(eventId: string, now: Date) {
     }
     if (event.status === "COMPLETED") return "COMPLETED";
     if (event.status === "PROCESSING") return "BUSY";
-    if (order.status !== "PAID_PENDING_FULFILLMENT") {
+    const replacementEligible =
+      event.replacementRequestId !== null &&
+      ["PENDING_FULFILLMENT", "EXCEPTION"].includes(
+        event.replacementStatus ?? "",
+      );
+    if (order.status !== "PAID_PENDING_FULFILLMENT" && !replacementEligible) {
       const skippedAs =
         order.status === "CANCELLED" ? "CANCELLED" : "NOT_ELIGIBLE";
       const errorCode =
@@ -321,6 +349,199 @@ async function buildCreateOrderInput(
   };
 }
 
+async function inspectRetry(eventId: string): Promise<RetryInspection | null> {
+  const rows = await db.execute<RetryInspection>(sql`
+    select
+      e.attempt_count as "attemptCount",
+      f.erp_no as "erpNo",
+      f.id as "fulfillmentId",
+      e.last_error_code as "lastErrorCode",
+      s.order_id as "orderId",
+      s.id as "shipmentId",
+      e.status
+    from integration_outbox e
+    inner join shipment_fulfillments f on f.shipment_id::text = e.aggregate_id
+    inner join order_shipments s on s.id = f.shipment_id
+    where e.id = ${eventId}
+      and e.target = 'JIFENG'
+      and e.event_type = 'JIFENG_CREATE_ORDER'
+  `);
+  return rows[0] ?? null;
+}
+
+async function lockDispatchRows(
+  tx: DbTransaction,
+  input: { eventId: string; fulfillmentId: string; orderId: string },
+) {
+  await tx.execute(sql`
+    select id from fulfillment_orders where id = ${input.orderId} for update
+  `);
+  await tx.execute(sql`
+    select id from shipment_fulfillments
+    where id = ${input.fulfillmentId}
+    for update
+  `);
+  await tx.execute(sql`
+    select id from integration_outbox where id = ${input.eventId} for update
+  `);
+}
+
+async function markReconciliationRequired(
+  inspected: RetryInspection,
+  eventId: string,
+  now: Date,
+  errorCode: string,
+) {
+  await db.transaction(async (tx) => {
+    await lockDispatchRows(tx, {
+      eventId,
+      fulfillmentId: inspected.fulfillmentId,
+      orderId: inspected.orderId,
+    });
+    const neverRetryAt = new Date("9999-12-31T23:59:59.999Z");
+    await tx
+      .update(shipmentFulfillments)
+      .set({
+        lastErrorCode: RECONCILIATION_REQUIRED,
+        lastErrorMessage: "Jifeng order outcome requires reconciliation",
+        nextRetryAt: neverRetryAt,
+        status: "EXCEPTION",
+        updatedAt: now,
+      })
+      .where(eq(shipmentFulfillments.id, inspected.fulfillmentId));
+    await tx
+      .update(integrationOutbox)
+      .set({
+        lastErrorCode: RECONCILIATION_REQUIRED,
+        lastErrorMessage: "Jifeng order outcome requires reconciliation",
+        lockedAt: null,
+        nextAttemptAt: neverRetryAt,
+        status: "FAILED",
+        updatedAt: now,
+      })
+      .where(eq(integrationOutbox.id, eventId));
+    await tx
+      .update(fulfillmentOrders)
+      .set({ status: "FULFILLMENT_EXCEPTION", updatedAt: now })
+      .where(
+        and(
+          eq(fulfillmentOrders.id, inspected.orderId),
+          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
+        ),
+      );
+    await tx.insert(auditLogs).values({
+      action: "JIFENG_ORDER_RECONCILIATION_REQUIRED",
+      actorId: null,
+      actorType: "SYSTEM",
+      afterJson: { errorCode, status: RECONCILIATION_REQUIRED },
+      beforeJson: { status: inspected.status },
+      entityId: inspected.orderId,
+      entityType: "FULFILLMENT_ORDER",
+      reason: "Jifeng create outcome could not be confirmed safely",
+    });
+  });
+}
+
+async function finalizeRemoteOrder(
+  inspected: RetryInspection,
+  eventId: string,
+  detail: JifengOrderDetail,
+  now: Date,
+) {
+  await db.transaction(async (tx) => {
+    await lockDispatchRows(tx, {
+      eventId,
+      fulfillmentId: inspected.fulfillmentId,
+      orderId: inspected.orderId,
+    });
+    await tx
+      .update(shipmentFulfillments)
+      .set({
+        externalOrderNo: detail.orderNo ?? null,
+        jifengStatus: detail.status,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextRetryAt: null,
+        status: "SUBMITTED",
+        submittedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(shipmentFulfillments.id, inspected.fulfillmentId));
+    await tx
+      .update(integrationOutbox)
+      .set({
+        completedAt: now,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lockedAt: null,
+        status: "COMPLETED",
+        updatedAt: now,
+      })
+      .where(eq(integrationOutbox.id, eventId));
+    await tx
+      .update(fulfillmentOrders)
+      .set({ status: "FULFILLING", updatedAt: now })
+      .where(
+        and(
+          eq(fulfillmentOrders.id, inspected.orderId),
+          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
+        ),
+      );
+    await tx.insert(auditLogs).values({
+      action: "JIFENG_ORDER_RECONCILED",
+      actorId: null,
+      actorType: "SYSTEM",
+      afterJson: { jifengStatus: detail.status, status: "SUBMITTED" },
+      beforeJson: { status: inspected.status },
+      entityId: inspected.orderId,
+      entityType: "FULFILLMENT_ORDER",
+      reason: "Existing Jifeng order confirmed by ERP number",
+    });
+  });
+}
+
+async function reconcileBeforeCreateRetry(input: {
+  client: JifengCreateOrderPort;
+  eventId: string;
+  now: Date;
+}) {
+  const inspected = await inspectRetry(input.eventId);
+  if (
+    !inspected ||
+    inspected.status !== "FAILED" ||
+    inspected.attemptCount === 0 ||
+    inspected.lastErrorCode === MANUAL_CONFIRMED_RETRY
+  ) {
+    return "CREATE" as const;
+  }
+  if (!input.client.getOrder) {
+    await markReconciliationRequired(
+      inspected,
+      input.eventId,
+      input.now,
+      "QUERY_UNAVAILABLE",
+    );
+    return "RECONCILIATION_REQUIRED" as const;
+  }
+  try {
+    const detail = await input.client.getOrder({ erpNo: inspected.erpNo });
+    await finalizeRemoteOrder(inspected, input.eventId, detail, input.now);
+    return "RECONCILED" as const;
+  } catch (error) {
+    if (error instanceof JifengApiError && CONFIRMED_NOT_FOUND_CODES.has(error.code)) {
+      return "CREATE" as const;
+    }
+    const failure = safeFailure(error);
+    await markReconciliationRequired(
+      inspected,
+      input.eventId,
+      input.now,
+      failure.code,
+    );
+    return "RECONCILIATION_REQUIRED" as const;
+  }
+}
+
 export async function processJifengCreateOrderEvent(input: {
   client: JifengCreateOrderPort;
   config: DispatchConfig;
@@ -328,17 +549,33 @@ export async function processJifengCreateOrderEvent(input: {
   now?: Date;
 }) {
   const now = input.now ?? new Date();
+  const reconciliation = await reconcileBeforeCreateRetry({
+    client: input.client,
+    eventId: input.eventId,
+    now,
+  });
+  if (reconciliation === "RECONCILED") return { status: "RECONCILED" as const };
+  if (reconciliation === "RECONCILIATION_REQUIRED") {
+    return { status: "RECONCILIATION_REQUIRED" as const };
+  }
   const claimed = await claimEvent(input.eventId, now);
   if (claimed === "CANCELLED") return { status: "SKIPPED_CANCELLED" as const };
   if (claimed === "NOT_ELIGIBLE") return { status: "SKIPPED_NOT_ELIGIBLE" as const };
   if (claimed === "COMPLETED") return { status: "ALREADY_COMPLETED" as const };
   if (claimed === "BUSY") return { status: "BUSY" as const };
 
+  let externalCreateSucceeded = false;
   try {
     const request = await buildCreateOrderInput(claimed.shipmentId, input.config);
     const response = await input.client.createOrder(request);
+    externalCreateSucceeded = true;
 
     await db.transaction(async (tx) => {
+      await lockDispatchRows(tx, {
+        eventId: input.eventId,
+        fulfillmentId: claimed.fulfillmentId,
+        orderId: claimed.orderId,
+      });
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -405,12 +642,36 @@ export async function processJifengCreateOrderEvent(input: {
 
     return { status: "COMPLETED" as const };
   } catch (error) {
+    if (externalCreateSucceeded) {
+      await markReconciliationRequired(
+        {
+          attemptCount: claimed.attemptNumber,
+          erpNo: erpNumberForShipment(claimed.shipmentId),
+          fulfillmentId: claimed.fulfillmentId,
+          lastErrorCode: "POST_SUCCESS_PERSISTENCE_ERROR",
+          orderId: claimed.orderId,
+          shipmentId: claimed.shipmentId,
+          status: "PROCESSING",
+        },
+        input.eventId,
+        now,
+        "POST_SUCCESS_PERSISTENCE_ERROR",
+      );
+      return { status: "RECONCILIATION_REQUIRED" as const };
+    }
     const failure = safeFailure(error);
-    const nextAttemptAt = failure.retryable
+    const requiresReconciliation =
+      failure.retryable || ["50019", "50038"].includes(failure.code);
+    const nextAttemptAt = requiresReconciliation
       ? retryAt(now, claimed.attemptNumber)
       : new Date("9999-12-31T23:59:59.999Z");
 
     await db.transaction(async (tx) => {
+      await lockDispatchRows(tx, {
+        eventId: input.eventId,
+        fulfillmentId: claimed.fulfillmentId,
+        orderId: claimed.orderId,
+      });
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -435,7 +696,7 @@ export async function processJifengCreateOrderEvent(input: {
       await tx
         .update(fulfillmentOrders)
         .set({
-          status: failure.retryable
+          status: requiresReconciliation
             ? "PAID_PENDING_FULFILLMENT"
             : "FULFILLMENT_EXCEPTION",
           updatedAt: now,
@@ -455,7 +716,7 @@ export async function processJifengCreateOrderEvent(input: {
         errorCode: failure.code,
         errorMessage: failure.message,
         finishedAt: now,
-        outcome: failure.retryable ? "RETRYABLE_FAILURE" : "PERMANENT_FAILURE",
+        outcome: requiresReconciliation ? "RETRYABLE_FAILURE" : "PERMANENT_FAILURE",
         outboxEventId: input.eventId,
         startedAt: claimed.startedAt,
       });
@@ -467,7 +728,7 @@ export async function processJifengCreateOrderEvent(input: {
           attemptNumber: claimed.attemptNumber,
           errorCode: failure.code,
           fulfillmentStatus: "EXCEPTION",
-          retryable: failure.retryable,
+          retryable: requiresReconciliation,
         },
         beforeJson: { fulfillmentStatus: "SUBMITTING" },
         entityId: claimed.orderId,
@@ -489,7 +750,7 @@ export async function processJifengCreateOrderEvent(input: {
     });
 
     return {
-      status: failure.retryable ? ("RETRY_SCHEDULED" as const) : ("FAILED" as const),
+      status: requiresReconciliation ? ("RETRY_SCHEDULED" as const) : ("FAILED" as const),
     };
   }
 }
@@ -524,11 +785,18 @@ export async function processDueJifengCreateOrderEvents(input: {
       eventId: event.id,
       now,
     });
-    if (result.status === "COMPLETED" || result.status === "ALREADY_COMPLETED") {
+    if (
+      result.status === "COMPLETED" ||
+      result.status === "ALREADY_COMPLETED" ||
+      result.status === "RECONCILED"
+    ) {
       summary.completed += 1;
     } else if (result.status === "RETRY_SCHEDULED") {
       summary.retryScheduled += 1;
-    } else if (result.status === "FAILED") {
+    } else if (
+      result.status === "FAILED" ||
+      result.status === "RECONCILIATION_REQUIRED"
+    ) {
       summary.failed += 1;
     }
   }
@@ -544,18 +812,31 @@ export async function retryJifengShipment(input: {
   const reason = input.reason.trim();
   if (!reason) throw new Error("重试极风履约必须填写原因");
   const now = input.now ?? new Date();
+  const references = await db.execute<{ orderId: string }>(sql`
+    select order_id as "orderId" from order_shipments where id = ${input.shipmentId}
+  `);
+  const reference = references[0];
+  if (!reference) throw new Error("Jifeng shipment not found");
   return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select id from fulfillment_orders where id = ${reference.orderId} for update
+    `);
     const rows = await tx.execute<{
       fulfillmentId: string;
+      lastErrorCode: string | null;
       orderId: string;
+      replacementRequestId: string | null;
       status: string;
     }>(sql`
       select
         f.id as "fulfillmentId",
+        f.last_error_code as "lastErrorCode",
         f.status,
-        s.order_id as "orderId"
+        s.order_id as "orderId",
+        r.id as "replacementRequestId"
       from shipment_fulfillments f
       inner join order_shipments s on s.id = f.shipment_id
+      left join replacement_requests r on r.replacement_shipment_id = s.id
       where s.id = ${input.shipmentId}
       for update of f
     `);
@@ -564,24 +845,51 @@ export async function retryJifengShipment(input: {
     if (["SHIPPED", "CANCELLED"].includes(fulfillment.status)) {
       throw new Error("已发货或已取消包裹不能重试");
     }
+    if (fulfillment.status !== "EXCEPTION") {
+      throw new Error("Only failed Jifeng fulfillments can be retried");
+    }
+    const eventRows = await tx.execute<{
+      id: string;
+      lastErrorCode: string | null;
+    }>(sql`
+      select id, last_error_code as "lastErrorCode"
+      from integration_outbox
+      where aggregate_id = ${input.shipmentId}
+        and event_type = 'JIFENG_CREATE_ORDER'
+      for update
+    `);
+    const event = eventRows[0];
+    if (!event) throw new Error("Jifeng create event not found");
+    const priorErrorCode = event.lastErrorCode ?? fulfillment.lastErrorCode;
+    const ambiguous =
+      priorErrorCode === RECONCILIATION_REQUIRED ||
+      ["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE", "INTERNAL_ERROR", "50019", "50038"].includes(
+        priorErrorCode ?? "",
+      ) ||
+      priorErrorCode?.startsWith("HTTP_") === true;
+    const retryMarker = ambiguous ? priorErrorCode : MANUAL_CONFIRMED_RETRY;
     await tx
       .update(shipmentFulfillments)
       .set({
-        lastErrorCode: null,
-        lastErrorMessage: null,
+        lastErrorCode: retryMarker,
+        lastErrorMessage: ambiguous
+          ? "Jifeng order outcome requires reconciliation"
+          : null,
         nextRetryAt: now,
-        status: "PENDING",
+        status: ambiguous ? "EXCEPTION" : "PENDING",
         updatedAt: now,
       })
       .where(eq(shipmentFulfillments.id, fulfillment.fulfillmentId));
     await tx
       .update(integrationOutbox)
       .set({
-        lastErrorCode: null,
-        lastErrorMessage: null,
+        lastErrorCode: retryMarker,
+        lastErrorMessage: ambiguous
+          ? "Jifeng order outcome requires reconciliation"
+          : null,
         lockedAt: null,
         nextAttemptAt: now,
-        status: "PENDING",
+        status: "FAILED",
         updatedAt: now,
       })
       .where(
@@ -590,15 +898,17 @@ export async function retryJifengShipment(input: {
           eq(integrationOutbox.eventType, "JIFENG_CREATE_ORDER"),
         ),
       );
-    await tx
-      .update(fulfillmentOrders)
-      .set({ status: "FULFILLING", updatedAt: now })
-      .where(
-        and(
-          eq(fulfillmentOrders.id, fulfillment.orderId),
-          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
-        ),
-      );
+    if (!fulfillment.replacementRequestId) {
+      await tx
+        .update(fulfillmentOrders)
+        .set({ status: "PAID_PENDING_FULFILLMENT", updatedAt: now })
+        .where(
+          and(
+            eq(fulfillmentOrders.id, fulfillment.orderId),
+            sql`${fulfillmentOrders.status} not in ('SHIPPED', 'CANCELLED')`,
+          ),
+        );
+    }
     await tx
       .update(replacementRequests)
       .set({ status: "PENDING_FULFILLMENT", updatedAt: now })

@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  JifengApiError,
   JifengClient,
   buildJifengCanonicalString,
   signJifengRequest,
@@ -177,4 +178,47 @@ describe("Jifeng API client", () => {
       retryable: true,
     });
   });
+
+  test.each([
+    [50019, false],
+    [50038, false],
+    [50017, false],
+    [50071, false],
+  ])("classifies official business code %s without unsafe blind retry", async (code, retryable) => {
+    const client = new JifengClient({
+      credentials,
+      fetch: async () =>
+        new Response(
+          JSON.stringify({ code, data: null, message: `official-${code}` }),
+        ),
+    });
+
+    const error = await client
+      .getOrder({ erpNo: "TZX-JF-CODE" })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(JifengApiError);
+    expect(error).toMatchObject({ code: String(code), retryable });
+  });
+
+  test.each([50018, 50060])(
+    "surfaces official cancellation constraint %s without retrying",
+    async (code) => {
+      const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+        void url;
+        return new Response(
+          JSON.stringify({ code, data: null, message: `official-${code}` }),
+        );
+      });
+      const client = new JifengClient({ credentials, fetch: fetchMock });
+
+      await expect(
+        client.cancelOrder({ erpNo: "TZX-JF-CANCEL" }),
+      ).rejects.toMatchObject({ code: String(code), retryable: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(String(fetchMock.mock.calls[0][0])).toBe(
+        "https://test.jfwms.com/api/order/cancel",
+      );
+    },
+  );
 });

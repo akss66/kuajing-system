@@ -21,7 +21,9 @@ import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 import {
   enqueuePaidOrdersForFulfillment,
+  processDueJifengCreateOrderEvents,
   processJifengCreateOrderEvent,
+  retryJifengShipment,
   type JifengCreateOrderPort,
 } from "@/modules/fulfillment/dispatch";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
@@ -359,11 +361,54 @@ describe("paid order Jifeng dispatch", () => {
     expect(JSON.stringify(updatedEvent)).not.toContain(recipient.addressLine1);
   });
 
+  test.each(["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE"])(
+    "blocks local cancellation after an ambiguous %s create attempt",
+    async (errorCode) => {
+      const { order } = await createShipmentFixture();
+      await enqueuePaidOrdersForFulfillment();
+      const [event] = await db.select().from(integrationOutbox);
+      await processJifengCreateOrderEvent({
+        client: {
+          async createOrder() {
+            throw new JifengApiError({
+              code: errorCode,
+              message: "ambiguous outbound failure",
+              retryable: true,
+            });
+          },
+        },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      });
+
+      await expect(
+        cancelFulfillmentOrder({
+          actorType: "ADMIN",
+          actorUserId: "admin-user",
+          orderId: order.id,
+          reason: "must reconcile before cancellation",
+        }),
+      ).rejects.toMatchObject({ code: "FULFILLMENT_CANCEL_REQUIRED" });
+
+      const [savedOrder] = await db
+        .select()
+        .from(fulfillmentOrders)
+        .where(eq(fulfillmentOrders.id, order.id));
+      const [reservation] = await db
+        .select()
+        .from(inventoryReservations)
+        .where(eq(inventoryReservations.referenceId, order.id));
+      expect(savedOrder.status).not.toBe("CANCELLED");
+      expect(reservation.status).toBe("ACTIVE");
+    },
+  );
+
   test("retries a transient Jifeng failure while preserving dispatch eligibility", async () => {
     const { order } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
     const [event] = await db.select().from(integrationOutbox);
     let apiCalls = 0;
+    let queryCalls = 0;
     const client: JifengCreateOrderPort = {
       async createOrder() {
         apiCalls += 1;
@@ -375,6 +420,14 @@ describe("paid order Jifeng dispatch", () => {
           });
         }
         return { data: null };
+      },
+      async getOrder() {
+        queryCalls += 1;
+        throw new JifengApiError({
+          code: "50017",
+          message: "confirmed absent",
+          retryable: false,
+        });
       },
     };
     const firstAt = new Date("2026-08-12T02:00:00.000Z");
@@ -397,6 +450,7 @@ describe("paid order Jifeng dispatch", () => {
     ).resolves.toEqual({ status: "COMPLETED" });
 
     expect(apiCalls).toBe(2);
+    expect(queryCalls).toBe(1);
     const [savedOrder] = await db
       .select()
       .from(fulfillmentOrders)
@@ -406,5 +460,253 @@ describe("paid order Jifeng dispatch", () => {
     expect(savedOrder.status).toBe("FULFILLING");
     expect(savedEvent).toMatchObject({ attemptCount: 2, status: "COMPLETED" });
     expect(fulfillment).toMatchObject({ attemptCount: 2, status: "SUBMITTED" });
+  });
+
+  test("reconciles an ambiguous create response to a remote order without creating twice", async () => {
+    const { order, shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    let apiCalls = 0;
+    let queryCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        apiCalls += 1;
+        throw new JifengApiError({
+          code: "TIMEOUT",
+          message: "create outcome unknown",
+          retryable: true,
+        });
+      },
+      async getOrder({ erpNo }) {
+        queryCalls += 1;
+        return { erpNo, orderNo: "JF-REMOTE-1", status: 6 };
+      },
+    };
+
+    await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+    const result = await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+
+    expect(result).toEqual({ status: "RECONCILED" });
+    expect(apiCalls).toBe(1);
+    expect(queryCalls).toBe(1);
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, order.id));
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    expect(savedOrder.status).toBe("FULFILLING");
+    expect(savedEvent.status).toBe("COMPLETED");
+    expect(fulfillment).toMatchObject({
+      externalOrderNo: "JF-REMOTE-1",
+      status: "SUBMITTED",
+    });
+  });
+
+  test.each(["50019", "50038"])(
+    "automatically reconciles official create code %s instead of blindly creating again",
+    async (code) => {
+      await createShipmentFixture();
+      await enqueuePaidOrdersForFulfillment();
+      const [event] = await db.select().from(integrationOutbox);
+      let apiCalls = 0;
+      let queryCalls = 0;
+      const firstAt = new Date("2026-08-12T02:00:00.000Z");
+      const client: JifengCreateOrderPort = {
+        async createOrder() {
+          apiCalls += 1;
+          throw new JifengApiError({
+            code,
+            message: "official reconciliation response",
+            retryable: false,
+          });
+        },
+        async getOrder({ erpNo }) {
+          queryCalls += 1;
+          return { erpNo, orderNo: `JF-${code}`, status: 6 };
+        },
+      };
+      await expect(
+        processJifengCreateOrderEvent({
+          client,
+          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+          eventId: event.id,
+          now: firstAt,
+        }),
+      ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
+
+      const summary = await processDueJifengCreateOrderEvents({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        now: new Date(firstAt.getTime() + 60_000),
+      });
+
+      expect(summary).toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
+      expect(apiCalls).toBe(1);
+      expect(queryCalls).toBe(1);
+    },
+  );
+
+  test("manual retry restores dispatch eligibility after a confirmed permanent failure", async () => {
+    const { order, shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    let apiCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        apiCalls += 1;
+        if (apiCalls === 1) {
+          throw new JifengApiError({
+            code: "50024",
+            message: "confirmed validation failure",
+            retryable: false,
+          });
+        }
+        return { data: null };
+      },
+    };
+    await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+
+    await retryJifengShipment({
+      actorUserId: "admin-user",
+      reason: "corrected warehouse mapping",
+      shipmentId: shipment.id,
+    });
+    await expect(
+      processJifengCreateOrderEvent({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      }),
+    ).resolves.toEqual({ status: "COMPLETED" });
+    expect(apiCalls).toBe(2);
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, order.id));
+    expect(savedOrder.status).toBe("FULFILLING");
+  });
+
+  test("never retries create after Jifeng success followed by a persistence error", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    let apiCalls = 0;
+    let queryCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        apiCalls += 1;
+        return { data: null, requestId: "success-before-db-error" };
+      },
+      async getOrder({ erpNo }) {
+        queryCalls += 1;
+        return { erpNo, orderNo: "JF-PERSISTED-REMOTE", status: 6 };
+      },
+    };
+    await db.execute(sql.raw(`
+      create function test_fail_success_attempt() returns trigger language plpgsql as $$
+      begin
+        if new.outcome = 'SUCCESS' then
+          raise exception 'injected post-success persistence error';
+        end if;
+        return new;
+      end;
+      $$;
+      create trigger test_fail_success_attempt_trigger
+      before insert on integration_attempts
+      for each row execute function test_fail_success_attempt();
+    `));
+    try {
+      await expect(
+        processJifengCreateOrderEvent({
+          client,
+          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+          eventId: event.id,
+        }),
+      ).resolves.toEqual({ status: "RECONCILIATION_REQUIRED" });
+    } finally {
+      await db.execute(sql.raw(`
+        drop trigger if exists test_fail_success_attempt_trigger on integration_attempts;
+        drop function if exists test_fail_success_attempt();
+      `));
+    }
+
+    await expect(
+      processJifengCreateOrderEvent({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      }),
+    ).resolves.toEqual({ status: "RECONCILED" });
+    expect(apiCalls).toBe(1);
+    expect(queryCalls).toBe(1);
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    expect(fulfillment.externalOrderNo).toBe("JF-PERSISTED-REMOTE");
+  });
+
+  test("serializes API success finalization with cancellation without duplicate create", async () => {
+    const { order } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const apiGate = deferred();
+    const lockReady = deferred();
+    const releaseLock = deferred();
+    let apiCalls = 0;
+    const dispatch = processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          apiCalls += 1;
+          await apiGate.promise;
+          return { data: null };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+    for (let attempt = 0; attempt < 100 && apiCalls === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const blocker = db.transaction(async (tx) => {
+      await tx.execute(sql`
+        select id from fulfillment_orders where id = ${order.id} for update
+      `);
+      lockReady.resolve();
+      await releaseLock.promise;
+    });
+    await lockReady.promise;
+    const cancellation = cancelFulfillmentOrder({
+      actorType: "ADMIN",
+      actorUserId: "admin-user",
+      orderId: order.id,
+      reason: "race with successful create",
+    });
+    apiGate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseLock.resolve();
+
+    await blocker;
+    await expect(cancellation).rejects.toMatchObject({
+      code: "FULFILLMENT_CANCEL_REQUIRED",
+    });
+    await expect(dispatch).resolves.toEqual({ status: "COMPLETED" });
+    expect(apiCalls).toBe(1);
   });
 });

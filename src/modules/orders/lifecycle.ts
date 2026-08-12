@@ -434,15 +434,23 @@ export async function cancelFulfillmentOrder(input: {
       return { orderId: input.orderId, status: "CANCELLED" as const };
     }
     if (!['PENDING_PAYMENT', 'PAID_PENDING_FULFILLMENT'].includes(order.status)) {
+      if (["FULFILLING", "FULFILLMENT_EXCEPTION"].includes(order.status)) {
+        throw new OrderLifecycleError(
+          "FULFILLMENT_CANCEL_REQUIRED",
+          "This order has entered Jifeng fulfillment; use the Jifeng cancellation flow",
+        );
+      }
       throw new OrderLifecycleError("ORDER_CANNOT_CANCEL", "该拿货单当前不能取消");
     }
 
     const fulfillmentRows = await tx.execute<{
+      attemptCount: number;
       externalOrderNo: string | null;
       status: string;
       submittedAt: Date | string | null;
     }>(sql`
       select
+        f.attempt_count as "attemptCount",
         f.external_order_no as "externalOrderNo",
         f.status,
         f.submitted_at as "submittedAt"
@@ -452,8 +460,8 @@ export async function cancelFulfillmentOrder(input: {
       order by f.id
       for update of f
     `);
-    const outboxRows = await tx.execute<{ status: string }>(sql`
-      select e.status
+    const outboxRows = await tx.execute<{ attemptCount: number; status: string }>(sql`
+      select e.attempt_count as "attemptCount", e.status
       from integration_outbox e
       inner join order_shipments s on s.id::text = e.aggregate_id
       where s.order_id = ${input.orderId}
@@ -465,10 +473,14 @@ export async function cancelFulfillmentOrder(input: {
     if (
       fulfillmentRows.some(
         (fulfillment) =>
+          fulfillment.attemptCount !== 0 ||
           fulfillment.externalOrderNo !== null ||
           fulfillment.submittedAt !== null ||
-          !["PENDING", "EXCEPTION", "CANCELLED"].includes(fulfillment.status),
-      ) || outboxRows.some((event) => event.status === "PROCESSING")
+          fulfillment.status !== "PENDING",
+      ) ||
+      outboxRows.some(
+        (event) => event.attemptCount !== 0 || event.status !== "PENDING",
+      )
     ) {
       throw new OrderLifecycleError(
         "FULFILLMENT_CANCEL_REQUIRED",

@@ -728,21 +728,27 @@ async function expireLockedSettlementBatch(
 
 export async function expireSettlementBatches(now: Date = new Date()): Promise<number> {
   const reportedCutoff = new Date(now.getTime() - PAYMENT_REVIEW_LOCK_MS);
-  return db.transaction(async (tx) => {
-    const candidates = await tx.execute<{ id: string }>(sql`
-      select id
-      from settlement_batches
-      where (status = 'PENDING_PAYMENT' and payment_due_at <= ${now.toISOString()}::timestamptz)
-         or (status = 'PAYMENT_REPORTED' and payment_reported_at <= ${reportedCutoff.toISOString()}::timestamptz)
-      order by coalesce(payment_reported_at, payment_due_at), id
-      for update skip locked
-      limit 100
-    `);
-    let expired = 0;
-    for (const candidate of candidates) {
+  let expired = 0;
+  for (let processed = 0; processed < 100; processed += 1) {
+    const result = await db.transaction(async (tx) => {
+      const candidates = await tx.execute<{ id: string }>(sql`
+        select id
+        from settlement_batches
+        where (status = 'PENDING_PAYMENT' and payment_due_at <= ${now.toISOString()}::timestamptz)
+           or (status = 'PAYMENT_REPORTED' and payment_reported_at <= ${reportedCutoff.toISOString()}::timestamptz)
+        order by coalesce(payment_reported_at, payment_due_at), id
+        for update skip locked
+        limit 1
+      `);
+      const candidate = candidates[0];
+      if (!candidate) return "NONE" as const;
       const batch = await lockBatch(tx, candidate.id);
-      if (await expireLockedSettlementBatch(tx, batch, candidate.id, now)) expired += 1;
-    }
-    return expired;
-  });
+      return (await expireLockedSettlementBatch(tx, batch, candidate.id, now))
+        ? ("EXPIRED" as const)
+        : ("SKIPPED" as const);
+    });
+    if (result === "NONE") break;
+    if (result === "EXPIRED") expired += 1;
+  }
+  return expired;
 }

@@ -1775,6 +1775,45 @@ describe("unified offline settlement lifecycle", () => {
     }
   });
 
+  test("review and withdrawal remain allowed one millisecond before the reported-payment deadline", async () => {
+    for (const operation of ["REVIEW", "WITHDRAW"] as const) {
+      const fixture = await createSubmissionFixture([250]);
+      const result = await submitFixture(fixture, 0);
+      const reportedAt = new Date();
+      await reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 250,
+        customerId: fixture.customer.id,
+        now: reportedAt,
+        settlementBatchId: result.settlementBatchId!,
+      });
+      const now = new Date(
+        reportedAt.getTime() + 12 * 60 * 60 * 1000 - 1,
+      );
+      if (operation === "REVIEW") {
+        await reviewSettlementPayment({
+          adminUserId: (await createSettlementAdmin()).id,
+          decision: "APPROVE",
+          now,
+          settlementBatchId: result.settlementBatchId!,
+        });
+      } else {
+        await withdrawSettlementPayment({
+          actorUserId: "customer-auth",
+          customerId: fixture.customer.id,
+          now,
+          reason: "withdraw before deadline",
+          settlementBatchId: result.settlementBatchId!,
+        });
+      }
+      const [batch] = await db
+        .select()
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, result.settlementBatchId!));
+      expect(batch.status).toBe(operation === "REVIEW" ? "PAID" : "WITHDRAWN");
+    }
+  });
+
   test("concurrent timeout workers claim disjoint batches without duplicate terminal effects", async () => {
     const [customer] = await db
       .insert(customers)
@@ -1838,6 +1877,49 @@ describe("unified offline settlement lifecycle", () => {
       .where(eq(auditLogs.action, "SETTLEMENT_EXPIRED"));
     expect(expiryAudits).toHaveLength(batches.length);
     expect(new Set(expiryAudits.map((audit) => audit.entityId)).size).toBe(batches.length);
+  });
+
+  test("concurrent short-lived timeout workers release mixed-wallet batches across customers exactly once", async () => {
+    const now = new Date();
+    const settlementIds: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      const fixture = await createSubmissionFixture([100]);
+      await adjustWalletBalance({
+        actorUserId: "wallet-admin",
+        customerId: fixture.customer.id,
+        deltaFen: 50,
+        reason: `worker mixed fixture ${index}`,
+      });
+      const submitted = await submitFixture(fixture, 50);
+      settlementIds.push(submitted.settlementBatchId!);
+      await db
+        .update(settlementBatches)
+        .set({ paymentDueAt: new Date(now.getTime() - 1) })
+        .where(eq(settlementBatches.id, submitted.settlementBatchId!));
+    }
+
+    const counts = await Promise.all([
+      expireSettlementBatches(now),
+      expireSettlementBatches(now),
+      expireSettlementBatches(now),
+    ]);
+
+    expect(counts.reduce((sum, count) => sum + count, 0)).toBe(settlementIds.length);
+    expect(Math.max(...counts)).toBeLessThanOrEqual(100);
+    const holds = await db.select().from(walletHolds);
+    expect(holds).toHaveLength(settlementIds.length);
+    expect(holds.every((hold) => hold.status === "RELEASED")).toBe(true);
+    const terminal = await db
+      .select({ id: settlementBatches.id, status: settlementBatches.status })
+      .from(settlementBatches);
+    expect(
+      terminal.filter((batch) => settlementIds.includes(batch.id)),
+    ).toHaveLength(settlementIds.length);
+    expect(
+      terminal
+        .filter((batch) => settlementIds.includes(batch.id))
+        .every((batch) => batch.status === "EXPIRED"),
+    ).toBe(true);
   });
 
   test("blocks both customer and administrator single-order cancellation while a unified claim is pending", async () => {
