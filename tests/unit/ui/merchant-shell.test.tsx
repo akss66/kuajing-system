@@ -88,7 +88,7 @@ describe("merchant shells", () => {
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
   });
 
-  it("renders the customer merchant shell without leaking admin-only navigation", () => {
+  it("keeps the mobile account menu compact without leaking admin-only navigation into the customer shell", () => {
     navigationState.pathname = "/portal";
 
     render(
@@ -102,7 +102,11 @@ describe("merchant shells", () => {
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "工作台" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "多店铺批量拿货" })).toBeVisible();
+
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
+
+    const accountMenu = document.querySelector("[data-slot='dropdown-menu-content']");
+    expect(accountMenu).toHaveClass("w-[236px]", "p-1.5", "sm:w-64", "sm:p-2");
     expect(screen.getByRole("button", { name: "退出登录" })).toBeVisible();
     expect(within(navigation).queryByRole("link", { name: "运营总览" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();

@@ -2,8 +2,8 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routerMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -29,6 +29,10 @@ describe("SignOutButton", () => {
     authClientMocks.signOut.mockReset();
     routerMocks.refresh.mockReset();
     routerMocks.replace.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("signs out the current session and returns the operator to /login", async () => {
@@ -70,9 +74,33 @@ describe("SignOutButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("退出登录失败，请刷新后重试。");
+    expect(await screen.findByRole("alert")).toHaveTextContent("退出登录失败，请稍后再试。");
     expect(routerMocks.replace).not.toHaveBeenCalled();
     expect(routerMocks.refresh).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "退出登录" })).toBeEnabled();
+  });
+
+  it("recovers from a rejected sign-out request and allows retrying", async () => {
+    authClientMocks.signOut.mockRejectedValueOnce(new Error("socket hang up")).mockResolvedValueOnce({
+      error: null,
+    });
+
+    render(<SignOutButton />);
+
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("退出登录失败，请稍后再试。");
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeEnabled();
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+    expect(routerMocks.refresh).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+
+    await waitFor(() => {
+      expect(authClientMocks.signOut).toHaveBeenCalledTimes(2);
+      expect(routerMocks.replace).toHaveBeenCalledWith("/login");
+      expect(routerMocks.refresh).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

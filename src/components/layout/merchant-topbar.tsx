@@ -105,15 +105,19 @@ export function MerchantTopbar({
               <span className="hidden sm:inline">账号</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 rounded-lg border border-border bg-[var(--merchant-panel)] p-2 shadow-lg">
-            <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-foreground">
+          <DropdownMenuContent
+            align="end"
+            className="w-[236px] rounded-lg border border-border bg-[var(--merchant-panel)] p-1.5 shadow-lg sm:w-64 sm:p-2"
+            sideOffset={6}
+          >
+            <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground sm:py-1.5">
               <ShieldCheck aria-hidden="true" className="size-4 text-primary" />
               <span>{accountLabel}</span>
             </DropdownMenuLabel>
-            <div className="px-2 pb-1 text-xs text-muted-foreground">{badgeLabel}</div>
+            <div className="px-2 pb-0.5 text-xs text-muted-foreground sm:pb-1">{badgeLabel}</div>
             <DropdownMenuSeparator />
-            <div className="px-1 pb-1 pt-1">
-              <SignOutButton className="h-9 w-full justify-start rounded-md px-2.5" size="sm" variant="ghost" />
+            <div className="px-0.5 py-0.5 sm:px-1 sm:py-1">
+              <SignOutButton className="h-8.5 w-full justify-start rounded-md px-2 text-sm sm:h-9 sm:px-2.5" size="sm" variant="ghost" />
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
