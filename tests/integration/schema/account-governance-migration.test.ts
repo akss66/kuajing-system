@@ -68,7 +68,15 @@ afterEach(async () => {
   }
 });
 
-test("migration only upgrades the bootstrap admin to super_admin", async () => {
+async function selectAuthUserRoles(sql: postgres.Sql) {
+  return sql<{ email: string; id: string; role: string }[]>`
+    select id, email, role
+    from auth_users
+    order by email asc
+  `;
+}
+
+test("migration upgrades the single bootstrap row when both markers hit the same row", async () => {
   const disposable = await createDisposableDatabase();
   disposables.push(disposable);
 
@@ -81,16 +89,78 @@ test("migration only upgrades the bootstrap admin to super_admin", async () => {
 
   await applyMigrationFile(disposable.sql, "drizzle/0014_account_governance.sql");
 
-  const rows = await disposable.sql<{ email: string; role: string }[]>`
-    select email, role
-    from auth_users
-    order by email asc
-  `;
+  const rows = await selectAuthUserRoles(disposable.sql);
 
   expect(rows).toEqual([
-    { email: "admin@tongzhouxing.local", role: "super_admin" },
-    { email: "ops-admin@test.local", role: "admin" },
+    {
+      email: "admin@tongzhouxing.local",
+      id: "00000000-0000-4000-8000-00000000a001",
+      role: "super_admin",
+    },
+    { email: "ops-admin@test.local", id: "legacy-admin-2", role: "admin" },
   ]);
+});
+
+test("migration upgrades the bootstrap row when only the fixed id marker exists", async () => {
+  const disposable = await createDisposableDatabase();
+  disposables.push(disposable);
+
+  await disposable.sql`
+    insert into auth_users (id, name, email, role)
+    values
+      ('00000000-0000-4000-8000-00000000a001', 'Bootstrap Admin', 'renamed-admin@test.local', 'admin'),
+      ('legacy-admin-2', 'Legacy Admin', 'ops-admin@test.local', 'admin')
+  `;
+
+  await applyMigrationFile(disposable.sql, "drizzle/0014_account_governance.sql");
+
+  const rows = await selectAuthUserRoles(disposable.sql);
+
+  expect(rows).toEqual([
+    { email: "ops-admin@test.local", id: "legacy-admin-2", role: "admin" },
+    {
+      email: "renamed-admin@test.local",
+      id: "00000000-0000-4000-8000-00000000a001",
+      role: "super_admin",
+    },
+  ]);
+});
+
+test("migration upgrades the bootstrap row when only the fixed email marker exists", async () => {
+  const disposable = await createDisposableDatabase();
+  disposables.push(disposable);
+
+  await disposable.sql`
+    insert into auth_users (id, name, email, role)
+    values
+      ('legacy-bootstrap', 'Bootstrap Admin', 'admin@tongzhouxing.local', 'admin'),
+      ('legacy-admin-2', 'Legacy Admin', 'ops-admin@test.local', 'admin')
+  `;
+
+  await applyMigrationFile(disposable.sql, "drizzle/0014_account_governance.sql");
+
+  const rows = await selectAuthUserRoles(disposable.sql);
+
+  expect(rows).toEqual([
+    { email: "admin@tongzhouxing.local", id: "legacy-bootstrap", role: "super_admin" },
+    { email: "ops-admin@test.local", id: "legacy-admin-2", role: "admin" },
+  ]);
+});
+
+test("migration fails fast when bootstrap id and email markers point at different rows", async () => {
+  const disposable = await createDisposableDatabase();
+  disposables.push(disposable);
+
+  await disposable.sql`
+    insert into auth_users (id, name, email, role)
+    values
+      ('00000000-0000-4000-8000-00000000a001', 'Marker By Id', 'renamed-admin@test.local', 'admin'),
+      ('legacy-bootstrap', 'Marker By Email', 'admin@tongzhouxing.local', 'admin')
+  `;
+
+  await expect(
+    applyMigrationFile(disposable.sql, "drizzle/0014_account_governance.sql"),
+  ).rejects.toThrow(/bootstrap super admin markers resolve to multiple rows/i);
 });
 
 test("migration fails fast when customer auth rows duplicate a customer_id", async () => {

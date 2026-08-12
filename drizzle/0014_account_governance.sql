@@ -1,5 +1,7 @@
 do $$
 declare
+  bootstrap_marker_rows text;
+  bootstrap_marker_count integer;
   duplicate_customer_ids text;
   orphan_user_rows text;
   unsupported_roles text;
@@ -55,16 +57,38 @@ begin
       using detail = orphan_user_rows,
         hint = 'Assign each user auth row to a customer before applying drizzle/0014_account_governance.sql.';
   end if;
+
+  select count(*), string_agg(format('%s <%s>', id, email), ', ' order by email)
+  into bootstrap_marker_count, bootstrap_marker_rows
+  from (
+    select id, email
+    from auth_users
+    where id = '00000000-0000-4000-8000-00000000a001'
+      or lower(email) = 'admin@tongzhouxing.local'
+  ) bootstrap_markers;
+
+  if bootstrap_marker_count > 1 then
+    raise exception 'Bootstrap super admin markers resolve to multiple rows'
+      using detail = bootstrap_marker_rows,
+        hint = 'Reconcile the bootstrap auth row so the fixed id and fixed email refer to the same record before applying drizzle/0014_account_governance.sql.';
+  end if;
 end $$;--> statement-breakpoint
 
+with "_bootstrap_super_admin_target" as (
+  select "id"
+  from "auth_users"
+  where "id" = '00000000-0000-4000-8000-00000000a001'
+     or lower("email") = 'admin@tongzhouxing.local'
+)
 update "auth_users"
 set
   "role" = case
     when "customer_id" is not null then 'user'
     when coalesce("role", 'user') in ('admin', 'super_admin')
-      and (
-        "id" = '00000000-0000-4000-8000-00000000a001'
-        or lower("email") = 'admin@tongzhouxing.local'
+      and exists (
+        select 1
+        from "_bootstrap_super_admin_target" as "target"
+        where "target"."id" = "auth_users"."id"
       ) then 'super_admin'
     when coalesce("role", 'user') in ('admin', 'super_admin') then 'admin'
     else coalesce("role", 'user')
@@ -74,9 +98,10 @@ where
   "role" is distinct from case
     when "customer_id" is not null then 'user'
     when coalesce("role", 'user') in ('admin', 'super_admin')
-      and (
-        "id" = '00000000-0000-4000-8000-00000000a001'
-        or lower("email") = 'admin@tongzhouxing.local'
+      and exists (
+        select 1
+        from "_bootstrap_super_admin_target" as "target"
+        where "target"."id" = "auth_users"."id"
       ) then 'super_admin'
     when coalesce("role", 'user') in ('admin', 'super_admin') then 'admin'
     else coalesce("role", 'user')

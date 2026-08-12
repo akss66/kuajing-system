@@ -11,6 +11,7 @@ Implemented:
   - no database unique index or constraint was added for `role = 'super_admin'`
   - migration `0014` now only upgrades the known bootstrap identity (`00000000-0000-4000-8000-00000000a001` / `admin@tongzhouxing.local`) to `super_admin`
   - migration `0014` now fails early with actionable diagnostics for duplicate `customer_id`, unsupported legacy roles, and `user` rows missing `customer_id`
+  - migration `0014` now disambiguates bootstrap markers before promotion: the fixed bootstrap id and email may match zero or one row total, but if they resolve to different rows the migration fails fast instead of widening promotion
 - Updated Better Auth and identity guards so:
   - Better Auth admin plugin only treats `super_admin` as an account-governance administrator
   - `requireAdmin()` accepts `ADMIN` and `SUPER_ADMIN`
