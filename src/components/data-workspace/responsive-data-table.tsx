@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
 export function ResponsiveDataTable({ children }: { children: ReactNode }) {
-  return <div className="overflow-x-auto">{children}</div>;
+  return (
+    <div className="overflow-x-auto" data-workspace-table>
+      {children}
+    </div>
+  );
 }

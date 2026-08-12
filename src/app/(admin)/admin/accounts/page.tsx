@@ -1,4 +1,6 @@
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { DataWorkspaceToolbar } from "@/components/data-workspace/data-workspace-toolbar";
+import { PageHeading } from "@/components/layout/page-heading";
 import { ActionForm } from "@/components/forms/action-form";
 import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +13,10 @@ import {
   setManagedAccountStatusAction,
   updateManagedAccountAction,
 } from "@/modules/accounts/actions";
-import { listManagedAccounts, type ManagedAccountSummary } from "@/modules/accounts/queries";
+import {
+  listManagedAccounts,
+  type ManagedAccountSummary,
+} from "@/modules/accounts/queries";
 import { requireAdmin } from "@/modules/identity/guards";
 
 function dateTime(value: Date | string | null) {
@@ -36,7 +41,9 @@ function statusLabel(status: ManagedAccountSummary["status"]) {
 }
 
 function statusTone(status: ManagedAccountSummary["status"]) {
-  return status === "ACTIVE" ? "bg-success/10 text-success" : "bg-warning/10 text-warning";
+  return status === "ACTIVE"
+    ? "bg-success/10 text-success"
+    : "bg-warning/10 text-warning";
 }
 
 function SummaryCard({
@@ -83,15 +90,31 @@ function ManagedAccountActions({ account }: { account: ManagedAccountSummary }) 
         <input name="userId" type="hidden" value={account.userId} />
         <label className="space-y-2 text-sm font-medium text-ink">
           姓名
-          <Input className="min-h-11" defaultValue={account.displayName} name="displayName" required />
+          <Input
+            className="min-h-11"
+            defaultValue={account.displayName}
+            name="displayName"
+            required
+          />
         </label>
         <label className="space-y-2 text-sm font-medium text-ink">
           账号邮箱
-          <Input className="min-h-11" defaultValue={account.email} name="email" required type="email" />
+          <Input
+            className="min-h-11"
+            defaultValue={account.email}
+            name="email"
+            required
+            type="email"
+          />
         </label>
         <label className="space-y-2 text-sm font-medium text-ink">
           修改原因
-          <Input className="min-h-11" name="reason" placeholder="例如：修正姓名或邮箱" required />
+          <Input
+            className="min-h-11"
+            name="reason"
+            placeholder="例如：修正姓名或邮箱"
+            required
+          />
         </label>
       </ActionForm>
 
@@ -103,11 +126,23 @@ function ManagedAccountActions({ account }: { account: ManagedAccountSummary }) 
         <input name="userId" type="hidden" value={account.userId} />
         <label className="space-y-2 text-sm font-medium text-ink">
           新密码
-          <Input className="min-h-11" minLength={12} name="newPassword" placeholder="至少 12 位" required type="password" />
+          <Input
+            className="min-h-11"
+            minLength={12}
+            name="newPassword"
+            placeholder="至少 12 位"
+            required
+            type="password"
+          />
         </label>
         <label className="space-y-2 text-sm font-medium text-ink">
           重置原因
-          <Input className="min-h-11" name="reason" placeholder="例如：重新发放初始密码" required />
+          <Input
+            className="min-h-11"
+            name="reason"
+            placeholder="例如：重新发放初始密码"
+            required
+          />
         </label>
       </ActionForm>
 
@@ -120,14 +155,23 @@ function ManagedAccountActions({ account }: { account: ManagedAccountSummary }) 
             : "恢复后该账号可以重新登录系统，原有数据和记录保持不变。"
         }
         confirmLabel={toggleLabel}
-        confirmTitle={nextStatus === "DISABLED" ? "确认停用这个账号？" : "确认恢复这个账号？"}
+        confirmTitle={
+          nextStatus === "DISABLED"
+            ? "确认停用这个账号？"
+            : "确认恢复这个账号？"
+        }
         submitLabel={toggleLabel}
       >
         <input name="status" type="hidden" value={nextStatus} />
         <input name="userId" type="hidden" value={account.userId} />
         <label className="space-y-2 text-sm font-medium text-ink">
           操作原因
-          <Input className="min-h-11" name="reason" placeholder="例如：离职停用 / 恢复值班账号" required />
+          <Input
+            className="min-h-11"
+            name="reason"
+            placeholder="例如：离职停用 / 恢复值班账号"
+            required
+          />
         </label>
         <div className="rounded-lg border border-border bg-background px-3 py-3 text-sm text-muted">
           当前状态：{statusLabel(account.status)}
@@ -158,19 +202,25 @@ function DesktopAccountTable({ rows }: { rows: ManagedAccountSummary[] }) {
               <TableCell className="font-medium">
                 <div className="space-y-1">
                   <p>{account.displayName}</p>
-                  {account.kind === "SUPER_ADMIN" ? <p className="text-xs text-muted">受保护超级管理员</p> : null}
+                  {account.kind === "SUPER_ADMIN" ? (
+                    <p className="text-xs text-muted">受保护超级管理员</p>
+                  ) : null}
                 </div>
               </TableCell>
               <TableCell>{account.email}</TableCell>
               <TableCell>{kindLabel(account.kind)}</TableCell>
               <TableCell>{account.customerName ?? "管理员账号"}</TableCell>
-              <TableCell>{account.customerId ? `${account.storeCount} 家店铺` : "—"}</TableCell>
+              <TableCell>
+                {account.customerId ? `${account.storeCount} 家店铺` : "—"}
+              </TableCell>
               <TableCell>
                 <Badge className={statusTone(account.status)} variant="secondary">
                   {statusLabel(account.status)}
                 </Badge>
               </TableCell>
-              <TableCell className="text-sm text-muted">{dateTime(account.lastLoginAt)}</TableCell>
+              <TableCell className="text-sm text-muted">
+                {dateTime(account.lastLoginAt)}
+              </TableCell>
             </TableRow>,
             <TableRow key={`${account.userId}-actions`}>
               <TableCell className="bg-surface/60 px-3 py-4" colSpan={7}>
@@ -188,7 +238,10 @@ function MobileAccountCards({ rows }: { rows: ManagedAccountSummary[] }) {
   return (
     <div className="space-y-4 lg:hidden">
       {rows.map((account) => (
-        <article className="rounded-[var(--radius-surface)] border border-border bg-background" key={account.userId}>
+        <article
+          className="rounded-[var(--radius-surface)] border border-border bg-background"
+          key={account.userId}
+        >
           <div className="space-y-3 border-b border-border px-4 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -210,7 +263,9 @@ function MobileAccountCards({ rows }: { rows: ManagedAccountSummary[] }) {
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-[0.08em]">店铺覆盖</dt>
-                <dd className="mt-1 text-ink">{account.customerId ? `${account.storeCount} 家店铺` : "—"}</dd>
+                <dd className="mt-1 text-ink">
+                  {account.customerId ? `${account.storeCount} 家店铺` : "—"}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-[0.08em]">最近登录</dt>
@@ -258,10 +313,14 @@ function AccountSection({
 function AccessDeniedState() {
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">账号管理受限</h1>
-        <p className="text-sm text-muted">只有超级管理员可以查看、创建或停用账号。</p>
-      </header>
+      <PageHeading
+        breadcrumbs={[
+          { href: "/admin", label: "管理工作台" },
+          { label: "账号管理受限" },
+        ]}
+        description="只有超级管理员可以查看、创建或停用账号。"
+        title="账号管理受限"
+      />
       <section className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-5 py-5 text-sm text-warning">
         普通管理员仍可继续处理客户与店铺的日常管理，但账号治理操作不会在这里暴露。
       </section>
@@ -281,18 +340,54 @@ export default async function AccountsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">账号管理</h1>
-        <p className="text-sm text-muted">
-          超级管理员在这里集中维护内部管理员与客户账号，所有停用和重置操作都会保留原有审计记录。
-        </p>
-      </header>
+      <PageHeading
+        breadcrumbs={[
+          { href: "/admin", label: "管理工作台" },
+          { label: "账号管理" },
+        ]}
+        description="超级管理员在这里集中维护内部管理员与客户账号，所有停用和重置操作都会保留原有审计记录。"
+        title="账号管理"
+      />
+
+      <MetricStrip
+        items={[
+          { label: "管理员账号", value: `${adminAccounts.length}` },
+          { label: "客户账号", value: `${customerAccounts.length}` },
+          {
+            label: "已停用账号",
+            tone: customerAccounts.some((item) => item.status === "DISABLED")
+              ? "warning"
+              : "default",
+            value: `${customerAccounts.filter((item) => item.status === "DISABLED").length}`,
+          },
+          {
+            label: "客户店铺数",
+            value: `${customerAccounts.reduce((sum, item) => sum + item.storeCount, 0)}`,
+          },
+        ]}
+      />
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <SummaryCard count={adminAccounts.length} description="包含受保护超级管理员与普通管理员。" title="管理员账号" />
-        <SummaryCard count={customerAccounts.length} description="一位客户绑定唯一账号，直接覆盖其名下店铺。" title="客户账号" />
-        <SummaryCard count={customerAccounts.filter((item) => item.status === "DISABLED").length} description="停用后旧会话立即失效，历史订单不会删除。" title="已停用账号" />
-        <SummaryCard count={customerAccounts.reduce((sum, item) => sum + item.storeCount, 0)} description="客户账号下的店铺数总和，用于快速判断覆盖范围。" title="客户店铺数" />
+        <SummaryCard
+          count={adminAccounts.length}
+          description="包含受保护超级管理员与普通管理员。"
+          title="管理员账号"
+        />
+        <SummaryCard
+          count={customerAccounts.length}
+          description="一位客户绑定唯一账号，直接覆盖其名下店铺。"
+          title="客户账号"
+        />
+        <SummaryCard
+          count={customerAccounts.filter((item) => item.status === "DISABLED").length}
+          description="停用后旧会话立即失效，历史订单不会删除。"
+          title="已停用账号"
+        />
+        <SummaryCard
+          count={customerAccounts.reduce((sum, item) => sum + item.storeCount, 0)}
+          description="客户账号名下店铺总数，用于快速判断覆盖范围。"
+          title="客户店铺数"
+        />
       </div>
 
       <Tabs className="gap-5" defaultValue="admins">
@@ -304,7 +399,9 @@ export default async function AccountsPage() {
         <TabsContent className="space-y-5" value="admins">
           <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
             <h2 className="text-lg font-semibold text-ink">创建普通管理员</h2>
-            <p className="mt-1 text-sm text-muted">此入口只允许创建普通管理员，不提供创建或晋升超级管理员的能力。</p>
+            <p className="mt-1 text-sm text-muted">
+              只允许创建普通管理员，不提供创建或晋升超级管理员的入口。
+            </p>
             <ActionForm
               action={createAdminAccountAction}
               className="mt-4 grid gap-4 xl:grid-cols-[1fr_1.2fr_1fr_1.4fr_auto] xl:items-end"
@@ -312,25 +409,48 @@ export default async function AccountsPage() {
             >
               <label className="space-y-2 text-sm font-medium text-ink">
                 管理员姓名
-                <Input className="min-h-11" name="displayName" placeholder="例如：运营值班管理员" required />
+                <Input
+                  className="min-h-11"
+                  name="displayName"
+                  placeholder="例如：运营值班管理员"
+                  required
+                />
               </label>
               <label className="space-y-2 text-sm font-medium text-ink">
                 登录邮箱
-                <Input className="min-h-11" name="email" placeholder="ops@example.com" required type="email" />
+                <Input
+                  className="min-h-11"
+                  name="email"
+                  placeholder="ops@example.com"
+                  required
+                  type="email"
+                />
               </label>
               <label className="space-y-2 text-sm font-medium text-ink">
                 初始密码
-                <Input className="min-h-11" minLength={12} name="password" placeholder="至少 12 位" required type="password" />
+                <Input
+                  className="min-h-11"
+                  minLength={12}
+                  name="password"
+                  placeholder="至少 12 位"
+                  required
+                  type="password"
+                />
               </label>
               <label className="space-y-2 text-sm font-medium text-ink">
                 创建原因
-                <Input className="min-h-11" name="reason" placeholder="例如：新增白班值守管理员" required />
+                <Input
+                  className="min-h-11"
+                  name="reason"
+                  placeholder="例如：新增白班值守管理员"
+                  required
+                />
               </label>
             </ActionForm>
           </section>
 
           <AccountSection
-            description="超级管理员行仅保留查看说明；普通管理员可修改资料、重置密码并停用或恢复。"
+            description="超级管理员行只保留查看说明；普通管理员可修改资料、重置密码，并停用或恢复。"
             emptyCopy="暂无管理员账号。创建后将自动进入管理员账号列表。"
             rows={adminAccounts}
             title="管理员账号清单"

@@ -60,11 +60,11 @@ describe("AdminSettlementReview", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "统一核款：8 张拿货单" })).toBeVisible();
-    expect(screen.getByText("余额冻结 ¥86.00")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "统一款项审核 · 8 张拿货单" })).toBeVisible();
+    expect(screen.getByText("逐店分摊")).toBeVisible();
+    expect(screen.getByText("客户提交付款声明")).toBeVisible();
     expect(screen.getByRole("button", { name: "确认已收款" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "拒绝付款声明" })).toBeEnabled();
-    expect(screen.getByText("客户提交付款声明")).toBeVisible();
     expect(screen.queryByText("PAYMENT_REPORTED")).not.toBeInTheDocument();
     expect(screen.queryByText("PENDING_PAYMENT")).not.toBeInTheDocument();
   });
@@ -97,11 +97,8 @@ describe("AdminSettlementReview", () => {
       />,
     );
 
-    expect(screen.getByText("该结算批次已收款，审核操作已结束。"))
-      .toBeVisible();
-    expect(screen.queryByRole("button", { name: "确认已收款" }))
-      .not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "拒绝付款声明" }))
-      .not.toBeInTheDocument();
+    expect(screen.getByText("该结算批次当前为 已收款，审核操作已结束。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "确认已收款" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拒绝付款声明" })).not.toBeInTheDocument();
   });
 });

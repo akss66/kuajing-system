@@ -180,7 +180,9 @@ export function AdminShell({
           subtitle="加拿大本地货盘 · TEMU 一件代发"
           title="同舟行运营中心"
         />
-        <main className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">{children}</main>
+        <main className="mx-auto w-full max-w-[1600px] bg-[var(--merchant-canvas)] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          {children}
+        </main>
       </div>
     </div>
   );

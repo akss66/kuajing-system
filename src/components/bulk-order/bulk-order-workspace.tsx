@@ -18,6 +18,8 @@ import {
   uploadGroupFilesAction,
   type SubmitBulkDraftActionResult,
 } from "@/modules/bulk-order/actions";
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
+import { PageHeading } from "@/components/layout/page-heading";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -504,8 +506,35 @@ export function BulkOrderWorkspace({
 
   return (
     <form className="space-y-6" onSubmit={onSubmit}>
-      <header className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <PageHeading
+        action={
+          <div className="rounded-[var(--radius-surface)] border border-border bg-background px-4 py-3 text-sm text-muted">
+            <p>{`草稿状态：${draftStatusLabel(draft.status)}`}</p>
+            <p className="mt-1">
+              {`创建于 ${formatDate(draft.createdAt)}，过期于 ${formatDate(draft.expiresAt)}`}
+            </p>
+          </div>
+        }
+        breadcrumbs={[
+          { href: "/portal", label: "商家中心" },
+          { href: "/portal/bulk-orders", label: "批量拿货" },
+          { label: "多店铺批量拿货" },
+        ]}
+        description="按店铺上传 TEMU 原始 Excel。系统会跨文件去重、识别跨店冲突，并把可提交分组统一汇总到结算。"
+        title="多店铺批量拿货"
+      />
+
+      <MetricStrip
+        items={[
+          { label: "分组数", value: `${groups.length}` },
+          { label: "可提交店铺", value: `${submittableCount}` },
+          { label: "已选分组", value: `${selectedGroups.length}` },
+          { label: "已选文件", value: `${summary.fileCount}` },
+        ]}
+      />
+
+      <section className="space-y-4">
+        <div className="hidden flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-primary">按店铺批量拿货</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
@@ -559,7 +588,7 @@ export function BulkOrderWorkspace({
             新增店铺分组
           </Button>
         </section>
-      </header>
+      </section>
 
       {alertMessage ? (
         <div

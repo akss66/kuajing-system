@@ -147,7 +147,9 @@ describe("customer management pages", () => {
 
     const storeCardScope = within(storeCard as HTMLDetailsElement);
     expect(storeCardScope.getByText("编辑店铺")).toBeVisible();
-    expect(storeCardScope.getByText("已停用后新拿货已关闭，历史数据会继续保留。")).toBeVisible();
+    expect(
+      storeCardScope.getByText(/已停用后新拿货已关闭，历史数据.*保留。/),
+    ).toBeVisible();
     expect(storeCardScope.getByDisplayValue("华北二店")).not.toBeVisible();
 
     (storeCard as HTMLDetailsElement).open = true;

@@ -88,8 +88,8 @@ export function MerchantTopbar({
         </Button>
         <Button
           aria-label="通知"
-          className="rounded-md border-white/12 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
-          size="icon-sm"
+          className="size-11 rounded-md border-white/12 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
+          size="icon"
           variant="ghost"
         >
           <Bell aria-hidden="true" />
@@ -98,7 +98,7 @@ export function MerchantTopbar({
           <DropdownMenuTrigger asChild>
             <Button
               aria-label="打开账号菜单"
-              className="h-9 gap-2 rounded-md border-white/12 bg-white/5 px-3 text-[var(--merchant-topbar-foreground)] hover:bg-white/10 hover:text-white"
+              className="min-h-11 gap-2 rounded-md border-white/12 bg-white/5 px-3 text-[var(--merchant-topbar-foreground)] hover:bg-white/10 hover:text-white"
               variant="outline"
             >
               <UserCircle2 aria-hidden="true" className="size-4" />

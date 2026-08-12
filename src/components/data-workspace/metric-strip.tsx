@@ -16,14 +16,20 @@ const toneClasses: Record<NonNullable<MetricItem["tone"]>, string> = {
 
 export function MetricStrip({ items }: { items: MetricItem[] }) {
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-metric-strip>
       {items.map((item) => (
         <article
-          className="rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-4 py-3"
+          className="rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-4 py-3.5"
+          data-workspace-panel
           key={`${item.label}-${item.value}`}
         >
           <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
-          <p className={cn("mt-2 text-[1.65rem] font-semibold tracking-[-0.035em] tabular-nums", toneClasses[item.tone ?? "default"])}>
+          <p
+            className={cn(
+              "mt-2 text-[1.65rem] font-semibold tracking-[-0.035em] tabular-nums",
+              toneClasses[item.tone ?? "default"],
+            )}
+          >
             {item.value}
           </p>
           {item.hint ? <p className="mt-1 text-xs text-muted-foreground">{item.hint}</p> : null}

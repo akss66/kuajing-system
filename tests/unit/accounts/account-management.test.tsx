@@ -110,8 +110,9 @@ describe("AccountsPage", () => {
     ).not.toBeInTheDocument();
 
     expect(screen.getAllByText("客户账号").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("客户店铺数").length).toBeGreaterThan(0);
-    expect(screen.getByText("3")).toBeVisible();
+    const storeCountMetric = document.querySelectorAll("[data-workspace-panel]")[3];
+    expect(storeCountMetric).toBeInstanceOf(HTMLElement);
+    expect(within(storeCountMetric as HTMLElement).getByText("3")).toBeVisible();
     expect(screen.queryByText("SUPER_ADMIN")).not.toBeInTheDocument();
     expect(screen.queryByText("CUSTOMER")).not.toBeInTheDocument();
   });

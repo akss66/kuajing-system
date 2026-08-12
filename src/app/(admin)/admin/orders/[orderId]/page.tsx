@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/forms/action-form";
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
+import { PageHeading } from "@/components/layout/page-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +59,31 @@ export default async function AdminOrderDetailPage({
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <PageHeading
+        action={
+          <Badge className="w-fit bg-primary-soft px-3 py-1.5 text-primary-hover" variant="secondary">
+            {order.status}
+          </Badge>
+        }
+        breadcrumbs={[
+          { href: "/admin", label: "管理工作台" },
+          { href: "/admin/orders", label: "订单管理" },
+          { label: order.orderNumber },
+        ]}
+        description={`${order.customerCode} · ${order.customerName} / ${order.storeName}`}
+        title={order.orderNumber}
+      />
+
+      <MetricStrip
+        items={[
+          { label: "包裹数", value: `${order.shipments.length}` },
+          { label: "商品件数", value: `${order.totalQuantity}` },
+          { label: "实际成交额", value: `¥${(order.totalAmountFen / 100).toFixed(2)}` },
+          { label: "创建时间", value: dateTime(order.createdAt) },
+        ]}
+      />
+
+      <header className="hidden flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Button asChild className="-ml-3 mb-2" variant="ghost">
             <Link href="/admin/orders"><ArrowLeft />返回订单列表</Link>

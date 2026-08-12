@@ -127,7 +127,9 @@ export function CustomerShell({ children }: { children: ReactNode }) {
           subtitle="加拿大本地货盘 · 多店铺统一拿货"
           title="同舟行客户中心"
         />
-        <main className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">{children}</main>
+        <main className="mx-auto max-w-[1480px] bg-[var(--merchant-canvas)] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileWarning, HelpCircle }
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
+import { PageHeading } from "@/components/layout/page-heading";
 import { Badge } from "@/components/ui/badge";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -54,7 +56,32 @@ export default async function ImportPreviewPage({
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <PageHeading
+        action={
+          <div className="text-sm text-muted sm:text-right">
+            <p>预览有效期至</p>
+            <p className="mt-1 font-medium tabular-nums text-ink">{deadline(preview.expiresAt)}（多伦多）</p>
+          </div>
+        }
+        breadcrumbs={[
+          { href: "/portal", label: "商家中心" },
+          { href: "/portal/imports/new", label: "导入订单" },
+          { label: "核对 TEMU 订单" },
+        ]}
+        description={`${preview.storeName} · ${preview.fileName} · 共 ${preview.summary.total} 行`}
+        title="核对 TEMU 订单"
+      />
+
+      <MetricStrip
+        items={[
+          { label: "可提交", value: `${preview.summary.ready}` },
+          { label: "重复订单", value: `${preview.summary.duplicate}` },
+          { label: "未知 SKU", value: `${preview.summary.unknownSku}` },
+          { label: "格式错误", value: `${preview.summary.invalid}` },
+        ]}
+      />
+
+      <header className="hidden flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/imports/new">
             <ArrowLeft aria-hidden="true" className="size-4" />重新上传

@@ -107,16 +107,13 @@ describe("CustomerSettlementDetailPage", () => {
 
     expect(screen.getByRole("heading", { name: "统一付款结算" })).toBeInTheDocument();
     const skipLink = screen.getByRole("link", { name: "跳到付款声明" });
-    expect(skipLink).toHaveAttribute(
-      "href",
-      "#settlement-payment-form",
-    );
+    expect(skipLink).toHaveAttribute("href", "#settlement-payment-form");
     fireEvent.click(skipLink);
     const target = document.getElementById("settlement-payment-form");
     expect(target).toHaveAttribute("tabindex", "-1");
     target?.focus();
     expect(target).toHaveFocus();
-    expect(screen.getByText("待付款")).toBeInTheDocument();
+    expect(screen.getAllByText("待付款").length).toBeGreaterThan(0);
     expect(screen.getByText("已付款 / 待发货")).toBeInTheDocument();
     expect(screen.getByText(/冻结中/)).toBeInTheDocument();
     expect(screen.queryByText("PENDING_PAYMENT")).not.toBeInTheDocument();

@@ -14,7 +14,10 @@ type PageHeadingProps = {
 
 export function PageHeading({ action, breadcrumbs = [], description, title }: PageHeadingProps) {
   return (
-    <section className="flex flex-col gap-4 border-b border-border/90 pb-4 sm:flex-row sm:items-end sm:justify-between">
+    <section
+      className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between"
+      data-page-heading
+    >
       <div className="min-w-0 space-y-2">
         {breadcrumbs.length ? (
           <nav aria-label="页面路径" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -32,8 +35,8 @@ export function PageHeading({ action, breadcrumbs = [], description, title }: Pa
             ))}
           </nav>
         ) : null}
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-[1.8rem]">{title}</h1>
+        <div className="space-y-1.5">
+          <h1 className="text-[1.9rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[2rem]">{title}</h1>
           {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
         </div>
       </div>
