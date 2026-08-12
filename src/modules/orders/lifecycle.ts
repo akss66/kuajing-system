@@ -6,6 +6,8 @@ import {
   fulfillmentOrders,
   inventoryReservations,
   paymentClaims,
+  settlementBatchOrders,
+  settlementPaymentClaims,
 } from "@/db/schema";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refundWalletForOrder } from "@/modules/wallet/service";
@@ -360,7 +362,7 @@ export async function cancelFulfillmentOrder(input: {
   return db.transaction(async (tx) => {
     const customerFilter =
       input.actorType === "CUSTOMER" ? sql`and customer_id = ${input.customerId!}` : sql``;
-    const rows = await tx.execute<{
+    const orderRows = await tx.execute<{
       cancelReason: string | null;
       customerId: string;
       paymentMode: string | null;
@@ -377,9 +379,43 @@ export async function cancelFulfillmentOrder(input: {
       where id = ${input.orderId} ${customerFilter}
       for update
     `);
-    const order = rows[0];
+    const order = orderRows[0];
     if (!order) {
       throw new OrderLifecycleError("ORDER_NOT_FOUND", "未找到该拿货单");
+    }
+    const [settlementReference] = await tx
+      .select({ settlementBatchId: settlementBatchOrders.settlementBatchId })
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.orderId, input.orderId))
+      .limit(1);
+    if (settlementReference) {
+      const lockedBatch = await tx.execute<{ id: string }>(sql`
+        select id
+        from settlement_batches
+        where id = ${settlementReference.settlementBatchId}
+        for update
+      `);
+      if (lockedBatch[0]) {
+        const [pendingUnifiedClaim] = await tx
+          .select({ id: settlementPaymentClaims.id })
+          .from(settlementPaymentClaims)
+          .where(
+            and(
+              eq(
+                settlementPaymentClaims.settlementBatchId,
+                settlementReference.settlementBatchId,
+              ),
+              eq(settlementPaymentClaims.status, "PENDING"),
+            ),
+          )
+          .limit(1);
+        if (pendingUnifiedClaim) {
+          throw new OrderLifecycleError(
+            "SETTLEMENT_CLAIM_PENDING",
+            "该拿货单属于待核款结算批次，请先撤回整笔付款声明",
+          );
+        }
+      }
     }
     if (order.status === "CANCELLED") {
       return { orderId: input.orderId, status: "CANCELLED" as const };
@@ -481,6 +517,14 @@ export async function expirePendingPaymentOrders(input?: {
       where status = 'PENDING_PAYMENT'
         and lock_expires_at is not null
         and lock_expires_at <= ${now.toISOString()}::timestamptz
+        and not exists (
+          select 1
+          from settlement_batch_orders allocation
+          inner join settlement_batches batch
+            on batch.id = allocation.settlement_batch_id
+          where allocation.order_id = fulfillment_orders.id
+            and batch.status in ('PENDING_PAYMENT', 'PAYMENT_REPORTED')
+        )
       order by lock_expires_at, id
       for update skip locked
       limit ${limit}

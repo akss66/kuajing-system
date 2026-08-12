@@ -1,0 +1,3 @@
+ALTER TABLE "settlement_payment_claims" DROP CONSTRAINT "settlement_payment_claims_review_details_required";--> statement-breakpoint
+CREATE INDEX "settlement_batches_status_reported_index" ON "settlement_batches" USING btree ("status","payment_reported_at");--> statement-breakpoint
+ALTER TABLE "settlement_payment_claims" ADD CONSTRAINT "settlement_payment_claims_review_details_required" CHECK (("settlement_payment_claims"."status" <> 'APPROVED' or ("settlement_payment_claims"."reviewed_at" is not null and "settlement_payment_claims"."reviewed_by_admin_user_id" is not null)) and ("settlement_payment_claims"."status" <> 'REJECTED' or "settlement_payment_claims"."reviewed_at" is not null));

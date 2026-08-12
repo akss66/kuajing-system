@@ -4,17 +4,21 @@ import { afterEach, describe, expect, test } from "vitest";
 import { db } from "@/db/client";
 import {
   auditLogs,
+  adminUsers,
   bulkImportDrafts,
   bulkImportStoreGroups,
   customers,
   fulfillmentOrders,
   inventoryBalances,
   inventoryReservations,
+  integrationOutbox,
   orderImportBatches,
   orderImportRows,
   products,
   settlementBatchOrders,
   settlementBatches,
+  settlementPaymentClaims,
+  shipmentFulfillments,
   skus,
   stores,
   walletAccounts,
@@ -23,6 +27,12 @@ import {
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
 import { getSettlementBatchAllocation } from "@/modules/settlement/batch-allocation";
+import {
+  expireSettlementBatches,
+  reportSettlementPayment,
+  reviewSettlementPayment,
+  withdrawSettlementPayment,
+} from "@/modules/settlement/batch-service";
 import { getWalletPosition } from "@/modules/wallet/queries";
 import {
   WalletInsufficientFundsError,
@@ -285,6 +295,8 @@ describe("bulk settlement wallet lifecycle", () => {
     `));
     await db.execute(sql.raw(`
       truncate table
+        settlement_payment_claims,
+        shipment_fulfillments,
         integration_outbox,
         audit_logs,
         wallet_transactions,
@@ -302,6 +314,7 @@ describe("bulk settlement wallet lifecycle", () => {
         bulk_import_drafts,
         inventory_reservations,
         inventory_balances,
+        admin_users,
         skus,
         products,
         stores,
@@ -1048,4 +1061,640 @@ describe("bulk settlement wallet lifecycle", () => {
     },
     15_000,
   );
+});
+
+async function createSettlementAdmin(status: "ACTIVE" | "DISABLED" = "ACTIVE") {
+  const [admin] = await db
+    .insert(adminUsers)
+    .values({
+      displayName: "结算管理员",
+      loginIdentifier: `settlement-${crypto.randomUUID()}@test.local`,
+      status,
+    })
+    .returning();
+  return admin;
+}
+
+async function expectTerminalRecovery(
+  settlementBatchId: string,
+  expected: {
+    batchStatus: "REJECTED" | "WITHDRAWN" | "EXPIRED";
+    orderStatus: "CANCELLED" | "EXPIRED";
+    reason: string;
+  },
+) {
+  const [batch] = await db
+    .select()
+    .from(settlementBatches)
+    .where(eq(settlementBatches.id, settlementBatchId));
+  expect(batch).toMatchObject({
+    status: expected.batchStatus,
+    statusReason: expected.reason,
+  });
+  expect(batch.closedAt).toBeInstanceOf(Date);
+
+  const orders = await db
+    .select()
+    .from(fulfillmentOrders)
+    .where(eq(fulfillmentOrders.customerId, batch.customerId));
+  expect(orders).not.toHaveLength(0);
+  expect(orders.every((order) => order.status === expected.orderStatus)).toBe(true);
+  expect(
+    orders.every((order) =>
+      expected.orderStatus === "CANCELLED"
+        ? order.cancelReason === expected.reason && order.cancelledAt instanceof Date
+        : order.cancelReason === null,
+    ),
+  ).toBe(true);
+
+  const reservations = await db.select().from(inventoryReservations);
+  const orderIds = orders.map((order) => order.id);
+  const scopedReservations = reservations.filter((reservation) =>
+    orderIds.includes(reservation.referenceId),
+  );
+  expect(scopedReservations).not.toHaveLength(0);
+  expect(
+    scopedReservations.every(
+      (reservation) =>
+        reservation.status === "RELEASED" &&
+        reservation.releaseReason === expected.reason &&
+        reservation.expiresAt === null,
+    ),
+  ).toBe(true);
+  const holds = await db
+    .select()
+    .from(walletHolds)
+    .where(eq(walletHolds.settlementBatchId, settlementBatchId));
+  expect(
+    holds.every(
+      (hold) => hold.status === "RELEASED" && hold.releaseReason === expected.reason,
+    ),
+  ).toBe(true);
+  expect(await db.select().from(shipmentFulfillments)).toEqual([]);
+  expect(
+    await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.eventType, "JIFENG_CREATE_ORDER")),
+  ).toEqual([]);
+}
+
+describe("unified offline settlement lifecycle", () => {
+  afterEach(async () => {
+    await db.execute(sql.raw(`
+      do $$
+      begin
+        if to_regclass('public.bulk_submission_requests') is not null then
+          execute 'truncate table bulk_submission_requests';
+        end if;
+      end $$;
+    `));
+    await db.execute(sql.raw(`
+      truncate table
+        settlement_payment_claims,
+        shipment_fulfillments,
+        integration_outbox,
+        audit_logs,
+        wallet_transactions,
+        wallet_holds,
+        wallet_accounts,
+        settlement_batch_orders,
+        settlement_batches,
+        order_lines,
+        order_shipments,
+        fulfillment_order_import_batches,
+        fulfillment_orders,
+        order_import_rows,
+        order_import_batches,
+        bulk_import_store_groups,
+        bulk_import_drafts,
+        inventory_reservations,
+        inventory_balances,
+        admin_users,
+        skus,
+        products,
+        stores,
+        customers
+      restart identity cascade
+    `));
+  });
+
+  test("reports the exact offline amount for the owning customer and extends every lock to twelve hours", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    const result = await submitFixture(fixture, 0);
+    const reportedAt = new Date();
+    const [otherCustomer] = await db
+      .insert(customers)
+      .values({ code: crypto.randomUUID(), name: "其他结算客户" })
+      .returning();
+
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "other-customer-auth",
+        amountFen: 400,
+        customerId: otherCustomer.id,
+        now: reportedAt,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_NOT_FOUND" });
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 399,
+        customerId: fixture.customer.id,
+        now: reportedAt,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "PAYMENT_AMOUNT_MISMATCH" });
+
+    const first = await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 400,
+      customerId: fixture.customer.id,
+      note: "微信已付；不要进入审计或出站消息",
+      now: reportedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const replay = await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 400,
+      customerId: fixture.customer.id,
+      note: "微信已付；不要进入审计或出站消息",
+      now: reportedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+
+    expect(replay.claim?.id).toBe(first.claim?.id);
+    expect(first).toMatchObject({
+      claim: { amountFen: 400, status: "PENDING" },
+      offlineAmountFen: 400,
+      status: "PAYMENT_REPORTED",
+    });
+    const expectedDeadline = new Date(
+      reportedAt.getTime() + 12 * 60 * 60 * 1000,
+    );
+    const orders = await db.select().from(fulfillmentOrders);
+    expect(
+      orders.every(
+        (order) =>
+          order.paymentDeclaredAt?.getTime() === reportedAt.getTime() &&
+          order.lockExpiresAt?.getTime() === expectedDeadline.getTime(),
+      ),
+    ).toBe(true);
+    const reservations = await db.select().from(inventoryReservations);
+    expect(
+      reservations.every(
+        (reservation) => reservation.expiresAt?.getTime() === expectedDeadline.getTime(),
+      ),
+    ).toBe(true);
+    expect(await db.select().from(settlementPaymentClaims)).toHaveLength(1);
+    const serializedAudit = JSON.stringify(await db.select().from(auditLogs));
+    expect(serializedAudit).not.toContain("不要进入审计");
+  });
+
+  test("does not admit an already-paid pure-wallet settlement to the offline claim flow", async () => {
+    const fixture = await createSubmissionFixture([300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 300,
+      reason: "纯余额测试",
+    });
+    const result = await submitFixture(fixture, 300);
+
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 1,
+        customerId: fixture.customer.id,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_ALREADY_PAID" });
+    expect(await db.select().from(settlementPaymentClaims)).toEqual([]);
+  });
+
+  test("admin approval consumes one mixed-payment hold, marks all orders paid and atomically creates fulfillment outbox", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 150,
+      reason: "混合结算测试",
+    });
+    const result = await submitFixture(fixture, 150);
+    const reportedAt = new Date();
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 250,
+      customerId: fixture.customer.id,
+      now: reportedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    const reviewedAt = new Date(reportedAt.getTime() + 30_000);
+
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      now: reviewedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      now: reviewedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+
+    const [batch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    expect(batch).toMatchObject({ paidAt: reviewedAt, status: "PAID" });
+    const [claim] = await db
+      .select()
+      .from(settlementPaymentClaims)
+      .where(eq(settlementPaymentClaims.settlementBatchId, result.settlementBatchId!));
+    expect(claim).toMatchObject({
+      reviewedAt,
+      reviewedByAdminUserId: admin.id,
+      status: "APPROVED",
+    });
+    const [hold] = await db
+      .select()
+      .from(walletHolds)
+      .where(eq(walletHolds.settlementBatchId, result.settlementBatchId!));
+    expect(hold).toMatchObject({ consumedAt: reviewedAt, status: "CONSUMED" });
+    const [wallet] = await db.select().from(walletAccounts);
+    expect(wallet.balanceFen).toBe(0);
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    expect(debits).toHaveLength(2);
+    expect(debits.reduce((sum, debit) => sum + debit.deltaFen, 0)).toBe(-150);
+    const orders = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+    expect(
+      orders.every(
+        (order) =>
+          order.status === "PAID_PENDING_FULFILLMENT" &&
+          order.paymentMode === "MIXED" &&
+          order.paidAt?.getTime() === reviewedAt.getTime() &&
+          order.lockExpiresAt === null,
+      ),
+    ).toBe(true);
+    expect(
+      (await db.select().from(inventoryReservations)).every(
+        (reservation) => reservation.status === "ACTIVE" && reservation.expiresAt === null,
+      ),
+    ).toBe(true);
+    expect(await db.select().from(shipmentFulfillments)).toHaveLength(2);
+    const fulfillmentEvents = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.eventType, "JIFENG_CREATE_ORDER"));
+    expect(fulfillmentEvents).toHaveLength(2);
+    expect(
+      fulfillmentEvents.every((event) => Object.keys(event.payload).join(",") === "shipmentId"),
+    ).toBe(true);
+  });
+
+  test("rejects inactive or missing administrators without any financial mutation", async () => {
+    const fixture = await createSubmissionFixture([300]);
+    const result = await submitFixture(fixture, 0);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 300,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const disabledAdmin = await createSettlementAdmin("DISABLED");
+
+    for (const adminUserId of [disabledAdmin.id, crypto.randomUUID()]) {
+      await expect(
+        reviewSettlementPayment({
+          adminUserId,
+          decision: "APPROVE",
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      ).rejects.toMatchObject({ code: "ADMIN_FORBIDDEN" });
+    }
+    const [batch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    expect(batch.status).toBe("PAYMENT_REPORTED");
+    const [claim] = await db
+      .select()
+      .from(settlementPaymentClaims)
+      .where(eq(settlementPaymentClaims.settlementBatchId, result.settlementBatchId!));
+    expect(claim.status).toBe("PENDING");
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
+    ).toEqual([]);
+  });
+
+  test("admin rejection releases the whole batch and requires one explicit reason", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "拒绝测试",
+    });
+    const result = await submitFixture(fixture, 200);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+
+    await expect(
+      reviewSettlementPayment({
+        adminUserId: admin.id,
+        decision: "REJECT",
+        rejectionReason: "  ",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "REJECTION_REASON_REQUIRED" });
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "REJECT",
+      rejectionReason: "未查询到对应微信收款",
+      settlementBatchId: result.settlementBatchId!,
+    });
+
+    await expectTerminalRecovery(result.settlementBatchId!, {
+      batchStatus: "REJECTED",
+      orderStatus: "CANCELLED",
+      reason: "未查询到对应微信收款",
+    });
+    const [claim] = await db.select().from(settlementPaymentClaims);
+    expect(claim).toMatchObject({
+      rejectionReason: "未查询到对应微信收款",
+      reviewedByAdminUserId: admin.id,
+      status: "REJECTED",
+    });
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
+    ).toEqual([]);
+  });
+
+  test("customer withdrawal is ownership-scoped, terminal and idempotent", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "撤回测试",
+    });
+    const result = await submitFixture(fixture, 200);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [otherCustomer] = await db
+      .insert(customers)
+      .values({ code: crypto.randomUUID(), name: "越权客户" })
+      .returning();
+    await expect(
+      withdrawSettlementPayment({
+        actorUserId: "other-auth",
+        customerId: otherCustomer.id,
+        reason: "尝试越权撤回",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_NOT_FOUND" });
+
+    const withdrawal = {
+      actorUserId: "customer-auth",
+      customerId: fixture.customer.id,
+      now: new Date(),
+      reason: "客户撤回付款声明并取消本批次",
+      settlementBatchId: result.settlementBatchId!,
+    };
+    await withdrawSettlementPayment(withdrawal);
+    await withdrawSettlementPayment(withdrawal);
+
+    await expectTerminalRecovery(result.settlementBatchId!, {
+      batchStatus: "WITHDRAWN",
+      orderStatus: "CANCELLED",
+      reason: withdrawal.reason,
+    });
+    const [claim] = await db.select().from(settlementPaymentClaims);
+    expect(claim).toMatchObject({
+      status: "WITHDRAWN",
+      withdrawalReason: withdrawal.reason,
+      withdrawnAt: withdrawal.now,
+    });
+  });
+
+  test("expires unreported batches after two hours and reported batches after twelve hours", async () => {
+    const unreportedFixture = await createSubmissionFixture([100]);
+    const unreported = await submitFixture(unreportedFixture, 0);
+    const [unreportedBatch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, unreported.settlementBatchId!));
+    const reportedFixture = await createSubmissionFixture([200]);
+    const reported = await submitFixture(reportedFixture, 0);
+    const reportedAt = new Date();
+    await reportSettlementPayment({
+      actorUserId: "reported-customer-auth",
+      amountFen: 200,
+      customerId: reportedFixture.customer.id,
+      now: reportedAt,
+      settlementBatchId: reported.settlementBatchId!,
+    });
+
+    expect(await expireSettlementBatches(new Date(unreportedBatch.paymentDueAt.getTime() - 1))).toBe(0);
+    expect(await expireSettlementBatches(new Date(unreportedBatch.paymentDueAt.getTime() + 1))).toBe(1);
+    expect(await expireSettlementBatches(new Date(reportedAt.getTime() + 12 * 60 * 60 * 1000 + 1))).toBe(1);
+    expect(await expireSettlementBatches(new Date(reportedAt.getTime() + 13 * 60 * 60 * 1000))).toBe(0);
+
+    await expectTerminalRecovery(unreported.settlementBatchId!, {
+      batchStatus: "EXPIRED",
+      orderStatus: "EXPIRED",
+      reason: "结算批次超过 2 小时未申报付款",
+    });
+    await expectTerminalRecovery(reported.settlementBatchId!, {
+      batchStatus: "EXPIRED",
+      orderStatus: "EXPIRED",
+      reason: "付款声明超过 12 小时未完成核款",
+    });
+    const [timedOutClaim] = await db
+      .select()
+      .from(settlementPaymentClaims)
+      .where(eq(settlementPaymentClaims.settlementBatchId, reported.settlementBatchId!));
+    expect(timedOutClaim).toMatchObject({
+      rejectionReason: "付款声明超过 12 小时未完成核款",
+      reviewedByAdminUserId: null,
+      status: "REJECTED",
+    });
+    expect(timedOutClaim.reviewedAt).toBeInstanceOf(Date);
+  });
+
+  test("blocks both customer and administrator single-order cancellation while a unified claim is pending", async () => {
+    const fixture = await createSubmissionFixture([300]);
+    const result = await submitFixture(fixture, 0);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 300,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [order] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+
+    for (const actorType of ["CUSTOMER", "ADMIN"] as const) {
+      await expect(
+        (await import("@/modules/orders/lifecycle")).cancelFulfillmentOrder({
+          actorType,
+          actorUserId: `${actorType.toLowerCase()}-auth`,
+          customerId: actorType === "CUSTOMER" ? fixture.customer.id : undefined,
+          orderId: order.id,
+          reason: "尝试单独取消",
+        }),
+      ).rejects.toMatchObject({ code: "SETTLEMENT_CLAIM_PENDING" });
+    }
+    expect((await db.select().from(fulfillmentOrders))[0].status).toBe("PENDING_PAYMENT");
+  });
+
+  test("serializes simultaneous approve and withdrawal into one complete terminal outcome", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "竞态测试",
+    });
+    const result = await submitFixture(fixture, 200);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+
+    const attempts = await Promise.allSettled([
+      reviewSettlementPayment({
+        adminUserId: admin.id,
+        decision: "APPROVE",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+      withdrawSettlementPayment({
+        actorUserId: "customer-auth",
+        customerId: fixture.customer.id,
+        reason: "客户在核款同时撤回",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    const [batch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    const [hold] = await db
+      .select()
+      .from(walletHolds)
+      .where(eq(walletHolds.settlementBatchId, result.settlementBatchId!));
+    const orders = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+    if (batch.status === "PAID") {
+      expect(hold.status).toBe("CONSUMED");
+      expect(orders.every((order) => order.status === "PAID_PENDING_FULFILLMENT")).toBe(true);
+      const debits = await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+      expect(debits).toHaveLength(1);
+      expect(debits[0].deltaFen).toBe(-200);
+      expect(await db.select().from(shipmentFulfillments)).toHaveLength(1);
+    } else {
+      expect(batch.status).toBe("WITHDRAWN");
+      expect(hold.status).toBe("RELEASED");
+      expect(orders.every((order) => order.status === "CANCELLED")).toBe(true);
+      expect(
+        await db
+          .select()
+          .from(walletTransactions)
+          .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
+      ).toEqual([]);
+      expect(await db.select().from(shipmentFulfillments)).toEqual([]);
+    }
+    const [claim] = await db
+      .select()
+      .from(settlementPaymentClaims)
+      .where(eq(settlementPaymentClaims.settlementBatchId, result.settlementBatchId!));
+    expect(
+      [
+        ["PAID", "APPROVED"],
+        ["WITHDRAWN", "WITHDRAWN"],
+      ],
+    ).toContainEqual([batch.status, claim.status]);
+  });
+
+  test("serializes simultaneous admin reviews without duplicate financial effects", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "并发核款测试",
+    });
+    const result = await submitFixture(fixture, 200);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+
+    const attempts = await Promise.allSettled([
+      reviewSettlementPayment({
+        adminUserId: admin.id,
+        decision: "APPROVE",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+      reviewSettlementPayment({
+        adminUserId: admin.id,
+        decision: "APPROVE",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ]);
+
+    expect(attempts.every((attempt) => attempt.status === "fulfilled")).toBe(true);
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    expect(debits).toHaveLength(1);
+    expect(debits[0].deltaFen).toBe(-200);
+    const audits = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "SETTLEMENT_PAYMENT_APPROVED"));
+    expect(audits).toHaveLength(1);
+    expect(await db.select().from(shipmentFulfillments)).toHaveLength(1);
+  });
 });

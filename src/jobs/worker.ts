@@ -15,12 +15,14 @@ import {
 } from "@/modules/feishu/outbox";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
 import { createDailyStockCoverageAlerts } from "@/modules/reports/stock-coverage";
+import { expireSettlementBatches } from "@/modules/settlement/batch-service";
 import { safeLogError } from "@/shared/privacy";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");
 
 const EXPIRE_PENDING_ORDERS_QUEUE = "expire-pending-payment-orders";
+const EXPIRE_SETTLEMENT_BATCHES_QUEUE = "expire-settlement-batches";
 const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
 const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
 const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
@@ -32,11 +34,15 @@ boss.on("error", (error) => {
 
 await boss.start();
 await boss.createQueue(EXPIRE_PENDING_ORDERS_QUEUE);
+await boss.createQueue(EXPIRE_SETTLEMENT_BATCHES_QUEUE);
 
 // pg-boss 12.27: schedules are upserted by name and should use five-field cron
 // expressions because the scheduler checks on a 30-second cadence.
 // Source: https://pgboss.io/api/scheduling
 await boss.schedule(EXPIRE_PENDING_ORDERS_QUEUE, "* * * * *", null, {
+  tz: "UTC",
+});
+await boss.schedule(EXPIRE_SETTLEMENT_BATCHES_QUEUE, "* * * * *", null, {
   tz: "UTC",
 });
 
@@ -46,6 +52,11 @@ await boss.schedule(EXPIRE_PENDING_ORDERS_QUEUE, "* * * * *", null, {
 await boss.work(EXPIRE_PENDING_ORDERS_QUEUE, { batchSize: 1 }, async () => {
   const expiredCount = await expirePendingPaymentOrders();
   console.info(`[worker] expired ${expiredCount} pending payment order(s)`);
+  return { expiredCount };
+});
+await boss.work(EXPIRE_SETTLEMENT_BATCHES_QUEUE, { batchSize: 1 }, async () => {
+  const expiredCount = await expireSettlementBatches(new Date());
+  console.info(`[worker] expired ${expiredCount} settlement batch(es)`);
   return { expiredCount };
 });
 

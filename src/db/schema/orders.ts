@@ -480,6 +480,10 @@ export const settlementBatches = pgTable(
       table.status,
       table.paymentDueAt,
     ),
+    index("settlement_batches_status_reported_index").on(
+      table.status,
+      table.paymentReportedAt,
+    ),
   ],
 );
 
@@ -657,7 +661,7 @@ export const settlementPaymentClaims = pgTable(
     ),
     check(
       "settlement_payment_claims_review_details_required",
-      sql`${table.status} not in ('APPROVED', 'REJECTED') or (${table.reviewedAt} is not null and ${table.reviewedByAdminUserId} is not null)`,
+      sql`(${table.status} <> 'APPROVED' or (${table.reviewedAt} is not null and ${table.reviewedByAdminUserId} is not null)) and (${table.status} <> 'REJECTED' or ${table.reviewedAt} is not null)`,
     ),
     check(
       "settlement_payment_claims_rejection_reason_required",

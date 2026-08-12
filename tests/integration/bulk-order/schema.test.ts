@@ -320,7 +320,7 @@ describe("multi-store bulk order schema", () => {
     ).rejects.toThrow();
   });
 
-  test("allows at most one PENDING claim per settlement and requires a positive amount", async () => {
+  test("enforces pending-claim uniqueness, positive amounts and system-timeout review details", async () => {
     const { customer } = await createCustomerAndStore("声明");
     const settlementId = await createSettlement({ customerId: customer.id });
 
@@ -331,6 +331,22 @@ describe("multi-store bulk order schema", () => {
         ) values (${settlementId}, ${customer.id}, 0, 'PENDING')
       `),
     ).rejects.toThrow();
+    await expect(
+      db.execute(sql`
+        insert into settlement_payment_claims (
+          settlement_batch_id, customer_id, amount_fen, status, reviewed_at
+        ) values (${settlementId}, ${customer.id}, 60, 'APPROVED', now())
+      `),
+    ).rejects.toThrow();
+    await db.execute(sql`
+      insert into settlement_payment_claims (
+        settlement_batch_id, customer_id, amount_fen, status, rejection_reason,
+        reviewed_at
+      ) values (
+        ${settlementId}, ${customer.id}, 60, 'REJECTED',
+        '付款声明超过 12 小时未完成核款', now()
+      )
+    `);
     await db.execute(sql`
       insert into settlement_payment_claims (
         settlement_batch_id, customer_id, amount_fen, status
