@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
 import {
+  auditLogs,
   bulkImportDrafts,
   bulkImportStoreGroups,
   customers,
@@ -21,7 +22,16 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
-import { adjustWalletBalance } from "@/modules/wallet/service";
+import { getSettlementBatchAllocation } from "@/modules/settlement/batch-allocation";
+import { getWalletPosition } from "@/modules/wallet/queries";
+import {
+  WalletInsufficientFundsError,
+  WalletValidationError,
+  adjustWalletBalance,
+  consumeWalletHold,
+  createWalletHold,
+  releaseWalletHold,
+} from "@/modules/wallet/service";
 
 const future = () => new Date(Date.now() + 60 * 60 * 1_000);
 
@@ -340,5 +350,333 @@ describe("bulk settlement wallet lifecycle", () => {
       walletAmountFen: 0,
     });
     expect(await db.select().from(walletAccounts)).toEqual([]);
+  });
+
+  test("reports balance, ACTIVE holds and available balance as one wallet position", async () => {
+    const fixture = await createSubmissionFixture([6_000]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 10_000,
+      reason: "wallet position fixture",
+    });
+    await submitFixture(fixture, 3_000);
+
+    await expect(getWalletPosition(fixture.customer.id)).resolves.toEqual({
+      activeHoldFen: 3_000,
+      availableFen: 7_000,
+      balanceFen: 10_000,
+    });
+  });
+
+  test("creates a hold once when the same request is replayed", async () => {
+    const fixture = await createSubmissionFixture([1_000]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 1_000,
+      reason: "hold creation fixture",
+    });
+    const [settlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `HOLD-${crypto.randomUUID()}`,
+        customerId: fixture.customer.id,
+        idempotencyKey: `hold-${crypto.randomUUID()}`,
+        offlineAmountFen: 600,
+        paymentDueAt: future(),
+        totalAmountFen: 1_000,
+        walletAmountFen: 400,
+      })
+      .returning();
+
+    const [first, replay] = await db.transaction(async (tx) => {
+      const created = await createWalletHold(tx, {
+        amountFen: 400,
+        customerId: fixture.customer.id,
+        settlementBatchId: settlement.id,
+      });
+      const repeated = await createWalletHold(tx, {
+        amountFen: 400,
+        customerId: fixture.customer.id,
+        settlementBatchId: settlement.id,
+      });
+      return [created, repeated] as const;
+    });
+
+    expect(replay.id).toBe(first.id);
+    expect(await db.select().from(walletHolds)).toHaveLength(1);
+  });
+
+  test("refuses to reserve funds already used by another ACTIVE hold", async () => {
+    const fixture = await createSubmissionFixture([1_000]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 1_000,
+      reason: "unavailable hold fixture",
+    });
+    const settlements = await db
+      .insert(settlementBatches)
+      .values([
+        {
+          batchNumber: `HOLD-A-${crypto.randomUUID()}`,
+          customerId: fixture.customer.id,
+          idempotencyKey: `hold-a-${crypto.randomUUID()}`,
+          offlineAmountFen: 300,
+          paymentDueAt: future(),
+          totalAmountFen: 1_000,
+          walletAmountFen: 700,
+        },
+        {
+          batchNumber: `HOLD-B-${crypto.randomUUID()}`,
+          customerId: fixture.customer.id,
+          idempotencyKey: `hold-b-${crypto.randomUUID()}`,
+          offlineAmountFen: 300,
+          paymentDueAt: future(),
+          totalAmountFen: 1_000,
+          walletAmountFen: 700,
+        },
+      ])
+      .returning();
+    await db.transaction((tx) =>
+      createWalletHold(tx, {
+        amountFen: 700,
+        customerId: fixture.customer.id,
+        settlementBatchId: settlements[0].id,
+      }),
+    );
+
+    await expect(
+      db.transaction((tx) =>
+        createWalletHold(tx, {
+          amountFen: 700,
+          customerId: fixture.customer.id,
+          settlementBatchId: settlements[1].id,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WalletInsufficientFundsError);
+  });
+
+  test("serializes competing holds so the same available balance cannot be reserved twice", async () => {
+    const fixture = await createSubmissionFixture([1_000]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 1_000,
+      reason: "concurrent hold fixture",
+    });
+    const settlements = await db
+      .insert(settlementBatches)
+      .values([
+        {
+          batchNumber: `CONCURRENT-HOLD-A-${crypto.randomUUID()}`,
+          customerId: fixture.customer.id,
+          idempotencyKey: `concurrent-hold-a-${crypto.randomUUID()}`,
+          offlineAmountFen: 300,
+          paymentDueAt: future(),
+          totalAmountFen: 1_000,
+          walletAmountFen: 700,
+        },
+        {
+          batchNumber: `CONCURRENT-HOLD-B-${crypto.randomUUID()}`,
+          customerId: fixture.customer.id,
+          idempotencyKey: `concurrent-hold-b-${crypto.randomUUID()}`,
+          offlineAmountFen: 300,
+          paymentDueAt: future(),
+          totalAmountFen: 1_000,
+          walletAmountFen: 700,
+        },
+      ])
+      .returning();
+
+    const attempts = await Promise.allSettled(
+      settlements.map((settlement) =>
+        db.transaction((tx) =>
+          createWalletHold(tx, {
+            amountFen: 700,
+            customerId: fixture.customer.id,
+            settlementBatchId: settlement.id,
+          }),
+        ),
+      ),
+    );
+
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    expect(await getWalletPosition(fixture.customer.id)).toEqual({
+      activeHoldFen: 700,
+      availableFen: 300,
+      balanceFen: 1_000,
+    });
+  });
+
+  test("rejects a negative hold amount before reaching the database", async () => {
+    const fixture = await createSubmissionFixture([1_000]);
+    const [settlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `NEGATIVE-HOLD-${crypto.randomUUID()}`,
+        customerId: fixture.customer.id,
+        idempotencyKey: `negative-hold-${crypto.randomUUID()}`,
+        offlineAmountFen: 1_000,
+        paymentDueAt: future(),
+        totalAmountFen: 1_000,
+        walletAmountFen: 0,
+      })
+      .returning();
+
+    await expect(
+      db.transaction((tx) =>
+        createWalletHold(tx, {
+          amountFen: -1,
+          customerId: fixture.customer.id,
+          settlementBatchId: settlement.id,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WalletValidationError);
+  });
+
+  test("consumes a mixed-payment hold exactly once and records per-order debits", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "hold consumption fixture",
+    });
+    const result = await submitFixture(fixture, 150);
+
+    const consume = () =>
+      db.transaction((tx) =>
+        consumeWalletHold(tx, {
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      );
+    await consume();
+    await consume();
+
+    const [hold] = await db.select().from(walletHolds);
+    expect(hold.status).toBe("CONSUMED");
+    expect(hold.consumedAt).toBeInstanceOf(Date);
+    const [wallet] = await db.select().from(walletAccounts);
+    expect(wallet.balanceFen).toBe(50);
+    const debits = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+    expect(debits).toHaveLength(2);
+    expect(debits.reduce((total, row) => total + row.deltaFen, 0)).toBe(-150);
+  });
+
+  test("releases a hold exactly once without changing the wallet balance", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "hold release fixture",
+    });
+    const result = await submitFixture(fixture, 200);
+
+    const release = () =>
+      db.transaction((tx) =>
+        releaseWalletHold(tx, {
+          actorType: "SYSTEM",
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          reason: "offline payment expired",
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      );
+    await release();
+    await release();
+
+    const [hold] = await db.select().from(walletHolds);
+    expect(hold).toMatchObject({
+      releaseReason: "offline payment expired",
+      status: "RELEASED",
+    });
+    expect(hold.releasedAt).toBeInstanceOf(Date);
+    const [wallet] = await db.select().from(walletAccounts);
+    expect(wallet.balanceFen).toBe(200);
+    const releaseAudits = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "WALLET_SETTLEMENT_HOLD_RELEASED"));
+    expect(releaseAudits).toHaveLength(1);
+    expect(releaseAudits[0].actorType).toBe("SYSTEM");
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
+    ).toEqual([]);
+  });
+
+  test("does not permit a terminal hold to transition to the other terminal state", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "terminal hold fixture",
+    });
+    const result = await submitFixture(fixture, 200);
+    await db.transaction((tx) =>
+      releaseWalletHold(tx, {
+        actorUserId: "settlement-admin",
+        customerId: fixture.customer.id,
+        reason: "cancelled",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    );
+
+    await expect(
+      db.transaction((tx) =>
+        consumeWalletHold(tx, {
+          actorUserId: "settlement-admin",
+          customerId: fixture.customer.id,
+          settlementBatchId: result.settlementBatchId!,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WalletValidationError);
+  });
+
+  test("returns the batch allocation with its orders and current hold state", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 150,
+      reason: "allocation view fixture",
+    });
+    const result = await submitFixture(fixture, 150);
+
+    const allocation = await getSettlementBatchAllocation(
+      fixture.customer.id,
+      result.settlementBatchId!,
+    );
+
+    expect(allocation).toMatchObject({
+      offlineAmountFen: 250,
+      status: "PENDING_PAYMENT",
+      totalAmountFen: 400,
+      walletAmountFen: 150,
+      walletHold: { amountFen: 150, status: "ACTIVE" },
+    });
+    expect(allocation?.orders).toHaveLength(2);
+    expect(
+      allocation?.orders.map((order) => [
+        order.totalAmountFen,
+        order.walletAmountFen,
+        order.offlineAmountFen,
+      ]),
+    ).toEqual([
+      [100, 37, 63],
+      [300, 113, 187],
+    ]);
   });
 });

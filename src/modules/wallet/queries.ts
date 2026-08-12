@@ -5,8 +5,39 @@ import {
   customers,
   fulfillmentOrders,
   walletAccounts,
+  walletHolds,
   walletTransactions,
 } from "@/db/schema";
+
+export async function getWalletPosition(customerId: string): Promise<{
+  activeHoldFen: number;
+  availableFen: number;
+  balanceFen: number;
+}> {
+  const [position] = await db
+    .select({
+      activeHoldFen:
+        sql<number>`coalesce(sum(${walletHolds.amountFen}) filter (where ${walletHolds.status} = 'ACTIVE'), 0)`.mapWith(
+          Number,
+        ),
+      balanceFen: sql<number>`coalesce(${walletAccounts.balanceFen}, 0)`.mapWith(
+        Number,
+      ),
+    })
+    .from(customers)
+    .leftJoin(walletAccounts, eq(walletAccounts.customerId, customers.id))
+    .leftJoin(walletHolds, eq(walletHolds.customerId, customers.id))
+    .where(eq(customers.id, customerId))
+    .groupBy(walletAccounts.balanceFen)
+    .limit(1);
+  const balanceFen = position?.balanceFen ?? 0;
+  const activeHoldFen = position?.activeHoldFen ?? 0;
+  return {
+    activeHoldFen,
+    availableFen: Math.max(0, balanceFen - activeHoldFen),
+    balanceFen,
+  };
+}
 
 export async function listAdminWalletAccounts() {
   return db
@@ -45,11 +76,7 @@ export async function listAdminWalletTransactions(limit = 100) {
 }
 
 export async function getCustomerWalletView(customerId: string) {
-  const [wallet] = await db
-    .select({ balanceFen: walletAccounts.balanceFen })
-    .from(walletAccounts)
-    .where(eq(walletAccounts.customerId, customerId))
-    .limit(1);
+  const position = await getWalletPosition(customerId);
   const transactions = await db
     .select({
       afterBalanceFen: walletTransactions.afterBalanceFen,
@@ -66,5 +93,5 @@ export async function getCustomerWalletView(customerId: string) {
     .orderBy(desc(walletTransactions.createdAt))
     .limit(100);
 
-  return { balanceFen: wallet?.balanceFen ?? 0, transactions };
+  return { ...position, transactions };
 }

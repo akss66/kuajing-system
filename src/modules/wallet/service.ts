@@ -1,8 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
+  settlementBatchOrders,
   walletAccounts,
   walletHolds,
   walletTransactions,
@@ -47,6 +48,33 @@ export type LockedWalletFunding = {
   version: number;
 };
 
+export type WalletHold = typeof walletHolds.$inferSelect;
+
+type WalletHoldIdentity = {
+  customerId: string;
+  settlementBatchId: string;
+};
+
+async function lockWalletHold(
+  tx: DbTransaction,
+  input: WalletHoldIdentity,
+): Promise<WalletHold> {
+  const [hold] = await tx
+    .select()
+    .from(walletHolds)
+    .where(
+      and(
+        eq(walletHolds.customerId, input.customerId),
+        eq(walletHolds.settlementBatchId, input.settlementBatchId),
+      ),
+    )
+    .orderBy(asc(walletHolds.createdAt))
+    .for("update")
+    .limit(1);
+  if (!hold) throw new WalletValidationError("找不到该结算批次的钱包冻结");
+  return hold;
+}
+
 export async function lockWalletFunding(
   tx: DbTransaction,
   customerId: string,
@@ -64,6 +92,165 @@ export async function lockWalletFunding(
     balanceFen: wallet.balanceFen,
     version: wallet.version,
   };
+}
+
+export async function createWalletHold(
+  tx: DbTransaction,
+  input: WalletHoldIdentity & { amountFen: number },
+): Promise<WalletHold> {
+  assertFen(input.amountFen, false);
+  if (input.amountFen < 0) {
+    throw new WalletValidationError("钱包冻结金额必须是正的人民币分整数");
+  }
+  const wallet = await lockWalletFunding(tx, input.customerId);
+  const [existing] = await tx
+    .select()
+    .from(walletHolds)
+    .where(
+      and(
+        eq(walletHolds.customerId, input.customerId),
+        eq(walletHolds.settlementBatchId, input.settlementBatchId),
+      ),
+    )
+    .orderBy(asc(walletHolds.createdAt))
+    .for("update")
+    .limit(1);
+  if (existing) {
+    if (existing.amountFen !== input.amountFen) {
+      throw new WalletValidationError("该结算批次的钱包冻结金额不一致");
+    }
+    return existing;
+  }
+  if (input.amountFen > wallet.availableFen) {
+    throw new WalletInsufficientFundsError();
+  }
+  const [hold] = await tx.insert(walletHolds).values(input).returning();
+  return hold;
+}
+
+export async function consumeWalletHold(
+  tx: DbTransaction,
+  input: WalletHoldIdentity & {
+    actorType?: "ADMIN" | "SYSTEM";
+    actorUserId: string;
+    now?: Date;
+  },
+): Promise<void> {
+  const actorUserId = input.actorUserId.trim();
+  if (!actorUserId) throw new WalletValidationError("钱包冻结核销人不能为空");
+  const now = input.now ?? new Date();
+  const wallet = await lockWalletFunding(tx, input.customerId);
+  const hold = await lockWalletHold(tx, input);
+  if (hold.status === "CONSUMED") return;
+  if (hold.status === "RELEASED") {
+    throw new WalletValidationError("已释放的钱包冻结不能核销");
+  }
+  if (wallet.balanceFen < hold.amountFen) {
+    throw new WalletInsufficientFundsError();
+  }
+
+  const allocations = await tx
+    .select({
+      orderId: settlementBatchOrders.orderId,
+      walletFen: settlementBatchOrders.walletAmountFen,
+    })
+    .from(settlementBatchOrders)
+    .where(
+      and(
+        eq(settlementBatchOrders.customerId, input.customerId),
+        eq(settlementBatchOrders.settlementBatchId, input.settlementBatchId),
+      ),
+    )
+    .orderBy(asc(settlementBatchOrders.orderId));
+  const debits = allocations.filter((allocation) => allocation.walletFen > 0);
+  const allocatedFen = debits.reduce(
+    (total, allocation) => total + allocation.walletFen,
+    0,
+  );
+  if (!Number.isSafeInteger(allocatedFen) || allocatedFen !== hold.amountFen) {
+    throw new WalletValidationError("结算批次分摊与钱包冻结金额不一致");
+  }
+
+  let runningBalanceFen = wallet.balanceFen;
+  const transactions = debits.map((allocation) => {
+    const beforeBalanceFen = runningBalanceFen;
+    runningBalanceFen -= allocation.walletFen;
+    return {
+      actorId: actorUserId,
+      actorType: input.actorType ?? ("ADMIN" as const),
+      afterBalanceFen: runningBalanceFen,
+      beforeBalanceFen,
+      customerId: input.customerId,
+      deltaFen: -allocation.walletFen,
+      orderId: allocation.orderId,
+      reason: "线下付款确认后核销批次钱包冻结",
+      transactionType: "ORDER_DEBIT" as const,
+    };
+  });
+  await tx
+    .update(walletAccounts)
+    .set({
+      balanceFen: runningBalanceFen,
+      updatedAt: now,
+      version: wallet.version + 1,
+    })
+    .where(eq(walletAccounts.customerId, input.customerId));
+  await tx.insert(walletTransactions).values(transactions);
+  await tx
+    .update(walletHolds)
+    .set({ consumedAt: now, status: "CONSUMED", updatedAt: now })
+    .where(eq(walletHolds.id, hold.id));
+  await tx.insert(auditLogs).values({
+    action: "WALLET_SETTLEMENT_HOLD_CONSUMED",
+    actorId: actorUserId,
+    actorType: input.actorType ?? "ADMIN",
+    afterJson: { balanceFen: runningBalanceFen, status: "CONSUMED" },
+    beforeJson: { balanceFen: wallet.balanceFen, status: "ACTIVE" },
+    entityId: input.settlementBatchId,
+    entityType: "SETTLEMENT_BATCH",
+    reason: "线下付款确认后核销钱包冻结",
+  });
+}
+
+export async function releaseWalletHold(
+  tx: DbTransaction,
+  input: WalletHoldIdentity & {
+    actorType?: "ADMIN" | "SYSTEM";
+    actorUserId: string;
+    now?: Date;
+    reason: string;
+  },
+): Promise<void> {
+  const actorUserId = input.actorUserId.trim();
+  const reason = input.reason.trim();
+  if (!actorUserId) throw new WalletValidationError("钱包冻结释放人不能为空");
+  if (!reason) throw new WalletValidationError("释放钱包冻结必须填写原因");
+  const now = input.now ?? new Date();
+  await lockWalletFunding(tx, input.customerId);
+  const hold = await lockWalletHold(tx, input);
+  if (hold.status === "RELEASED") return;
+  if (hold.status === "CONSUMED") {
+    throw new WalletValidationError("已核销的钱包冻结不能释放");
+  }
+  await tx
+    .update(walletHolds)
+    .set({
+      releaseReason: reason,
+      releasedAt: now,
+      status: "RELEASED",
+      updatedAt: now,
+    })
+    .where(eq(walletHolds.id, hold.id));
+  await tx.insert(auditLogs).values({
+    action: "WALLET_SETTLEMENT_HOLD_RELEASED",
+    actorId: actorUserId,
+    actorType: input.actorType ?? "ADMIN",
+    afterJson: { reason, status: "RELEASED" },
+    beforeJson: { status: "ACTIVE" },
+    entityId: input.settlementBatchId,
+    entityType: "SETTLEMENT_BATCH",
+    reason,
+  });
 }
 
 export async function applyBulkSettlementWallet(
@@ -101,7 +288,7 @@ export async function applyBulkSettlementWallet(
   if (input.walletAmountFen === 0) return "NONE" as const;
 
   if (input.walletAmountFen < input.totalAmountFen) {
-    await tx.insert(walletHolds).values({
+    await createWalletHold(tx, {
       amountFen: input.walletAmountFen,
       customerId: input.customerId,
       settlementBatchId: input.settlementBatchId,
