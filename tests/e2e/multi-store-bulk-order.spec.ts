@@ -252,7 +252,7 @@ test("customer bulk workspace stays usable at approved mobile widths", async ({
     }
   });
 
-  for (const width of [360, 390]) {
+  for (const width of [360, 390, 430]) {
     await page.setViewportSize({ height: 844, width });
     await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
     await expect(

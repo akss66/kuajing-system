@@ -58,9 +58,9 @@ export function SettlementPaymentForm({
   }, [canReport, state.status]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" id={formId} tabIndex={-1}>
       {canReport ? (
-        <form action={formAction} className="grid gap-4" id={formId} tabIndex={-1}>
+        <form action={formAction} className="grid gap-4">
           <input name="settlementBatchId" type="hidden" value={settlementBatchId} />
           <label className="space-y-2 text-sm font-medium text-ink">
             付款金额（元）

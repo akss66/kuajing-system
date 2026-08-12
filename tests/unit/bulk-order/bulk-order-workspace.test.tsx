@@ -195,6 +195,60 @@ describe("BulkOrderWorkspace", () => {
     });
   });
 
+  it("preserves a manual deselection while pruning blocked groups and selecting newly submittable groups", async () => {
+    const { rerender } = render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({ groupId: "group-b", storeId: "store-b", storeName: "杭州店" }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择深圳店" }));
+    expect(screen.getByRole("checkbox", { name: "选择深圳店" })).toHaveAttribute(
+      "data-state",
+      "unchecked",
+    );
+
+    rerender(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({
+            groupId: "group-b",
+            storeId: "store-b",
+            storeName: "杭州店",
+            helperText: "订单信息异常",
+            status: "BLOCKED_INVALID",
+            statusLabel: "需要修复",
+          }),
+          createGroup({
+            groupId: "group-c",
+            storeId: "store-c",
+            storeName: "广州店",
+          }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "选择深圳店" })).toHaveAttribute(
+        "data-state",
+        "unchecked",
+      );
+      expect(screen.getByRole("checkbox", { name: "选择杭州店" })).toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: "选择广州店" })).toHaveAttribute(
+        "data-state",
+        "checked",
+      );
+    });
+  });
+
   it("focuses the store selector when trying to create a blank store group", async () => {
     render(
       <BulkOrderWorkspace

@@ -87,3 +87,22 @@
 
 - `npm.cmd run test:e2e -- tests/e2e/multi-store-bulk-order.spec.ts` — 2 passed, 2 correctly project-skipped.
 - Impeccable detector over changed customer workspace and settlement surfaces — `[]`.
+
+## Fix Round 2 — Accessibility Coverage Completion
+
+### RED/GREEN evidence
+
+- RED: local `vitest.cmd` ran the new target assertions. The `PENDING` payment-declaration case failed because `#settlement-payment-form` was absent. The selection refresh assertion was immediately green because the prior refresh implementation already retained explicit deselection; this round adds direct regression coverage for that contract.
+- GREEN: `node_modules\\.bin\\vitest.cmd run tests/unit/bulk-order/bulk-order-workspace.test.tsx tests/unit/settlement/settlement-payment-form.test.tsx tests/unit/settlement/customer-settlement-page.test.tsx` — 3 files, 13 tests passed.
+- GREEN: `node_modules\\.bin\\playwright.cmd test tests/e2e/multi-store-bulk-order.spec.ts --project=mobile-chromium --grep "approved mobile widths"` — 1 passed, checking 360px, 390px, and 430px.
+
+### Coverage completed
+
+- A direct workspace rerender test proves a manual deselection survives while a blocked group is pruned and a newly submittable group defaults to selected.
+- The payment declaration id/tab stop now belongs to its always-present outer wrapper, so the skip target exists and can be focused for both no-claim and `PENDING` claim states without duplicate ids.
+- Mobile browser coverage restores the 430px loop and continues to assert no horizontal overflow, CTA minimum height, compact-summary bounds, and no React hydration console errors at every approved width.
+
+### Notes
+
+- The detector was intentionally not rerun: this round adds accessibility behavior and coverage only, without a new visual system change.
+- `pnpm.cmd` was blocked by the repository's minimum-release-age supply-chain policy before Vitest could start; direct local test binaries were used for the targeted RED/GREEN loop.

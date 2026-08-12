@@ -78,4 +78,22 @@ describe("SettlementPaymentForm", () => {
       expect(screen.getByLabelText("撤回原因")).toHaveFocus();
     });
   });
+
+  it.each([
+    ["no claim", null],
+    ["a pending claim", "PENDING"],
+  ] as const)("renders a focusable payment declaration target for %s", (_description, claimStatus) => {
+    const { container } = render(
+      <SettlementPaymentForm
+        claimStatus={claimStatus}
+        offlineAmountFen={168800}
+        settlementBatchId="batch-1"
+      />,
+    );
+
+    const target = container.querySelector<HTMLElement>("#settlement-payment-form");
+    expect(target).toHaveAttribute("tabindex", "-1");
+    target?.focus();
+    expect(target).toHaveFocus();
+  });
 });
