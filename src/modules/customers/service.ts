@@ -26,6 +26,7 @@ export type ProvisionCustomerInput = {
   customerName: string;
   email: string;
   password: string;
+  reason: string;
   storeName: string;
 };
 
@@ -56,6 +57,7 @@ function assertReason(reason: string) {
 export async function provisionCustomerWithStore(
   input: ProvisionCustomerInput,
 ): Promise<{ customerId: string; storeId: string; userId: string }> {
+  const reason = assertReason(input.reason);
   const passwordHash = await hashPassword(input.password);
   const userId = crypto.randomUUID();
 
@@ -102,7 +104,7 @@ export async function provisionCustomerWithStore(
       beforeJson: {},
       entityId: customer.id,
       entityType: "CUSTOMER",
-      reason: "管理员创建合作客户、店铺与登录账号",
+      reason,
     });
 
     return { customerId: customer.id, storeId: store.id, userId };

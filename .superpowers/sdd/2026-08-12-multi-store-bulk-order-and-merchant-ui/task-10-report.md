@@ -9,6 +9,8 @@ Implemented:
   - customer users must keep `customer_id` non-null
   - only `customer_id` has a database unique partial index
   - no database unique index or constraint was added for `role = 'super_admin'`
+  - migration `0014` now only upgrades the known bootstrap identity (`00000000-0000-4000-8000-00000000a001` / `admin@tongzhouxing.local`) to `super_admin`
+  - migration `0014` now fails early with actionable diagnostics for duplicate `customer_id`, unsupported legacy roles, and `user` rows missing `customer_id`
 - Updated Better Auth and identity guards so:
   - Better Auth admin plugin only treats `super_admin` as an account-governance administrator
   - `requireAdmin()` accepts `ADMIN` and `SUPER_ADMIN`
@@ -24,6 +26,7 @@ Implemented:
   - store disable remains a soft-disable and only blocks new order/import flows
   - customer/store updates and status changes write before/after/reason audit rows
   - added missing customer/store management server actions and cache revalidation wiring
+  - customer account provisioning now requires an operator-supplied `reason` and persists it into the creation audit record instead of using a fixed message
 - Fixed bootstrap/seed behavior in `src/db/seed.ts`:
   - seed still creates exactly one protected `super_admin`
   - seed now also creates matching `admin_users` and `customer_users` mirror profiles so the initialized accounts are operational in downstream admin/customer flows
@@ -32,9 +35,11 @@ Tests added/updated:
 - `tests/integration/accounts/governance.test.ts`
 - `tests/integration/customers/provisioning.test.ts`
 - `tests/integration/identity/access-guards.test.ts`
+- `tests/integration/schema/account-governance-migration.test.ts`
 - `tests/unit/customers/customer-management-actions.test.ts`
 
 Verification:
+- `npm.cmd run test:integration -- tests/integration/schema/account-governance-migration.test.ts`
 - `npm.cmd run test:integration -- tests/integration/accounts/governance.test.ts tests/integration/customers/provisioning.test.ts tests/integration/identity/access-guards.test.ts tests/integration/schema/identity-customers.test.ts`
 - `npm.cmd run test:integration -- tests/integration/bulk-order/draft.test.ts tests/integration/order-import/preview.test.ts`
 - `npm.cmd run test -- tests/unit/customers/customer-management-actions.test.ts`

@@ -174,6 +174,7 @@ describe("customer management actions", () => {
     formData.set("customerName", "Provisioned Customer");
     formData.set("email", "new-customer@test.local");
     formData.set("password", "valid-customer-password-2026");
+    formData.set("reason", "Open the first managed storefront");
     formData.set("storeName", "First Store");
 
     const result = await createCustomerWithStoreAction({ status: "idle" }, formData);
@@ -185,7 +186,25 @@ describe("customer management actions", () => {
       customerName: "Provisioned Customer",
       email: "new-customer@test.local",
       password: "valid-customer-password-2026",
+      reason: "Open the first managed storefront",
       storeName: "First Store",
     });
+  });
+
+  it("requires a reason before provisioning a new customer account", async () => {
+    const formData = new FormData();
+    formData.set("code", "NEW-CUSTOMER");
+    formData.set("customerName", "Provisioned Customer");
+    formData.set("email", "new-customer@test.local");
+    formData.set("password", "valid-customer-password-2026");
+    formData.set("storeName", "First Store");
+
+    const result = await createCustomerWithStoreAction({ status: "idle" }, formData);
+
+    expect(result.status).toBe("error");
+    expect(result.fieldErrors).toMatchObject({
+      reason: expect.any(Array),
+    });
+    expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
   });
 });

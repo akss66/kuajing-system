@@ -39,6 +39,7 @@ test("provisions a customer, store and sign-in account together", async () => {
     customerName: "Provisioned customer",
     email,
     password: "valid-customer-password-2026",
+    reason: "Create initial customer account",
     storeName: "Provisioned TEMU store",
   });
 
@@ -64,12 +65,13 @@ test("provisions a customer, store and sign-in account together", async () => {
     .where(eq(walletAccounts.customerId, result.customerId));
   expect(wallet.balanceFen).toBe(0);
   const [audit] = await db
-    .select({ afterJson: auditLogs.afterJson })
+    .select({ afterJson: auditLogs.afterJson, reason: auditLogs.reason })
     .from(auditLogs)
     .where(eq(auditLogs.entityId, result.customerId));
   expect(audit.afterJson).toMatchObject({
     email: `p***@test.tongzhouxing.local`,
   });
+  expect(audit.reason).toBe("Create initial customer account");
   expect(JSON.stringify(audit.afterJson)).not.toContain(email);
   const [customerUser] = await db
     .select()
@@ -88,6 +90,7 @@ test("disabling a customer also disables the linked auth account and revokes ses
     customerName: "Disable customer",
     email,
     password: "valid-customer-password-2026",
+    reason: "Create account before disable flow",
     storeName: "Disable store",
   });
 
@@ -125,6 +128,7 @@ test("customer management detail returns the linked account summary and store co
     customerName: "Detail customer",
     email,
     password: "valid-customer-password-2026",
+    reason: "Create account before detail lookup",
     storeName: "Detail store",
   });
 

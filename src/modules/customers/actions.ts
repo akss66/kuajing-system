@@ -20,6 +20,7 @@ const createCustomerSchema = z.object({
   customerName: z.string().trim().min(2).max(160),
   email: z.email(),
   password: z.string().min(12),
+  reason: z.string().trim().min(1).max(500),
   storeName: z.string().trim().min(2).max(160),
 });
 
@@ -83,6 +84,7 @@ export async function createCustomerWithStoreAction(
     customerName: formData.get("customerName"),
     email: formData.get("email"),
     password: formData.get("password"),
+    reason: formData.get("reason"),
     storeName: formData.get("storeName"),
   });
   if (!parsed.success) {
