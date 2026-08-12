@@ -175,9 +175,12 @@ export async function validateBulkDraft(input: {
   draftId: string;
 }): Promise<BulkDraftValidationView> {
   const draft = await getBulkDraft(input.customerId, input.draftId);
-  const groupIds = draft.groups
+  const allGroupIds = draft.groups.map((group) => group.id);
+  const previewGroupIds = new Set(
+    draft.groups
     .filter((group) => group.status === "PREVIEW")
-    .map((group) => group.id);
+      .map((group) => group.id),
+  );
   const loadedGroups = new Map<string, GroupWork>(
     draft.groups.map((group) => [
       group.id,
@@ -194,7 +197,7 @@ export async function validateBulkDraft(input: {
   );
 
   const storedRows =
-    groupIds.length === 0
+    allGroupIds.length === 0
       ? []
       : await db
           .select({
@@ -215,7 +218,7 @@ export async function validateBulkDraft(input: {
             orderImportRows,
             eq(orderImportRows.batchId, orderImportBatches.id),
           )
-          .where(inArray(orderImportBatches.storeGroupId, groupIds));
+          .where(inArray(orderImportBatches.storeGroupId, allGroupIds));
 
   for (const row of storedRows) {
     if (!row.groupId) continue;
@@ -248,7 +251,7 @@ export async function validateBulkDraft(input: {
   }
 
   const existingRows =
-    groupIds.length === 0
+    previewGroupIds.size === 0
       ? []
       : await db
           .select({
@@ -278,7 +281,7 @@ export async function validateBulkDraft(input: {
               ),
             ),
           )
-          .where(inArray(bulkImportStoreGroups.id, groupIds));
+          .where(inArray(bulkImportStoreGroups.id, [...previewGroupIds]));
   const existingOrderKeys = new Set(
     existingRows.flatMap((row) =>
       row.externalSubOrderNo
@@ -314,6 +317,7 @@ export async function validateBulkDraft(input: {
     }
 
     for (const row of firstBySubOrder.values()) {
+      if (!previewGroupIds.has(group.id)) continue;
       if (
         existingOrderKeys.has(rowKey(group.storeId, row.externalSubOrderNo!)) ||
         row.status === "DUPLICATE"
@@ -353,10 +357,12 @@ export async function validateBulkDraft(input: {
       };
     }),
   );
-  const stockGroups = draft.groups.map((group) => ({
-    groupId: group.id,
-    quantityBySku: loadedGroups.get(group.id)!.quantityBySku,
-  }));
+  const stockGroups = draft.groups
+    .filter((group) => previewGroupIds.has(group.id))
+    .map((group) => ({
+      groupId: group.id,
+      quantityBySku: loadedGroups.get(group.id)!.quantityBySku,
+    }));
   const skuIds = stockGroups.flatMap((group) => [...group.quantityBySku.keys()]);
   const availableBySku = await loadAvailableQuantities(skuIds);
   const stock = findGroupsAffectedByShortage(stockGroups, availableBySku);
@@ -377,10 +383,16 @@ export async function validateBulkDraft(input: {
       if (group.status === "SUBMITTED") {
         errorCodes.push("GROUP_ALREADY_SUBMITTED");
       }
-      if (groupHasConflict(crossStore.fileHashConflicts, group.id)) {
+      if (
+        previewGroupIds.has(group.id) &&
+        groupHasConflict(crossStore.fileHashConflicts, group.id)
+      ) {
         errorCodes.push("CROSS_STORE_FILE");
       }
-      if (groupHasConflict(crossStore.subOrderConflicts, group.id)) {
+      if (
+        previewGroupIds.has(group.id) &&
+        groupHasConflict(crossStore.subOrderConflicts, group.id)
+      ) {
         errorCodes.push("CROSS_STORE_SUB_ORDER");
       }
       if (work.unknownSkuCount > 0) errorCodes.push("UNKNOWN_SKU");

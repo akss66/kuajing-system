@@ -526,6 +526,60 @@ describe("bulk draft validation", () => {
     expect(result.shortageBySku).toEqual(new Map());
   });
 
+  test("keeps submitted batches in cross-store conflict diagnostics for preview groups", async () => {
+    const fixture = await createDraftFixture(["submitted-conflict", "preview-conflict"]);
+    const submitted = fixture.groups.get("submitted-conflict")!;
+    const preview = fixture.groups.get("preview-conflict")!;
+    const sku = await createSku({ code: "CROSS-SUBMITTED", stock: 10 });
+    const sharedFileHash = "f".repeat(64);
+    await db
+      .update(bulkImportDrafts)
+      .set({ status: "PARTIALLY_SUBMITTED" })
+      .where(eq(bulkImportDrafts.id, fixture.draft.id));
+    await db
+      .update(bulkImportStoreGroups)
+      .set({ status: "SUBMITTED", submittedAt: new Date() })
+      .where(eq(bulkImportStoreGroups.id, submitted.id));
+    await seedBatch({
+      customerId: fixture.customer.id,
+      fileHash: sharedFileHash,
+      groupId: submitted.id,
+      rows: [{
+        externalSubOrderNo: "SUB-SHARED-WITH-SUBMITTED",
+        quantity: 1,
+        resolvedSkuId: sku.id,
+        rowNumber: 2,
+      }],
+      storeId: submitted.storeId,
+    });
+    await seedBatch({
+      customerId: fixture.customer.id,
+      fileHash: sharedFileHash,
+      groupId: preview.id,
+      rows: [{
+        externalSubOrderNo: "SUB-SHARED-WITH-SUBMITTED",
+        quantity: 1,
+        resolvedSkuId: sku.id,
+        rowNumber: 2,
+      }],
+      storeId: preview.storeId,
+    });
+
+    const result = await validateBulkDraft({
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+    });
+
+    expect(result.groups.get(submitted.id)).toMatchObject({
+      errorCodes: ["GROUP_ALREADY_SUBMITTED"],
+      status: "ALREADY_SUBMITTED",
+    });
+    expect(result.groups.get(preview.id)).toMatchObject({
+      errorCodes: ["CROSS_STORE_FILE", "CROSS_STORE_SUB_ORDER"],
+      status: "BLOCKED_CROSS_STORE",
+    });
+  });
+
   test("uses Task 3 ownership isolation and keeps expired drafts readable as blocked previews", async () => {
     const fixture = await createDraftFixture(["expired"]);
     const group = fixture.groups.get("expired")!;
