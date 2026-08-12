@@ -114,7 +114,7 @@ export default async function AdminBulkOrdersPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>客户 / 更新时间</TableHead>
-                  <TableHead>诊断状态</TableHead>
+                  <TableHead>草稿状态 / 诊断状态</TableHead>
                   <TableHead>店铺 / 文件</TableHead>
                   <TableHead>过期时间</TableHead>
                   <TableHead>操作</TableHead>
@@ -129,6 +129,7 @@ export default async function AdminBulkOrdersPage({
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{draft.statusLabel}</Badge>
+                      <p className="mt-1 text-xs text-muted">{draft.validationStatusLabel}</p>
                     </TableCell>
                     <TableCell>
                       <p className="text-sm text-ink">{`${draft.groupCount} 个店铺`}</p>
@@ -161,6 +162,7 @@ export default async function AdminBulkOrdersPage({
                 <Badge variant="secondary">{draft.statusLabel}</Badge>
               </div>
               <p className="text-sm text-muted">{`${draft.groupCount} 个店铺 · ${draft.fileCount} 个文件`}</p>
+              <p className="text-xs text-muted">{draft.validationStatusLabel}</p>
               <Button asChild size="sm" variant="outline">
                 <Link href={`/admin/bulk-orders/${draft.id}`}>查看诊断</Link>
               </Button>

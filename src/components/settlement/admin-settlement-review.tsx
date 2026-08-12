@@ -28,6 +28,7 @@ type AdminSettlementReviewProps = {
     offlineAmountFen: number;
     paidAtLabel: string;
     paymentReportedAtLabel: string;
+    reviewable: boolean;
     statusLabel: string;
     totalAmountFen: number;
     walletAmountFen: number;
@@ -158,6 +159,7 @@ export function AdminSettlementReview({
           </section>
 
           <div className="space-y-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
+            {batch.reviewable ? <>
             <ConfirmedActionForm
               action={reviewAction}
               confirmDescription={`确认后将一次性影响 ${orders.length} 张拿货单，相关订单统一进入待发货。`}
@@ -192,6 +194,11 @@ export function AdminSettlementReview({
                 />
               </label>
             </ConfirmedActionForm>
+            </> : (
+              <p className="text-sm text-muted">
+                {`该结算批次${batch.statusLabel}，审核操作已结束。`}
+              </p>
+            )}
           </div>
         </div>
       </section>

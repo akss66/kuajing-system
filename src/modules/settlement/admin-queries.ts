@@ -17,6 +17,7 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import {
   getAdminSettlementBatchStatusLabel,
+  getAdminSettlementAuditActionLabel,
   getAdminSettlementClaimStatusLabel,
   getAdminSettlementOrderStatusLabel,
   getAdminWalletHoldStatusLabel,
@@ -255,7 +256,7 @@ export async function getAdminSettlementBatchDetail(settlementBatchId: string) {
 
   return {
     auditEntries: audits.map((entry) => ({
-      actionLabel: entry.action,
+      actionLabel: getAdminSettlementAuditActionLabel(entry.action),
       actorLabel:
         entry.actorType === "ADMIN"
           ? adminActorMap.get(entry.actorId ?? "") ?? "管理员"
@@ -274,6 +275,7 @@ export async function getAdminSettlementBatchDetail(settlementBatchId: string) {
       offlineAmountFen: batch.offlineAmountFen,
       paidAt: batch.paidAt,
       paymentReportedAt: batch.paymentReportedAt,
+      status: batch.status,
       statusLabel: getAdminSettlementBatchStatusLabel(batch.status),
       totalAmountFen: batch.totalAmountFen,
       walletAmountFen: batch.walletAmountFen,

@@ -15,6 +15,7 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 import {
   getAdminBulkDraftErrorLabel,
   getAdminBulkDraftStatusLabel,
+  getAdminBulkDraftValidationLabel,
 } from "@/modules/settlement/admin-ui-labels";
 import {
   type BulkDraftValidationStatus,
@@ -191,8 +192,9 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
         diagnosticStatus: dominantStatus,
         fileCount: summary.get(draft.id)?.fileCount ?? 0,
         groupCount: summary.get(draft.id)?.groupCount ?? 0,
-        statusLabel: getAdminBulkDraftStatusLabel(dominantStatus),
+        statusLabel: getAdminBulkDraftStatusLabel(draft.status),
         storeIds: draftGroups.map((group) => group.storeId),
+        validationStatusLabel: getAdminBulkDraftValidationLabel(dominantStatus),
       };
     })
     .filter((draft) => {
@@ -307,7 +309,9 @@ export async function getAdminBulkDraftDetail(draftId: string) {
           readyRows: groupResults.filter((row) => row.rowStatus === "READY").length,
           unknownSkuRows: groupResults.filter((row) => row.rowStatus === "UNKNOWN_SKU").length,
         },
-        statusLabel: getAdminBulkDraftStatusLabel(validationGroup?.status ?? group.status),
+        statusLabel: getAdminBulkDraftValidationLabel(
+          validationGroup?.status ?? group.status,
+        ),
         storeName: group.storeName,
       };
     }),

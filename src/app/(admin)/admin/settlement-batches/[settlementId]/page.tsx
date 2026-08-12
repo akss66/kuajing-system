@@ -32,6 +32,7 @@ export default async function AdminSettlementBatchDetailPage({
         ...detail.batch,
         paidAtLabel: dateTime(detail.batch.paidAt),
         paymentReportedAtLabel: dateTime(detail.batch.paymentReportedAt),
+        reviewable: detail.batch.status === "PAYMENT_REPORTED",
       }}
       claim={
         detail.claim

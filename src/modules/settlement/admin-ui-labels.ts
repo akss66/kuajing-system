@@ -31,7 +31,14 @@ const walletHoldStatusLabels = {
   RELEASED: "已释放",
 } as const;
 
-const bulkDraftStatusLabels = {
+const bulkDraftLifecycleStatusLabels = {
+  COMPLETED: "全部店铺已提交",
+  DRAFT: "草稿待提交",
+  EXPIRED: "草稿已过期",
+  PARTIALLY_SUBMITTED: "部分店铺已提交",
+} as const;
+
+const bulkDraftValidationStatusLabels = {
   ALREADY_SUBMITTED: "已提交",
   BLOCKED_CROSS_STORE: "跨店冲突",
   BLOCKED_INVALID: "格式问题",
@@ -40,6 +47,14 @@ const bulkDraftStatusLabels = {
   EMPTY: "无可提交订单",
   EXPIRED: "已过期",
   SUBMITTABLE: "可提交",
+} as const;
+
+const settlementAuditActionLabels = {
+  SETTLEMENT_PAYMENT_APPROVED: "管理员已确认到账",
+  SETTLEMENT_PAYMENT_EXPIRED: "付款声明已过期",
+  SETTLEMENT_PAYMENT_REJECTED: "管理员已拒绝付款声明",
+  SETTLEMENT_PAYMENT_REPORTED: "客户提交付款声明",
+  SETTLEMENT_PAYMENT_WITHDRAWN: "客户已撤回付款声明",
 } as const;
 
 const bulkDraftErrorLabels = {
@@ -73,9 +88,23 @@ export function getAdminWalletHoldStatusLabel(status: string | null) {
 }
 
 export function getAdminBulkDraftStatusLabel(status: string) {
-  return bulkDraftStatusLabels[status as keyof typeof bulkDraftStatusLabels] ?? "处理中";
+  return bulkDraftLifecycleStatusLabels[
+    status as keyof typeof bulkDraftLifecycleStatusLabels
+  ] ?? "状态处理中";
+}
+
+export function getAdminBulkDraftValidationLabel(status: string) {
+  return bulkDraftValidationStatusLabels[
+    status as keyof typeof bulkDraftValidationStatusLabels
+  ] ?? "诊断处理中";
 }
 
 export function getAdminBulkDraftErrorLabel(code: string) {
   return bulkDraftErrorLabels[code as keyof typeof bulkDraftErrorLabels] ?? code;
+}
+
+export function getAdminSettlementAuditActionLabel(action: string) {
+  return settlementAuditActionLabels[
+    action as keyof typeof settlementAuditActionLabels
+  ] ?? "结算记录已更新";
 }
