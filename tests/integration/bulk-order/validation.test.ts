@@ -466,6 +466,66 @@ describe("bulk draft validation", () => {
     expect(selectSpy.mock.calls.length + executeSpy.mock.calls.length).toBeLessThanOrEqual(6);
   });
 
+  test("excludes submitted groups and their active reservations from fresh preview demand", async () => {
+    const fixture = await createDraftFixture(["submitted", "preview"]);
+    const submitted = fixture.groups.get("submitted")!;
+    const preview = fixture.groups.get("preview")!;
+    const sku = await createSku({ code: "PARTIAL", stock: 6 });
+    await db
+      .update(bulkImportDrafts)
+      .set({ status: "PARTIALLY_SUBMITTED" })
+      .where(eq(bulkImportDrafts.id, fixture.draft.id));
+    await db
+      .update(bulkImportStoreGroups)
+      .set({ status: "SUBMITTED", submittedAt: new Date() })
+      .where(eq(bulkImportStoreGroups.id, submitted.id));
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: submitted.id,
+      rows: [{
+        externalSubOrderNo: "SUB-ALREADY-SUBMITTED",
+        quantity: 3,
+        resolvedSkuId: sku.id,
+        rowNumber: 2,
+      }],
+      storeId: submitted.storeId,
+    });
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: preview.id,
+      rows: [{
+        externalSubOrderNo: "SUB-FRESH-PREVIEW",
+        quantity: 3,
+        resolvedSkuId: sku.id,
+        rowNumber: 2,
+      }],
+      storeId: preview.storeId,
+    });
+    await db.insert(inventoryReservations).values({
+      quantity: 3,
+      referenceId: submitted.id,
+      referenceType: "BULK_STORE_GROUP",
+      skuId: sku.id,
+    });
+
+    const result = await validateBulkDraft({
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+    });
+
+    expect(result.groups.get(submitted.id)).toMatchObject({
+      errorCodes: ["GROUP_ALREADY_SUBMITTED"],
+      status: "ALREADY_SUBMITTED",
+      totalQuantity: 0,
+    });
+    expect(result.groups.get(preview.id)).toMatchObject({
+      deduplicatedOrderCount: 1,
+      status: "SUBMITTABLE",
+      totalQuantity: 3,
+    });
+    expect(result.shortageBySku).toEqual(new Map());
+  });
+
   test("uses Task 3 ownership isolation and keeps expired drafts readable as blocked previews", async () => {
     const fixture = await createDraftFixture(["expired"]);
     const group = fixture.groups.get("expired")!;

@@ -175,7 +175,9 @@ export async function validateBulkDraft(input: {
   draftId: string;
 }): Promise<BulkDraftValidationView> {
   const draft = await getBulkDraft(input.customerId, input.draftId);
-  const groupIds = draft.groups.map((group) => group.id);
+  const groupIds = draft.groups
+    .filter((group) => group.status === "PREVIEW")
+    .map((group) => group.id);
   const loadedGroups = new Map<string, GroupWork>(
     draft.groups.map((group) => [
       group.id,
