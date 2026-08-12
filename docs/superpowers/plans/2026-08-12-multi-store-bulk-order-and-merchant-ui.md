@@ -39,6 +39,8 @@
 - Modify `src/db/schema/orders.ts`: 增加草稿、店铺分组、结算、冻结、统一付款声明和多文件关联表及枚举。
 - Modify `src/db/schema/index.ts`: 导出新增表。
 - Create `drizzle/0010_multi_store_bulk_order.sql`: 可回滚前向迁移、约束和索引。
+- Create `drizzle/0011_bulk_submission_requests.sql`: 批量提交专用幂等请求表和客户作用域唯一约束。
+- Create `drizzle/0012_account_governance.sql`: 账号治理、唯一超级管理员与客户账号一对一约束。
 - Modify `drizzle/meta/_journal.json`: 记录迁移序号。
 
 ### Bulk import domain
@@ -89,7 +91,7 @@
 ### Account, customer and store management
 
 - Modify `src/db/schema/auth.ts` and `identity.ts`: 客户账号唯一归属、超级管理员角色和管理员身份映射。
-- Create `drizzle/0011_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
+- Create `drizzle/0012_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
 - Create `src/modules/accounts/service.ts`, `queries.ts`, `actions.ts`: 账号列表、创建普通管理员、资料修改、密码重置、停用/恢复和会话撤销。
 - Modify `src/modules/identity/principal.ts` and `guards.ts`: 区分 `SUPER_ADMIN` 与普通 `ADMIN`，新增 `requireSuperAdmin()`。
 - Expand `src/modules/customers/service.ts`, `actions.ts`, `queries.ts`: 客户和店铺完整资料维护、停用/恢复与审计。
@@ -271,11 +273,13 @@ git commit -m "feat: add bulk order and settlement schema"
 ### Task 3: 24 小时草稿与按店铺分组上传
 
 **Files:**
+- Modify: `next.config.ts`
 - Create: `src/modules/bulk-order/draft-service.ts`
 - Create: `src/modules/bulk-order/actions.ts`
 - Modify: `src/modules/order-import/service.ts`
 - Modify: `src/modules/order-import/temu-parser.ts`
 - Test: `tests/integration/bulk-order/draft.test.ts`
+- Test: `tests/unit/config/next-config.test.ts`
 
 **Interfaces:**
 - Produces: `createBulkDraft({ actorUserId, customerId }): Promise<BulkDraftView>`
@@ -316,16 +320,18 @@ export async function addStoreGroup(input: AddStoreGroupInput) {
 
 逐文件验证 `.xlsx`、MIME、10 MB、33 列表头和 50,000 行；调用现有 PII 加密和精确 SKU 映射，将 `order_import_batches.store_group_id` 写入，不把完整收件信息写入错误或审计。
 
+`next.config.ts` 必须把 Server Actions 请求体上限显式设为 `101mb`，覆盖单店一次最多 10 个、每个 10 MB 文件及 multipart 开销；逐文件 10 MB 和每组 10 文件仍由服务层独立校验，草稿总计 100 文件通过多次分组请求完成，不允许一次请求绕过分组限制。
+
 - [ ] **Step 5: 通过草稿测试和原单店预览回归**
 
-Run: `npm run test:integration -- tests/integration/bulk-order/draft.test.ts tests/integration/order-import/preview.test.ts`
+Run: `npm test -- tests/unit/config/next-config.test.ts && npm run test:integration -- tests/integration/bulk-order/draft.test.ts tests/integration/order-import/preview.test.ts`
 
 Expected: PASS；20/10/100 限制、过期、重新登录读取、同店唯一和旧入口均有覆盖。
 
 - [ ] **Step 6: 提交草稿服务**
 
 ```bash
-git add src/modules/bulk-order src/modules/order-import tests/integration/bulk-order/draft.test.ts
+git add next.config.ts src/modules/bulk-order src/modules/order-import tests/integration/bulk-order/draft.test.ts tests/unit/config/next-config.test.ts
 git commit -m "feat: add multi-store bulk import drafts"
 ```
 
@@ -387,11 +393,17 @@ git commit -m "feat: validate grouped bulk order imports"
 ### Task 5: 原子部分提交与逐店拿货单
 
 **Files:**
+- Modify: `src/db/schema/orders.ts`
+- Modify: `src/db/schema/index.ts`
+- Create: `drizzle/0011_bulk_submission_requests.sql`
+- Modify: `drizzle/meta/_journal.json`
 - Create: `src/modules/bulk-order/submission-service.ts`
 - Modify: `src/modules/orders/submission.ts`
 - Modify: `src/modules/inventory/service.ts`
+- Modify: `src/modules/wallet/service.ts`
 - Test: `tests/integration/bulk-order/submission.test.ts`
 - Test: `tests/integration/bulk-order/concurrency.test.ts`
+- Test: `tests/integration/settlement/batch-lifecycle.test.ts`
 
 **Interfaces:**
 - Produces: `submitBulkDraft(input: SubmitBulkDraftInput): Promise<BulkSubmissionResult>`
@@ -428,9 +440,13 @@ return db.transaction(async (tx) => {
 });
 ```
 
+幂等状态必须写入专用 `bulk_submission_requests` 表，不得依赖 `audit_logs`。表至少包含 `customer_id`、`idempotency_key`、`payload_digest`、`draft_id`、`result_json`、可空 `settlement_batch_id` 和时间戳；`(customer_id, idempotency_key)` 唯一。先获取客户+key advisory lock，再读取/创建请求记录；同 payload 返回已存安全结果，不同 payload 拒绝。全失败请求也必须稳定重放，审计日志清理不得影响幂等。
+
 - [ ] **Step 4: 创建逐店订单、多文件关联、包裹、行和库存锁定**
 
 每个店铺只创建一张 `fulfillment_orders`；按 TEMU 主订单创建包裹，按子订单创建行；成交价使用提交时快照。SKU 行按稳定 ID 顺序 `FOR UPDATE`，受短缺 SKU 影响的组全部剔除后再创建库存锁定。
+
+成功店铺确定后，在同一事务锁定客户钱包并计算最新可用余额。实际抵扣额为 `min(requestedWalletFen, 成功订单总额, 最新可用余额)`，重新按成功订单分摊并写入 `settlement_batch_orders`。纯余额时逐订单写 `ORDER_DEBIT` 并把订单置为 `PAID_PENDING_FULFILLMENT`；混合付款创建一条 `ACTIVE` wallet hold，不改变账面余额；零余额不创建 hold。`settlement_batches.wallet_amount_fen/offline_amount_fen` 必须始终对应已扣或已冻结的真实资金状态，不允许保存假定金额。
 
 - [ ] **Step 5: 写并运行并发测试**
 
@@ -440,24 +456,24 @@ Expected: 两个并发批次竞争同一库存时不超卖；不受影响店铺�
 
 - [ ] **Step 6: 运行旧单店提交回归**
 
-Run: `npm run test:integration -- tests/integration/orders/submission.test.ts tests/integration/bulk-order/submission.test.ts tests/integration/bulk-order/concurrency.test.ts`
+Run: `npm run test:integration -- tests/integration/orders/submission.test.ts tests/integration/bulk-order/submission.test.ts tests/integration/bulk-order/concurrency.test.ts tests/integration/settlement/batch-lifecycle.test.ts`
 
 Expected: 全部 PASS。
 
 - [ ] **Step 7: 提交批量提交服务**
 
 ```bash
-git add src/modules/bulk-order src/modules/orders/submission.ts src/modules/inventory/service.ts tests/integration/bulk-order
+git add src/db/schema drizzle src/modules/bulk-order src/modules/orders/submission.ts src/modules/inventory/service.ts src/modules/wallet/service.ts tests/integration/bulk-order tests/integration/settlement/batch-lifecycle.test.ts
 git commit -m "feat: submit bulk orders with partial success"
 ```
 
-### Task 6: 可用余额、冻结、分摊与纯余额结算
+### Task 6: 钱包位置、冻结生命周期与分摊读模型
 
 **Files:**
 - Modify: `src/modules/wallet/service.ts`
 - Modify: `src/modules/wallet/queries.ts`
 - Create: `src/modules/settlement/batch-allocation.ts`
-- Modify: `src/modules/bulk-order/submission-service.ts`
+- Modify: `src/modules/bulk-order/submission-service.ts` only if required to expose the Task 5 transaction behavior through the public helpers.
 - Test: `tests/integration/settlement/batch-lifecycle.test.ts`
 
 **Interfaces:**
@@ -490,9 +506,9 @@ const availableFen = account.balanceFen - activeHoldFen;
 if (requestedFen > availableFen) throw new SettlementError("INSUFFICIENT_AVAILABLE_BALANCE", "可用余额不足");
 ```
 
-- [ ] **Step 4: 接入分摊和部分成功重算**
+- [ ] **Step 4: 验证分摊和部分成功重算并补齐公共生命周期函数**
 
-实际抵扣额固定为 `min(客户输入, 成功订单总额, 最新可用余额)`；把 `allocateWalletFen` 结果写入 `settlement_batch_orders`。纯余额在同一提交事务逐订单写 `ORDER_DEBIT`；混合付款创建一条 `ACTIVE` 冻结但不改变 `wallet_accounts.balance_fen`。
+Task 5 已在提交事务中落实实际抵扣、分摊、纯余额扣款和混合冻结。本 Task 将该逻辑收敛为 `createWalletHold`、`consumeWalletHold`、`releaseWalletHold` 和 `getWalletPosition` 公共接口，增加 `batch-allocation` 读模型，并验证重复调用、冻结释放和后续核款所需的幂等边界。
 
 - [ ] **Step 5: 通过钱包、分摊和旧钱包回归**
 
@@ -694,7 +710,7 @@ git commit -m "feat: add admin bulk settlement workspace"
 - Modify: `src/db/schema/auth.ts`
 - Modify: `src/db/schema/identity.ts`
 - Modify: `src/db/schema/index.ts`
-- Create: `drizzle/0011_account_governance.sql`
+- Create: `drizzle/0012_account_governance.sql`
 - Modify: `drizzle/meta/_journal.json`
 - Create: `src/modules/accounts/service.ts`
 - Create: `src/modules/accounts/queries.ts`
@@ -736,9 +752,9 @@ Run: `npm run test:integration -- tests/integration/accounts/governance.test.ts 
 
 Expected: FAIL，提示 `requireSuperAdmin` 或唯一约束尚不存在。
 
-- [ ] **Step 3: 增加 0011 前向迁移和角色边界**
+- [ ] **Step 3: 增加 0012 前向迁移和角色边界**
 
-`auth_users.role` 固定使用 `super_admin | admin | user`；迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
+`auth_users.role` 固定使用 `super_admin | admin | user`；0012 迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
 
 Better Auth 的管理员插件只把 `super_admin` 配置为拥有用户管理权限；`admin` 由应用 `requireAdmin()` 识别为日常运营角色，但不能调用账号管理 API。`SuperAdminPrincipal` 与 `AdminPrincipal` 明确区分，`requireAdmin()` 接受二者，`requireSuperAdmin()` 只接受前者。
 
@@ -953,7 +969,7 @@ Expected: 全部桌面、360/390/430px、视觉快照和可访问性测试 PASS�
 
 - [ ] **Step 6: 更新操作与发布说明**
 
-`local-development.md` 写明 0010/0011 迁移、批量草稿/结算超时 worker、本地字体依赖和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、账号/客户/店铺治理、退出登录、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
+`local-development.md` 写明 0010/0011/0012 迁移、批量草稿/结算超时 worker、本地字体依赖和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、专用幂等请求、账号/客户/店铺治理、退出登录、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
 
 - [ ] **Step 7: 检查版本库范围并提交验收**
 
