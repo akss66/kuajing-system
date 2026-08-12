@@ -273,6 +273,10 @@ export const fulfillmentOrders = pgTable(
       table.status,
       table.lockExpiresAt,
     ),
+    index("fulfillment_orders_status_submitted_index").on(
+      table.status,
+      table.submittedAt,
+    ),
   ],
 );
 
@@ -326,6 +330,10 @@ export const orderShipments = pgTable(
       sql`${table.logisticsFeeMinor} is null or ${table.logisticsCurrency} is not null`,
     ),
     index("order_shipments_order_index").on(table.orderId),
+    index("order_shipments_kind_shipped_index").on(
+      table.kind,
+      table.shippedAt,
+    ),
   ],
 );
 
@@ -460,6 +468,7 @@ export const walletTransactions = pgTable(
       table.customerId,
       table.createdAt,
     ),
+    index("wallet_transactions_created_index").on(table.createdAt),
   ],
 );
 
@@ -504,6 +513,10 @@ export const paymentClaims = pgTable(
     index("payment_claims_status_created_index").on(
       table.status,
       table.createdAt,
+    ),
+    index("payment_claims_status_reviewed_index").on(
+      table.status,
+      table.reviewedAt,
     ),
   ],
 );

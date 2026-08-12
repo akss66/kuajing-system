@@ -64,6 +64,13 @@
       "when": 1786489763911,
       "tag": "0008_absurd_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786493426641,
+      "tag": "0009_foamy_sasquatch",
+      "breakpoints": true
     }
   ]
 }
