@@ -43,6 +43,9 @@ describe("allocateWalletFen", () => {
 
   it("拒绝负金额、重复订单 ID 和空订单上的非零抵扣", () => {
     expect(() =>
+      allocateWalletFen([{ orderId: "a", totalAmountFen: 1 }], -1),
+    ).toThrow("余额抵扣不能为负数");
+    expect(() =>
       allocateWalletFen([{ orderId: "a", totalAmountFen: -1 }], 0),
     ).toThrow("订单金额不能为负数");
     expect(() =>

@@ -33,6 +33,15 @@ describe("findCrossStoreConflicts", () => {
 
     expect(result.blockedGroupIds).toEqual(new Set());
   });
+
+  it("拒绝重复的店铺分组 ID", () => {
+    expect(() =>
+      findCrossStoreConflicts([
+        { fileHashes: [], groupId: "g1", subOrderNos: [] },
+        { fileHashes: [], groupId: "g1", subOrderNos: [] },
+      ]),
+    ).toThrow("店铺分组 ID 不能重复");
+  });
 });
 
 describe("findGroupsAffectedByShortage", () => {
