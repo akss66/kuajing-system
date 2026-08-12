@@ -195,6 +195,52 @@ describe("BulkOrderWorkspace", () => {
     });
   });
 
+  it("collapses mobile details for idle store cards after the first one", async () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({
+            groupId: "group-a",
+            storeId: "store-a",
+            storeName: "深圳店",
+            fileCount: 0,
+            files: [],
+            helperText: "请继续上传文件",
+            status: "EMPTY",
+            statusLabel: "等待上传",
+            totalAmountFen: 0,
+            totalQuantity: 0,
+          }),
+          createGroup({
+            groupId: "group-b",
+            storeId: "store-b",
+            storeName: "杭州店",
+            fileCount: 0,
+            files: [],
+            helperText: "请继续上传文件",
+            status: "EMPTY",
+            statusLabel: "等待上传",
+            totalAmountFen: 0,
+            totalQuantity: 0,
+          }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "展开详情" })).toBeInTheDocument();
+    const collapsedSections = document.querySelectorAll('[data-collapsed="true"]');
+    expect(collapsedSections).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "收起详情" })).toBeInTheDocument();
+      expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(0);
+    });
+  });
+
   it("preserves a manual deselection while pruning blocked groups and selecting newly submittable groups", async () => {
     const { rerender } = render(
       <BulkOrderWorkspace

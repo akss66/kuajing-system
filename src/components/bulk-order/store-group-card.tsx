@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import {
   AlertCircle,
+  ChevronDown,
   FileSpreadsheet,
   LoaderCircle,
   Trash2,
@@ -73,6 +75,7 @@ const statusTone: Record<
 };
 
 export function StoreGroupCard({
+  defaultCollapsed = false,
   fileInputKey,
   fileInputRef,
   fileSelection,
@@ -86,6 +89,7 @@ export function StoreGroupCard({
   selectionControlRef,
   uploading,
 }: {
+  defaultCollapsed?: boolean;
   fileInputKey: number;
   fileInputRef?: (node: HTMLInputElement | null) => void;
   fileSelection: readonly File[];
@@ -104,6 +108,8 @@ export function StoreGroupCard({
   const selectable = group.status === "SUBMITTABLE";
   const editable =
     group.status !== "ALREADY_SUBMITTED" && group.status !== "EXPIRED";
+  const [detailsCollapsed, setDetailsCollapsed] = useState(defaultCollapsed);
+  const shouldShowMobileDisclosure = defaultCollapsed || detailsCollapsed;
 
   return (
     <article className="rounded-[var(--radius-surface)] border border-border bg-background">
@@ -171,10 +177,28 @@ export function StoreGroupCard({
                 "继续上传 TEMU 原始 Excel，系统会按店铺跨文件去重并保留失败文件。"}
             </p>
           </div>
+          {shouldShowMobileDisclosure ? (
+            <Button
+              aria-expanded={!detailsCollapsed}
+              className="min-h-11 px-3 lg:hidden"
+              onClick={() => setDetailsCollapsed((current) => !current)}
+              type="button"
+              variant="ghost"
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className={cn("size-4 transition-transform", detailsCollapsed ? "" : "rotate-180")}
+              />
+              {detailsCollapsed ? "展开详情" : "收起详情"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <div className="space-y-4 px-4 py-4 sm:px-5">
+      <div
+        className={cn("space-y-4 px-4 py-4 sm:px-5", detailsCollapsed ? "hidden lg:block" : "")}
+        data-collapsed={detailsCollapsed ? "true" : "false"}
+      >
         <div className="space-y-3">
           {group.files.length ? (
             group.files.map((file) => (

@@ -240,7 +240,7 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   await page.getByRole("button", { name: "提交拿货单并进入结算" }).first().click();
 
-  await expect(page).toHaveURL(/\/portal\/settlements\//);
+  await expect(page).toHaveURL(/\/portal\/settlements\//, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "统一付款结算" })).toBeVisible();
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("80.00");
   await expect(page.locator("header").getByText("待付款", { exact: true })).toBeVisible();

@@ -61,9 +61,17 @@ export default async function AdminOrderDetailPage({
     <div className="space-y-6">
       <PageHeading
         action={
-          <Badge className="w-fit bg-primary-soft px-3 py-1.5 text-primary-hover" variant="secondary">
-            {order.status}
-          </Badge>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Button asChild className="min-h-11" variant="outline">
+              <Link href="/admin/orders">
+                <ArrowLeft aria-hidden="true" />
+                返回订单列表
+              </Link>
+            </Button>
+            <Badge className="w-fit bg-primary-soft px-3 py-1.5 text-primary-hover" variant="secondary">
+              {order.status}
+            </Badge>
+          </div>
         }
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
@@ -82,27 +90,6 @@ export default async function AdminOrderDetailPage({
           { label: "创建时间", value: dateTime(order.createdAt) },
         ]}
       />
-
-      <header className="hidden flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <Button asChild className="-ml-3 mb-2" variant="ghost">
-            <Link href="/admin/orders"><ArrowLeft />返回订单列表</Link>
-          </Button>
-          <p className="text-sm font-medium text-primary">履约详情</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{order.orderNumber}</h1>
-          <p className="mt-2 text-sm text-muted">{order.customerCode} · {order.customerName} / {order.storeName}</p>
-        </div>
-        <Badge className="w-fit bg-primary-soft px-3 py-1.5 text-primary-hover" variant="secondary">{order.status}</Badge>
-      </header>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["包裹", `${order.shipments.length} 个`],
-          ["商品数量", `${order.totalQuantity} 件`],
-          ["实际成交额", `¥${(order.totalAmountFen / 100).toFixed(2)}`],
-          ["创建时间", dateTime(order.createdAt)],
-        ].map(([label, value]) => <div className="rounded-[var(--radius-surface)] border border-border bg-background p-4" key={label}><p className="text-xs text-muted">{label}</p><p className="mt-2 font-semibold text-ink">{value}</p></div>)}
-      </section>
 
       <div className="space-y-5">
         {order.shipments.map((shipment, shipmentIndex) => {

@@ -125,6 +125,11 @@ test("administrator can inspect a shipped package and create a replacement", asy
   await page.goto(`/admin/orders/${fixture.order.id}`);
 
   await expect(page.getByRole("heading", { name: fixture.order.orderNumber })).toBeVisible();
+  await expect(page.getByRole("link", { name: "返回订单列表" })).toBeVisible();
+  await expect(page.getByText("包裹数", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("商品件数", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("实际成交额", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("创建时间", { exact: true })).toHaveCount(1);
   await expect(page.getByText(`ERP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
   await expect(page.getByText(`CP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
   await expect(page.getByText("CAD 8.99")).toBeVisible();

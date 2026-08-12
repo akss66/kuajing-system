@@ -16,7 +16,7 @@ const toneClasses: Record<NonNullable<MetricItem["tone"]>, string> = {
 
 export function MetricStrip({ items }: { items: MetricItem[] }) {
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-metric-strip>
+    <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" data-metric-strip>
       {items.map((item) => (
         <article
           className="rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-4 py-3.5"

@@ -613,27 +613,44 @@ export function BulkOrderWorkspace({
         </section>
       ) : (
         <div className="space-y-4">
-          {groups.map((group) => (
-            <StoreGroupCard
-              fileInputKey={fileInputKeys[group.groupId] ?? 0}
-              fileInputRef={(node) => {
-                fileInputRefs.current[group.groupId] = node;
-              }}
-              fileSelection={selectedFiles[group.groupId] ?? []}
-              group={group}
-              key={group.groupId}
-              onFilesSelected={handleFilesSelected}
-              onRemoveFile={onRemoveFile}
-              onSelectedChange={toggleGroup}
-              onUpload={onUpload}
-              removingBatchId={removingBatchId}
-              selected={activeSelection.has(group.groupId)}
-              selectionControlRef={(node) => {
-                checkboxRefs.current[group.groupId] = node;
-              }}
-              uploading={uploadingGroupId === group.groupId}
-            />
-          ))}
+          {(() => {
+            let idleGroupCount = 0;
+
+            return groups.map((group) => {
+              const isIdleGroup =
+                group.status === "EMPTY" ||
+                group.status === "ALREADY_SUBMITTED" ||
+                group.status === "EXPIRED";
+              const defaultCollapsed = isIdleGroup && idleGroupCount > 0;
+
+              if (isIdleGroup) {
+                idleGroupCount += 1;
+              }
+
+              return (
+                <StoreGroupCard
+                  defaultCollapsed={defaultCollapsed}
+                  fileInputKey={fileInputKeys[group.groupId] ?? 0}
+                  fileInputRef={(node) => {
+                    fileInputRefs.current[group.groupId] = node;
+                  }}
+                  fileSelection={selectedFiles[group.groupId] ?? []}
+                  group={group}
+                  key={group.groupId}
+                  onFilesSelected={handleFilesSelected}
+                  onRemoveFile={onRemoveFile}
+                  onSelectedChange={toggleGroup}
+                  onUpload={onUpload}
+                  removingBatchId={removingBatchId}
+                  selected={activeSelection.has(group.groupId)}
+                  selectionControlRef={(node) => {
+                    checkboxRefs.current[group.groupId] = node;
+                  }}
+                  uploading={uploadingGroupId === group.groupId}
+                />
+              );
+            });
+          })()}
         </div>
       )}
 

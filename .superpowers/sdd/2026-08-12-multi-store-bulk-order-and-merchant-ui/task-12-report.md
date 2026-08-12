@@ -146,3 +146,90 @@ Notes:
   - `.superpowers/sdd/2026-08-12-multi-store-bulk-order-and-merchant-ui/task-10-report.md`
   - `visual-review/screenshots/fix-round1/*`
 - Playwright web-server output still emits expected access-denial stack traces for customer attempts to hit admin-only routes and occasional `MaxListenersExceededWarning` lines from the dev server; no assertions failed because of them.
+
+## Fix Round 1
+
+Date: 2026-08-12
+
+Review findings closed:
+- `src/app/(admin)/admin/orders/[orderId]/page.tsx`
+  - moved `返回订单列表` into the visible `PageHeading` action area
+  - removed the dead hidden legacy header block
+  - removed the duplicate metrics card section so heading metrics render once
+- `src/app/(customer)/portal/imports/[batchId]/page.tsx`
+  - restored visible `重新上传` navigation inside `PageHeading`
+  - removed the hidden legacy preview header and duplicate summary cards
+  - preserved `requireCustomer`, preview lookup, blocking logic, and submit button behavior
+- `src/app/(admin)/admin/replacements/page.tsx`
+  - replaced raw replacement status enum output with explicit Chinese labels and unknown fallback
+- `src/components/data-workspace/metric-strip.tsx`
+  - compacted the shared strip to a 2-column mobile grid so catalog KPI cards render 2x2 instead of one-per-row
+- `src/components/bulk-order/bulk-order-workspace.tsx`
+  - default-collapsed idle mobile store cards after the first one without changing selection, upload, focus, or idempotency behavior
+- `src/components/bulk-order/store-group-card.tsx`
+  - added mobile-only progressive disclosure control and explicit collapsed state marker for testability
+
+Tests added/updated for the fixes:
+- Added unit RED/GREEN coverage:
+  - `tests/unit/orders/admin-order-detail-page.test.tsx`
+  - `tests/unit/order-import/import-preview-page.test.tsx`
+  - `tests/unit/fulfillment/replacement-status-label.test.ts`
+  - `tests/unit/bulk-order/bulk-order-workspace.test.tsx`
+- Extended E2E coverage:
+  - `tests/e2e/phase-three-fulfillment.spec.ts`
+    - visible `返回订单列表`
+    - heading metrics render once on admin order detail
+  - `tests/e2e/customer-catalog.spec.ts`
+    - customer import preview keeps visible `重新上传`
+    - `data-metric-strip` contains exactly four heading metrics
+  - `tests/e2e/multi-store-bulk-order.spec.ts`
+    - widened settlement redirect assertion timeout to avoid false red under high concurrency after stateful submit
+
+RED / GREEN:
+- RED on 2026-08-12:
+  - `npm.cmd test -- tests/unit/orders/admin-order-detail-page.test.tsx tests/unit/order-import/import-preview-page.test.tsx ...`
+  - exposed:
+    - missing visible admin back link
+    - missing visible customer re-upload link
+    - duplicate page-level metrics
+    - raw replacement status output
+- GREEN on 2026-08-12:
+  - `npm.cmd test -- tests/unit/orders/admin-order-detail-page.test.tsx tests/unit/order-import/import-preview-page.test.tsx tests/unit/fulfillment/replacement-status-label.test.ts tests/unit/bulk-order/bulk-order-workspace.test.tsx`
+    - passed: 4 files / 12 tests
+
+Verification for fix round 1:
+- `npm.cmd run typecheck`
+  - passed
+- `npm.cmd run lint`
+  - passed
+- `npm.cmd test`
+  - passed: 30 files / 98 tests
+- `npm.cmd run test:e2e -- --workers=1 tests/e2e/phase-three-fulfillment.spec.ts`
+  - passed: 2 tests, skipped: 2 project-specific cases
+- `npm.cmd run test:e2e -- --workers=1 --update-snapshots=changed tests/e2e/customer-catalog.spec.ts`
+  - passed: 6 tests
+- `npm.cmd run test:e2e -- --workers=1 --update-snapshots=changed tests/e2e/merchant-center-visual.spec.ts`
+  - passed: 14 tests
+- `npm.cmd run test:e2e -- --project=desktop-chromium --update-snapshots=changed tests/e2e/multi-store-bulk-order.spec.ts`
+  - passed: 3 tests, skipped: 1 project-specific case
+- `git diff --check`
+  - no whitespace or conflict-marker findings; only LF→CRLF warnings in touched files
+
+Visual evidence refresh:
+- refreshed task evidence files under `.superpowers/sdd/2026-08-12-multi-store-bulk-order-and-merchant-ui/task-12-visual/`:
+  - `admin-settlement-review-1440.png`
+  - `admin-settlement-review-390.png`
+  - `bulk-workspace-1440.png`
+  - `bulk-workspace-390.png`
+  - `settlement-1440.png`
+- confirmed actual screenshot dimensions:
+  - `admin-settlement-review-1440.png`: `1440x1248`
+  - `admin-settlement-review-390.png`: `390x2234`
+  - `bulk-workspace-1440.png`: `1440x4877`
+- manual review after refresh:
+  - desktop and mobile settlement-review captures are no longer the same size
+  - no obvious horizontal overflow
+  - compact KPI cards and progressive disclosure are visible on mobile
+
+Notes:
+- Running `merchant-center-visual.spec.ts` with the default 10 workers produced intermittent seeded-customer login failures on mobile (`/login` instead of `/portal`). Re-running the same suite with `--workers=1` passed 14/14, so the issue was treated as test-environment concurrency noise rather than a product regression.

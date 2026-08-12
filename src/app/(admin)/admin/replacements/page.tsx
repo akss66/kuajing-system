@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db/client";
 import { fulfillmentOrders, replacementRequests } from "@/db/schema";
+import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
 
 export default async function ReplacementsPage() {
   const rows = await db
@@ -68,7 +69,7 @@ export default async function ReplacementsPage() {
                 </div>
                 <p className="text-sm text-muted">{row.reason}</p>
                 <Badge className="w-fit bg-primary-soft text-primary-hover" variant="secondary">
-                  {row.status}
+                  {formatReplacementStatus(row.status)}
                 </Badge>
                 <Button asChild size="sm" variant="outline">
                   <Link href={`/admin/orders/${row.orderId}`}>查看订单</Link>
