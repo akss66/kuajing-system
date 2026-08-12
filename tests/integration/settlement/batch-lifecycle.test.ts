@@ -62,6 +62,74 @@ async function waitForBlockedAllocationRead() {
   throw new Error("allocation read did not reach the coordinated table lock");
 }
 
+async function startWalletRowBlocker(customerId: string) {
+  const ready = deferred();
+  const released = deferred();
+  let backendPid: number | null = null;
+  const completion = db.transaction(async (tx) => {
+    const pidRows = await tx.execute<{ backendPid: number }>(sql`
+      select pg_backend_pid() as "backendPid"
+    `);
+    backendPid = pidRows[0].backendPid;
+    await tx.execute(sql`
+      select customer_id
+      from wallet_accounts
+      where customer_id = ${customerId}
+      for update
+    `);
+    ready.resolve();
+    await released.promise;
+  });
+  void completion.catch(() => ready.resolve());
+  await ready.promise;
+  if (backendPid === null) await completion;
+  return {
+    backendPid: backendPid!,
+    completion,
+    release: released.resolve,
+  };
+}
+
+async function waitForWalletRowWaiters(
+  blockerPid: number,
+  expectedCount: number,
+) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await db.execute<{ waitingCount: number }>(sql`
+      with recursive blocker_descendants(pid) as (
+        select activity.pid
+        from pg_stat_activity activity
+        where ${blockerPid} = any(pg_blocking_pids(activity.pid))
+
+        union
+
+        select activity.pid
+        from pg_stat_activity activity
+        inner join blocker_descendants blocker
+          on blocker.pid = any(pg_blocking_pids(activity.pid))
+      )
+      select count(distinct activity.pid)::integer as "waitingCount"
+      from pg_stat_activity activity
+      inner join blocker_descendants
+        on blocker_descendants.pid = activity.pid
+      inner join pg_locks waiting_lock
+        on waiting_lock.pid = activity.pid
+       and waiting_lock.granted = false
+      where activity.datname = current_database()
+        and activity.state = 'active'
+        and activity.wait_event_type = 'Lock'
+        and activity.query ilike '%wallet_accounts%'
+        and activity.query ilike '%for update%'
+    `);
+    const waitingCount = rows[0]?.waitingCount ?? 0;
+    if (waitingCount >= expectedCount) return waitingCount;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(
+    `expected ${expectedCount} wallet row waiters blocked by backend ${blockerPid}`,
+  );
+}
+
 function expectContinuousDebitLedger(
   rows: readonly {
     afterBalanceFen: number;
@@ -82,6 +150,37 @@ function expectContinuousDebitLedger(
   expect(rows.reduce((total, row) => total + row.deltaFen, 0)).toBe(
     input.totalDeltaFen,
   );
+}
+
+async function expectSettlementDebitLedger(
+  settlementBatchId: string,
+  input: { endingFen: number; startingFen: number; totalDeltaFen: number },
+) {
+  const allocations = await db
+    .select({
+      orderId: settlementBatchOrders.orderId,
+      walletAmountFen: settlementBatchOrders.walletAmountFen,
+    })
+    .from(settlementBatchOrders)
+    .where(eq(settlementBatchOrders.settlementBatchId, settlementBatchId));
+  const debits = await db
+    .select({
+      afterBalanceFen: walletTransactions.afterBalanceFen,
+      beforeBalanceFen: walletTransactions.beforeBalanceFen,
+      deltaFen: walletTransactions.deltaFen,
+      orderId: walletTransactions.orderId,
+    })
+    .from(walletTransactions)
+    .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
+
+  const debitByOrder = new Map(debits.map((debit) => [debit.orderId, debit]));
+  expect(debits).toHaveLength(allocations.length);
+  for (const allocation of allocations) {
+    const debit = debitByOrder.get(allocation.orderId);
+    expect(debit).toBeDefined();
+    expect(debit!.deltaFen).toBe(-allocation.walletAmountFen);
+  }
+  expectContinuousDebitLedger(debits, input);
 }
 
 async function createSubmissionFixture(prices: readonly number[]) {
@@ -653,12 +752,7 @@ describe("bulk settlement wallet lifecycle", () => {
     expect(hold.consumedAt).toBeInstanceOf(Date);
     const [wallet] = await db.select().from(walletAccounts);
     expect(wallet.balanceFen).toBe(50);
-    const debits = await db
-      .select()
-      .from(walletTransactions)
-      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
-    expect(debits).toHaveLength(2);
-    expectContinuousDebitLedger(debits, {
+    await expectSettlementDebitLedger(result.settlementBatchId!, {
       endingFen: 50,
       startingFen: 200,
       totalDeltaFen: -150,
@@ -682,20 +776,25 @@ describe("bulk settlement wallet lifecycle", () => {
           settlementBatchId: result.settlementBatchId!,
         }),
       );
-
-    const attempts = await Promise.allSettled([consume(), consume()]);
+    const blocker = await startWalletRowBlocker(fixture.customer.id);
+    const attemptsPromise = Promise.allSettled([consume(), consume()]);
+    let attempts: Awaited<typeof attemptsPromise>;
+    try {
+      expect(await waitForWalletRowWaiters(blocker.backendPid, 2)).toBe(2);
+      blocker.release();
+      attempts = await attemptsPromise;
+    } finally {
+      blocker.release();
+      await blocker.completion;
+      await attemptsPromise;
+    }
 
     expect(attempts.every((attempt) => attempt.status === "fulfilled")).toBe(
       true,
     );
     const [hold] = await db.select().from(walletHolds);
     expect(hold.status).toBe("CONSUMED");
-    const debits = await db
-      .select()
-      .from(walletTransactions)
-      .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
-    expect(debits).toHaveLength(2);
-    expectContinuousDebitLedger(debits, {
+    await expectSettlementDebitLedger(result.settlementBatchId!, {
       endingFen: 50,
       startingFen: 200,
       totalDeltaFen: -150,
@@ -716,8 +815,8 @@ describe("bulk settlement wallet lifecycle", () => {
       reason: "consume release race fixture",
     });
     const result = await submitFixture(fixture, 150);
-
-    const attempts = await Promise.allSettled([
+    const blocker = await startWalletRowBlocker(fixture.customer.id);
+    const attemptsPromise = Promise.allSettled([
       db.transaction((tx) =>
         consumeWalletHold(tx, {
           actorUserId: "settlement-admin",
@@ -735,8 +834,20 @@ describe("bulk settlement wallet lifecycle", () => {
         }),
       ),
     ]);
+    let attempts: Awaited<typeof attemptsPromise>;
+    try {
+      expect(await waitForWalletRowWaiters(blocker.backendPid, 2)).toBe(2);
+      blocker.release();
+      attempts = await attemptsPromise;
+    } finally {
+      blocker.release();
+      await blocker.completion;
+      await attemptsPromise;
+    }
 
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(
+      attempts.filter((attempt) => attempt.status === "fulfilled"),
+    ).toHaveLength(1);
     const [loser] = attempts.filter((attempt) => attempt.status === "rejected");
     expect(loser).toMatchObject({ reason: expect.any(WalletValidationError) });
     const [hold] = await db.select().from(walletHolds);
@@ -746,8 +857,7 @@ describe("bulk settlement wallet lifecycle", () => {
       .where(eq(walletTransactions.transactionType, "ORDER_DEBIT"));
     const [wallet] = await db.select().from(walletAccounts);
     if (hold.status === "CONSUMED") {
-      expect(debits).toHaveLength(2);
-      expectContinuousDebitLedger(debits, {
+      await expectSettlementDebitLedger(result.settlementBatchId!, {
         endingFen: 50,
         startingFen: 200,
         totalDeltaFen: -150,
