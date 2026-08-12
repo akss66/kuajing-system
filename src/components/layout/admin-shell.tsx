@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   Banknote,
   BarChart3,
   BellRing,
@@ -50,6 +51,7 @@ const navigation: NavigationItem[] = [
   { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
   { href: "/admin/notifications", icon: BellRing, label: "系统通知" },
   { href: "/admin/system/integrations", icon: PlugZap, label: "外部集成" },
+  { href: "/admin/system/health", icon: Activity, label: "系统健康" },
   { href: "/admin/system/audit", icon: Settings2, label: "审计日志" },
 ];
 

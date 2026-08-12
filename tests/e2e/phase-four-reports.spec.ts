@@ -130,3 +130,22 @@ test("reports and stock coverage fit approved mobile widths", async ({ page }, t
     ),
   ).toBeLessThanOrEqual(0);
 });
+
+test("public health is minimal and administrator health details are protected", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Security acceptance runs once");
+  const publicHealth = await request.get("/api/health");
+  expect(publicHealth.status()).toBe(200);
+  expect(await publicHealth.json()).toEqual({ status: "ok" });
+
+  const fixture = await seedReportFixture();
+  await loginThroughUi(page, fixture.admin);
+  await expect(page).toHaveURL(/\/admin$/);
+  const response = await page.goto("/admin/system/health");
+  expect(response?.headers()["x-frame-options"]).toBe("DENY");
+  expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
+  await expect(page.getByRole("heading", { name: "系统健康" })).toBeVisible();
+  await expect(page.getByText("只读运营检查")).toBeVisible();
+});

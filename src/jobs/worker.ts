@@ -15,6 +15,7 @@ import {
 } from "@/modules/feishu/outbox";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
 import { createDailyStockCoverageAlerts } from "@/modules/reports/stock-coverage";
+import { safeLogError } from "@/shared/privacy";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");
@@ -26,7 +27,7 @@ const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
 const boss = new PgBoss(connectionString);
 
 boss.on("error", (error) => {
-  console.error("[worker] pg-boss error", error);
+  console.error("[worker] pg-boss error", safeLogError(error));
 });
 
 await boss.start();

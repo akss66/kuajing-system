@@ -9,6 +9,7 @@ import {
   stores,
   walletAccounts,
 } from "@/db/schema";
+import { maskEmail } from "@/shared/privacy";
 
 export type ProvisionCustomerInput = {
   actorId: string;
@@ -55,7 +56,7 @@ export async function provisionCustomerWithStore(
       actorType: "ADMIN",
       afterJson: {
         customerName: input.customerName,
-        email: input.email.toLowerCase(),
+        email: maskEmail(input.email.toLowerCase()),
         storeId: store.id,
         storeName: input.storeName,
       },

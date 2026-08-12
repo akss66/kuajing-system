@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { walletAccounts } from "@/db/schema";
+import { auditLogs, walletAccounts } from "@/db/schema";
 import { auth } from "@/modules/identity/auth";
 import { getCurrentPrincipal } from "@/modules/identity/principal";
 import { provisionCustomerWithStore } from "@/modules/customers/service";
@@ -41,4 +41,12 @@ test("provisions a customer, store and sign-in account together", async () => {
     .from(walletAccounts)
     .where(eq(walletAccounts.customerId, result.customerId));
   expect(wallet.balanceFen).toBe(0);
+  const [audit] = await db
+    .select({ afterJson: auditLogs.afterJson })
+    .from(auditLogs)
+    .where(eq(auditLogs.entityId, result.customerId));
+  expect(audit.afterJson).toMatchObject({
+    email: `p***@test.tongzhouxing.local`,
+  });
+  expect(JSON.stringify(audit.afterJson)).not.toContain(email);
 });
