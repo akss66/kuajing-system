@@ -84,6 +84,12 @@ export type BulkOrderWorkspaceStore = {
   platform: string;
 };
 
+type SelectionState = {
+  selectedGroupIds: Set<string>;
+  signature: string;
+  submittableGroupIds: Set<string>;
+};
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
@@ -100,6 +106,38 @@ function parseYuanToFen(value: string) {
 }
 
 function createSelection(groups: readonly BulkOrderWorkspaceGroup[]) {
+  return new Set(
+    groups
+      .filter((group) => group.status === "SUBMITTABLE")
+      .map((group) => group.groupId),
+  );
+}
+
+function buildGroupSignature(groups: readonly BulkOrderWorkspaceGroup[]) {
+  return groups
+    .map((group) => {
+      const fileVersion = group.files.map((file) => file.batchId).join(",");
+      return [
+        group.groupId,
+        group.status,
+        group.fileCount,
+        fileVersion,
+        group.rawOrderCount,
+        group.deduplicatedOrderCount,
+      ].join(":");
+    })
+    .join("|");
+}
+
+function buildPayloadSignature(
+  draftId: string,
+  selectedGroupIds: readonly string[],
+  requestedWalletFen: number,
+) {
+  return `${draftId}:${requestedWalletFen}:${selectedGroupIds.join(",")}`;
+}
+
+function getSubmittableGroupIds(groups: readonly BulkOrderWorkspaceGroup[]) {
   return new Set(
     groups
       .filter((group) => group.status === "SUBMITTABLE")
@@ -125,11 +163,11 @@ function defaultHelperText(group: BulkOrderWorkspaceGroup) {
 
   switch (group.status) {
     case "BLOCKED_CROSS_STORE":
-      return "检测到跨店文件或跨店子订单，请移除冲突文件后重新上传。";
+      return "检测到跨店铺文件或跨店子订单，请移除冲突文件后重新上传。";
     case "BLOCKED_UNKNOWN_SKU":
-      return "存在未知 SKU，请先联系管理员维护映射，再继续上传该店铺文件。";
+      return "存在未知 SKU，请先联系管理员补齐映射，再继续上传该店铺文件。";
     case "BLOCKED_INVALID":
-      return "文件里仍有格式问题，请修正后重新上传；失败文件会保留。";
+      return "文件中仍有格式问题，请修正后重新上传；失败文件会保留。";
     case "BLOCKED_INVENTORY":
       return "库存已变化，当前分组暂时不能提交；稍后可重新上传或减少数量。";
     case "ALREADY_SUBMITTED":
@@ -157,23 +195,19 @@ export function BulkOrderWorkspace({
   };
 }) {
   const router = useRouter();
-  const alertRef = useRef<HTMLDivElement>(null);
   const [pending, startAction] = useTransition();
   const [selectedStoreId, setSelectedStoreId] = useState("");
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(
-    () => createSelection(draft.groups),
-  );
-  const [walletInput, setWalletInput] = useState("0");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File[]>>({});
   const [fileInputKeys, setFileInputKeys] = useState<Record<string, number>>({});
   const [uploadingGroupId, setUploadingGroupId] = useState<string | null>(null);
   const [removingBatchId, setRemovingBatchId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!alertMessage) return;
-    alertRef.current?.focus();
-  }, [alertMessage]);
+  const storeSelectFieldRef = useRef<HTMLDivElement>(null);
+  const alertRef = useRef<HTMLDivElement>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const checkboxRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const idempotencyKeysRef = useRef(new Map<string, string>());
 
   const groups = useMemo(
     () =>
@@ -183,6 +217,52 @@ export function BulkOrderWorkspace({
       })),
     [draft.groups],
   );
+
+  const groupSignature = useMemo(() => buildGroupSignature(groups), [groups]);
+  const [selectionState, setSelectionState] = useState<SelectionState>(() => ({
+    selectedGroupIds: createSelection(draft.groups),
+    signature: buildGroupSignature(draft.groups),
+    submittableGroupIds: getSubmittableGroupIds(draft.groups),
+  }));
+  const [walletState, setWalletState] = useState(() => ({
+    signature: buildGroupSignature(draft.groups),
+    value: "0",
+  }));
+
+  useEffect(() => {
+    if (selectionState.signature === groupSignature) return;
+    const currentSubmittableGroupIds = getSubmittableGroupIds(groups);
+    const selectedGroupIds = new Set<string>();
+
+    for (const groupId of currentSubmittableGroupIds) {
+      if (
+        !selectionState.submittableGroupIds.has(groupId) ||
+        selectionState.selectedGroupIds.has(groupId)
+      ) {
+        selectedGroupIds.add(groupId);
+      }
+    }
+
+    // The server action refreshes draft groups asynchronously. Keep selection
+    // aligned to that authoritative snapshot while preserving explicit choices.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectionState({
+      selectedGroupIds,
+      signature: groupSignature,
+      submittableGroupIds: currentSubmittableGroupIds,
+    });
+  }, [groupSignature, groups, selectionState]);
+
+  useEffect(() => {
+    if (walletState.signature === groupSignature) return;
+    // A refreshed draft has a new total, so the previous wallet input is stale.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWalletState({ signature: groupSignature, value: "0" });
+  }, [groupSignature, walletState.signature]);
+
+  const activeSelection = selectionState.selectedGroupIds;
+  const walletInput = walletState.value;
+
   const addedStoreIds = useMemo(
     () => new Set(groups.map((group) => group.storeId)),
     [groups],
@@ -192,8 +272,12 @@ export function BulkOrderWorkspace({
     [addedStoreIds, stores],
   );
   const selectedGroups = useMemo(
-    () => groups.filter((group) => selectedGroupIds.has(group.groupId)),
-    [groups, selectedGroupIds],
+    () =>
+      groups.filter(
+        (group) =>
+          group.status === "SUBMITTABLE" && activeSelection.has(group.groupId),
+      ),
+    [activeSelection, groups],
   );
   const summary = useMemo(
     () =>
@@ -219,21 +303,75 @@ export function BulkOrderWorkspace({
     (group) => group.status === "SUBMITTABLE",
   ).length;
 
-  function setActionError(error: unknown, fallback: string) {
-    if (error instanceof Error && error.message) {
-      setAlertMessage(error.message);
+  function focusAlert() {
+    queueMicrotask(() => {
+      alertRef.current?.focus();
+    });
+  }
+
+  function focusStoreSelect() {
+    queueMicrotask(() => {
+      storeSelectFieldRef.current
+        ?.querySelector<HTMLButtonElement>('[role="combobox"]')
+        ?.focus();
+    });
+  }
+
+  function focusGroupInput(groupId: string) {
+    queueMicrotask(() => {
+      fileInputRefs.current[groupId]?.focus();
+    });
+  }
+
+  function focusFirstSelectableCheckbox() {
+    const firstSelectableGroup = groups.find(
+      (group) => group.status === "SUBMITTABLE",
+    );
+    if (!firstSelectableGroup) {
+      focusAlert();
       return;
     }
-    setAlertMessage(fallback);
+
+    queueMicrotask(() => {
+      checkboxRefs.current[firstSelectableGroup.groupId]?.focus();
+    });
+  }
+
+  function setActionError(error: unknown, fallback: string) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "message" in error &&
+      typeof error.message === "string"
+    ) {
+      setAlertMessage(error.message);
+    } else {
+      setAlertMessage(fallback);
+    }
+    focusAlert();
   }
 
   function toggleGroup(groupId: string, checked: boolean) {
     setSelectedGroupIds((current) => {
-      const next = new Set(current);
+      const next = new Set(current.selectedGroupIds);
       if (checked) next.add(groupId);
       else next.delete(groupId);
-      return next;
+      return {
+        selectedGroupIds: next,
+        signature: groupSignature,
+        submittableGroupIds: current.submittableGroupIds,
+      };
     });
+  }
+
+  function setSelectedGroupIds(
+    updater: (current: SelectionState) => SelectionState,
+  ) {
+    setSelectionState((current) => updater(current));
+  }
+
+  function setWalletInput(value: string) {
+    setWalletState({ signature: groupSignature, value });
   }
 
   function handleFilesSelected(groupId: string, files: FileList | null) {
@@ -258,7 +396,8 @@ export function BulkOrderWorkspace({
 
   async function onAddStoreGroup() {
     if (!selectedStoreId) {
-      setAlertMessage("请先选择一个尚未添加的店铺。");
+      setAlertMessage("请选择店铺后再新增分组。");
+      focusStoreSelect();
       return;
     }
 
@@ -276,7 +415,8 @@ export function BulkOrderWorkspace({
   async function onUpload(groupId: string) {
     const files = selectedFiles[groupId] ?? [];
     if (!files.length) {
-      setAlertMessage("请先为该店铺选择至少一个 TEMU 原始 Excel。");
+      setAlertMessage("请先为该店铺选择至少一个 Excel 文件。");
+      focusGroupInput(groupId);
       return;
     }
 
@@ -314,20 +454,40 @@ export function BulkOrderWorkspace({
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedGroups.length) {
-      setAlertMessage("当前没有可提交店铺，请先修复被阻止的分组或新增店铺。");
+    const selectedGroupIds = [...selectedGroups.map((group) => group.groupId)].sort();
+    if (!selectedGroupIds.length) {
+      setAlertMessage("请至少选择一个可提交的店铺分组。");
+      focusFirstSelectableCheckbox();
       return;
     }
 
     startAction(async () => {
-      const response: SubmitBulkDraftActionResult = await submitBulkDraftAction({
-        draftId: draft.id,
+      const payloadSignature = buildPayloadSignature(
+        draft.id,
+        selectedGroupIds,
         requestedWalletFen,
-        selectedGroupIds: selectedGroups.map((group) => group.groupId),
-      });
+      );
+
+      const idempotencyKey =
+        idempotencyKeysRef.current.get(payloadSignature) ?? crypto.randomUUID();
+      idempotencyKeysRef.current.set(payloadSignature, idempotencyKey);
+
+      let response: SubmitBulkDraftActionResult;
+      try {
+        response = await submitBulkDraftAction({
+          draftId: draft.id,
+          idempotencyKey,
+          requestedWalletFen,
+          selectedGroupIds,
+        });
+      } catch (error) {
+        setActionError(error, "提交拿货单失败，请稍后重试。");
+        return;
+      }
 
       if (!response.ok) {
         setAlertMessage(response.message);
+        focusAlert();
         return;
       }
 
@@ -336,7 +496,8 @@ export function BulkOrderWorkspace({
         return;
       }
 
-      setAlertMessage("没有新拿货单生成；失败文件已保留，请修复后继续提交。");
+      setAlertMessage("没有新的拿货单生成；失败文件已保留，请修复后继续提交。");
+      focusAlert();
       await refreshWorkspace();
     });
   }
@@ -355,20 +516,20 @@ export function BulkOrderWorkspace({
             </p>
           </div>
           <div className="rounded-[var(--radius-surface)] border border-border bg-background px-4 py-3 text-sm text-muted">
-            <p>草稿状态：{draftStatusLabel(draft.status)}</p>
+            <p>{`草稿状态：${draftStatusLabel(draft.status)}`}</p>
             <p className="mt-1">
-              创建于 {formatDate(draft.createdAt)}，过期于 {formatDate(draft.expiresAt)}
+              {`创建于 ${formatDate(draft.createdAt)}，过期于 ${formatDate(draft.expiresAt)}`}
             </p>
           </div>
         </div>
 
         <section className="grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="space-y-3">
-            <p className="text-sm font-medium text-ink">{submittableCount} 个店铺可提交</p>
-            <label className="block space-y-2 text-sm font-medium text-ink">
-              新增店铺分组
+            <p className="text-sm font-medium text-ink">{`${submittableCount} 个店铺可提交`}</p>
+            <div className="block space-y-2 text-sm font-medium text-ink" ref={storeSelectFieldRef}>
+              <span>新增店铺分组</span>
               <Select onValueChange={setSelectedStoreId} value={selectedStoreId}>
-                <SelectTrigger className="min-h-11 w-full">
+                <SelectTrigger aria-label="新增店铺分组" className="min-h-11 w-full">
                   <SelectValue placeholder="选择一个尚未添加的店铺" />
                 </SelectTrigger>
                 <SelectContent>
@@ -385,7 +546,7 @@ export function BulkOrderWorkspace({
                   )}
                 </SelectContent>
               </Select>
-            </label>
+            </div>
           </div>
           <Button
             className="min-h-11 px-4"
@@ -395,7 +556,7 @@ export function BulkOrderWorkspace({
             variant="outline"
           >
             <Plus aria-hidden="true" />
-            添加店铺
+            新增店铺分组
           </Button>
         </section>
       </header>
@@ -426,6 +587,9 @@ export function BulkOrderWorkspace({
           {groups.map((group) => (
             <StoreGroupCard
               fileInputKey={fileInputKeys[group.groupId] ?? 0}
+              fileInputRef={(node) => {
+                fileInputRefs.current[group.groupId] = node;
+              }}
               fileSelection={selectedFiles[group.groupId] ?? []}
               group={group}
               key={group.groupId}
@@ -434,7 +598,10 @@ export function BulkOrderWorkspace({
               onSelectedChange={toggleGroup}
               onUpload={onUpload}
               removingBatchId={removingBatchId}
-              selected={selectedGroupIds.has(group.groupId)}
+              selected={activeSelection.has(group.groupId)}
+              selectionControlRef={(node) => {
+                checkboxRefs.current[group.groupId] = node;
+              }}
               uploading={uploadingGroupId === group.groupId}
             />
           ))}
@@ -452,7 +619,7 @@ export function BulkOrderWorkspace({
         requestedWalletFen={requestedWalletFen}
         requestedWalletInput={walletInput}
         selectedCount={selectedGroups.length}
-        submitDisabled={!selectedGroups.length || pending}
+        submitDisabled={pending}
         submitting={pending}
         totalAmountFen={summary.totalAmountFen}
         wechatDueFen={wechatDueFen}

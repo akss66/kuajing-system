@@ -6,6 +6,12 @@ import { SettlementPaymentForm } from "@/components/settlement/settlement-paymen
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import { getCustomerSettlementDetail } from "@/modules/settlement/queries";
+import {
+  getCustomerSettlementBatchStatusLabel,
+  getCustomerSettlementClaimStatusLabel,
+  getCustomerSettlementOrderStatusLabel,
+  getCustomerWalletHoldStatusLabel,
+} from "@/modules/settlement/customer-ui-labels";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 function money(fen: number) {
@@ -19,40 +25,6 @@ function dateTime(value: Date | null) {
     timeStyle: "short",
     timeZone: BUSINESS_TIME_ZONE,
   }).format(value);
-}
-
-function batchStatusLabel(status: string) {
-  switch (status) {
-    case "PAYMENT_REPORTED":
-      return "待审核";
-    case "PAID":
-      return "已收款";
-    case "REJECTED":
-      return "已拒绝";
-    case "WITHDRAWN":
-      return "已撤回";
-    case "CANCELLED":
-      return "已关闭";
-    case "EXPIRED":
-      return "已超时";
-    default:
-      return "待付款";
-  }
-}
-
-function claimStatusLabel(status: string | null) {
-  switch (status) {
-    case "APPROVED":
-      return "已核准";
-    case "PENDING":
-      return "待审核";
-    case "REJECTED":
-      return "已拒绝";
-    case "WITHDRAWN":
-      return "已撤回";
-    default:
-      return "未声明";
-  }
 }
 
 export default async function CustomerSettlementDetailPage({
@@ -71,22 +43,34 @@ export default async function CustomerSettlementDetailPage({
   return (
     <div className="space-y-6">
       <header>
-        <Link
-          className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
-          href="/portal/orders?status=PENDING_PAYMENT"
-        >
-          <ArrowLeft className="size-4" />
-          返回待付款
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
+            href="/portal/orders?status=PENDING_PAYMENT"
+          >
+            <ArrowLeft className="size-4" />
+            返回待付款
+          </Link>
+          <a
+            className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface"
+            href="#settlement-payment-form"
+          >
+            跳到付款声明
+          </a>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-            统一付款
+            统一付款结算
           </h1>
-          <Badge variant="secondary">{batchStatusLabel(detail.status)}</Badge>
-          <Badge variant="secondary">声明：{claimStatusLabel(detail.claim?.status ?? null)}</Badge>
+          <Badge variant="secondary">
+            {getCustomerSettlementBatchStatusLabel(detail.status)}
+          </Badge>
+          <Badge variant="secondary">
+            {`声明：${getCustomerSettlementClaimStatusLabel(detail.claim?.status ?? null)}`}
+          </Badge>
         </div>
         <p className="mt-2 text-sm text-muted">
-          批次 {detail.batchNumber} · 付款截止 {dateTime(detail.paymentDueAt)}（渥太华）
+          {`批次 ${detail.batchNumber} · 付款截止 ${dateTime(detail.paymentDueAt)}（渥太华）`}
         </p>
       </header>
 
@@ -98,7 +82,7 @@ export default async function CustomerSettlementDetailPage({
           {
             label: "冻结状态",
             value: detail.walletHold
-              ? `${detail.walletHold.status} · ${money(detail.walletHold.amountFen)}`
+              ? `${getCustomerWalletHoldStatusLabel(detail.walletHold.status)} · ${money(detail.walletHold.amountFen)}`
               : "未冻结",
           },
         ].map((item) => (
@@ -113,7 +97,53 @@ export default async function CustomerSettlementDetailPage({
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">
-        <div className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
+        <div className="space-y-4 xl:order-2">
+          <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
+            <div className="flex items-center gap-2">
+              <Clock3 className="size-4 text-primary" />
+              <h2 className="font-semibold text-ink">付款声明</h2>
+            </div>
+            <p className="mt-1 text-sm text-muted">
+              表单金额只读，等于当前微信待付；待审核时可撤回整笔声明。
+            </p>
+
+            <div className="mt-4">
+              <SettlementPaymentForm
+                claimStatus={detail.claim?.status ?? null}
+                formId="settlement-payment-form"
+                noteInputId="settlement-payment-note"
+                offlineAmountFen={detail.offlineAmountFen}
+                settlementBatchId={detail.id}
+              />
+            </div>
+          </section>
+
+          {detail.claim ? (
+            <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
+              <h2 className="font-semibold text-ink">最近一次声明</h2>
+              <div className="mt-3 space-y-2 text-sm text-muted">
+                <p>{`状态：${getCustomerSettlementClaimStatusLabel(detail.claim.status)}`}</p>
+                <p>{`提交时间：${dateTime(detail.claim.createdAt)}（渥太华）`}</p>
+                <p>{`声明金额：${money(detail.claim.amountFen)}`}</p>
+                {detail.claim.note ? <p>{`备注：${detail.claim.note}`}</p> : null}
+                {detail.claim.reviewedAt ? (
+                  <p>{`审核时间：${dateTime(detail.claim.reviewedAt)}（渥太华）`}</p>
+                ) : null}
+                {detail.claim.rejectionReason ? (
+                  <p>{`拒绝原因：${detail.claim.rejectionReason}`}</p>
+                ) : null}
+                {detail.claim.withdrawnAt ? (
+                  <p>{`撤回时间：${dateTime(detail.claim.withdrawnAt)}（渥太华）`}</p>
+                ) : null}
+                {detail.claim.withdrawalReason ? (
+                  <p>{`撤回原因：${detail.claim.withdrawalReason}`}</p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+        </div>
+
+        <div className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background xl:order-1">
           <div className="border-b border-border px-4 py-4 sm:px-5">
             <div className="flex items-center gap-2">
               <WalletCards className="size-4 text-primary" />
@@ -137,58 +167,15 @@ export default async function CustomerSettlementDetailPage({
                     {order.orderNumber}
                   </Link>
                   <p className="mt-1 text-sm text-muted">
-                    总额 {money(order.totalAmountFen)} · 钱包 {money(order.walletAmountFen)} ·
-                    微信 {money(order.offlineAmountFen)}
+                    {`总额 ${money(order.totalAmountFen)} · 钱包 ${money(order.walletAmountFen)} · 微信 ${money(order.offlineAmountFen)}`}
                   </p>
                 </div>
-                <Badge variant="secondary">{order.status}</Badge>
+                <Badge variant="secondary">
+                  {getCustomerSettlementOrderStatusLabel(order.status)}
+                </Badge>
               </article>
             ))}
           </div>
-        </div>
-
-        <div className="space-y-4">
-          <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
-            <div className="flex items-center gap-2">
-              <Clock3 className="size-4 text-primary" />
-              <h2 className="font-semibold text-ink">付款声明</h2>
-            </div>
-            <p className="mt-1 text-sm text-muted">
-              表单金额只读，等于当前微信待付；待审核时可撤回整笔声明。
-            </p>
-
-            <div className="mt-4">
-              <SettlementPaymentForm
-                claimStatus={detail.claim?.status ?? null}
-                offlineAmountFen={detail.offlineAmountFen}
-                settlementBatchId={detail.id}
-              />
-            </div>
-          </section>
-
-          {detail.claim ? (
-            <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
-              <h2 className="font-semibold text-ink">最近一次声明</h2>
-              <div className="mt-3 space-y-2 text-sm text-muted">
-                <p>状态：{claimStatusLabel(detail.claim.status)}</p>
-                <p>提交时间：{dateTime(detail.claim.createdAt)}（渥太华）</p>
-                <p>声明金额：{money(detail.claim.amountFen)}</p>
-                {detail.claim.note ? <p>备注：{detail.claim.note}</p> : null}
-                {detail.claim.reviewedAt ? (
-                  <p>审核时间：{dateTime(detail.claim.reviewedAt)}（渥太华）</p>
-                ) : null}
-                {detail.claim.rejectionReason ? (
-                  <p>拒绝原因：{detail.claim.rejectionReason}</p>
-                ) : null}
-                {detail.claim.withdrawnAt ? (
-                  <p>撤回时间：{dateTime(detail.claim.withdrawnAt)}（渥太华）</p>
-                ) : null}
-                {detail.claim.withdrawalReason ? (
-                  <p>撤回原因：{detail.claim.withdrawalReason}</p>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
         </div>
       </section>
     </div>

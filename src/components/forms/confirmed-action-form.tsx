@@ -29,6 +29,7 @@ export function ConfirmedActionForm({
   confirmDescription,
   confirmLabel,
   confirmTitle,
+  onErrorFocus,
   submitLabel,
 }: {
   action: ManagedAction;
@@ -37,6 +38,7 @@ export function ConfirmedActionForm({
   confirmDescription: string;
   confirmLabel: string;
   confirmTitle: string;
+  onErrorFocus?: () => void;
   submitLabel: string;
 }) {
   const formId = `confirmed-action-${useId().replaceAll(":", "")}`;
@@ -49,6 +51,10 @@ export function ConfirmedActionForm({
   useEffect(() => {
     if (state.status === "success") formRef.current?.reset();
   }, [state.status]);
+
+  useEffect(() => {
+    if (state.status === "error") onErrorFocus?.();
+  }, [onErrorFocus, state.status]);
 
   const errors = Object.values(state.fieldErrors ?? {}).flat();
 

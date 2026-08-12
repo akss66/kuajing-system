@@ -74,6 +74,7 @@ const statusTone: Record<
 
 export function StoreGroupCard({
   fileInputKey,
+  fileInputRef,
   fileSelection,
   group,
   onFilesSelected,
@@ -82,9 +83,11 @@ export function StoreGroupCard({
   onUpload,
   removingBatchId,
   selected,
+  selectionControlRef,
   uploading,
 }: {
   fileInputKey: number;
+  fileInputRef?: (node: HTMLInputElement | null) => void;
   fileSelection: readonly File[];
   group: BulkOrderWorkspaceGroup;
   onFilesSelected: (groupId: string, files: FileList | null) => void;
@@ -93,6 +96,7 @@ export function StoreGroupCard({
   onUpload: (groupId: string) => void;
   removingBatchId?: string | null;
   selected: boolean;
+  selectionControlRef?: (node: HTMLButtonElement | null) => void;
   uploading: boolean;
 }) {
   const tone = statusTone[group.status];
@@ -106,15 +110,24 @@ export function StoreGroupCard({
       <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <Checkbox
-              aria-label={`选择${group.storeName}`}
-              checked={selected}
-              className="mt-1 size-5"
-              disabled={!selectable}
-              onCheckedChange={(checked) =>
-                onSelectedChange(group.groupId, checked === true)
+            <div
+              ref={(node) =>
+                selectionControlRef?.(
+                  (node?.querySelector('[role="checkbox"]') as HTMLButtonElement | null) ??
+                    null,
+                )
               }
-            />
+            >
+              <Checkbox
+                aria-label={`选择${group.storeName}`}
+                checked={selected}
+                className="mt-1 size-5"
+                disabled={!selectable}
+                onCheckedChange={(checked) =>
+                  onSelectedChange(group.groupId, checked === true)
+                }
+              />
+            </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-semibold text-ink">{group.storeName}</h2>
@@ -123,8 +136,7 @@ export function StoreGroupCard({
                 </Badge>
               </div>
               <p className="mt-1 text-sm text-muted">
-                原始/去重订单 {group.rawOrderCount} / {group.deduplicatedOrderCount}，共{" "}
-                {group.totalQuantity} 件，预计 {money(group.totalAmountFen)}
+                {`原始/去重订单 ${group.rawOrderCount} / ${group.deduplicatedOrderCount}，共 ${group.totalQuantity} 件，预计 ${money(group.totalAmountFen)}`}
               </p>
             </div>
           </div>
@@ -152,7 +164,7 @@ export function StoreGroupCard({
           <StatusIcon className={cn("mt-0.5 size-4 shrink-0", tone.helperClass)} />
           <div className="min-w-0 flex-1">
             <p className="font-medium text-ink">
-              同店重复 {group.sameStoreDuplicateCount}，历史已存在 {group.existingOrderCount}
+              {`同店重复 ${group.sameStoreDuplicateCount}，历史已存在 ${group.existingOrderCount}`}
             </p>
             <p className="mt-1 text-sm text-muted">
               {group.helperText ??
@@ -176,8 +188,7 @@ export function StoreGroupCard({
                     <p className="truncate font-medium text-ink">{file.fileName}</p>
                   </div>
                   <p className="mt-1 text-xs text-muted">
-                    {bytes(file.fileSizeBytes)} · 原始订单 {file.rawOrderCount} · 未知 SKU{" "}
-                    {file.unknownSkuRows} · 格式问题 {file.invalidRows}
+                    {`${bytes(file.fileSizeBytes)} · 原始订单 ${file.rawOrderCount} · 未知 SKU ${file.unknownSkuRows} · 格式问题 ${file.invalidRows}`}
                   </p>
                 </div>
                 <Button
@@ -198,7 +209,7 @@ export function StoreGroupCard({
             ))
           ) : (
             <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted">
-              还没有上传文件。请为该店铺选择一个或多个 TEMU 原始 Excel。
+              还没有上传文件。请先为该店铺选择一个或多个 TEMU 原始 Excel。
             </div>
           )}
         </div>
@@ -220,22 +231,22 @@ export function StoreGroupCard({
                 key={fileInputKey}
                 multiple
                 onChange={(event) => onFilesSelected(group.groupId, event.target.files)}
+                ref={fileInputRef}
                 type="file"
               />
               {fileSelection.length ? (
                 <p className="mt-2 text-sm text-muted">
-                  已选择 {fileSelection.length} 个文件：{" "}
-                  {fileSelection.map((file) => file.name).join("、")}
+                  {`已选择 ${fileSelection.length} 个文件：${fileSelection.map((file) => file.name).join("、")}`}
                 </p>
               ) : (
                 <p className="mt-2 text-sm text-muted">
-                  支持同店铺多文件上传；失败文件会保留，方便继续修复。
+                  支持同店铺多文件上传；失败文件会保留，便于继续修复。
                 </p>
               )}
             </div>
             <Button
               className="min-h-11 px-4"
-              disabled={!editable || !fileSelection.length || uploading}
+              disabled={!editable || uploading}
               onClick={() => onUpload(group.groupId)}
               type="button"
             >
@@ -244,9 +255,7 @@ export function StoreGroupCard({
               ) : (
                 <Upload aria-hidden="true" />
               )}
-              {uploading
-                ? `上传中 ${fileSelection.length} 个文件`
-                : "上传并合并该店铺"}
+              {uploading ? `上传中 ${fileSelection.length} 个文件` : "上传该店铺文件"}
             </Button>
           </div>
         </div>

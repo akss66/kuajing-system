@@ -46,3 +46,44 @@
 
 - I did not finish the separate one-off screenshot artifact capture pass because the temporary shell-driven capture script was blocked by the local command policy wrapper. Functional mobile coverage still passed in Playwright at 360/390/430 with no page-level horizontal overflow assertion regression.
 - `next-env.d.ts` was touched by local Next dev behavior during verification; it is not part of the intended product change and should be excluded from the commit if still shown by git as a pure line-ending/worktree artifact.
+
+## Fix Round 1 — Phase A Behavior
+
+### RED evidence
+
+- `npm.cmd test -- tests/unit/bulk-order/bulk-order-workspace.test.tsx tests/unit/bulk-order/submit-bulk-draft-action.test.ts tests/unit/settlement/settlement-payment-form.test.tsx tests/unit/settlement/customer-settlement-page.test.tsx`
+  initially failed for workspace refresh selection, first-error focus, client idempotency replay validation, and settlement label/anchor coverage.
+
+### GREEN evidence
+
+- `npm.cmd test -- tests/unit/bulk-order/bulk-order-workspace.test.tsx tests/unit/bulk-order/submit-bulk-draft-action.test.ts tests/unit/settlement/settlement-payment-form.test.tsx tests/unit/settlement/customer-settlement-page.test.tsx` — 4 files, 11 tests passed.
+- `npm.cmd run typecheck` — passed.
+- `npm.cmd run lint` — passed.
+
+### Behavior covered
+
+- Refreshes prune non-submittable selections, auto-select newly submittable groups, and retain explicit cancellation of still-submittable groups.
+- Validation errors focus the related store selector, file input, first selectable group, payment note, or withdrawal-reason control while retaining alerts.
+- The browser creates a UUID once per canonical submit payload and reuses it for retries; the action validates and forwards that key.
+- Settlement enums use customer-facing Chinese labels; the heading has a visible `跳到付款声明` link to a focusable payment form.
+
+## Fix Round 1 — Phase B Visual and Browser Acceptance
+
+### Browser evidence
+
+- Isolated Playwright Chromium verified the workspace at 1440px, 390px, and 360px: no document horizontal overflow and every visible submit CTA measured at least 44px high.
+- The compact summary measured within the acceptance bounds: desktop 96–120px, mobile no more than 96px. At mobile widths the initial row stays collapsed and group work begins in the first viewport; full metrics remain available through `查看汇总`.
+- The isolated mobile console collection recorded no React hydration errors (including server-rendered HTML/text-content mismatch patterns). No hydration suppression was added.
+- Settlement verification covered Chinese status labels plus the visible `跳到付款声明` link and focusable `#settlement-payment-form` target.
+
+### Screenshots
+
+- `visual-review/screenshots/fix-round1/bulk-workspace-1440.png`
+- `visual-review/screenshots/fix-round1/bulk-workspace-390.png`
+- `visual-review/screenshots/fix-round1/bulk-workspace-360.png`
+- `visual-review/screenshots/fix-round1/settlement-1440.png`
+
+### Verification
+
+- `npm.cmd run test:e2e -- tests/e2e/multi-store-bulk-order.spec.ts` — 2 passed, 2 correctly project-skipped.
+- Impeccable detector over changed customer workspace and settlement surfaces — `[]`.

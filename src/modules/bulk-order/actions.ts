@@ -1,7 +1,5 @@
 "use server";
 
-import crypto from "node:crypto";
-
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -39,6 +37,7 @@ const uploadedFileSchema = z
   );
 const submitDraftSchema = z.object({
   draftId: idSchema,
+  idempotencyKey: z.string().uuid().max(64),
   requestedWalletFen: z.number().int().min(0).max(2_147_483_647),
   selectedGroupIds: z.array(idSchema).min(1).max(20),
 });
@@ -85,6 +84,7 @@ export async function uploadGroupFilesAction(formData: FormData) {
     .min(1)
     .max(10)
     .parse(formData.getAll("files"));
+
   return uploadGroupFiles({
     actorUserId: principal.userId,
     customerId: principal.customerId,
@@ -119,7 +119,7 @@ export async function submitBulkDraftAction(
   const parsed = submitDraftSchema.safeParse(input);
   if (!parsed.success) {
     return {
-      message: "请至少选择一个可提交店铺，并确认余额抵扣金额有效。",
+      message: "提交参数不完整，请刷新页面后重试。",
       ok: false,
     };
   }
@@ -129,7 +129,7 @@ export async function submitBulkDraftAction(
       actorUserId: principal.userId,
       customerId: principal.customerId,
       draftId: parsed.data.draftId,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: parsed.data.idempotencyKey,
       requestedWalletFen: parsed.data.requestedWalletFen,
       selectedGroupIds: parsed.data.selectedGroupIds,
     });

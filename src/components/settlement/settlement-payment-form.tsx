@@ -17,10 +17,14 @@ function money(fen: number) {
 
 export function SettlementPaymentForm({
   claimStatus,
+  formId = "settlement-payment-form",
+  noteInputId = "settlement-payment-note",
   offlineAmountFen,
   settlementBatchId,
 }: {
   claimStatus: "APPROVED" | "PENDING" | "REJECTED" | "WITHDRAWN" | null;
+  formId?: string;
+  noteInputId?: string;
   offlineAmountFen: number;
   settlementBatchId: string;
 }) {
@@ -29,22 +33,34 @@ export function SettlementPaymentForm({
     INITIAL_ACTION_STATE,
   );
   const feedbackRef = useRef<HTMLDivElement>(null);
+  const noteInputRef = useRef<HTMLInputElement>(null);
+  const withdrawReasonRef = useRef<HTMLInputElement>(null);
 
   const messages = [...Object.values(state.fieldErrors ?? {}).flat()];
   if (state.message) messages.push(state.message);
+
   const canReport =
     claimStatus == null || claimStatus === "REJECTED" || claimStatus === "WITHDRAWN";
 
   useEffect(() => {
-    if (state.status === "error") {
+    if (state.status !== "error") return;
+
+    if (canReport) {
+      noteInputRef.current?.focus();
+      return;
+    }
+
+    if (withdrawReasonRef.current) {
+      withdrawReasonRef.current.focus();
+    } else {
       feedbackRef.current?.focus();
     }
-  }, [state.status]);
+  }, [canReport, state.status]);
 
   return (
     <div className="space-y-4">
       {canReport ? (
-        <form action={formAction} className="grid gap-4">
+        <form action={formAction} className="grid gap-4" id={formId} tabIndex={-1}>
           <input name="settlementBatchId" type="hidden" value={settlementBatchId} />
           <label className="space-y-2 text-sm font-medium text-ink">
             付款金额（元）
@@ -60,9 +76,11 @@ export function SettlementPaymentForm({
             付款备注（选填）
             <Input
               className="min-h-11"
+              id={noteInputId}
               maxLength={500}
               name="note"
               placeholder="例如：微信昵称或转账时间"
+              ref={noteInputRef}
             />
           </label>
           {messages.length ? (
@@ -99,6 +117,7 @@ export function SettlementPaymentForm({
           confirmDescription="撤回后整笔结算会关闭，相关拿货单同步取消，冻结的余额与库存锁定一并释放。"
           confirmLabel="确认撤回"
           confirmTitle="确定撤回这笔统一付款声明？"
+          onErrorFocus={() => withdrawReasonRef.current?.focus()}
           submitLabel="撤回整笔声明"
         >
           <input name="settlementBatchId" type="hidden" value={settlementBatchId} />
@@ -109,6 +128,7 @@ export function SettlementPaymentForm({
               maxLength={1000}
               name="reason"
               placeholder="请说明撤回整笔声明的原因"
+              ref={withdrawReasonRef}
               required
             />
           </label>

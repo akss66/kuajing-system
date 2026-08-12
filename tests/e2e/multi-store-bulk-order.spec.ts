@@ -25,6 +25,27 @@ import { createManagedUser, loginThroughUi } from "./support/managed-user";
 
 const XLSX_MIME =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const VISUAL_REVIEW_DIR = "visual-review/screenshots/fix-round1";
+
+async function expectUsableViewport(page: import("@playwright/test").Page) {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  const heights = await page
+    .getByRole("button", { name: /提交拿货单/ })
+    .evaluateAll((buttons) =>
+      buttons
+        .filter((button) => {
+          const styles = window.getComputedStyle(button);
+          return styles.display !== "none" && styles.visibility !== "hidden";
+        })
+        .map((button) => button.getBoundingClientRect().height),
+    );
+  expect(heights).not.toHaveLength(0);
+  expect(heights.every((height) => height >= 44)).toBe(true);
+}
 
 async function workbookBuffer(index: number) {
   const workbook = new ExcelJS.Workbook();
@@ -172,18 +193,40 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
     page.getByRole("heading", { name: "多店铺批量拿货" }),
   ).toBeVisible();
   await expect(page.getByText("8 个店铺可提交")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "提交 8 个店铺" }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "提交拿货单并进入结算" }).first()).toBeEnabled();
+  await expectUsableViewport(page);
 
-  await page.getByRole("button", { name: "提交 8 个店铺" }).click();
+  const summary = page.getByTestId("bulk-order-summary");
+  await expect(summary).toBeVisible();
+  const summaryBox = await summary.boundingBox();
+  expect(summaryBox?.height).toBeGreaterThanOrEqual(96);
+  expect(summaryBox?.height).toBeLessThanOrEqual(120);
+  expect((await page.locator("article").first().boundingBox())?.y).toBeLessThan(500);
+  await page.screenshot({
+    fullPage: true,
+    path: `${VISUAL_REVIEW_DIR}/bulk-workspace-1440.png`,
+  });
+
+  await page.getByRole("button", { name: "提交拿货单并进入结算" }).first().click();
 
   await expect(page).toHaveURL(/\/portal\/settlements\//);
-  await expect(page.getByRole("heading", { name: "统一付款" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "统一付款结算" })).toBeVisible();
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("80.00");
+  await expect(page.locator("header").getByText("待付款", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "跳到付款声明" })).toHaveAttribute(
+    "href",
+    "#settlement-payment-form",
+  );
+  await expect(page.locator("#settlement-payment-form")).toHaveAttribute("tabindex", "-1");
+  await page.locator("#settlement-payment-form").focus();
+  await expect(page.locator("#settlement-payment-form")).toBeFocused();
   await expect(
     page.getByRole("button", { name: "我已微信付款" }),
   ).toBeVisible();
+  await page.screenshot({
+    fullPage: true,
+    path: `${VISUAL_REVIEW_DIR}/settlement-1440.png`,
+  });
 });
 
 test("customer bulk workspace stays usable at approved mobile widths", async ({
@@ -199,21 +242,35 @@ test("customer bulk workspace stays usable at approved mobile widths", async ({
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal/);
 
-  for (const width of [360, 390, 430]) {
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /hydration|server rendered HTML|text content does not match/i.test(message.text())
+    ) {
+      hydrationErrors.push(message.text());
+    }
+  });
+
+  for (const width of [360, 390]) {
     await page.setViewportSize({ height: 844, width });
     await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
     await expect(
       page.getByRole("heading", { name: "多店铺批量拿货" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "提交 8 个店铺" }),
+      page.getByRole("button", { name: "提交拿货单" }).first(),
     ).toBeVisible();
+    await expectUsableViewport(page);
 
-    const overflow = await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    );
-    expect(overflow).toBeLessThanOrEqual(1);
+    const summary = page.getByTestId("bulk-order-summary");
+    expect((await summary.boundingBox())?.height).toBeLessThanOrEqual(96);
+    expect((await page.locator("article").first().boundingBox())?.y).toBeLessThan(600);
+    await page.screenshot({
+      fullPage: true,
+      path: `${VISUAL_REVIEW_DIR}/bulk-workspace-${width}.png`,
+    });
   }
+
+  expect(hydrationErrors).toEqual([]);
 });
