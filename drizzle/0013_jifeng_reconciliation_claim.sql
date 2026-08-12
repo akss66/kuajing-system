@@ -1,0 +1,2 @@
+ALTER TABLE "integration_outbox" ADD COLUMN "claim_token" uuid;--> statement-breakpoint
+CREATE INDEX "integration_outbox_reconciliation_lease_index" ON "integration_outbox" USING btree ("target","status","locked_at");

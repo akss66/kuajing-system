@@ -21,6 +21,7 @@ import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 import {
   enqueuePaidOrdersForFulfillment,
+  JIFENG_RECONCILIATION_LEASE_MS,
   processDueJifengCreateOrderEvents,
   processJifengCreateOrderEvent,
   retryJifengShipment,
@@ -692,6 +693,382 @@ describe("paid order Jifeng dispatch", () => {
       jifengStatus: 6,
       status: "FULFILLING",
     });
+    const reconciliationAudits = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_ORDER_RECONCILED"));
+    expect(reconciliationAudits).toHaveLength(1);
+  });
+
+  test("rejects an administrator retry while a live reconciliation claim is querying Jifeng", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    let createCalls = 0;
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new JifengApiError({
+            code: "TIMEOUT",
+            message: "ambiguous create",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: firstAt,
+    });
+    const queryGate = deferred();
+    let queryCalls = 0;
+    const reconciliation = processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new Error("create must not run during reconciliation");
+        },
+        async getOrder({ erpNo }) {
+          queryCalls += 1;
+          await queryGate.promise;
+          return { erpNo, orderNo: "JF-LIVE-CLAIM", status: 6 };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: new Date(firstAt.getTime() + 60_000),
+    });
+    for (let index = 0; index < 100 && queryCalls === 0; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    await expect(
+      retryJifengShipment({
+        actorUserId: "admin-user",
+        now: new Date(firstAt.getTime() + 61_000),
+        reason: "must not steal a live reconciliation claim",
+        shipmentId: shipment.id,
+      }),
+    ).rejects.toMatchObject({ code: "RECONCILIATION_IN_PROGRESS" });
+    queryGate.resolve();
+
+    await expect(reconciliation).resolves.toEqual({ status: "RECONCILED" });
+    expect(createCalls).toBe(1);
+    expect(queryCalls).toBe(1);
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    expect(savedEvent.status).toBe("COMPLETED");
+  });
+
+  test("reclaims a crashed reconciliation exactly at lease expiry and queries Jifeng once", async () => {
+    await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    let createCalls = 0;
+    let queryCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        createCalls += 1;
+        throw new JifengApiError({
+          code: "TIMEOUT",
+          message: "ambiguous create",
+          retryable: true,
+        });
+      },
+      async getOrder({ erpNo }) {
+        queryCalls += 1;
+        return { erpNo, orderNo: "JF-LEASE-RECOVERED", status: 6 };
+      },
+    };
+    await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: firstAt,
+    });
+    const claimAt = new Date(firstAt.getTime() + 60_000);
+    const crashedToken = crypto.randomUUID();
+    await db.execute(sql`
+      update integration_outbox
+      set
+        claim_token = ${crashedToken}::uuid,
+        locked_at = ${claimAt.toISOString()}::timestamptz,
+        status = 'PROCESSING'
+      where id = ${event.id}
+    `);
+
+    const beforeExpiry = await processDueJifengCreateOrderEvents({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS - 1),
+    });
+    expect(beforeExpiry).toEqual({ completed: 0, failed: 0, retryScheduled: 0 });
+    expect(queryCalls).toBe(0);
+
+    const atExpiry = await processDueJifengCreateOrderEvents({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
+    });
+    expect(atExpiry).toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
+    expect(createCalls).toBe(1);
+    expect(queryCalls).toBe(1);
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
+  });
+
+  test("queries before recreating after a stale claim is confirmed absent", async () => {
+    await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    const trace: string[] = [];
+    let createCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        createCalls += 1;
+        trace.push(`create-${createCalls}`);
+        if (createCalls === 1) {
+          throw new JifengApiError({
+            code: "TIMEOUT",
+            message: "ambiguous create",
+            retryable: true,
+          });
+        }
+        return { data: null };
+      },
+      async getOrder() {
+        trace.push("query");
+        throw new JifengApiError({
+          code: "50017",
+          message: "confirmed absent",
+          retryable: false,
+        });
+      },
+    };
+    await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: firstAt,
+    });
+    const claimAt = new Date(firstAt.getTime() + 60_000);
+    await db.execute(sql`
+      update integration_outbox
+      set
+        claim_token = ${crypto.randomUUID()}::uuid,
+        last_error_code = null,
+        locked_at = ${claimAt.toISOString()}::timestamptz,
+        status = 'PROCESSING'
+      where id = ${event.id}
+    `);
+
+    await expect(
+      processDueJifengCreateOrderEvents({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
+      }),
+    ).resolves.toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
+    expect(trace).toEqual(["create-1", "query", "create-2"]);
+  });
+
+  test("keeps an administrator-recovered stale claim query-only before create", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    let createCalls = 0;
+    const claimAt = new Date(firstAt.getTime() + 60_000);
+    await db.execute(sql`
+      update integration_outbox
+      set
+        attempt_count = 1,
+        claim_token = ${crypto.randomUUID()}::uuid,
+        last_error_code = null,
+        locked_at = ${claimAt.toISOString()}::timestamptz,
+        status = 'PROCESSING'
+      where id = ${event.id}
+    `);
+    await db.execute(sql`
+      update shipment_fulfillments
+      set attempt_count = 1, last_error_code = null, status = 'EXCEPTION'
+      where shipment_id = ${shipment.id}
+    `);
+    const recoveredAt = new Date(
+      claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS,
+    );
+    await retryJifengShipment({
+      actorUserId: "admin-user",
+      now: recoveredAt,
+      reason: "recover the expired worker lease safely",
+      shipmentId: shipment.id,
+    });
+    let queryCalls = 0;
+    await expect(
+      processJifengCreateOrderEvent({
+        client: {
+          async createOrder() {
+            createCalls += 1;
+            throw new Error("remote exists, create must not repeat");
+          },
+          async getOrder({ erpNo }) {
+            queryCalls += 1;
+            return { erpNo, orderNo: "JF-ADMIN-RECOVERED", status: 6 };
+          },
+        },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+        now: recoveredAt,
+      }),
+    ).resolves.toEqual({ status: "RECONCILED" });
+    expect(createCalls).toBe(0);
+    expect(queryCalls).toBe(1);
+  });
+
+  test("lets only one concurrent worker reclaim a stale reconciliation lease", async () => {
+    await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    let createCalls = 0;
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new JifengApiError({
+            code: "NETWORK_ERROR",
+            message: "ambiguous create",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: firstAt,
+    });
+    const claimAt = new Date(firstAt.getTime() + 60_000);
+    await db.execute(sql`
+      update integration_outbox
+      set
+        claim_token = ${crypto.randomUUID()}::uuid,
+        locked_at = ${claimAt.toISOString()}::timestamptz,
+        status = 'PROCESSING'
+      where id = ${event.id}
+    `);
+    const queryGate = deferred();
+    let queryCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        createCalls += 1;
+        throw new Error("a stale reconciliation claim must query before create");
+      },
+      async getOrder({ erpNo }) {
+        queryCalls += 1;
+        await queryGate.promise;
+        return { erpNo, orderNo: "JF-SINGLE-RECLAIMER", status: 6 };
+      },
+    };
+    const now = new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS);
+    const workers = [
+      processDueJifengCreateOrderEvents({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        now,
+      }),
+      processDueJifengCreateOrderEvents({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        now,
+      }),
+    ];
+    for (let index = 0; index < 100 && queryCalls === 0; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    queryGate.resolve();
+    const summaries = await Promise.all(workers);
+
+    expect(queryCalls).toBe(1);
+    expect(createCalls).toBe(1);
+    expect(summaries.reduce((sum, item) => sum + item.completed, 0)).toBe(1);
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
+  });
+
+  test("prevents an expired reconciliation owner from overwriting the reclaimer result", async () => {
+    await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+    let createCalls = 0;
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new JifengApiError({
+            code: "TIMEOUT",
+            message: "ambiguous create",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: firstAt,
+    });
+    const oldOwnerGate = deferred();
+    let oldOwnerQueries = 0;
+    const claimAt = new Date(firstAt.getTime() + 60_000);
+    const expiredOwner = processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new Error("reconciliation must not call create");
+        },
+        async getOrder() {
+          oldOwnerQueries += 1;
+          await oldOwnerGate.promise;
+          throw new JifengApiError({
+            code: "NETWORK_ERROR",
+            message: "expired owner failure",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: claimAt,
+    });
+    for (let index = 0; index < 100 && oldOwnerQueries === 0; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    let newOwnerQueries = 0;
+    const reclaimer = await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          createCalls += 1;
+          throw new Error("reclaimer must query before create");
+        },
+        async getOrder({ erpNo }) {
+          newOwnerQueries += 1;
+          return { erpNo, orderNo: "JF-NEW-LEASE-OWNER", status: 6 };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
+    });
+    expect(reclaimer).toEqual({ status: "RECONCILED" });
+    oldOwnerGate.resolve();
+    await expect(expiredOwner).resolves.toEqual({ status: "STALE" });
+
+    expect(createCalls).toBe(1);
+    expect(oldOwnerQueries).toBe(1);
+    expect(newOwnerQueries).toBe(1);
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
     const reconciliationAudits = await db
       .select()
       .from(auditLogs)

@@ -185,6 +185,7 @@ export const integrationOutbox = pgTable(
       .defaultNow()
       .notNull(),
     lockedAt: timestamp("locked_at", { mode: "date", withTimezone: true }),
+    claimToken: uuid("claim_token"),
     completedAt: timestamp("completed_at", {
       mode: "date",
       withTimezone: true,
@@ -205,6 +206,11 @@ export const integrationOutbox = pgTable(
       table.target,
       table.status,
       table.nextAttemptAt,
+    ),
+    index("integration_outbox_reconciliation_lease_index").on(
+      table.target,
+      table.status,
+      table.lockedAt,
     ),
   ],
 );

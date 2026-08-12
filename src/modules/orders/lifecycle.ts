@@ -505,6 +505,7 @@ export async function cancelFulfillmentOrder(input: {
     await tx
       .update(integrationOutbox)
       .set({
+        claimToken: null,
         completedAt: now,
         lastErrorCode: "ORDER_CANCELLED",
         lastErrorMessage: "Local order cancellation",

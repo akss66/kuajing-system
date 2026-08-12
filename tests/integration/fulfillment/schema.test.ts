@@ -153,4 +153,34 @@ describe("fulfillment integration schema", () => {
     await db.insert(integrationOutbox).values(event);
     await expect(db.insert(integrationOutbox).values(event)).rejects.toThrow();
   });
+
+  test("integration outbox stores a nullable UUID reconciliation claim token", async () => {
+    const columns = await db.execute<{
+      dataType: string;
+      isNullable: string;
+    }>(sql`
+      select
+        data_type as "dataType",
+        is_nullable as "isNullable"
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'integration_outbox'
+        and column_name = 'claim_token'
+    `);
+
+    expect(columns).toEqual([
+      { dataType: "uuid", isNullable: "YES" },
+    ]);
+
+    const indexes = await db.execute<{ indexdef: string }>(sql`
+      select indexdef
+      from pg_indexes
+      where schemaname = 'public'
+        and tablename = 'integration_outbox'
+        and indexname = 'integration_outbox_reconciliation_lease_index'
+    `);
+    expect(indexes[0]?.indexdef).toContain(
+      "(target, status, locked_at)",
+    );
+  });
 });

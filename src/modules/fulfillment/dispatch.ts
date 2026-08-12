@@ -54,6 +54,7 @@ type DispatchConfig = {
 
 type ClaimedEvent = {
   attemptNumber: number;
+  claimToken: string;
   fulfillmentId: string;
   orderId: string;
   shipmentId: string;
@@ -71,9 +72,18 @@ type RetryInspection = {
 };
 
 type ReconciliationClaim = RetryInspection & {
-  claimToken: Date;
+  claimToken: string;
   priorErrorCode: string;
 };
+
+export const JIFENG_RECONCILIATION_LEASE_MS = 5 * 60 * 1000;
+
+export class JifengDispatchError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "JifengDispatchError";
+  }
+}
 
 const MANUAL_CONFIRMED_RETRY = "MANUAL_CONFIRMED_FAILURE_RETRY";
 const RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED";
@@ -84,6 +94,7 @@ const CREATE_AFTER_NOT_FOUND_CODES = new Set([
   "NETWORK_ERROR",
   "INVALID_RESPONSE",
   "POST_SUCCESS_PERSISTENCE_ERROR",
+  "STALE_PROCESSING",
 ]);
 
 function reconciliationOrigin(code: string | null) {
@@ -247,6 +258,7 @@ async function claimEvent(eventId: string, now: Date) {
       await tx
         .update(integrationOutbox)
         .set({
+          claimToken: null,
           completedAt: now,
           lastErrorCode: errorCode,
           lastErrorMessage: "Local order is not eligible for dispatch",
@@ -270,10 +282,12 @@ async function claimEvent(eventId: string, now: Date) {
     }
 
     const attemptNumber = event.attemptCount + 1;
+    const claimToken = crypto.randomUUID();
     await tx
       .update(integrationOutbox)
       .set({
         attemptCount: attemptNumber,
+        claimToken,
         lastErrorCode: null,
         lastErrorMessage: null,
         lockedAt: now,
@@ -293,6 +307,7 @@ async function claimEvent(eventId: string, now: Date) {
 
     return {
       attemptNumber,
+      claimToken,
       fulfillmentId: event.fulfillmentId,
       orderId: event.orderId,
       shipmentId: event.shipmentId,
@@ -394,6 +409,7 @@ async function reconciliationRow(
 ): Promise<
   | (RetryInspection & {
       fulfillmentStatus: string;
+      claimToken: string | null;
       lockedAt: Date | string | null;
     })
   | null
@@ -401,11 +417,13 @@ async function reconciliationRow(
   const rows = await tx.execute<
     RetryInspection & {
       fulfillmentStatus: string;
+      claimToken: string | null;
       lockedAt: Date | string | null;
     }
   >(sql`
     select
       e.attempt_count as "attemptCount",
+      e.claim_token as "claimToken",
       f.erp_no as "erpNo",
       f.id as "fulfillmentId",
       f.status as "fulfillmentStatus",
@@ -425,18 +443,30 @@ async function reconciliationRow(
 }
 
 function sameClaim(
-  row: { lockedAt: Date | string | null; status: string },
+  row: { claimToken: string | null; status: string },
   claim: ReconciliationClaim,
 ) {
-  const lockedAt = row.lockedAt instanceof Date
-    ? row.lockedAt
-    : row.lockedAt
-      ? new Date(row.lockedAt)
-      : null;
-  return (
-    row.status === "PROCESSING" &&
-    lockedAt?.getTime() === claim.claimToken.getTime()
-  );
+  return ownsProcessingClaim(row, claim.claimToken);
+}
+
+function ownsProcessingClaim(
+  row: { claimToken: string | null; status: string },
+  claimToken: string,
+) {
+  return row.status === "PROCESSING" && row.claimToken === claimToken;
+}
+
+function asDate(value: Date | string | null) {
+  return value instanceof Date ? value : value ? new Date(value) : null;
+}
+
+function reconciliationLeaseExpired(
+  lockedAt: Date | string | null,
+  now: Date,
+) {
+  const claimedAt = asDate(lockedAt);
+  return claimedAt !== null &&
+    claimedAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS <= now.getTime();
 }
 
 async function claimReconciliation(eventId: string, now: Date) {
@@ -458,24 +488,39 @@ async function claimReconciliation(eventId: string, now: Date) {
     await lockDispatchRows(tx, { eventId, ...reference });
     const row = await reconciliationRow(tx, eventId);
     if (!row) return "CREATE" as const;
-    if (row.status === "COMPLETED") return "COMPLETED" as const;
-    if (row.status === "PROCESSING") return "BUSY" as const;
+    if (row.status === "COMPLETED") {
+      if (row.lastErrorCode === "ORDER_CANCELLED") return "CANCELLED" as const;
+      if (row.lastErrorCode === "ORDER_NOT_ELIGIBLE") {
+        return "NOT_ELIGIBLE" as const;
+      }
+      return "COMPLETED" as const;
+    }
+    const reclaimingStaleClaim =
+      row.status === "PROCESSING" && reconciliationLeaseExpired(row.lockedAt, now);
+    if (row.status === "PROCESSING" && !reclaimingStaleClaim) {
+      return "BUSY" as const;
+    }
     if (
-      row.status !== "FAILED" ||
+      !reclaimingStaleClaim &&
+      (row.status !== "FAILED" ||
       row.attemptCount === 0 ||
-      row.lastErrorCode === MANUAL_CONFIRMED_RETRY
+      row.lastErrorCode === MANUAL_CONFIRMED_RETRY)
     ) {
       return "CREATE" as const;
     }
-    const claimToken = new Date(now);
+    const claimToken = crypto.randomUUID();
     await tx
       .update(integrationOutbox)
-      .set({ lockedAt: claimToken, status: "PROCESSING", updatedAt: now })
+      .set({ claimToken, lockedAt: now, status: "PROCESSING", updatedAt: now })
       .where(eq(integrationOutbox.id, eventId));
     return {
       ...row,
       claimToken,
-      priorErrorCode: reconciliationOrigin(row.lastErrorCode),
+      priorErrorCode: reclaimingStaleClaim
+        ? reconciliationOrigin(row.lastErrorCode) === "UNKNOWN"
+          ? "STALE_PROCESSING"
+          : reconciliationOrigin(row.lastErrorCode)
+        : reconciliationOrigin(row.lastErrorCode),
     } satisfies ReconciliationClaim;
   });
 }
@@ -488,6 +533,7 @@ async function completeAlreadyTerminalClaim(
   await tx
     .update(integrationOutbox)
     .set({
+      claimToken: null,
       completedAt: now,
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -512,6 +558,7 @@ async function markReconciliationRequired(
     });
     const current = await reconciliationRow(tx, eventId);
     if (!current) return "STALE" as const;
+    if (!sameClaim(current, inspected)) return "STALE" as const;
     if (
       current.status === "COMPLETED" ||
       ["SUBMITTED", "FULFILLING", "SHIPPED", "CANCELLED"].includes(
@@ -523,7 +570,6 @@ async function markReconciliationRequired(
       }
       return "TERMINAL" as const;
     }
-    if (!sameClaim(current, inspected)) return "STALE" as const;
     const neverRetryAt = new Date("9999-12-31T23:59:59.999Z");
     const stateCode = reconciliationStateCode(inspected.priorErrorCode);
     await tx
@@ -539,6 +585,7 @@ async function markReconciliationRequired(
     await tx
       .update(integrationOutbox)
       .set({
+        claimToken: null,
         lastErrorCode: stateCode,
         lastErrorMessage: "Jifeng order outcome requires reconciliation",
         lockedAt: null,
@@ -588,6 +635,7 @@ async function finalizeRemoteOrder(
     });
     const current = await reconciliationRow(tx, eventId);
     if (!current) return "STALE" as const;
+    if (!sameClaim(current, inspected)) return "STALE" as const;
     if (
       current.status === "COMPLETED" ||
       ["SHIPPED", "CANCELLED"].includes(current.fulfillmentStatus)
@@ -597,7 +645,6 @@ async function finalizeRemoteOrder(
       }
       return "TERMINAL" as const;
     }
-    if (!sameClaim(current, inspected)) return "STALE" as const;
     const mapped = await applyJifengOrderStatus(
       { detail, now, source: "POLL" },
       tx,
@@ -605,6 +652,7 @@ async function finalizeRemoteOrder(
     await tx
       .update(integrationOutbox)
       .set({
+        claimToken: null,
         completedAt: now,
         lastErrorCode: null,
         lastErrorMessage: null,
@@ -643,6 +691,7 @@ async function releaseClaimForConfirmedNotFound(
     await tx
       .update(integrationOutbox)
       .set({
+        claimToken: null,
         lastErrorCode: `CONFIRMED_NOT_FOUND:${claim.priorErrorCode}`.slice(0, 80),
         lastErrorMessage: "Jifeng order confirmed absent before create retry",
         lockedAt: null,
@@ -668,9 +717,9 @@ async function reconcileBeforeCreateRetry(input: {
       input.now,
       "QUERY_UNAVAILABLE",
     );
-    return outcome === "TERMINAL"
-      ? ("COMPLETED" as const)
-      : ("RECONCILIATION_REQUIRED" as const);
+    if (outcome === "TERMINAL") return "COMPLETED" as const;
+    if (outcome === "STALE") return "STALE" as const;
+    return "RECONCILIATION_REQUIRED" as const;
   }
   try {
     const detail = await input.client.getOrder({ erpNo: inspected.erpNo });
@@ -680,17 +729,22 @@ async function reconcileBeforeCreateRetry(input: {
       detail,
       input.now,
     );
-    return outcome === "APPLIED"
-      ? ("RECONCILED" as const)
-      : ("COMPLETED" as const);
+    if (outcome === "APPLIED") return "RECONCILED" as const;
+    if (outcome === "STALE") return "STALE" as const;
+    return "COMPLETED" as const;
   } catch (error) {
     if (error instanceof JifengApiError && CONFIRMED_NOT_FOUND_CODES.has(error.code)) {
       if (
         !QUERY_ONLY_PRIOR_CODES.has(inspected.priorErrorCode) &&
-        CREATE_AFTER_NOT_FOUND_CODES.has(inspected.priorErrorCode) &&
-        await releaseClaimForConfirmedNotFound(inspected, input.eventId, input.now)
+        CREATE_AFTER_NOT_FOUND_CODES.has(inspected.priorErrorCode)
       ) {
-        return "CREATE" as const;
+        return await releaseClaimForConfirmedNotFound(
+          inspected,
+          input.eventId,
+          input.now,
+        )
+          ? ("CREATE" as const)
+          : ("STALE" as const);
       }
       const outcome = await markReconciliationRequired(
         inspected,
@@ -698,9 +752,9 @@ async function reconcileBeforeCreateRetry(input: {
         input.now,
         error.code,
       );
-      return outcome === "TERMINAL"
-        ? ("COMPLETED" as const)
-        : ("RECONCILIATION_REQUIRED" as const);
+      if (outcome === "TERMINAL") return "COMPLETED" as const;
+      if (outcome === "STALE") return "STALE" as const;
+      return "RECONCILIATION_REQUIRED" as const;
     }
     const failure = safeFailure(error);
     const outcome = await markReconciliationRequired(
@@ -709,9 +763,9 @@ async function reconcileBeforeCreateRetry(input: {
       input.now,
       failure.code,
     );
-    return outcome === "TERMINAL"
-      ? ("COMPLETED" as const)
-      : ("RECONCILIATION_REQUIRED" as const);
+    if (outcome === "TERMINAL") return "COMPLETED" as const;
+    if (outcome === "STALE") return "STALE" as const;
+    return "RECONCILIATION_REQUIRED" as const;
   }
 }
 
@@ -727,9 +781,27 @@ export async function processJifengCreateOrderEvent(input: {
     eventId: input.eventId,
     now,
   });
-  if (reconciliation === "RECONCILED") return { status: "RECONCILED" as const };
-  if (reconciliation === "RECONCILIATION_REQUIRED") {
-    return { status: "RECONCILIATION_REQUIRED" as const };
+  if (reconciliation !== "CREATE") {
+    switch (reconciliation) {
+      case "RECONCILED":
+        return { status: "RECONCILED" as const };
+      case "RECONCILIATION_REQUIRED":
+        return { status: "RECONCILIATION_REQUIRED" as const };
+      case "BUSY":
+        return { status: "BUSY" as const };
+      case "COMPLETED":
+        return { status: "ALREADY_COMPLETED" as const };
+      case "STALE":
+        return { status: "STALE" as const };
+      case "CANCELLED":
+        return { status: "SKIPPED_CANCELLED" as const };
+      case "NOT_ELIGIBLE":
+        return { status: "SKIPPED_NOT_ELIGIBLE" as const };
+      default: {
+        const exhaustive: never = reconciliation;
+        return exhaustive;
+      }
+    }
   }
   const claimed = await claimEvent(input.eventId, now);
   if (claimed === "CANCELLED") return { status: "SKIPPED_CANCELLED" as const };
@@ -743,12 +815,16 @@ export async function processJifengCreateOrderEvent(input: {
     const response = await input.client.createOrder(request);
     externalCreateSucceeded = true;
 
-    await db.transaction(async (tx) => {
+    const persisted = await db.transaction(async (tx) => {
       await lockDispatchRows(tx, {
         eventId: input.eventId,
         fulfillmentId: claimed.fulfillmentId,
         orderId: claimed.orderId,
       });
+      const current = await reconciliationRow(tx, input.eventId);
+      if (!current || !ownsProcessingClaim(current, claimed.claimToken)) {
+        return false;
+      }
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -763,6 +839,7 @@ export async function processJifengCreateOrderEvent(input: {
       await tx
         .update(integrationOutbox)
         .set({
+          claimToken: null,
           completedAt: now,
           lastErrorCode: null,
           lastErrorMessage: null,
@@ -811,15 +888,17 @@ export async function processJifengCreateOrderEvent(input: {
         entityType: "FULFILLMENT_ORDER",
         reason: "已将包裹提交至极风履约",
       });
+      return true;
     });
 
+    if (!persisted) return { status: "STALE" as const };
     return { status: "COMPLETED" as const };
   } catch (error) {
     if (externalCreateSucceeded) {
-      await markReconciliationRequired(
+      const outcome = await markReconciliationRequired(
         {
           attemptCount: claimed.attemptNumber,
-          claimToken: claimed.startedAt,
+          claimToken: claimed.claimToken,
           erpNo: erpNumberForShipment(claimed.shipmentId),
           fulfillmentId: claimed.fulfillmentId,
           lastErrorCode: "POST_SUCCESS_PERSISTENCE_ERROR",
@@ -832,6 +911,10 @@ export async function processJifengCreateOrderEvent(input: {
         now,
         "POST_SUCCESS_PERSISTENCE_ERROR",
       );
+      if (outcome === "STALE") return { status: "STALE" as const };
+      if (outcome === "TERMINAL") {
+        return { status: "ALREADY_COMPLETED" as const };
+      }
       return { status: "RECONCILIATION_REQUIRED" as const };
     }
     const failure = safeFailure(error);
@@ -841,12 +924,16 @@ export async function processJifengCreateOrderEvent(input: {
       ? retryAt(now, claimed.attemptNumber)
       : new Date("9999-12-31T23:59:59.999Z");
 
-    await db.transaction(async (tx) => {
+    const persisted = await db.transaction(async (tx) => {
       await lockDispatchRows(tx, {
         eventId: input.eventId,
         fulfillmentId: claimed.fulfillmentId,
         orderId: claimed.orderId,
       });
+      const current = await reconciliationRow(tx, input.eventId);
+      if (!current || !ownsProcessingClaim(current, claimed.claimToken)) {
+        return false;
+      }
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -860,6 +947,7 @@ export async function processJifengCreateOrderEvent(input: {
       await tx
         .update(integrationOutbox)
         .set({
+          claimToken: null,
           lastErrorCode: failure.code,
           lastErrorMessage: failure.message,
           lockedAt: null,
@@ -922,8 +1010,10 @@ export async function processJifengCreateOrderEvent(input: {
           type: "JIFENG_SUBMIT_FAILED",
         });
       }
+      return true;
     });
 
+    if (!persisted) return { status: "STALE" as const };
     return {
       status: requiresReconciliation ? ("RETRY_SCHEDULED" as const) : ("FAILED" as const),
     };
@@ -938,6 +1028,9 @@ export async function processDueJifengCreateOrderEvents(input: {
 }) {
   const limit = input.limit ?? 50;
   const now = input.now ?? new Date();
+  const staleLeaseCutoff = new Date(
+    now.getTime() - JIFENG_RECONCILIATION_LEASE_MS,
+  );
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
     throw new Error("极风任务批量大小必须在 1 到 200 之间");
   }
@@ -946,9 +1039,14 @@ export async function processDueJifengCreateOrderEvents(input: {
     from integration_outbox
     where target = 'JIFENG'
       and event_type = 'JIFENG_CREATE_ORDER'
-      and status in ('PENDING', 'FAILED')
-      and next_attempt_at <= ${now.toISOString()}::timestamptz
-    order by next_attempt_at, id
+      and (
+        (status in ('PENDING', 'FAILED')
+          and next_attempt_at <= ${now.toISOString()}::timestamptz)
+        or (status = 'PROCESSING'
+          and locked_at is not null
+          and locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz)
+      )
+    order by coalesce(locked_at, next_attempt_at), id
     limit ${limit}
   `);
 
@@ -1024,10 +1122,18 @@ export async function retryJifengShipment(input: {
       throw new Error("Only failed Jifeng fulfillments can be retried");
     }
     const eventRows = await tx.execute<{
+      claimToken: string | null;
       id: string;
       lastErrorCode: string | null;
+      lockedAt: Date | string | null;
+      status: string;
     }>(sql`
-      select id, last_error_code as "lastErrorCode"
+      select
+        claim_token as "claimToken",
+        id,
+        last_error_code as "lastErrorCode",
+        locked_at as "lockedAt",
+        status
       from integration_outbox
       where aggregate_id = ${input.shipmentId}
         and event_type = 'JIFENG_CREATE_ORDER'
@@ -1035,13 +1141,24 @@ export async function retryJifengShipment(input: {
     `);
     const event = eventRows[0];
     if (!event) throw new Error("Jifeng create event not found");
-    const priorErrorCode = event.lastErrorCode ?? fulfillment.lastErrorCode;
+    if (
+      event.status === "PROCESSING" &&
+      !reconciliationLeaseExpired(event.lockedAt, now)
+    ) {
+      throw new JifengDispatchError(
+        "RECONCILIATION_IN_PROGRESS",
+        "Jifeng reconciliation is already in progress",
+      );
+    }
+    const priorErrorCode = event.status === "PROCESSING"
+      ? event.lastErrorCode ?? fulfillment.lastErrorCode ?? "STALE_PROCESSING"
+      : event.lastErrorCode ?? fulfillment.lastErrorCode;
     const reconciliationPending = priorErrorCode?.startsWith(
       `${RECONCILIATION_REQUIRED}:`,
     ) === true;
     const ambiguous =
       reconciliationPending ||
-      ["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE", "INTERNAL_ERROR", "50019", "50038"].includes(
+      ["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE", "INTERNAL_ERROR", "STALE_PROCESSING", "50019", "50038"].includes(
         priorErrorCode ?? "",
       ) ||
       priorErrorCode?.startsWith("HTTP_") === true;
@@ -1061,6 +1178,7 @@ export async function retryJifengShipment(input: {
     await tx
       .update(integrationOutbox)
       .set({
+        claimToken: null,
         lastErrorCode: retryMarker,
         lastErrorMessage: ambiguous
           ? "Jifeng order outcome requires reconciliation"
