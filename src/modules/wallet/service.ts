@@ -1,7 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db, type DbTransaction } from "@/db/client";
-import { auditLogs, walletAccounts, walletTransactions } from "@/db/schema";
+import {
+  auditLogs,
+  walletAccounts,
+  walletHolds,
+  walletTransactions,
+} from "@/db/schema";
 
 export class WalletValidationError extends Error {
   constructor(message: string) {
@@ -34,6 +39,132 @@ async function ensureAndLockWallet(
   const wallet = rows[0];
   if (!wallet) throw new WalletValidationError("客户钱包不存在");
   return wallet;
+}
+
+export type LockedWalletFunding = {
+  availableFen: number;
+  balanceFen: number;
+  version: number;
+};
+
+export async function lockWalletForBulkSettlement(
+  tx: DbTransaction,
+  customerId: string,
+): Promise<LockedWalletFunding> {
+  const wallet = await ensureAndLockWallet(tx, customerId);
+  const heldRows = await tx.execute<{ heldFen: number }>(sql`
+    select coalesce(sum(amount_fen), 0)::integer as "heldFen"
+    from wallet_holds
+    where customer_id = ${customerId}
+      and status = 'ACTIVE'
+  `);
+  const heldFen = heldRows[0]?.heldFen ?? 0;
+  return {
+    availableFen: Math.max(0, wallet.balanceFen - heldFen),
+    balanceFen: wallet.balanceFen,
+    version: wallet.version,
+  };
+}
+
+export async function applyBulkSettlementWallet(
+  tx: DbTransaction,
+  input: {
+    actorUserId: string;
+    allocations: readonly { orderId: string; walletFen: number }[];
+    customerId: string;
+    settlementBatchId: string;
+    snapshot: LockedWalletFunding;
+    totalAmountFen: number;
+    walletAmountFen: number;
+    now: Date;
+  },
+) {
+  assertFen(input.totalAmountFen, false);
+  assertFen(input.walletAmountFen, true);
+  if (
+    input.totalAmountFen <= 0 ||
+    input.walletAmountFen > input.totalAmountFen ||
+    input.walletAmountFen > input.snapshot.availableFen
+  ) {
+    throw new WalletValidationError("批量结算钱包分配无效");
+  }
+  const allocatedFen = input.allocations.reduce(
+    (total, allocation) => total + allocation.walletFen,
+    0,
+  );
+  if (
+    !Number.isSafeInteger(allocatedFen) ||
+    allocatedFen !== input.walletAmountFen
+  ) {
+    throw new WalletValidationError("批量结算订单分配与钱包总额不一致");
+  }
+  if (input.walletAmountFen === 0) return "NONE" as const;
+
+  if (input.walletAmountFen < input.totalAmountFen) {
+    await tx.insert(walletHolds).values({
+      amountFen: input.walletAmountFen,
+      customerId: input.customerId,
+      settlementBatchId: input.settlementBatchId,
+    });
+    await tx.insert(auditLogs).values({
+      action: "WALLET_SETTLEMENT_HELD",
+      actorId: input.actorUserId,
+      actorType: "SYSTEM",
+      afterJson: { amountFen: input.walletAmountFen, status: "ACTIVE" },
+      beforeJson: { availableFen: input.snapshot.availableFen },
+      entityId: input.settlementBatchId,
+      entityType: "SETTLEMENT_BATCH",
+      reason: "为批量结算保留可用钱包余额",
+    });
+    return "MIXED" as const;
+  }
+
+  const debits = [...input.allocations]
+    .filter((allocation) => allocation.walletFen > 0)
+    .sort((left, right) => left.orderId.localeCompare(right.orderId));
+  let runningBalanceFen = input.snapshot.balanceFen;
+  const transactions = debits.map((allocation) => {
+    const beforeBalanceFen = runningBalanceFen;
+    runningBalanceFen -= allocation.walletFen;
+    return {
+      actorId: input.actorUserId,
+      actorType: "SYSTEM" as const,
+      afterBalanceFen: runningBalanceFen,
+      beforeBalanceFen,
+      customerId: input.customerId,
+      deltaFen: -allocation.walletFen,
+      orderId: allocation.orderId,
+      reason: "批量结算纯钱包支付自动扣款",
+      transactionType: "ORDER_DEBIT" as const,
+    };
+  });
+  if (runningBalanceFen !== input.snapshot.balanceFen - input.walletAmountFen) {
+    throw new WalletValidationError("批量结算钱包流水链不平衡");
+  }
+  await tx
+    .update(walletAccounts)
+    .set({
+      balanceFen: runningBalanceFen,
+      updatedAt: input.now,
+      version: input.snapshot.version + 1,
+    })
+    .where(eq(walletAccounts.customerId, input.customerId));
+  await tx.insert(walletTransactions).values(transactions);
+  await tx.insert(auditLogs).values({
+    action: "WALLET_SETTLEMENT_DEBITED",
+    actorId: input.actorUserId,
+    actorType: "SYSTEM",
+    afterJson: {
+      balanceFen: runningBalanceFen,
+      debitedFen: input.walletAmountFen,
+      orderCount: transactions.length,
+    },
+    beforeJson: { balanceFen: input.snapshot.balanceFen },
+    entityId: input.settlementBatchId,
+    entityType: "SETTLEMENT_BATCH",
+    reason: "批量结算纯钱包支付完成扣款",
+  });
+  return "PURE_WALLET" as const;
 }
 
 function assertFen(value: number, allowZero: boolean) {

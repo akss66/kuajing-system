@@ -7,8 +7,10 @@ import {
   auditLogs,
   bulkImportDrafts,
   bulkImportStoreGroups,
+  bulkSubmissionRequests,
   fulfillmentOrderImportBatches,
   fulfillmentOrders,
+  inventoryReservations,
   orderImportBatches,
   orderImportRows,
   orderLines,
@@ -25,6 +27,10 @@ import {
   createFulfillmentOrderNumber,
   UNPAID_ORDER_LOCK_MS,
 } from "@/modules/orders/submission";
+import {
+  applyBulkSettlementWallet,
+  lockWalletForBulkSettlement,
+} from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import { allocateWalletFen } from "./allocation";
@@ -146,7 +152,7 @@ type PreparedGroup = {
   totalQuantity: number;
 };
 
-const IDEMPOTENCY_AUDIT_ACTION = "BULK_ORDER_SUBMISSION_RECORDED";
+const SUBMISSION_AUDIT_ACTION = "BULK_ORDER_SUBMISSION_COMPLETED";
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -251,32 +257,36 @@ async function lockOwnedDraft(
 
 async function findIdempotentResult(
   tx: DbTransaction,
-  scopeDigest: string,
-  payloadDigest: string,
+  input: {
+    customerId: string;
+    idempotencyKey: string;
+    payloadDigest: string;
+  },
 ) {
   const [record] = await tx
-    .select({ afterJson: auditLogs.afterJson })
-    .from(auditLogs)
+    .select({
+      payloadDigest: bulkSubmissionRequests.payloadDigest,
+      resultJson: bulkSubmissionRequests.resultJson,
+    })
+    .from(bulkSubmissionRequests)
     .where(
       and(
-        eq(auditLogs.action, IDEMPOTENCY_AUDIT_ACTION),
-        eq(auditLogs.entityType, "BULK_SUBMISSION_IDEMPOTENCY"),
-        eq(auditLogs.entityId, scopeDigest),
+        eq(bulkSubmissionRequests.customerId, input.customerId),
+        eq(bulkSubmissionRequests.idempotencyKey, input.idempotencyKey),
       ),
     )
-    .orderBy(asc(auditLogs.createdAt))
     .limit(1);
   if (!record) return null;
-  if (record.afterJson.payloadDigest !== payloadDigest) {
+  if (record.payloadDigest !== input.payloadDigest) {
     throw new BulkSubmissionError(
       "IDEMPOTENCY_KEY_REUSED",
       "该幂等键已用于不同的批量提交请求",
     );
   }
-  if (!isStoredResult(record.afterJson.result)) {
+  if (!isStoredResult(record.resultJson)) {
     throw new BulkSubmissionError("INVALID_STATE", "批量提交幂等记录损坏");
   }
-  return record.afterJson.result;
+  return record.resultJson;
 }
 
 function rowsForGroup(
@@ -391,6 +401,7 @@ async function lockSubmissionConflicts(
 async function createSubmissionSettlement(
   tx: DbTransaction,
   input: {
+    actorUserId: string;
     createdOrders: readonly BulkCreatedOrder[];
     customerId: string;
     lockExpiresAt: Date;
@@ -400,21 +411,28 @@ async function createSubmissionSettlement(
   },
 ) {
   if (input.createdOrders.length === 0) return null;
+  const totalAmountFen = input.createdOrders.reduce(
+    (total, order) => safeAdd(total, order.totalAmountFen),
+    0,
+  );
+  const wallet = await lockWalletForBulkSettlement(tx, input.customerId);
+  const actualWalletFen = Math.min(
+    input.requestedWalletFen,
+    totalAmountFen,
+    wallet.availableFen,
+  );
   const allocations = allocateWalletFen(
     input.createdOrders.map((order) => ({
       orderId: order.orderId,
       totalAmountFen: order.totalAmountFen,
     })),
-    input.requestedWalletFen,
-  );
-  const totalAmountFen = input.createdOrders.reduce(
-    (total, order) => safeAdd(total, order.totalAmountFen),
-    0,
+    actualWalletFen,
   );
   const walletAmountFen = allocations.reduce(
     (total, allocation) => safeAdd(total, allocation.walletFen),
     0,
   );
+  const isPureWallet = walletAmountFen === totalAmountFen;
   const [settlement] = await tx
     .insert(settlementBatches)
     .values({
@@ -422,8 +440,9 @@ async function createSubmissionSettlement(
       customerId: input.customerId,
       idempotencyKey: `bulk:${input.scopeDigest}`,
       offlineAmountFen: totalAmountFen - walletAmountFen,
+      paidAt: isPureWallet ? input.now : null,
       paymentDueAt: input.lockExpiresAt,
-      status: "PENDING_PAYMENT",
+      status: isPureWallet ? "PAID" : "PENDING_PAYMENT",
       totalAmountFen,
       walletAmountFen,
     })
@@ -441,6 +460,39 @@ async function createSubmissionSettlement(
       walletAmountFen: allocation.walletFen,
     })),
   );
+  await applyBulkSettlementWallet(tx, {
+    actorUserId: input.actorUserId,
+    allocations,
+    customerId: input.customerId,
+    now: input.now,
+    settlementBatchId: settlement.id,
+    snapshot: wallet,
+    totalAmountFen,
+    walletAmountFen,
+  });
+  if (isPureWallet) {
+    const orderIds = input.createdOrders.map((order) => order.orderId);
+    await tx
+      .update(fulfillmentOrders)
+      .set({
+        lockExpiresAt: null,
+        paidAt: input.now,
+        paymentMode: "WALLET",
+        status: "PAID_PENDING_FULFILLMENT",
+        updatedAt: input.now,
+      })
+      .where(inArray(fulfillmentOrders.id, orderIds));
+    await tx
+      .update(inventoryReservations)
+      .set({ expiresAt: null, updatedAt: input.now })
+      .where(
+        and(
+          eq(inventoryReservations.referenceType, "FULFILLMENT_ORDER"),
+          inArray(inventoryReservations.referenceId, orderIds),
+          eq(inventoryReservations.status, "ACTIVE"),
+        ),
+      );
+  }
   return settlement.id;
 }
 
@@ -485,25 +537,44 @@ async function recordIdempotentResult(
   tx: DbTransaction,
   input: {
     actorUserId: string;
+    customerId: string;
     draftId: string;
-    payloadDigest: string;
+    idempotencyKey: string;
     result: BulkSubmissionResult;
     scopeDigest: string;
+    settlementBatchId: string | null;
     selectedGroupCount: number;
   },
 ) {
+  await tx
+    .update(bulkSubmissionRequests)
+    .set({
+      resultJson: input.result,
+      settlementBatchId: input.settlementBatchId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(bulkSubmissionRequests.customerId, input.customerId),
+        eq(bulkSubmissionRequests.idempotencyKey, input.idempotencyKey),
+      ),
+    );
   await tx.insert(auditLogs).values({
-    action: IDEMPOTENCY_AUDIT_ACTION,
+    action: SUBMISSION_AUDIT_ACTION,
     actorId: input.actorUserId,
     actorType: "CUSTOMER",
-    afterJson: { payloadDigest: input.payloadDigest, result: input.result },
+    afterJson: {
+      createdOrderCount: input.result.createdOrders.length,
+      failedGroupCount: input.result.failedGroups.length,
+      settlementBatchId: input.settlementBatchId,
+    },
     beforeJson: {
       draftId: input.draftId,
       selectedGroupCount: input.selectedGroupCount,
     },
     entityId: input.scopeDigest,
-    entityType: "BULK_SUBMISSION_IDEMPOTENCY",
-    reason: "记录批量提交幂等结果",
+    entityType: "BULK_SUBMISSION",
+    reason: "记录批量提交完成结果",
   });
 }
 
@@ -512,7 +583,8 @@ export async function submitBulkDraft(
 ): Promise<BulkSubmissionResult> {
   assertInput(input);
   const selectedGroupIds = [...new Set(input.selectedGroupIds)].sort();
-  const scopeDigest = digest(`${input.customerId}\u0000${input.idempotencyKey}`);
+  const idempotencyKey = input.idempotencyKey.trim();
+  const scopeDigest = digest(`${input.customerId}\u0000${idempotencyKey}`);
   const payloadDigest = digest(
     JSON.stringify({
       draftId: input.draftId,
@@ -523,13 +595,19 @@ export async function submitBulkDraft(
 
   return db.transaction(async (tx) => {
     await lockSubmissionScope(tx, scopeDigest);
-    const draft = await lockOwnedDraft(tx, input);
-    const existing = await findIdempotentResult(
-      tx,
-      scopeDigest,
+    const existing = await findIdempotentResult(tx, {
+      customerId: input.customerId,
+      idempotencyKey,
       payloadDigest,
-    );
+    });
     if (existing) return existing;
+    const draft = await lockOwnedDraft(tx, input);
+    await tx.insert(bulkSubmissionRequests).values({
+      customerId: input.customerId,
+      draftId: draft.id,
+      idempotencyKey,
+      payloadDigest,
+    });
 
     const selectedGroups = await tx
       .select({
@@ -1050,6 +1128,7 @@ export async function submitBulkDraft(
     }
 
     const settlementBatchId = await createSubmissionSettlement(tx, {
+      actorUserId: input.actorUserId,
       createdOrders,
       customerId: input.customerId,
       lockExpiresAt,
@@ -1078,10 +1157,12 @@ export async function submitBulkDraft(
     });
     await recordIdempotentResult(tx, {
       actorUserId: input.actorUserId,
+      customerId: input.customerId,
       draftId: input.draftId,
-      payloadDigest,
+      idempotencyKey,
       result,
       scopeDigest,
+      settlementBatchId,
       selectedGroupCount: selectedGroupIds.length,
     });
     return result;

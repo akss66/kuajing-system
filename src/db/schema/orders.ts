@@ -4,6 +4,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -478,6 +479,46 @@ export const settlementBatches = pgTable(
     index("settlement_batches_status_due_index").on(
       table.status,
       table.paymentDueAt,
+    ),
+  ],
+);
+
+export const bulkSubmissionRequests = pgTable(
+  "bulk_submission_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull(),
+    payloadDigest: varchar("payload_digest", { length: 64 }).notNull(),
+    draftId: uuid("draft_id").notNull(),
+    resultJson: jsonb("result_json").$type<Record<string, unknown>>(),
+    settlementBatchId: uuid("settlement_batch_id"),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "bulk_submission_requests_draft_customer_fk",
+      columns: [table.draftId, table.customerId],
+      foreignColumns: [bulkImportDrafts.id, bulkImportDrafts.customerId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "bulk_submission_requests_settlement_customer_fk",
+      columns: [table.settlementBatchId, table.customerId],
+      foreignColumns: [settlementBatches.id, settlementBatches.customerId],
+    }).onDelete("restrict"),
+    uniqueIndex("bulk_submission_requests_customer_key_unique").on(
+      table.customerId,
+      table.idempotencyKey,
+    ),
+    check(
+      "bulk_submission_requests_payload_digest_format",
+      sql`${table.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    index("bulk_submission_requests_draft_created_index").on(
+      table.draftId,
+      table.createdAt,
     ),
   ],
 );

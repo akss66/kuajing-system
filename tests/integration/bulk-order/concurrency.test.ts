@@ -120,6 +120,14 @@ function submissionInput(input: {
 describe("bulk submission concurrency", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
+      do $$
+      begin
+        if to_regclass('public.bulk_submission_requests') is not null then
+          execute 'truncate table bulk_submission_requests';
+        end if;
+      end $$;
+    `));
+    await db.execute(sql.raw(`
       truncate table
         integration_outbox,
         audit_logs,

@@ -219,8 +219,41 @@ async function tableCounts() {
   };
 }
 
+async function storedSubmissionRequests(idempotencyKey: string) {
+  const [registry] = await db.execute<{ tableName: string | null }>(sql`
+    select to_regclass('public.bulk_submission_requests')::text as "tableName"
+  `);
+  expect(registry?.tableName).toBe("bulk_submission_requests");
+  return db.execute<{
+    customerId: string;
+    draftId: string;
+    idempotencyKey: string;
+    payloadDigest: string;
+    resultJson: unknown;
+    settlementBatchId: string | null;
+  }>(sql`
+    select
+      customer_id as "customerId",
+      draft_id as "draftId",
+      idempotency_key as "idempotencyKey",
+      payload_digest as "payloadDigest",
+      result_json as "resultJson",
+      settlement_batch_id as "settlementBatchId"
+    from bulk_submission_requests
+    where idempotency_key = ${idempotencyKey}
+  `);
+}
+
 describe("atomic partial bulk submission", () => {
   afterEach(async () => {
+    await db.execute(sql.raw(`
+      do $$
+      begin
+        if to_regclass('public.bulk_submission_requests') is not null then
+          execute 'truncate table bulk_submission_requests';
+        end if;
+      end $$;
+    `));
     await db.execute(sql.raw(`
       truncate table
         integration_outbox,
@@ -343,9 +376,9 @@ describe("atomic partial bulk submission", () => {
       .where(eq(settlementBatches.id, result.settlementBatchId!));
     expect(settlement).toMatchObject({
       customerId: fixture.customer.id,
-      offlineAmountFen: 375,
+      offlineAmountFen: 675,
       totalAmountFen: 675,
-      walletAmountFen: 300,
+      walletAmountFen: 0,
     });
 
     const groups = await db
@@ -402,6 +435,94 @@ describe("atomic partial bulk submission", () => {
     expect(await submitBulkDraft(input)).toEqual(first);
     expect((await tableCounts()).orders).toBe(1);
     expect((await tableCounts()).settlements).toBe(1);
+  });
+
+  test("replays a successful request from the business idempotency table after audit cleanup", async () => {
+    const fixture = await createDraftFixture(["audit-independent"]);
+    const sku = await createSku({ code: "AUDIT-INDEPENDENT", stock: 1 });
+    const group = fixture.groups.get("audit-independent")!;
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [{ resolvedSkuId: sku.id, rowNumber: 2 }],
+      storeId: group.storeId,
+    });
+    const input = {
+      actorUserId: "audit-independent-user",
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: "audit-independent-success",
+      requestedWalletFen: 0,
+      selectedGroupIds: [group.id],
+    };
+
+    const first = await submitBulkDraft(input);
+    await db.delete(auditLogs);
+    const repeated = await submitBulkDraft(input);
+
+    expect(repeated).toEqual(first);
+    expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
+    expect(await db.select().from(settlementBatches)).toHaveLength(1);
+    const requests = await storedSubmissionRequests(input.idempotencyKey);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: input.idempotencyKey,
+      resultJson: first,
+      settlementBatchId: first.settlementBatchId,
+    });
+    expect(requests[0].payloadDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("persists and replays a fully failed request without settlement or audit dependency", async () => {
+    const fixture = await createDraftFixture(["fully-failed"]);
+    const sku = await createSku({ code: "FULLY-FAILED", stock: 0 });
+    const group = fixture.groups.get("fully-failed")!;
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [{ resolvedSkuId: sku.id, rowNumber: 2 }],
+      storeId: group.storeId,
+    });
+    const input = {
+      actorUserId: "fully-failed-user",
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: "fully-failed-stable-replay",
+      requestedWalletFen: 999,
+      selectedGroupIds: [group.id],
+    };
+
+    const first = await submitBulkDraft(input);
+    await db.delete(auditLogs);
+    const repeated = await submitBulkDraft(input);
+
+    expect(first).toEqual({
+      createdOrders: [],
+      failedGroups: [
+        { groupId: group.id, status: "STOCK_CHANGED", storeId: group.storeId },
+      ],
+      groupResults: [
+        { groupId: group.id, status: "STOCK_CHANGED", storeId: group.storeId },
+      ],
+      settlementBatchId: null,
+    });
+    expect(repeated).toEqual(first);
+    expect(await db.select().from(fulfillmentOrders)).toEqual([]);
+    expect(await db.select().from(settlementBatches)).toEqual([]);
+    expect(await db.select().from(inventoryReservations)).toEqual([]);
+    expect(await db.select().from(auditLogs)).toEqual([]);
+    const requests = await storedSubmissionRequests(input.idempotencyKey);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: input.idempotencyKey,
+      resultJson: first,
+      settlementBatchId: null,
+    });
+    expect(JSON.stringify(requests[0].resultJson)).not.toContain("Sensitive Recipient");
   });
 
   test("revalidates duplicates, cross-store conflicts, formats, store state, SKU state, and expiry", async () => {

@@ -78,6 +78,13 @@
       "when": 1786504305353,
       "tag": "0010_multi_store_bulk_order",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786512112072,
+      "tag": "0011_bulk_submission_requests",
+      "breakpoints": true
     }
   ]
 }
