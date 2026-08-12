@@ -4,10 +4,12 @@ import { db } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
+  integrationOutbox,
   inventoryReservations,
   paymentClaims,
   settlementBatchOrders,
   settlementPaymentClaims,
+  shipmentFulfillments,
 } from "@/db/schema";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refundWalletForOrder } from "@/modules/wallet/service";
@@ -360,6 +362,29 @@ export async function cancelFulfillmentOrder(input: {
   }
 
   return db.transaction(async (tx) => {
+    const [allocationReference] = await tx
+      .select({
+        settlementBatchId: settlementBatchOrders.settlementBatchId,
+        walletAmountFen: settlementBatchOrders.walletAmountFen,
+      })
+      .from(settlementBatchOrders)
+      .where(
+        and(
+          eq(settlementBatchOrders.orderId, input.orderId),
+          input.actorType === "CUSTOMER"
+            ? eq(settlementBatchOrders.customerId, input.customerId!)
+            : undefined,
+        ),
+      )
+      .limit(1);
+    if (allocationReference) {
+      await tx.execute(sql`
+        select id
+        from settlement_batches
+        where id = ${allocationReference.settlementBatchId}
+        for update
+      `);
+    }
     const customerFilter =
       input.actorType === "CUSTOMER" ? sql`and customer_id = ${input.customerId!}` : sql``;
     const orderRows = await tx.execute<{
@@ -383,38 +408,26 @@ export async function cancelFulfillmentOrder(input: {
     if (!order) {
       throw new OrderLifecycleError("ORDER_NOT_FOUND", "未找到该拿货单");
     }
-    const [settlementReference] = await tx
-      .select({ settlementBatchId: settlementBatchOrders.settlementBatchId })
-      .from(settlementBatchOrders)
-      .where(eq(settlementBatchOrders.orderId, input.orderId))
-      .limit(1);
+    const settlementReference = allocationReference;
     if (settlementReference) {
-      const lockedBatch = await tx.execute<{ id: string }>(sql`
-        select id
-        from settlement_batches
-        where id = ${settlementReference.settlementBatchId}
-        for update
-      `);
-      if (lockedBatch[0]) {
-        const [pendingUnifiedClaim] = await tx
-          .select({ id: settlementPaymentClaims.id })
-          .from(settlementPaymentClaims)
-          .where(
-            and(
-              eq(
-                settlementPaymentClaims.settlementBatchId,
-                settlementReference.settlementBatchId,
-              ),
-              eq(settlementPaymentClaims.status, "PENDING"),
+      const [pendingUnifiedClaim] = await tx
+        .select({ id: settlementPaymentClaims.id })
+        .from(settlementPaymentClaims)
+        .where(
+          and(
+            eq(
+              settlementPaymentClaims.settlementBatchId,
+              settlementReference.settlementBatchId,
             ),
-          )
-          .limit(1);
-        if (pendingUnifiedClaim) {
-          throw new OrderLifecycleError(
-            "SETTLEMENT_CLAIM_PENDING",
-            "该拿货单属于待核款结算批次，请先撤回整笔付款声明",
-          );
-        }
+            eq(settlementPaymentClaims.status, "PENDING"),
+          ),
+        )
+        .limit(1);
+      if (pendingUnifiedClaim) {
+        throw new OrderLifecycleError(
+          "SETTLEMENT_CLAIM_PENDING",
+          "该拿货单属于待核款结算批次，请先撤回整笔付款声明",
+        );
       }
     }
     if (order.status === "CANCELLED") {
@@ -424,11 +437,88 @@ export async function cancelFulfillmentOrder(input: {
       throw new OrderLifecycleError("ORDER_CANNOT_CANCEL", "该拿货单当前不能取消");
     }
 
-    if (order.status === "PAID_PENDING_FULFILLMENT" && order.paymentMode === "WALLET") {
+    const fulfillmentRows = await tx.execute<{
+      externalOrderNo: string | null;
+      status: string;
+      submittedAt: Date | string | null;
+    }>(sql`
+      select
+        f.external_order_no as "externalOrderNo",
+        f.status,
+        f.submitted_at as "submittedAt"
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      where s.order_id = ${input.orderId}
+      order by f.id
+      for update of f
+    `);
+    const outboxRows = await tx.execute<{ status: string }>(sql`
+      select e.status
+      from integration_outbox e
+      inner join order_shipments s on s.id::text = e.aggregate_id
+      where s.order_id = ${input.orderId}
+        and e.target = 'JIFENG'
+        and e.event_type = 'JIFENG_CREATE_ORDER'
+      order by e.id
+      for update of e
+    `);
+    if (
+      fulfillmentRows.some(
+        (fulfillment) =>
+          fulfillment.externalOrderNo !== null ||
+          fulfillment.submittedAt !== null ||
+          !["PENDING", "EXCEPTION", "CANCELLED"].includes(fulfillment.status),
+      ) || outboxRows.some((event) => event.status === "PROCESSING")
+    ) {
+      throw new OrderLifecycleError(
+        "FULFILLMENT_CANCEL_REQUIRED",
+        "该拿货单已进入极风发货流程，请使用极风取消流程处理",
+      );
+    }
+    await tx
+      .update(shipmentFulfillments)
+      .set({
+        cancelledAt: now,
+        lastErrorCode: "ORDER_CANCELLED",
+        lastErrorMessage: "Local order cancellation",
+        nextRetryAt: null,
+        status: "CANCELLED",
+        updatedAt: now,
+      })
+      .where(sql`${shipmentFulfillments.id} in (
+        select f.id from shipment_fulfillments f
+        inner join order_shipments s on s.id = f.shipment_id
+        where s.order_id = ${input.orderId} and f.status in ('PENDING', 'EXCEPTION')
+      )`);
+    await tx
+      .update(integrationOutbox)
+      .set({
+        completedAt: now,
+        lastErrorCode: "ORDER_CANCELLED",
+        lastErrorMessage: "Local order cancellation",
+        lockedAt: null,
+        status: "COMPLETED",
+        updatedAt: now,
+      })
+      .where(sql`${integrationOutbox.id} in (
+        select e.id from integration_outbox e
+        inner join order_shipments s on s.id::text = e.aggregate_id
+        where s.order_id = ${input.orderId}
+          and e.target = 'JIFENG'
+          and e.event_type = 'JIFENG_CREATE_ORDER'
+          and e.status in ('PENDING', 'FAILED')
+      )`);
+
+    const walletRefundFen = settlementReference
+      ? settlementReference.walletAmountFen
+      : order.paymentMode === "WALLET"
+        ? order.totalAmountFen
+        : 0;
+    if (order.status === "PAID_PENDING_FULFILLMENT" && walletRefundFen > 0) {
       await refundWalletForOrder(tx, {
         actorType: input.actorType,
         actorUserId: input.actorUserId,
-        amountFen: order.totalAmountFen,
+        amountFen: walletRefundFen,
         customerId: order.customerId,
         orderId: input.orderId,
         reason: `订单取消退款：${reason}`,

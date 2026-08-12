@@ -136,10 +136,33 @@ export async function enqueuePaidOrdersForFulfillment(input?: {
 }
 
 async function claimEvent(eventId: string, now: Date) {
-  return db.transaction(async (tx): Promise<ClaimedEvent | "COMPLETED" | "BUSY"> => {
+  return db.transaction(async (
+    tx,
+  ): Promise<
+    ClaimedEvent | "COMPLETED" | "BUSY" | "CANCELLED" | "NOT_ELIGIBLE"
+  > => {
+    const references = await tx.execute<{ orderId: string }>(sql`
+      select s.order_id as "orderId"
+      from integration_outbox e
+      inner join order_shipments s on s.id::text = e.aggregate_id
+      where e.id = ${eventId}
+        and e.target = 'JIFENG'
+        and e.event_type = 'JIFENG_CREATE_ORDER'
+    `);
+    const reference = references[0];
+    if (!reference) throw new Error("Jifeng create event not found");
+    const orderRows = await tx.execute<{ status: string }>(sql`
+      select status
+      from fulfillment_orders
+      where id = ${reference.orderId}
+      for update
+    `);
+    const order = orderRows[0];
+    if (!order) throw new Error("Jifeng event order not found");
     const rows = await tx.execute<{
       attemptCount: number;
       fulfillmentId: string;
+      lastErrorCode: string | null;
       orderId: string;
       shipmentId: string;
       status: string;
@@ -147,6 +170,7 @@ async function claimEvent(eventId: string, now: Date) {
       select
         e.status,
         e.attempt_count as "attemptCount",
+        e.last_error_code as "lastErrorCode",
         f.id as "fulfillmentId",
         s.id as "shipmentId",
         s.order_id as "orderId"
@@ -160,8 +184,40 @@ async function claimEvent(eventId: string, now: Date) {
     `);
     const event = rows[0];
     if (!event) throw new Error("未找到极风创建订单任务");
+    if (event.status === "COMPLETED" && event.lastErrorCode === "ORDER_CANCELLED") {
+      return "CANCELLED";
+    }
     if (event.status === "COMPLETED") return "COMPLETED";
     if (event.status === "PROCESSING") return "BUSY";
+    if (order.status !== "PAID_PENDING_FULFILLMENT") {
+      const skippedAs =
+        order.status === "CANCELLED" ? "CANCELLED" : "NOT_ELIGIBLE";
+      const errorCode =
+        skippedAs === "CANCELLED" ? "ORDER_CANCELLED" : "ORDER_NOT_ELIGIBLE";
+      await tx
+        .update(integrationOutbox)
+        .set({
+          completedAt: now,
+          lastErrorCode: errorCode,
+          lastErrorMessage: "Local order is not eligible for dispatch",
+          lockedAt: null,
+          status: "COMPLETED",
+          updatedAt: now,
+        })
+        .where(eq(integrationOutbox.id, eventId));
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          cancelledAt: skippedAs === "CANCELLED" ? now : null,
+          lastErrorCode: errorCode,
+          lastErrorMessage: "Local order is not eligible for dispatch",
+          nextRetryAt: null,
+          status: "CANCELLED",
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, event.fulfillmentId));
+      return skippedAs;
+    }
 
     const attemptNumber = event.attemptCount + 1;
     await tx
@@ -273,6 +329,8 @@ export async function processJifengCreateOrderEvent(input: {
 }) {
   const now = input.now ?? new Date();
   const claimed = await claimEvent(input.eventId, now);
+  if (claimed === "CANCELLED") return { status: "SKIPPED_CANCELLED" as const };
+  if (claimed === "NOT_ELIGIBLE") return { status: "SKIPPED_NOT_ELIGIBLE" as const };
   if (claimed === "COMPLETED") return { status: "ALREADY_COMPLETED" as const };
   if (claimed === "BUSY") return { status: "BUSY" as const };
 
@@ -376,7 +434,12 @@ export async function processJifengCreateOrderEvent(input: {
         .where(eq(integrationOutbox.id, input.eventId));
       await tx
         .update(fulfillmentOrders)
-        .set({ status: "FULFILLMENT_EXCEPTION", updatedAt: now })
+        .set({
+          status: failure.retryable
+            ? "PAID_PENDING_FULFILLMENT"
+            : "FULFILLMENT_EXCEPTION",
+          updatedAt: now,
+        })
         .where(
           and(
             eq(fulfillmentOrders.id, claimed.orderId),

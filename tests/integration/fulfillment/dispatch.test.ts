@@ -24,6 +24,7 @@ import {
   processJifengCreateOrderEvent,
   type JifengCreateOrderPort,
 } from "@/modules/fulfillment/dispatch";
+import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import type { TemuRecipient } from "@/modules/order-import/temu-parser";
 import { encryptPii } from "@/shared/pii-crypto";
 
@@ -43,6 +44,14 @@ const recipient: TemuRecipient = {
   province: "Ontario",
   taxNumber: null,
 };
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 async function createShipmentFixture(
   status: "PAID_PENDING_FULFILLMENT" | "PENDING_PAYMENT" =
@@ -230,6 +239,76 @@ describe("paid order Jifeng dispatch", () => {
     expect(dispatchAudits).toHaveLength(1);
   });
 
+  test("never calls Jifeng for an event whose local order cancellation already committed", async () => {
+    const { order } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    await cancelFulfillmentOrder({
+      actorType: "ADMIN",
+      actorUserId: "admin-user",
+      orderId: order.id,
+      reason: "cancel before queued dispatch",
+    });
+    let apiCalls = 0;
+
+    const result = await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          apiCalls += 1;
+          return { data: null };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+
+    expect(result).toEqual({ status: "SKIPPED_CANCELLED" });
+    expect(apiCalls).toBe(0);
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, order.id));
+    const [fulfillment] = await db.select().from(shipmentFulfillments);
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    expect(savedOrder.status).toBe("CANCELLED");
+    expect(fulfillment.status).toBe("CANCELLED");
+    expect(savedEvent.status).toBe("COMPLETED");
+  });
+
+  test("blocks local cancellation after the dispatch claim crosses the safe boundary", async () => {
+    const { order } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const gate = deferred();
+    let apiCalls = 0;
+    const dispatch = processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          apiCalls += 1;
+          await gate.promise;
+          return { data: null };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+    for (let attempt = 0; attempt < 100 && apiCalls === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(apiCalls).toBe(1);
+
+    await expect(
+      cancelFulfillmentOrder({
+        actorType: "ADMIN",
+        actorUserId: "admin-user",
+        orderId: order.id,
+        reason: "too late for local cancel",
+      }),
+    ).rejects.toMatchObject({ code: "FULFILLMENT_CANCEL_REQUIRED" });
+    gate.resolve();
+    await expect(dispatch).resolves.toEqual({ status: "COMPLETED" });
+  });
+
   test("keeps only a safe failure summary and schedules retryable errors", async () => {
     const { order } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
@@ -260,7 +339,7 @@ describe("paid order Jifeng dispatch", () => {
     const [fulfillment] = await db.select().from(shipmentFulfillments);
     const [updatedEvent] = await db.select().from(integrationOutbox);
     const [attempt] = await db.select().from(integrationAttempts);
-    expect(updatedOrder.status).toBe("FULFILLMENT_EXCEPTION");
+    expect(updatedOrder.status).toBe("PAID_PENDING_FULFILLMENT");
     expect(fulfillment).toMatchObject({
       attemptCount: 1,
       lastErrorCode: "HTTP_503",
@@ -278,5 +357,54 @@ describe("paid order Jifeng dispatch", () => {
     });
     expect(JSON.stringify(updatedEvent)).not.toContain(recipient.phone);
     expect(JSON.stringify(updatedEvent)).not.toContain(recipient.addressLine1);
+  });
+
+  test("retries a transient Jifeng failure while preserving dispatch eligibility", async () => {
+    const { order } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    let apiCalls = 0;
+    const client: JifengCreateOrderPort = {
+      async createOrder() {
+        apiCalls += 1;
+        if (apiCalls === 1) {
+          throw new JifengApiError({
+            code: "HTTP_503",
+            message: "temporary carrier outage",
+            retryable: true,
+          });
+        }
+        return { data: null };
+      },
+    };
+    const firstAt = new Date("2026-08-12T02:00:00.000Z");
+
+    await expect(
+      processJifengCreateOrderEvent({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+        now: firstAt,
+      }),
+    ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
+    await expect(
+      processJifengCreateOrderEvent({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+        now: new Date(firstAt.getTime() + 60_000),
+      }),
+    ).resolves.toEqual({ status: "COMPLETED" });
+
+    expect(apiCalls).toBe(2);
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, order.id));
+    const [savedEvent] = await db.select().from(integrationOutbox);
+    const [fulfillment] = await db.select().from(shipmentFulfillments);
+    expect(savedOrder.status).toBe("FULFILLING");
+    expect(savedEvent).toMatchObject({ attemptCount: 2, status: "COMPLETED" });
+    expect(fulfillment).toMatchObject({ attemptCount: 2, status: "SUBMITTED" });
   });
 });

@@ -215,7 +215,7 @@ export async function consumeWalletHold(
 export async function releaseWalletHold(
   tx: DbTransaction,
   input: WalletHoldIdentity & {
-    actorType?: "ADMIN" | "SYSTEM";
+    actorType?: "ADMIN" | "CUSTOMER" | "SYSTEM";
     actorUserId: string;
     now?: Date;
     reason: string;

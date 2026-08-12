@@ -364,7 +364,7 @@ async function releaseTerminalBatch(
   const orderIds = await batchOrderIds(tx, input.settlementBatchId);
   if (input.batch.walletAmountFen > 0) {
     await releaseWalletHold(tx, {
-      actorType: input.actorType === "CUSTOMER" ? "ADMIN" : input.actorType,
+      actorType: input.actorType,
       actorUserId: input.actorId,
       customerId: input.batch.customerId,
       now: input.now,
@@ -438,6 +438,56 @@ async function releaseTerminalBatch(
   });
 }
 
+const REPORTED_PAYMENT_TIMEOUT_REASON = "付款声明超过 12 小时未完成核款";
+
+function reportedPaymentDeadlineReached(batch: LockedBatch, now: Date) {
+  const reportedAt = asDate(batch.paymentReportedAt);
+  return (
+    batch.status === "PAYMENT_REPORTED" &&
+    reportedAt !== null &&
+    reportedAt.getTime() + PAYMENT_REVIEW_LOCK_MS <= now.getTime()
+  );
+}
+
+async function expireLockedReportedBatch(
+  tx: DbTransaction,
+  batch: LockedBatch,
+  settlementBatchId: string,
+  now: Date,
+) {
+  const claim = await pendingClaim(tx, settlementBatchId);
+  if (!claim) {
+    throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "超时结算批次缺少待审核付款声明");
+  }
+  await tx
+    .update(settlementPaymentClaims)
+    .set({
+      rejectionReason: REPORTED_PAYMENT_TIMEOUT_REASON,
+      reviewedAt: now,
+      reviewedByAdminUserId: null,
+      status: "REJECTED",
+      updatedAt: now,
+    })
+    .where(eq(settlementPaymentClaims.id, claim.id));
+  await releaseTerminalBatch(tx, {
+    actorId: "settlement-timeout-worker",
+    actorType: "SYSTEM",
+    batch,
+    now,
+    orderStatus: "EXPIRED",
+    reason: REPORTED_PAYMENT_TIMEOUT_REASON,
+    settlementBatchId,
+    status: "EXPIRED",
+  });
+}
+
+function throwReviewDeadlineExpired(): never {
+  throw new SettlementBatchError(
+    "SETTLEMENT_REVIEW_DEADLINE_EXPIRED",
+    "付款声明已超过 12 小时审核期限并被系统关闭",
+  );
+}
+
 export async function withdrawSettlementPayment(input: {
   actorUserId: string;
   customerId: string;
@@ -452,7 +502,7 @@ export async function withdrawSettlementPayment(input: {
     "撤回付款声明必须填写原因",
   );
   const now = input.now ?? new Date();
-  return db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx) => {
     const batch = await lockBatch(tx, input.settlementBatchId, input.customerId);
     if (batch.status === "WITHDRAWN") {
       if (batch.statusReason !== reason) {
@@ -462,6 +512,10 @@ export async function withdrawSettlementPayment(input: {
     }
     if (batch.status !== "PAYMENT_REPORTED") {
       throw new SettlementBatchError("SETTLEMENT_NOT_WITHDRAWABLE", "该结算批次当前不能撤回付款声明");
+    }
+    if (reportedPaymentDeadlineReached(batch, now)) {
+      await expireLockedReportedBatch(tx, batch, input.settlementBatchId, now);
+      return { deadlineExpired: true as const };
     }
     const claim = await pendingClaim(tx, input.settlementBatchId);
     if (!claim) throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "未找到待审核付款声明");
@@ -486,6 +540,10 @@ export async function withdrawSettlementPayment(input: {
     });
     return getBatchView(tx, input.settlementBatchId);
   });
+  if ("deadlineExpired" in outcome && outcome.deadlineExpired) {
+    throwReviewDeadlineExpired();
+  }
+  return outcome as SettlementBatchView;
 }
 
 async function assertActiveAdmin(tx: DbTransaction, adminUserId: string) {
@@ -515,7 +573,7 @@ export async function reviewSettlementPayment(input: {
       : null;
   const now = input.now ?? new Date();
 
-  await db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx) => {
     await assertActiveAdmin(tx, adminUserId);
     const batch = await lockBatch(tx, input.settlementBatchId);
     if (input.decision === "APPROVE" && batch.status === "PAID") return;
@@ -528,6 +586,10 @@ export async function reviewSettlementPayment(input: {
     }
     if (batch.status !== "PAYMENT_REPORTED") {
       throw new SettlementBatchError("SETTLEMENT_NOT_REVIEWABLE", "该结算批次当前不能核款");
+    }
+    if (reportedPaymentDeadlineReached(batch, now)) {
+      await expireLockedReportedBatch(tx, batch, input.settlementBatchId, now);
+      return "DEADLINE_EXPIRED" as const;
     }
     const claim = await pendingClaim(tx, input.settlementBatchId);
     if (!claim) throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "未找到待审核付款声明");
@@ -630,41 +692,27 @@ export async function reviewSettlementPayment(input: {
       title: "结算批次已付款",
     });
   });
+  if (outcome === "DEADLINE_EXPIRED") throwReviewDeadlineExpired();
   if (input.decision === "APPROVE") {
     await enqueuePaidOrdersForFulfillment({ now });
   }
 }
 
-async function expireOneSettlementBatch(settlementBatchId: string, now: Date) {
-  return db.transaction(async (tx) => {
-    const batch = await lockBatch(tx, settlementBatchId);
+async function expireLockedSettlementBatch(
+  tx: DbTransaction,
+  batch: LockedBatch,
+  settlementBatchId: string,
+  now: Date,
+) {
     const paymentDueAt = asDate(batch.paymentDueAt)!;
-    const paymentReportedAt = asDate(batch.paymentReportedAt);
     const isUnreportedExpired = batch.status === "PENDING_PAYMENT" && paymentDueAt <= now;
-    const isReportedExpired =
-      batch.status === "PAYMENT_REPORTED" &&
-      paymentReportedAt !== null &&
-      paymentReportedAt.getTime() + PAYMENT_REVIEW_LOCK_MS <= now.getTime();
+    const isReportedExpired = reportedPaymentDeadlineReached(batch, now);
     if (!isUnreportedExpired && !isReportedExpired) return false;
-    const reason = isReportedExpired
-      ? "付款声明超过 12 小时未完成核款"
-      : "结算批次超过 2 小时未申报付款";
     if (isReportedExpired) {
-      const claim = await pendingClaim(tx, settlementBatchId);
-      if (!claim) {
-        throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "超时结算批次缺少待审核付款声明");
-      }
-      await tx
-        .update(settlementPaymentClaims)
-        .set({
-          rejectionReason: reason,
-          reviewedAt: now,
-          reviewedByAdminUserId: null,
-          status: "REJECTED",
-          updatedAt: now,
-        })
-        .where(eq(settlementPaymentClaims.id, claim.id));
+      await expireLockedReportedBatch(tx, batch, settlementBatchId, now);
+      return true;
     }
+    const reason = "结算批次超过 2 小时未申报付款";
     await releaseTerminalBatch(tx, {
       actorId: "settlement-timeout-worker",
       actorType: "SYSTEM",
@@ -676,13 +724,12 @@ async function expireOneSettlementBatch(settlementBatchId: string, now: Date) {
       status: "EXPIRED",
     });
     return true;
-  });
 }
 
 export async function expireSettlementBatches(now: Date = new Date()): Promise<number> {
   const reportedCutoff = new Date(now.getTime() - PAYMENT_REVIEW_LOCK_MS);
-  const candidates = await db.transaction((tx) =>
-    tx.execute<{ id: string }>(sql`
+  return db.transaction(async (tx) => {
+    const candidates = await tx.execute<{ id: string }>(sql`
       select id
       from settlement_batches
       where (status = 'PENDING_PAYMENT' and payment_due_at <= ${now.toISOString()}::timestamptz)
@@ -690,11 +737,12 @@ export async function expireSettlementBatches(now: Date = new Date()): Promise<n
       order by coalesce(payment_reported_at, payment_due_at), id
       for update skip locked
       limit 100
-    `),
-  );
-  let expired = 0;
-  for (const candidate of candidates) {
-    if (await expireOneSettlementBatch(candidate.id, now)) expired += 1;
-  }
-  return expired;
+    `);
+    let expired = 0;
+    for (const candidate of candidates) {
+      const batch = await lockBatch(tx, candidate.id);
+      if (await expireLockedSettlementBatch(tx, batch, candidate.id, now)) expired += 1;
+    }
+    return expired;
+  });
 }

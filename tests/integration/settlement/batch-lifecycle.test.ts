@@ -26,6 +26,7 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
+import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import { getSettlementBatchAllocation } from "@/modules/settlement/batch-allocation";
 import {
   expireSettlementBatches,
@@ -98,6 +99,49 @@ async function startWalletRowBlocker(customerId: string) {
     completion,
     release: released.resolve,
   };
+}
+
+async function startOrderRowBlocker(orderId: string) {
+  const ready = deferred();
+  const released = deferred();
+  let backendPid: number | null = null;
+  const completion = db.transaction(async (tx) => {
+    const pidRows = await tx.execute<{ backendPid: number }>(sql`
+      select pg_backend_pid() as "backendPid"
+    `);
+    backendPid = pidRows[0].backendPid;
+    await tx.execute(sql`
+      select id from fulfillment_orders where id = ${orderId} for update
+    `);
+    ready.resolve();
+    await released.promise;
+  });
+  void completion.catch(() => ready.resolve());
+  await ready.promise;
+  if (backendPid === null) await completion;
+  return { backendPid: backendPid!, completion, release: released.resolve };
+}
+
+async function waitForLockDescendants(blockerPid: number, expectedCount: number) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const rows = await db.execute<{ waitingCount: number }>(sql`
+      with recursive blocker_descendants(pid) as (
+        select activity.pid
+        from pg_stat_activity activity
+        where ${blockerPid} = any(pg_blocking_pids(activity.pid))
+        union
+        select activity.pid
+        from pg_stat_activity activity
+        inner join blocker_descendants blocker
+          on blocker.pid = any(pg_blocking_pids(activity.pid))
+      )
+      select count(distinct pid)::integer as "waitingCount"
+      from blocker_descendants
+    `);
+    if ((rows[0]?.waitingCount ?? 0) >= expectedCount) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`expected ${expectedCount} lock descendants for backend ${blockerPid}`);
 }
 
 async function waitForWalletRowWaiters(
@@ -1362,6 +1406,115 @@ describe("unified offline settlement lifecycle", () => {
     ).toBe(true);
   });
 
+  test("cancelling an approved mixed order refunds its immutable wallet allocation once and neutralizes queued Jifeng work", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 150,
+      reason: "mixed cancellation regression",
+    });
+    const result = await submitFixture(fixture, 150);
+    const reportedAt = new Date();
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 250,
+      customerId: fixture.customer.id,
+      now: reportedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      now: new Date(reportedAt.getTime() + 1_000),
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!))
+      .orderBy(asc(settlementBatchOrders.totalAmountFen))
+      .limit(1);
+
+    const cancellation = {
+      actorType: "CUSTOMER" as const,
+      actorUserId: "customer-auth",
+      customerId: fixture.customer.id,
+      orderId: allocation.orderId,
+      reason: "customer cancelled one paid order",
+    };
+    await cancelFulfillmentOrder(cancellation);
+    await cancelFulfillmentOrder(cancellation);
+
+    const [wallet] = await db
+      .select()
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, fixture.customer.id));
+    expect(wallet.balanceFen).toBe(allocation.walletAmountFen);
+    const refunds = await db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.transactionType, "ORDER_REFUND"));
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({
+      deltaFen: allocation.walletAmountFen,
+      orderId: allocation.orderId,
+    });
+    const cancelledWork = await db.execute<{
+      fulfillmentStatus: string;
+      outboxStatus: string;
+    }>(sql`
+      select f.status as "fulfillmentStatus", e.status as "outboxStatus"
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      inner join integration_outbox e
+        on e.aggregate_id = s.id::text
+       and e.event_type = 'JIFENG_CREATE_ORDER'
+      where s.order_id = ${allocation.orderId}
+    `);
+    expect(cancelledWork).toEqual([
+      { fulfillmentStatus: "CANCELLED", outboxStatus: "COMPLETED" },
+    ]);
+  });
+
+  test("cancelling an approved direct-offline order never creates a wallet refund", async () => {
+    const fixture = await createSubmissionFixture([300]);
+    const result = await submitFixture(fixture, 0);
+    const reportedAt = new Date();
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 300,
+      customerId: fixture.customer.id,
+      now: reportedAt,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!));
+
+    await cancelFulfillmentOrder({
+      actorType: "ADMIN",
+      actorUserId: admin.id,
+      orderId: allocation.orderId,
+      reason: "admin cancelled direct offline order",
+    });
+
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_REFUND")),
+    ).toEqual([]);
+  });
+
   test("rejects inactive or missing administrators without any financial mutation", async () => {
     const fixture = await createSubmissionFixture([300]);
     const result = await submitFixture(fixture, 0);
@@ -1500,6 +1653,15 @@ describe("unified offline settlement lifecycle", () => {
       withdrawalReason: withdrawal.reason,
       withdrawnAt: withdrawal.now,
     });
+    const [holdReleaseAudit] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "WALLET_SETTLEMENT_HOLD_RELEASED"));
+    expect(holdReleaseAudit).toMatchObject({
+      actorId: withdrawal.actorUserId,
+      actorType: "CUSTOMER",
+      entityId: result.settlementBatchId,
+    });
   });
 
   test("expires unreported batches after two hours and reported batches after twelve hours", async () => {
@@ -1521,8 +1683,8 @@ describe("unified offline settlement lifecycle", () => {
     });
 
     expect(await expireSettlementBatches(new Date(unreportedBatch.paymentDueAt.getTime() - 1))).toBe(0);
-    expect(await expireSettlementBatches(new Date(unreportedBatch.paymentDueAt.getTime() + 1))).toBe(1);
-    expect(await expireSettlementBatches(new Date(reportedAt.getTime() + 12 * 60 * 60 * 1000 + 1))).toBe(1);
+    expect(await expireSettlementBatches(new Date(unreportedBatch.paymentDueAt.getTime()))).toBe(1);
+    expect(await expireSettlementBatches(new Date(reportedAt.getTime() + 12 * 60 * 60 * 1000))).toBe(1);
     expect(await expireSettlementBatches(new Date(reportedAt.getTime() + 13 * 60 * 60 * 1000))).toBe(0);
 
     await expectTerminalRecovery(unreported.settlementBatchId!, {
@@ -1545,6 +1707,137 @@ describe("unified offline settlement lifecycle", () => {
       status: "REJECTED",
     });
     expect(timedOutClaim.reviewedAt).toBeInstanceOf(Date);
+  });
+
+  test("review and withdrawal route exact or late reported-payment deadlines through atomic system expiry", async () => {
+    for (const operation of ["REVIEW", "WITHDRAW"] as const) {
+      for (const lateByMs of [0, 1]) {
+        const fixture = await createSubmissionFixture([250]);
+        await adjustWalletBalance({
+          actorUserId: "wallet-admin",
+          customerId: fixture.customer.id,
+          deltaFen: 100,
+          reason: "deadline regression hold",
+        });
+        const result = await submitFixture(fixture, 100);
+        const reportedAt = new Date();
+        await reportSettlementPayment({
+          actorUserId: "customer-auth",
+          amountFen: 150,
+          customerId: fixture.customer.id,
+          now: reportedAt,
+          settlementBatchId: result.settlementBatchId!,
+        });
+        const now = new Date(reportedAt.getTime() + 12 * 60 * 60 * 1000 + lateByMs);
+        const attempt =
+          operation === "REVIEW"
+            ? reviewSettlementPayment({
+                adminUserId: (await createSettlementAdmin()).id,
+                decision: "APPROVE",
+                now,
+                settlementBatchId: result.settlementBatchId!,
+              })
+            : withdrawSettlementPayment({
+                actorUserId: "customer-auth",
+                customerId: fixture.customer.id,
+                now,
+                reason: "late withdrawal must expire",
+                settlementBatchId: result.settlementBatchId!,
+              });
+        await expect(attempt).rejects.toMatchObject({
+          code: "SETTLEMENT_REVIEW_DEADLINE_EXPIRED",
+        });
+        const [expiredBatch] = await db
+          .select()
+          .from(settlementBatches)
+          .where(eq(settlementBatches.id, result.settlementBatchId!));
+        const [expiredOrder] = await db
+          .select()
+          .from(fulfillmentOrders)
+          .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+        const [releasedHold] = await db
+          .select()
+          .from(walletHolds)
+          .where(eq(walletHolds.settlementBatchId, result.settlementBatchId!));
+        expect(expiredBatch.status).toBe("EXPIRED");
+        expect(expiredBatch.statusReason?.trim()).toBeTruthy();
+        expect(expiredOrder.status).toBe("EXPIRED");
+        expect(releasedHold.status).toBe("RELEASED");
+        const [claim] = await db
+          .select()
+          .from(settlementPaymentClaims)
+          .where(eq(settlementPaymentClaims.settlementBatchId, result.settlementBatchId!));
+        expect(claim).toMatchObject({
+          reviewedByAdminUserId: null,
+          status: "REJECTED",
+        });
+      }
+    }
+  });
+
+  test("concurrent timeout workers claim disjoint batches without duplicate terminal effects", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: crypto.randomUUID(), name: "worker concurrency customer" })
+      .returning();
+    const [store] = await db
+      .insert(stores)
+      .values({ customerId: customer.id, name: "worker concurrency store" })
+      .returning();
+    const now = new Date();
+    const batches = await db
+      .insert(settlementBatches)
+      .values(
+        Array.from({ length: 101 }, (_, index) => ({
+          batchNumber: `WORKER-${index}-${crypto.randomUUID()}`,
+          customerId: customer.id,
+          idempotencyKey: `worker-${index}-${crypto.randomUUID()}`,
+          offlineAmountFen: 100,
+          paymentDueAt: new Date(now.getTime() - 1),
+          totalAmountFen: 100,
+          walletAmountFen: 0,
+        })),
+      )
+      .returning({ id: settlementBatches.id });
+    const orders = await db
+      .insert(fulfillmentOrders)
+      .values(
+        batches.map((_, index) => ({
+          customerId: customer.id,
+          lockExpiresAt: new Date(now.getTime() - 1),
+          orderNumber: `WORKER-${index}-${crypto.randomUUID().slice(0, 8)}`,
+          status: "PENDING_PAYMENT" as const,
+          storeId: store.id,
+          totalAmountFen: 100,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        })),
+      )
+      .returning({ id: fulfillmentOrders.id });
+    await db.insert(settlementBatchOrders).values(
+      batches.map((batch, index) => ({
+        customerId: customer.id,
+        offlineAmountFen: 100,
+        orderId: orders[index].id,
+        settlementBatchId: batch.id,
+        totalAmountFen: 100,
+        walletAmountFen: 0,
+      })),
+    );
+
+    const counts = await Promise.all([
+      expireSettlementBatches(now),
+      expireSettlementBatches(now),
+    ]);
+
+    expect(counts.reduce((sum, count) => sum + count, 0)).toBe(batches.length);
+    expect(await expireSettlementBatches(now)).toBe(0);
+    const expiryAudits = await db
+      .select({ entityId: auditLogs.entityId })
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "SETTLEMENT_EXPIRED"));
+    expect(expiryAudits).toHaveLength(batches.length);
+    expect(new Set(expiryAudits.map((audit) => audit.entityId)).size).toBe(batches.length);
   });
 
   test("blocks both customer and administrator single-order cancellation while a unified claim is pending", async () => {
@@ -1574,6 +1867,85 @@ describe("unified offline settlement lifecycle", () => {
     }
     expect((await db.select().from(fulfillmentOrders))[0].status).toBe("PENDING_PAYMENT");
   });
+
+  test.each(["APPROVE", "EXPIRE"] as const)(
+    "allocated cancellation contends with %s in canonical batch-to-order order without deadlock",
+    async (operation) => {
+      const fixture = await createSubmissionFixture([300]);
+      const result = await submitFixture(fixture, 0);
+      const [order] = await db
+        .select()
+        .from(fulfillmentOrders)
+        .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+      const reportedAt = new Date();
+      if (operation === "APPROVE") {
+        await reportSettlementPayment({
+          actorUserId: "customer-auth",
+          amountFen: 300,
+          customerId: fixture.customer.id,
+          now: reportedAt,
+          settlementBatchId: result.settlementBatchId!,
+        });
+      }
+      const blocker = await startOrderRowBlocker(order.id);
+      const cancel = () => cancelFulfillmentOrder({
+          actorType: "ADMIN",
+          actorUserId: "admin-auth",
+          orderId: order.id,
+          reason: "race cancellation",
+        });
+      const compete = async () =>
+        operation === "APPROVE"
+          ? reviewSettlementPayment({
+              adminUserId: (await createSettlementAdmin()).id,
+              decision: "APPROVE",
+              settlementBatchId: result.settlementBatchId!,
+            })
+          : expireSettlementBatches(
+              new Date((await db.select().from(settlementBatches).where(eq(settlementBatches.id, result.settlementBatchId!)))[0].paymentDueAt.getTime()),
+            );
+      let cancellation!: ReturnType<typeof cancel>;
+      let competing!: ReturnType<typeof compete>;
+      try {
+        if (operation === "APPROVE") {
+          cancellation = cancel();
+          await waitForLockDescendants(blocker.backendPid, 1);
+          competing = compete();
+        } else {
+          competing = compete();
+          await waitForLockDescendants(blocker.backendPid, 1);
+          cancellation = cancel();
+        }
+        await waitForLockDescendants(blocker.backendPid, 2);
+      } finally {
+        blocker.release();
+        await blocker.completion;
+      }
+
+      const attempts = await Promise.allSettled([cancellation, competing]);
+      expect(
+        attempts.every(
+          (attempt) =>
+            attempt.status === "fulfilled" ||
+            !("code" in (attempt.reason as object)) ||
+            !["40P01", "55P03"].includes((attempt.reason as { code?: string }).code ?? ""),
+        ),
+      ).toBe(true);
+      const [savedBatch] = await db
+        .select()
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, result.settlementBatchId!));
+      const [savedOrder] = await db
+        .select()
+        .from(fulfillmentOrders)
+        .where(eq(fulfillmentOrders.id, order.id));
+      expect(
+        operation === "APPROVE"
+          ? [["PAID", "PAID_PENDING_FULFILLMENT"], ["PENDING_PAYMENT", "CANCELLED"]]
+          : [["EXPIRED", "EXPIRED"], ["PENDING_PAYMENT", "CANCELLED"]],
+      ).toContainEqual([savedBatch.status, savedOrder.status]);
+    },
+  );
 
   test("serializes simultaneous approve and withdrawal into one complete terminal outcome", async () => {
     const fixture = await createSubmissionFixture([400]);
