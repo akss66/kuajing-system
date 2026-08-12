@@ -20,6 +20,7 @@ import type {
 } from "@/integrations/jifeng/types";
 import { decryptPii } from "@/shared/pii-crypto";
 import { createSystemNotification } from "@/modules/notifications/service";
+import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 
 const recipientSchema = z.object({
   addressLine1: z.string().min(1),
@@ -69,9 +70,30 @@ type RetryInspection = {
   status: string;
 };
 
+type ReconciliationClaim = RetryInspection & {
+  claimToken: Date;
+  priorErrorCode: string;
+};
+
 const MANUAL_CONFIRMED_RETRY = "MANUAL_CONFIRMED_FAILURE_RETRY";
 const RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED";
 const CONFIRMED_NOT_FOUND_CODES = new Set(["50017", "50071"]);
+const QUERY_ONLY_PRIOR_CODES = new Set(["50019", "50038"]);
+const CREATE_AFTER_NOT_FOUND_CODES = new Set([
+  "TIMEOUT",
+  "NETWORK_ERROR",
+  "INVALID_RESPONSE",
+  "POST_SUCCESS_PERSISTENCE_ERROR",
+]);
+
+function reconciliationOrigin(code: string | null) {
+  const prefix = `${RECONCILIATION_REQUIRED}:`;
+  return code?.startsWith(prefix) ? code.slice(prefix.length) : code ?? "UNKNOWN";
+}
+
+function reconciliationStateCode(origin: string) {
+  return `${RECONCILIATION_REQUIRED}:${origin}`.slice(0, 80);
+}
 
 function erpNumberForShipment(shipmentId: string) {
   return `TZX-${shipmentId.replaceAll("-", "")}`;
@@ -349,26 +371,6 @@ async function buildCreateOrderInput(
   };
 }
 
-async function inspectRetry(eventId: string): Promise<RetryInspection | null> {
-  const rows = await db.execute<RetryInspection>(sql`
-    select
-      e.attempt_count as "attemptCount",
-      f.erp_no as "erpNo",
-      f.id as "fulfillmentId",
-      e.last_error_code as "lastErrorCode",
-      s.order_id as "orderId",
-      s.id as "shipmentId",
-      e.status
-    from integration_outbox e
-    inner join shipment_fulfillments f on f.shipment_id::text = e.aggregate_id
-    inner join order_shipments s on s.id = f.shipment_id
-    where e.id = ${eventId}
-      and e.target = 'JIFENG'
-      and e.event_type = 'JIFENG_CREATE_ORDER'
-  `);
-  return rows[0] ?? null;
-}
-
 async function lockDispatchRows(
   tx: DbTransaction,
   input: { eventId: string; fulfillmentId: string; orderId: string },
@@ -386,23 +388,148 @@ async function lockDispatchRows(
   `);
 }
 
+async function reconciliationRow(
+  tx: DbTransaction,
+  eventId: string,
+): Promise<
+  | (RetryInspection & {
+      fulfillmentStatus: string;
+      lockedAt: Date | string | null;
+    })
+  | null
+> {
+  const rows = await tx.execute<
+    RetryInspection & {
+      fulfillmentStatus: string;
+      lockedAt: Date | string | null;
+    }
+  >(sql`
+    select
+      e.attempt_count as "attemptCount",
+      f.erp_no as "erpNo",
+      f.id as "fulfillmentId",
+      f.status as "fulfillmentStatus",
+      e.last_error_code as "lastErrorCode",
+      e.locked_at as "lockedAt",
+      s.order_id as "orderId",
+      s.id as "shipmentId",
+      e.status
+    from integration_outbox e
+    inner join shipment_fulfillments f on f.shipment_id::text = e.aggregate_id
+    inner join order_shipments s on s.id = f.shipment_id
+    where e.id = ${eventId}
+      and e.target = 'JIFENG'
+      and e.event_type = 'JIFENG_CREATE_ORDER'
+  `);
+  return rows[0] ?? null;
+}
+
+function sameClaim(
+  row: { lockedAt: Date | string | null; status: string },
+  claim: ReconciliationClaim,
+) {
+  const lockedAt = row.lockedAt instanceof Date
+    ? row.lockedAt
+    : row.lockedAt
+      ? new Date(row.lockedAt)
+      : null;
+  return (
+    row.status === "PROCESSING" &&
+    lockedAt?.getTime() === claim.claimToken.getTime()
+  );
+}
+
+async function claimReconciliation(eventId: string, now: Date) {
+  const references = await db.execute<{
+    fulfillmentId: string;
+    orderId: string;
+  }>(sql`
+    select f.id as "fulfillmentId", s.order_id as "orderId"
+    from integration_outbox e
+    inner join shipment_fulfillments f on f.shipment_id::text = e.aggregate_id
+    inner join order_shipments s on s.id = f.shipment_id
+    where e.id = ${eventId}
+      and e.target = 'JIFENG'
+      and e.event_type = 'JIFENG_CREATE_ORDER'
+  `);
+  const reference = references[0];
+  if (!reference) return "CREATE" as const;
+  return db.transaction(async (tx) => {
+    await lockDispatchRows(tx, { eventId, ...reference });
+    const row = await reconciliationRow(tx, eventId);
+    if (!row) return "CREATE" as const;
+    if (row.status === "COMPLETED") return "COMPLETED" as const;
+    if (row.status === "PROCESSING") return "BUSY" as const;
+    if (
+      row.status !== "FAILED" ||
+      row.attemptCount === 0 ||
+      row.lastErrorCode === MANUAL_CONFIRMED_RETRY
+    ) {
+      return "CREATE" as const;
+    }
+    const claimToken = new Date(now);
+    await tx
+      .update(integrationOutbox)
+      .set({ lockedAt: claimToken, status: "PROCESSING", updatedAt: now })
+      .where(eq(integrationOutbox.id, eventId));
+    return {
+      ...row,
+      claimToken,
+      priorErrorCode: reconciliationOrigin(row.lastErrorCode),
+    } satisfies ReconciliationClaim;
+  });
+}
+
+async function completeAlreadyTerminalClaim(
+  tx: DbTransaction,
+  eventId: string,
+  now: Date,
+) {
+  await tx
+    .update(integrationOutbox)
+    .set({
+      completedAt: now,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lockedAt: null,
+      status: "COMPLETED",
+      updatedAt: now,
+    })
+    .where(eq(integrationOutbox.id, eventId));
+}
+
 async function markReconciliationRequired(
-  inspected: RetryInspection,
+  inspected: ReconciliationClaim,
   eventId: string,
   now: Date,
   errorCode: string,
 ) {
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     await lockDispatchRows(tx, {
       eventId,
       fulfillmentId: inspected.fulfillmentId,
       orderId: inspected.orderId,
     });
+    const current = await reconciliationRow(tx, eventId);
+    if (!current) return "STALE" as const;
+    if (
+      current.status === "COMPLETED" ||
+      ["SUBMITTED", "FULFILLING", "SHIPPED", "CANCELLED"].includes(
+        current.fulfillmentStatus,
+      )
+    ) {
+      if (current.status !== "COMPLETED") {
+        await completeAlreadyTerminalClaim(tx, eventId, now);
+      }
+      return "TERMINAL" as const;
+    }
+    if (!sameClaim(current, inspected)) return "STALE" as const;
     const neverRetryAt = new Date("9999-12-31T23:59:59.999Z");
+    const stateCode = reconciliationStateCode(inspected.priorErrorCode);
     await tx
       .update(shipmentFulfillments)
       .set({
-        lastErrorCode: RECONCILIATION_REQUIRED,
+        lastErrorCode: stateCode,
         lastErrorMessage: "Jifeng order outcome requires reconciliation",
         nextRetryAt: neverRetryAt,
         status: "EXCEPTION",
@@ -412,7 +539,7 @@ async function markReconciliationRequired(
     await tx
       .update(integrationOutbox)
       .set({
-        lastErrorCode: RECONCILIATION_REQUIRED,
+        lastErrorCode: stateCode,
         lastErrorMessage: "Jifeng order outcome requires reconciliation",
         lockedAt: null,
         nextAttemptAt: neverRetryAt,
@@ -433,40 +560,48 @@ async function markReconciliationRequired(
       action: "JIFENG_ORDER_RECONCILIATION_REQUIRED",
       actorId: null,
       actorType: "SYSTEM",
-      afterJson: { errorCode, status: RECONCILIATION_REQUIRED },
+      afterJson: {
+        errorCode,
+        priorErrorCode: inspected.priorErrorCode,
+        status: RECONCILIATION_REQUIRED,
+      },
       beforeJson: { status: inspected.status },
       entityId: inspected.orderId,
       entityType: "FULFILLMENT_ORDER",
       reason: "Jifeng create outcome could not be confirmed safely",
     });
+    return "APPLIED" as const;
   });
 }
 
 async function finalizeRemoteOrder(
-  inspected: RetryInspection,
+  inspected: ReconciliationClaim,
   eventId: string,
   detail: JifengOrderDetail,
   now: Date,
 ) {
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     await lockDispatchRows(tx, {
       eventId,
       fulfillmentId: inspected.fulfillmentId,
       orderId: inspected.orderId,
     });
-    await tx
-      .update(shipmentFulfillments)
-      .set({
-        externalOrderNo: detail.orderNo ?? null,
-        jifengStatus: detail.status,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        nextRetryAt: null,
-        status: "SUBMITTED",
-        submittedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(shipmentFulfillments.id, inspected.fulfillmentId));
+    const current = await reconciliationRow(tx, eventId);
+    if (!current) return "STALE" as const;
+    if (
+      current.status === "COMPLETED" ||
+      ["SHIPPED", "CANCELLED"].includes(current.fulfillmentStatus)
+    ) {
+      if (current.status !== "COMPLETED") {
+        await completeAlreadyTerminalClaim(tx, eventId, now);
+      }
+      return "TERMINAL" as const;
+    }
+    if (!sameClaim(current, inspected)) return "STALE" as const;
+    const mapped = await applyJifengOrderStatus(
+      { detail, now, source: "POLL" },
+      tx,
+    );
     await tx
       .update(integrationOutbox)
       .set({
@@ -478,25 +613,44 @@ async function finalizeRemoteOrder(
         updatedAt: now,
       })
       .where(eq(integrationOutbox.id, eventId));
-    await tx
-      .update(fulfillmentOrders)
-      .set({ status: "FULFILLING", updatedAt: now })
-      .where(
-        and(
-          eq(fulfillmentOrders.id, inspected.orderId),
-          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
-        ),
-      );
     await tx.insert(auditLogs).values({
       action: "JIFENG_ORDER_RECONCILED",
       actorId: null,
       actorType: "SYSTEM",
-      afterJson: { jifengStatus: detail.status, status: "SUBMITTED" },
+      afterJson: { jifengStatus: detail.status, status: mapped.status },
       beforeJson: { status: inspected.status },
       entityId: inspected.orderId,
       entityType: "FULFILLMENT_ORDER",
       reason: "Existing Jifeng order confirmed by ERP number",
     });
+    return "APPLIED" as const;
+  });
+}
+
+async function releaseClaimForConfirmedNotFound(
+  claim: ReconciliationClaim,
+  eventId: string,
+  now: Date,
+) {
+  return db.transaction(async (tx) => {
+    await lockDispatchRows(tx, {
+      eventId,
+      fulfillmentId: claim.fulfillmentId,
+      orderId: claim.orderId,
+    });
+    const current = await reconciliationRow(tx, eventId);
+    if (!current || !sameClaim(current, claim)) return false;
+    await tx
+      .update(integrationOutbox)
+      .set({
+        lastErrorCode: `CONFIRMED_NOT_FOUND:${claim.priorErrorCode}`.slice(0, 80),
+        lastErrorMessage: "Jifeng order confirmed absent before create retry",
+        lockedAt: null,
+        status: "FAILED",
+        updatedAt: now,
+      })
+      .where(eq(integrationOutbox.id, eventId));
+    return true;
   });
 }
 
@@ -505,40 +659,59 @@ async function reconcileBeforeCreateRetry(input: {
   eventId: string;
   now: Date;
 }) {
-  const inspected = await inspectRetry(input.eventId);
-  if (
-    !inspected ||
-    inspected.status !== "FAILED" ||
-    inspected.attemptCount === 0 ||
-    inspected.lastErrorCode === MANUAL_CONFIRMED_RETRY
-  ) {
-    return "CREATE" as const;
-  }
+  const inspected = await claimReconciliation(input.eventId, input.now);
+  if (typeof inspected === "string") return inspected;
   if (!input.client.getOrder) {
-    await markReconciliationRequired(
+    const outcome = await markReconciliationRequired(
       inspected,
       input.eventId,
       input.now,
       "QUERY_UNAVAILABLE",
     );
-    return "RECONCILIATION_REQUIRED" as const;
+    return outcome === "TERMINAL"
+      ? ("COMPLETED" as const)
+      : ("RECONCILIATION_REQUIRED" as const);
   }
   try {
     const detail = await input.client.getOrder({ erpNo: inspected.erpNo });
-    await finalizeRemoteOrder(inspected, input.eventId, detail, input.now);
-    return "RECONCILED" as const;
+    const outcome = await finalizeRemoteOrder(
+      inspected,
+      input.eventId,
+      detail,
+      input.now,
+    );
+    return outcome === "APPLIED"
+      ? ("RECONCILED" as const)
+      : ("COMPLETED" as const);
   } catch (error) {
     if (error instanceof JifengApiError && CONFIRMED_NOT_FOUND_CODES.has(error.code)) {
-      return "CREATE" as const;
+      if (
+        !QUERY_ONLY_PRIOR_CODES.has(inspected.priorErrorCode) &&
+        CREATE_AFTER_NOT_FOUND_CODES.has(inspected.priorErrorCode) &&
+        await releaseClaimForConfirmedNotFound(inspected, input.eventId, input.now)
+      ) {
+        return "CREATE" as const;
+      }
+      const outcome = await markReconciliationRequired(
+        inspected,
+        input.eventId,
+        input.now,
+        error.code,
+      );
+      return outcome === "TERMINAL"
+        ? ("COMPLETED" as const)
+        : ("RECONCILIATION_REQUIRED" as const);
     }
     const failure = safeFailure(error);
-    await markReconciliationRequired(
+    const outcome = await markReconciliationRequired(
       inspected,
       input.eventId,
       input.now,
       failure.code,
     );
-    return "RECONCILIATION_REQUIRED" as const;
+    return outcome === "TERMINAL"
+      ? ("COMPLETED" as const)
+      : ("RECONCILIATION_REQUIRED" as const);
   }
 }
 
@@ -646,10 +819,12 @@ export async function processJifengCreateOrderEvent(input: {
       await markReconciliationRequired(
         {
           attemptCount: claimed.attemptNumber,
+          claimToken: claimed.startedAt,
           erpNo: erpNumberForShipment(claimed.shipmentId),
           fulfillmentId: claimed.fulfillmentId,
           lastErrorCode: "POST_SUCCESS_PERSISTENCE_ERROR",
           orderId: claimed.orderId,
+          priorErrorCode: "POST_SUCCESS_PERSISTENCE_ERROR",
           shipmentId: claimed.shipmentId,
           status: "PROCESSING",
         },
@@ -861,8 +1036,11 @@ export async function retryJifengShipment(input: {
     const event = eventRows[0];
     if (!event) throw new Error("Jifeng create event not found");
     const priorErrorCode = event.lastErrorCode ?? fulfillment.lastErrorCode;
+    const reconciliationPending = priorErrorCode?.startsWith(
+      `${RECONCILIATION_REQUIRED}:`,
+    ) === true;
     const ambiguous =
-      priorErrorCode === RECONCILIATION_REQUIRED ||
+      reconciliationPending ||
       ["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE", "INTERNAL_ERROR", "50019", "50038"].includes(
         priorErrorCode ?? "",
       ) ||

@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/db/client";
+import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
@@ -36,10 +36,10 @@ export async function applyJifengOrderStatus(input: {
   detail: JifengOrderDetail;
   now?: Date;
   source: StatusSource;
-}) {
+}, existingTx?: DbTransaction) {
   const now = input.now ?? new Date();
 
-  return db.transaction(async (tx) => {
+  const apply = async (tx: DbTransaction) => {
     const rows = await tx.execute<{
       fulfillmentId: string;
       fulfillmentStatus: string;
@@ -354,7 +354,8 @@ export async function applyJifengOrderStatus(input: {
         current.orderStatus === "SHIPPED" ? "SHIPPED" : "FULFILLING",
       status,
     };
-  });
+  };
+  return existingTx ? apply(existingTx) : db.transaction(apply);
 }
 
 export async function pollActiveJifengFulfillments(input: {

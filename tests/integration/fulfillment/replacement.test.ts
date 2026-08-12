@@ -302,4 +302,171 @@ describe("replacement fulfillment", () => {
       ),
     ).toBe(true);
   });
+
+  test.each([
+    [6, "FULFILLING", "FULFILLING", "ACTIVE", 10],
+    [7, "SHIPPED", "SHIPPED", "CONSUMED", 9],
+    [9, "CANCELLED", "CANCELLED", "ACTIVE", 10],
+    [8, "EXCEPTION", "EXCEPTION", "ACTIVE", 10],
+  ] as const)(
+    "maps reconciled replacement Jifeng status %s without flattening lifecycle semantics",
+    async (
+      jifengStatus,
+      expectedFulfillment,
+      expectedReplacement,
+      expectedReservation,
+      expectedInventory,
+    ) => {
+      const fixture = await createShippedFixture();
+      const created = await createReplacementRequest({
+        actorUserId: "auth-admin-replacement",
+        adminUserId: fixture.admin.id,
+        items: [{ quantity: 1, skuId: fixture.sku.id }],
+        originalShipmentId: fixture.shipment.id,
+        reason: "replacement reconciliation status mapping",
+      });
+      const [event] = await db
+        .select()
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+      const [fulfillment] = await db
+        .select()
+        .from(shipmentFulfillments)
+        .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+      await processJifengCreateOrderEvent({
+        client: {
+          async createOrder() {
+            throw new JifengApiError({
+              code: "TIMEOUT",
+              message: "ambiguous replacement create",
+              retryable: true,
+            });
+          },
+        },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      });
+
+      await expect(
+        processJifengCreateOrderEvent({
+          client: {
+            async createOrder() {
+              throw new Error("replacement create must not repeat");
+            },
+            async getOrder({ erpNo }) {
+              return {
+                erpNo,
+                orderNo: `JF-REPL-${jifengStatus}`,
+                shippedTime:
+                  jifengStatus === 7 ? "2026-08-12T09:00:00.000Z" : undefined,
+                status: jifengStatus,
+                trackingNo: jifengStatus === 7 ? "CP-RECONCILED" : undefined,
+              };
+            },
+          },
+          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+          eventId: event.id,
+        }),
+      ).resolves.toEqual({ status: "RECONCILED" });
+
+      const [savedFulfillment] = await db
+        .select()
+        .from(shipmentFulfillments)
+        .where(eq(shipmentFulfillments.id, fulfillment.id));
+      const [savedReplacement] = await db
+        .select()
+        .from(replacementRequests)
+        .where(eq(replacementRequests.id, created.replacementRequestId));
+      const [savedReservation] = await db
+        .select()
+        .from(inventoryReservations)
+        .where(eq(inventoryReservations.referenceId, created.replacementRequestId));
+      const [savedInventory] = await db
+        .select()
+        .from(inventoryBalances)
+        .where(eq(inventoryBalances.skuId, fixture.sku.id));
+      const [savedOrder] = await db
+        .select()
+        .from(fulfillmentOrders)
+        .where(eq(fulfillmentOrders.id, fixture.order.id));
+      expect(savedFulfillment).toMatchObject({
+        externalOrderNo: `JF-REPL-${jifengStatus}`,
+        jifengStatus,
+        status: expectedFulfillment,
+      });
+      expect(savedReplacement.status).toBe(expectedReplacement);
+      expect(savedReservation.status).toBe(expectedReservation);
+      expect(savedInventory.totalQuantity).toBe(expectedInventory);
+      expect(savedOrder.status).toBe("SHIPPED");
+      if (jifengStatus === 7) {
+        const [savedShipment] = await db
+          .select()
+          .from(orderShipments)
+          .where(eq(orderShipments.id, created.replacementShipmentId));
+        expect(savedShipment.trackingNumber).toBe("CP-RECONCILED");
+        expect(savedShipment.shippedAt).toEqual(
+          new Date("2026-08-12T09:00:00.000Z"),
+        );
+      }
+    },
+  );
+
+  test("reconciles a replacement after post-success persistence failure without repeating create", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "replacement post-success persistence reconciliation",
+    });
+    const [event] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    let createCalls = 0;
+    const client = {
+      async createOrder() {
+        createCalls += 1;
+        return { data: null };
+      },
+      async getOrder({ erpNo }: { erpNo: string }) {
+        return { erpNo, orderNo: "JF-REPL-POST-SUCCESS", status: 6 };
+      },
+    };
+    await db.execute(sql.raw(`
+      create function test_fail_replacement_success_attempt() returns trigger language plpgsql as $$
+      begin
+        if new.outcome = 'SUCCESS' then raise exception 'injected'; end if;
+        return new;
+      end;
+      $$;
+      create trigger test_fail_replacement_success_attempt_trigger
+      before insert on integration_attempts
+      for each row execute function test_fail_replacement_success_attempt();
+    `));
+    try {
+      await processJifengCreateOrderEvent({
+        client,
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      });
+    } finally {
+      await db.execute(sql.raw(`
+        drop trigger if exists test_fail_replacement_success_attempt_trigger on integration_attempts;
+        drop function if exists test_fail_replacement_success_attempt();
+      `));
+    }
+    await processJifengCreateOrderEvent({
+      client,
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+
+    expect(createCalls).toBe(1);
+    expect((await db.select().from(replacementRequests))[0].status).toBe(
+      "FULFILLING",
+    );
+    expect((await db.select().from(fulfillmentOrders))[0].status).toBe("SHIPPED");
+  });
 });
