@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -10,6 +10,7 @@ import {
   stores,
 } from "@/db/schema";
 import { requireAdmin } from "@/modules/identity/guards";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import {
   getAdminBulkDraftErrorLabel,
@@ -29,15 +30,76 @@ export type AdminBulkDraftFilters = {
 };
 
 function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function day(value: Date) {
-  return value.toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
   await requireAdmin();
+
+  const conditions: SQL[] = [];
+  if (filters.customerId) {
+    conditions.push(eq(bulkImportDrafts.customerId, filters.customerId));
+  }
+  if (filters.storeId) {
+    conditions.push(
+      exists(
+        db
+          .select({ id: bulkImportStoreGroups.id })
+          .from(bulkImportStoreGroups)
+          .where(
+            and(
+              eq(bulkImportStoreGroups.draftId, bulkImportDrafts.id),
+              eq(bulkImportStoreGroups.storeId, filters.storeId),
+            ),
+          ),
+      ),
+    );
+  }
+  if (filters.status === "ALREADY_SUBMITTED") {
+    conditions.push(
+      exists(
+        db
+          .select({ id: bulkImportStoreGroups.id })
+          .from(bulkImportStoreGroups)
+          .where(
+            and(
+              eq(bulkImportStoreGroups.draftId, bulkImportDrafts.id),
+              eq(bulkImportStoreGroups.status, "SUBMITTED"),
+            ),
+          ),
+      ),
+    );
+  }
+  if (filters.status === "EXPIRED") {
+    conditions.push(
+      or(
+        eq(bulkImportDrafts.status, "EXPIRED"),
+        exists(
+          db
+            .select({ id: bulkImportStoreGroups.id })
+            .from(bulkImportStoreGroups)
+            .where(
+              and(
+                eq(bulkImportStoreGroups.draftId, bulkImportDrafts.id),
+                eq(bulkImportStoreGroups.status, "EXPIRED"),
+              ),
+            ),
+        ),
+      )!,
+    );
+  }
+  if (filters.dateFrom && isIsoDate(filters.dateFrom)) {
+    conditions.push(
+      sql`(${bulkImportDrafts.updatedAt} at time zone ${BUSINESS_TIME_ZONE})::date >= ${filters.dateFrom}::date`,
+    );
+  }
+  if (filters.dateTo && isIsoDate(filters.dateTo)) {
+    conditions.push(
+      sql`(${bulkImportDrafts.updatedAt} at time zone ${BUSINESS_TIME_ZONE})::date <= ${filters.dateTo}::date`,
+    );
+  }
 
   const drafts = await db
     .select({
@@ -52,6 +114,7 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
     })
     .from(bulkImportDrafts)
     .innerJoin(customers, eq(customers.id, bulkImportDrafts.customerId))
+    .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(bulkImportDrafts.updatedAt))
     .limit(50);
 
@@ -133,15 +196,7 @@ export async function listAdminBulkDrafts(filters: AdminBulkDraftFilters = {}) {
       };
     })
     .filter((draft) => {
-      if (filters.customerId && draft.customerId !== filters.customerId) return false;
       if (filters.status && draft.diagnosticStatus !== filters.status) return false;
-      if (filters.storeId && !draft.storeIds.includes(filters.storeId)) return false;
-      if (filters.dateFrom && isIsoDate(filters.dateFrom) && day(draft.updatedAt) < filters.dateFrom) {
-        return false;
-      }
-      if (filters.dateTo && isIsoDate(filters.dateTo) && day(draft.updatedAt) > filters.dateTo) {
-        return false;
-      }
       return true;
     });
 }

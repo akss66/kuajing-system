@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -13,6 +13,7 @@ import {
   walletHolds,
 } from "@/db/schema";
 import { requireAdmin } from "@/modules/identity/guards";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import {
   getAdminSettlementBatchStatusLabel,
@@ -30,17 +31,50 @@ export type AdminSettlementBatchFilters = {
 };
 
 function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function day(value: Date) {
-  return value.toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export async function listAdminSettlementBatches(
   filters: AdminSettlementBatchFilters = {},
 ) {
   await requireAdmin();
+
+  const conditions: SQL[] = [];
+  if (filters.customerId) {
+    conditions.push(eq(settlementBatches.customerId, filters.customerId));
+  }
+  if (filters.status) conditions.push(eq(settlementBatches.status, filters.status as never));
+  if (filters.storeId) {
+    conditions.push(
+      exists(
+        db
+          .select({ orderId: settlementBatchOrders.orderId })
+          .from(settlementBatchOrders)
+          .innerJoin(
+            fulfillmentOrders,
+            eq(fulfillmentOrders.id, settlementBatchOrders.orderId),
+          )
+          .where(
+            and(
+              eq(settlementBatchOrders.settlementBatchId, settlementBatches.id),
+              eq(fulfillmentOrders.storeId, filters.storeId),
+            ),
+          ),
+      ),
+    );
+  }
+  if (filters.dateFrom && isIsoDate(filters.dateFrom)) {
+    conditions.push(
+      sql`(${settlementBatches.createdAt} at time zone ${BUSINESS_TIME_ZONE})::date >= ${filters.dateFrom}::date`,
+    );
+  }
+  if (filters.dateTo && isIsoDate(filters.dateTo)) {
+    conditions.push(
+      sql`(${settlementBatches.createdAt} at time zone ${BUSINESS_TIME_ZONE})::date <= ${filters.dateTo}::date`,
+    );
+  }
 
   const rows = await db
     .select({
@@ -59,6 +93,7 @@ export async function listAdminSettlementBatches(
     })
     .from(settlementBatches)
     .innerJoin(customers, eq(customers.id, settlementBatches.customerId))
+    .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(settlementBatches.createdAt))
     .limit(50);
 
@@ -103,25 +138,12 @@ export async function listAdminSettlementBatches(
     storeIdsByBatch.set(row.settlementBatchId, current);
   }
 
-  return rows
-    .map((row) => ({
-      ...row,
-      orderCount: orderCountByBatch.get(row.id) ?? 0,
-      statusLabel: getAdminSettlementBatchStatusLabel(row.status),
-      storeIds: [...(storeIdsByBatch.get(row.id) ?? new Set<string>())],
-    }))
-    .filter((row) => {
-      if (filters.customerId && row.customerId !== filters.customerId) return false;
-      if (filters.status && row.status !== filters.status) return false;
-      if (filters.storeId && !row.storeIds.includes(filters.storeId)) return false;
-      if (filters.dateFrom && isIsoDate(filters.dateFrom) && day(row.createdAt) < filters.dateFrom) {
-        return false;
-      }
-      if (filters.dateTo && isIsoDate(filters.dateTo) && day(row.createdAt) > filters.dateTo) {
-        return false;
-      }
-      return true;
-    });
+  return rows.map((row) => ({
+    ...row,
+    orderCount: orderCountByBatch.get(row.id) ?? 0,
+    statusLabel: getAdminSettlementBatchStatusLabel(row.status),
+    storeIds: [...(storeIdsByBatch.get(row.id) ?? new Set<string>())],
+  }));
 }
 
 export async function getAdminSettlementBatchDetail(settlementBatchId: string) {
