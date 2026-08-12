@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { configureE2ETestDatabaseEnvironment } from "./tests/e2e/support/test-database";
 
-process.env.DATABASE_URL ??=
-  "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_test";
+const e2eDatabaseUrl = configureE2ETestDatabaseEnvironment(process.env);
 process.env.BETTER_AUTH_SECRET ??= "e2e-only-secret-with-at-least-32-characters";
 process.env.BETTER_AUTH_URL ??= "http://127.0.0.1:3000";
 process.env.PII_ENCRYPTION_KEY ??=
@@ -34,8 +34,9 @@ export default defineConfig({
     env: {
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
-      DATABASE_URL: process.env.DATABASE_URL,
+      DATABASE_URL: e2eDatabaseUrl,
       PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY,
+      TEST_DATABASE_URL: e2eDatabaseUrl,
     },
     url: "http://127.0.0.1:3000",
     reuseExistingServer: !process.env.CI,

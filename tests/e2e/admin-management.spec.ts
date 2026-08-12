@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -13,6 +13,7 @@ import {
 import { seed } from "@/db/seed";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
+import { resetE2EDatabaseToSeedState } from "./support/test-database";
 
 const seededSuperAdmin = {
   email: "admin@tongzhouxing.local",
@@ -21,47 +22,11 @@ const seededSuperAdmin = {
 };
 
 async function resetAdminManagementBaseline() {
-  await db.execute(sql.raw(`
-    truncate table
-      system_notifications,
-      integration_attempts,
-      integration_outbox,
-      replacement_requests,
-      shipment_fulfillments,
-      audit_logs,
-      settlement_payment_claims,
-      settlement_batch_orders,
-      settlement_batches,
-      wallet_holds,
-      payment_claims,
-      wallet_transactions,
-      wallet_accounts,
-      order_lines,
-      order_shipments,
-      fulfillment_orders,
-      bulk_submission_requests,
-      bulk_import_store_groups,
-      bulk_import_drafts,
-      order_import_rows,
-      order_import_batches,
-      inventory_movements,
-      inventory_reservations,
-      inventory_balances,
-      sku_aliases,
-      customer_sku_prices,
-      auth_sessions,
-      auth_accounts,
-      auth_verifications,
-      auth_users,
-      customer_users,
-      admin_users,
-      stores,
-      skus,
-      products,
-      customers
-    restart identity cascade
-  `));
-  await seed();
+  await resetE2EDatabaseToSeedState({
+    context: "admin-management E2E reset",
+    database: db,
+    reseed: seed,
+  });
 }
 
 async function openAdminNavigationIfNeeded(page: Page) {
