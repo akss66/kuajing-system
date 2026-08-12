@@ -40,7 +40,8 @@
 - Modify `src/db/schema/index.ts`: 导出新增表。
 - Create `drizzle/0010_multi_store_bulk_order.sql`: 可回滚前向迁移、约束和索引。
 - Create `drizzle/0011_bulk_submission_requests.sql`: 批量提交专用幂等请求表和客户作用域唯一约束。
-- Create `drizzle/0012_account_governance.sql`: 账号治理、唯一超级管理员与客户账号一对一约束。
+- Create `drizzle/0012_settlement_timeout_review.sql`: 允许系统超时拒绝不伪造管理员身份，同时保留人工审核约束。
+- Create `drizzle/0013_account_governance.sql`: 账号治理、唯一超级管理员与客户账号一对一约束。
 - Modify `drizzle/meta/_journal.json`: 记录迁移序号。
 
 ### Bulk import domain
@@ -91,7 +92,7 @@
 ### Account, customer and store management
 
 - Modify `src/db/schema/auth.ts` and `identity.ts`: 客户账号唯一归属、超级管理员角色和管理员身份映射。
-- Create `drizzle/0012_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
+- Create `drizzle/0013_account_governance.sql`: 前向增加账号约束、超级管理员保护索引和兼容回填。
 - Create `src/modules/accounts/service.ts`, `queries.ts`, `actions.ts`: 账号列表、创建普通管理员、资料修改、密码重置、停用/恢复和会话撤销。
 - Modify `src/modules/identity/principal.ts` and `guards.ts`: 区分 `SUPER_ADMIN` 与普通 `ADMIN`，新增 `requireSuperAdmin()`。
 - Expand `src/modules/customers/service.ts`, `actions.ts`, `queries.ts`: 客户和店铺完整资料维护、停用/恢复与审计。
@@ -526,6 +527,9 @@ git commit -m "feat: add wallet holds for bulk settlement"
 ### Task 7: 统一线下付款、管理员审核与超时恢复
 
 **Files:**
+- Modify: `src/db/schema/orders.ts`
+- Create: `drizzle/0012_settlement_timeout_review.sql`
+- Modify: `drizzle/meta/_journal.json`
 - Create: `src/modules/settlement/batch-service.ts`
 - Create: `src/modules/settlement/actions.ts`
 - Modify: `src/modules/orders/lifecycle.ts`
@@ -566,6 +570,8 @@ await enqueueEligibleFulfillmentJobs(tx, id);
 
 声明金额必须精确等于线下待付额；管理员不能部分确认。待声明 2 小时，已声明 12 小时。重复审核通过幂等返回，不重复扣款。
 
+系统 12 小时超时拒绝不得伪造管理员身份。`settlement_payment_claims_review_details_required` 调整为：`APPROVED` 必须同时有 `reviewed_at` 和真实 `reviewed_by_admin_user_id`；`REJECTED` 必须有 `reviewed_at` 与非空拒绝原因，允许系统超时时管理员字段为空。人工拒绝仍由服务层强制有效管理员。迁移仅前向放宽该检查约束，不删除或改写历史声明。
+
 - [ ] **Step 4: 阻止统一待核款中的单订单取消**
 
 `requestOrderCancellation` 和管理员取消入口在发现待审 `settlement_payment_claims` 时返回 `SETTLEMENT_CLAIM_PENDING`，文案要求先撤回整笔声明。
@@ -583,7 +589,7 @@ Expected: PASS。
 - [ ] **Step 7: 提交统一结算生命周期**
 
 ```bash
-git add src/modules/settlement src/modules/orders/lifecycle.ts src/jobs/worker.ts tests/integration
+git add src/db/schema/orders.ts drizzle src/modules/settlement src/modules/orders/lifecycle.ts src/jobs/worker.ts tests/integration
 git commit -m "feat: add unified offline settlement review"
 ```
 
@@ -710,7 +716,7 @@ git commit -m "feat: add admin bulk settlement workspace"
 - Modify: `src/db/schema/auth.ts`
 - Modify: `src/db/schema/identity.ts`
 - Modify: `src/db/schema/index.ts`
-- Create: `drizzle/0012_account_governance.sql`
+- Create: `drizzle/0013_account_governance.sql`
 - Modify: `drizzle/meta/_journal.json`
 - Create: `src/modules/accounts/service.ts`
 - Create: `src/modules/accounts/queries.ts`
@@ -752,9 +758,9 @@ Run: `npm run test:integration -- tests/integration/accounts/governance.test.ts 
 
 Expected: FAIL，提示 `requireSuperAdmin` 或唯一约束尚不存在。
 
-- [ ] **Step 3: 增加 0012 前向迁移和角色边界**
+- [ ] **Step 3: 增加 0013 前向迁移和角色边界**
 
-`auth_users.role` 固定使用 `super_admin | admin | user`；0012 迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
+`auth_users.role` 固定使用 `super_admin | admin | user`；0013 迁移把现有唯一管理员账号提升为 `super_admin`，对 `role = 'super_admin'` 建立唯一部分索引，对非空 `customer_id` 建立唯一部分索引，并保证管理员 `customer_id is null`、客户账号 `role = 'user' and customer_id is not null`。迁移不得删除现有账号、会话或审计历史。
 
 Better Auth 的管理员插件只把 `super_admin` 配置为拥有用户管理权限；`admin` 由应用 `requireAdmin()` 识别为日常运营角色，但不能调用账号管理 API。`SuperAdminPrincipal` 与 `AdminPrincipal` 明确区分，`requireAdmin()` 接受二者，`requireSuperAdmin()` 只接受前者。
 
@@ -969,7 +975,7 @@ Expected: 全部桌面、360/390/430px、视觉快照和可访问性测试 PASS�
 
 - [ ] **Step 6: 更新操作与发布说明**
 
-`local-development.md` 写明 0010/0011/0012 迁移、批量草稿/结算超时 worker、本地字体依赖和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、专用幂等请求、账号/客户/店铺治理、退出登录、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
+`local-development.md` 写明 0010/0011/0012/0013 迁移、批量草稿/结算超时 worker、本地字体依赖和测试命令；`v0.2.0.md` 记录批量拿货、统一结算、余额冻结、专用幂等请求、账号/客户/店铺治理、退出登录、旧流程兼容、商家中心 UI 和已知外部集成前置条件。
 
 - [ ] **Step 7: 检查版本库范围并提交验收**
 
