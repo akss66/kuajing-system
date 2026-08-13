@@ -182,6 +182,7 @@ describe("customer management pages", () => {
       account: {
         displayName: "北区负责人",
         email: "north-owner@test.local",
+        id: "account-1",
         status: "ACTIVE",
       },
       customer: {

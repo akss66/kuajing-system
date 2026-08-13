@@ -186,6 +186,7 @@ export async function getCustomerManagementDetail(customerId: string) {
         : {
             displayName: account.displayName,
             email: account.loginIdentifier,
+            id: account.id,
             status: account.status,
           },
     customer,

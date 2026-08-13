@@ -215,6 +215,85 @@ test("returns one exact management row per customer without multiplying wallet, 
   ]);
 });
 
+test("returns a complete empty-account detail without failing when no customer mirror exists", async () => {
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: "NO-DETAIL-MIRROR", name: "无账号镜像客户" })
+    .returning({ id: customers.id });
+  await db.insert(walletAccounts).values({ balanceFen: 7_250, customerId: customer.id });
+  const [store] = await db
+    .insert(stores)
+    .values({ customerId: customer.id, name: "无账号客户一店" })
+    .returning();
+
+  const detail = await getCustomerManagementDetail(customer.id);
+
+  expect(detail.account).toBeNull();
+  expect(detail.stores).toEqual([store]);
+  expect(detail.summary).toEqual({
+    balanceFen: 7_250,
+    pendingPaymentFen: 0,
+    recentOrderCount: 0,
+    storeCount: 1,
+  });
+  expect(detail.recentOrders).toEqual([]);
+  expect(detail.recentTransactions).toEqual([]);
+});
+
+test("returns the newest customer mirror identity without changing the remaining detail data", async () => {
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: "DUPLICATE-DETAIL-MIRROR", name: "重复账号镜像客户" })
+    .returning({ id: customers.id });
+  const oldCreatedAt = new Date("2026-01-10T08:00:00.000Z");
+  const latestCreatedAt = new Date("2026-02-10T08:00:00.000Z");
+  const latestMirrorId = "00000000-0000-4000-8000-000000000202";
+
+  await db.insert(customerUsers).values([
+    {
+      createdAt: oldCreatedAt,
+      customerId: customer.id,
+      displayName: "过期详情负责人",
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      loginIdentifier: "stale-detail-mirror@test.local",
+      status: "ACTIVE",
+      updatedAt: oldCreatedAt,
+    },
+    {
+      createdAt: latestCreatedAt,
+      customerId: customer.id,
+      displayName: "最新详情负责人",
+      id: latestMirrorId,
+      loginIdentifier: "latest-detail-mirror@test.local",
+      status: "DISABLED",
+      updatedAt: latestCreatedAt,
+    },
+  ]);
+  await db.insert(walletAccounts).values({ balanceFen: 8_800, customerId: customer.id });
+  const [store] = await db
+    .insert(stores)
+    .values({ customerId: customer.id, name: "重复账号客户一店" })
+    .returning();
+
+  const detail = await getCustomerManagementDetail(customer.id);
+
+  expect(detail.account).toEqual({
+    displayName: "最新详情负责人",
+    email: "latest-detail-mirror@test.local",
+    id: latestMirrorId,
+    status: "DISABLED",
+  });
+  expect(detail.stores).toEqual([store]);
+  expect(detail.summary).toEqual({
+    balanceFen: 8_800,
+    pendingPaymentFen: 0,
+    recentOrderCount: 0,
+    storeCount: 1,
+  });
+  expect(detail.recentOrders).toEqual([]);
+  expect(detail.recentTransactions).toEqual([]);
+});
+
 test("returns exact isolated customer detail summaries and at most 20 deterministically ordered recent rows", async () => {
   const [customer, otherCustomer] = await db
     .insert(customers)
