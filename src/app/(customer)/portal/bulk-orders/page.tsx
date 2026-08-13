@@ -32,6 +32,14 @@ function draftStatusLabel(status: string) {
   }
 }
 
+function isWritableDraftStatus(status: string) {
+  return status === "DRAFT" || status === "PARTIALLY_SUBMITTED";
+}
+
+function effectiveDraftStatus(status: string, expiresAt: Date, now: Date) {
+  return isWritableDraftStatus(status) && expiresAt <= now ? "EXPIRED" : status;
+}
+
 export default async function CustomerBulkOrdersPage() {
   const principal = await requireCustomer();
   const [stores, drafts] = await Promise.all([
@@ -47,12 +55,12 @@ export default async function CustomerBulkOrdersPage() {
   }
 
   const now = new Date();
-  const writableDrafts = drafts.filter(
-    (draft) =>
-      (draft.status === "DRAFT" || draft.status === "PARTIALLY_SUBMITTED") &&
-      draft.expiresAt > now,
-  );
-  const latestDraft = writableDrafts[0];
+  const displayedDrafts = drafts.map((draft) => ({
+    draft,
+    status: effectiveDraftStatus(draft.status, draft.expiresAt, now),
+  }));
+  const writableDrafts = displayedDrafts.filter(({ status }) => isWritableDraftStatus(status));
+  const latestDraft = writableDrafts[0]?.draft;
 
   return (
     <div className="space-y-5">
@@ -124,13 +132,13 @@ export default async function CustomerBulkOrdersPage() {
 
         {drafts.length ? (
           <div className="divide-y divide-border">
-            {drafts.map((draft) => (
+            {displayedDrafts.map(({ draft, status }) => (
               <article
                 className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 key={draft.id}
               >
                 <div className="space-y-1">
-                  <p className="font-medium text-ink">{draftStatusLabel(draft.status)}</p>
+                  <p className="font-medium text-ink">{draftStatusLabel(status)}</p>
                   <p className="text-sm text-muted">
                     {draft.groupCount} 个店铺 · {draft.fileCount} 个文件 · 更新于 {dateTime(draft.updatedAt)}
                   </p>
@@ -142,7 +150,7 @@ export default async function CustomerBulkOrdersPage() {
                   className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
                   href={`/portal/bulk-orders/${draft.id}`}
                 >
-                  {draft.status === "DRAFT" || draft.status === "PARTIALLY_SUBMITTED" ? "继续草稿" : "查看草稿"}
+                  {isWritableDraftStatus(status) ? "继续草稿" : "查看草稿"}
                   <ArrowRight className="size-4" />
                 </Link>
               </article>

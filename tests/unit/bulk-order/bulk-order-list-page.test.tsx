@@ -71,4 +71,26 @@ describe("CustomerBulkOrdersPage", () => {
     expect(actions).toHaveTextContent("3 个文件");
     expect(screen.getByText("可继续提交").closest("article")).toHaveTextContent("1");
   });
+
+  it("presents time-expired editable drafts as expired and view-only", async () => {
+    draftMocks.listBulkDrafts.mockResolvedValue(
+      ["DRAFT", "PARTIALLY_SUBMITTED"].map((status, index) => ({
+        createdAt: new Date(`2026-08-0${index + 1}T01:00:00.000Z`),
+        expiresAt: new Date("2026-08-10T01:00:00.000Z"),
+        fileCount: index + 1,
+        groupCount: index + 1,
+        id: `time-expired-${status.toLowerCase()}`,
+        status,
+        submittableGroupCount: index,
+        updatedAt: new Date(`2026-08-0${index + 1}T03:00:00.000Z`),
+      })),
+    );
+
+    render(await CustomerBulkOrdersPage());
+
+    expect(screen.getAllByText("已过期")).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "查看草稿" })).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: "继续草稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "继续上次草稿" })).not.toBeInTheDocument();
+  });
 });
