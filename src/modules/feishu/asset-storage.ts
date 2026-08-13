@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import {
   link,
@@ -71,6 +71,17 @@ type TargetWriteProgress = {
   targetPath: string;
   totalBytes: number;
 };
+type TargetCleanupContext = {
+  targetPath: string;
+};
+type FileIdentity = {
+  birthtimeMs: number;
+  ctimeMs: number;
+  dev: number;
+  ino: number;
+  mtimeMs: number;
+  size: number;
+};
 type CatalogAssetStorageOptions = {
   assetDir?: string;
   claimHeartbeatIntervalMs?: number;
@@ -90,13 +101,17 @@ type CatalogAssetStorageOptions = {
   onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
+  onTargetCleanup?: ((context: TargetCleanupContext) => Promise<void> | void) | undefined;
   onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  onTemporaryWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   targetWriteChunkSize?: number;
 };
 type PublishBytesOptions = {
+  assertCanContinue?: (() => void) | undefined;
   bytes: Uint8Array;
   expectedDigest?: string;
   expectedMimeType?: ImageMimeType;
+  onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   onReady?: (() => Promise<void> | void) | undefined;
   targetPath: string;
 };
@@ -145,7 +160,9 @@ type StorageDependencies = Required<
   onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
+  onTargetCleanup?: ((context: TargetCleanupContext) => Promise<void> | void) | undefined;
   onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  onTemporaryWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
 };
 
 class CatalogAssetError extends Error {
@@ -396,6 +413,70 @@ async function safeClose(handle: FileHandle | null | undefined) {
   await handle.close().catch(() => undefined);
 }
 
+function toFileIdentity(stats: Stats): FileIdentity {
+  return {
+    birthtimeMs: stats.birthtimeMs,
+    ctimeMs: stats.ctimeMs,
+    dev: stats.dev,
+    ino: stats.ino,
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+  };
+}
+
+function hasStableDeviceInode(identity: FileIdentity) {
+  return identity.dev !== 0 && identity.ino !== 0;
+}
+
+function fileIdentityMatches(expected: FileIdentity, actual: FileIdentity) {
+  if (hasStableDeviceInode(expected) && hasStableDeviceInode(actual)) {
+    return expected.dev === actual.dev && expected.ino === actual.ino;
+  }
+
+  if (process.platform === "win32") {
+    return (
+      expected.birthtimeMs === actual.birthtimeMs &&
+      expected.ctimeMs === actual.ctimeMs &&
+      expected.mtimeMs === actual.mtimeMs &&
+      expected.size === actual.size
+    );
+  }
+
+  return false;
+}
+
+async function safeUnlinkOwnedPath(
+  path: string,
+  expectedIdentity: FileIdentity | null,
+  assertHeld: () => void,
+): Promise<boolean> {
+  if (!expectedIdentity) {
+    return false;
+  }
+
+  try {
+    assertHeld();
+  } catch {
+    return false;
+  }
+
+  const currentStats = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  });
+  if (!currentStats || !currentStats.isFile()) {
+    return false;
+  }
+  if (!fileIdentityMatches(expectedIdentity, toFileIdentity(currentStats))) {
+    return false;
+  }
+
+  await safeUnlink(path);
+  return true;
+}
+
 function serializeLease(payload: LockLeasePayload) {
   return JSON.stringify(payload);
 }
@@ -491,12 +572,39 @@ async function sumDirectoryBytes(directoryPath: string): Promise<number> {
   return total;
 }
 
-async function writeExclusiveFile(path: string, bytes: Uint8Array) {
+async function writeExclusiveFile(
+  path: string,
+  bytes: Uint8Array,
+  options?: {
+    assertCanContinue?: (() => void) | undefined;
+    chunkSize?: number | undefined;
+    onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  },
+) {
   let handle: FileHandle | null = null;
   try {
+    options?.assertCanContinue?.();
     handle = await open(path, WRITE_NOFOLLOW_FLAGS, 0o600);
-    await handle.writeFile(bytes);
+    const chunkSize = Math.max(1, options?.chunkSize ?? bytes.byteLength);
+    let bytesWritten = 0;
+    while (bytesWritten < bytes.byteLength) {
+      options?.assertCanContinue?.();
+
+      const nextBytesWritten = Math.min(bytesWritten + chunkSize, bytes.byteLength);
+      const chunk = Buffer.from(bytes.subarray(bytesWritten, nextBytesWritten));
+      await handle.write(chunk, 0, chunk.byteLength, bytesWritten);
+      bytesWritten = nextBytesWritten;
+
+      await options?.onWriteProgress?.({
+        bytesWritten,
+        targetPath: path,
+        totalBytes: bytes.byteLength,
+      });
+      options?.assertCanContinue?.();
+    }
+
     await handle.sync();
+    options?.assertCanContinue?.();
   } catch (error) {
     await safeClose(handle);
     throw error;
@@ -666,9 +774,12 @@ async function fallbackPublishByClaim(
 
       let targetHandle: FileHandle | null = null;
       let targetCreated = false;
+      let targetIdentity: FileIdentity | null = null;
       try {
+        claimControl.assertHeld();
         targetHandle = await open(options.targetPath, WRITE_NOFOLLOW_FLAGS, 0o600);
         targetCreated = true;
+        targetIdentity = toFileIdentity(await targetHandle.stat());
 
         let bytesWritten = 0;
         const chunkSize = Math.max(1, dependencies.targetWriteChunkSize);
@@ -689,9 +800,12 @@ async function fallbackPublishByClaim(
         }
 
         await targetHandle.sync();
+        claimControl.assertHeld();
         await safeClose(targetHandle);
         targetHandle = null;
+        claimControl.assertHeld();
         await syncDirectory(finalDirectory, dependencies, "publish");
+        claimControl.assertHeld();
         return { published: true } satisfies PublishBytesResult;
       } catch (error) {
         await safeClose(targetHandle);
@@ -702,8 +816,15 @@ async function fallbackPublishByClaim(
         }
 
         if (targetCreated) {
-          await safeUnlink(options.targetPath);
-          await syncDirectory(finalDirectory, dependencies, "cleanup");
+          await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
+          const removedOwnedTarget = await safeUnlinkOwnedPath(
+            options.targetPath,
+            targetIdentity,
+            () => claimControl.assertHeld(),
+          );
+          if (removedOwnedTarget) {
+            await syncDirectory(finalDirectory, dependencies, "cleanup");
+          }
         }
         throw error;
       }
@@ -731,10 +852,18 @@ async function publishBytesAtomically(
   assertContainedPath(state.absoluteRoot, tempPath, "storage key");
 
   try {
-    await writeExclusiveFile(tempPath, options.bytes);
+    options.assertCanContinue?.();
+    await writeExclusiveFile(tempPath, options.bytes, {
+      assertCanContinue: options.assertCanContinue,
+      chunkSize: dependencies.targetWriteChunkSize,
+      onWriteProgress: options.onWriteProgress,
+    });
+    options.assertCanContinue?.();
     await options.onReady?.();
+    options.assertCanContinue?.();
 
     try {
+      options.assertCanContinue?.();
       if (isFinalPublish && dependencies.onStorageLink) {
         await dependencies.onStorageLink(tempPath, options.targetPath);
       } else {
@@ -746,8 +875,10 @@ async function publishBytesAtomically(
             throw new CatalogAssetError("temporary asset publish source disappeared before rename");
           }
         }
+      options.assertCanContinue?.();
       }
       await syncDirectory(finalDirectory, dependencies, "publish");
+      options.assertCanContinue?.();
       return { published: true };
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
@@ -761,6 +892,7 @@ async function publishBytesAtomically(
       if (isFinalPublish) {
         await verifyExistingPublishedTarget(state, dependencies, options);
       }
+      options.assertCanContinue?.();
       return { published: false };
     }
   } finally {
@@ -1113,7 +1245,9 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     onRunLockAcquired: options.onRunLockAcquired,
     onStageWriteReady: options.onStageWriteReady,
     onStorageLink: options.onStorageLink,
+    onTargetCleanup: options.onTargetCleanup,
     onTargetWriteProgress: options.onTargetWriteProgress,
+    onTemporaryWriteProgress: options.onTemporaryWriteProgress,
     targetWriteChunkSize: options.targetWriteChunkSize ?? 64 * 1024,
   };
 
@@ -1168,9 +1302,12 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
       runLock.assertHeld();
 
       await publishBytesAtomically(state, dependencies, {
+        assertCanContinue: () => runLock.assertHeld(),
         bytes: input.bytes,
+        onWriteProgress: dependencies.onTemporaryWriteProgress,
         targetPath: temporaryPath,
       });
+      runLock.assertHeld();
     });
 
     return {

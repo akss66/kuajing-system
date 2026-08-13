@@ -892,6 +892,78 @@ describe("catalog asset storage", () => {
     await expect(stagePromise).rejects.toThrow(/lease/i);
   });
 
+  test("does not publish or retain temp bytes after a run lease is lost mid-write and another worker reclaims the run", async () => {
+    let releaseFirstWrite: (() => void) | null = null;
+    let firstWritePaused = false;
+    let runHeartbeatWrites = 0;
+    const firstBytes = await createImageBuffer("png", { b: 101 });
+    const secondBytes = await createImageBuffer("png", { g: 111 });
+    const maxRunBytes = Math.max(firstBytes.byteLength, secondBytes.byteLength) + 16;
+    const sharedOptions = {
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 80,
+      lockTimeoutMs: 700,
+      maxRunBytes,
+      targetWriteChunkSize: 32,
+    } as const;
+    const firstStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onLeaseWrite({ kind }) {
+        if (kind !== "run") {
+          return;
+        }
+        runHeartbeatWrites += 1;
+        if (runHeartbeatWrites >= 2) {
+          throw new Error("simulated run lease heartbeat failure");
+        }
+      },
+      onTemporaryWriteProgress({ bytesWritten, totalBytes }) {
+        if (!firstWritePaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+          firstWritePaused = true;
+          return new Promise<void>((resolve) => {
+            releaseFirstWrite = resolve;
+          });
+        }
+      },
+    });
+    const secondStorage = createCatalogAssetStorage(sharedOptions);
+    const firstStagePromise = firstStorage.stageCatalogAsset({
+      bytes: firstBytes,
+      contentType: "image/png",
+      originalFileName: "lease-lost-first.png",
+      runId: "lease-lost-mid-write-run",
+      skuCode: "TZX-001",
+    });
+
+    while (!firstWritePaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const secondStagePromise = secondStorage.stageCatalogAsset({
+      bytes: secondBytes,
+      contentType: "image/png",
+      originalFileName: "lease-lost-second.png",
+      runId: "lease-lost-mid-write-run",
+      skuCode: "TZX-002",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const continueFirstWrite = releaseFirstWrite as (() => void) | null;
+    continueFirstWrite?.();
+
+    await expect(firstStagePromise).rejects.toThrow(/lease/i);
+
+    const secondManifest = await secondStagePromise;
+    const runDirectory = stagedRunDirectory(secondManifest);
+    const runEntries = await readdir(runDirectory);
+    expect(runEntries.filter((entry) => entry.startsWith(".catalog-asset-"))).toEqual([]);
+    expect(runEntries.filter((entry) => entry.endsWith(".png"))).toEqual([
+      `${secondManifest.contentSha256}.png`,
+    ]);
+    expect(await sumDirectoryBytes(runDirectory)).toBeLessThanOrEqual(maxRunBytes);
+  });
+
   test("aborts fallback publish after the claim lease heartbeat is lost", async () => {
     let releaseClaim: (() => void) | null = null;
     let claimHeartbeatWrites = 0;
@@ -933,6 +1005,92 @@ describe("catalog asset storage", () => {
 
     await expect(commitPromise).rejects.toThrow(/lease/i);
     await expect(storage.openCatalogAsset(expectedStorageKey)).rejects.toThrow();
+  });
+
+  test("does not delete a replacement target after the claim lease is lost", async () => {
+    let releaseCopy: (() => void) | null = null;
+    let partialVisible = false;
+    let claimHeartbeatWrites = 0;
+    let replacementWritten = false;
+    const replacementBytes = await createImageBuffer("png", { r: 230 });
+    const storage = createCatalogAssetStorage({
+      claimHeartbeatIntervalMs: 10,
+      claimStaleMs: 80,
+      onLeaseWrite({ kind }) {
+        if (kind !== "claim") {
+          return;
+        }
+        claimHeartbeatWrites += 1;
+        if (claimHeartbeatWrites >= 2) {
+          throw new Error("simulated claim lease heartbeat failure");
+        }
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      onTargetCleanup: async ({ targetPath }) => {
+        replacementWritten = true;
+        await rm(targetPath, { force: true });
+        await writeFile(targetPath, replacementBytes);
+      },
+      onTargetWriteProgress({ bytesWritten, totalBytes }) {
+        if (!partialVisible && bytesWritten > 0 && bytesWritten < totalBytes) {
+          partialVisible = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 81 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-replacement.png",
+      runId: "claim-replacement-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    const targetPath = join(assetRoot, expectedStorageKey);
+    const commitPromise = storage.commitCatalogAsset(manifest);
+
+    while (!partialVisible) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const continueCopy = releaseCopy as (() => void) | null;
+    continueCopy?.();
+
+    await expect(commitPromise).rejects.toThrow(/lease/i);
+    expect(replacementWritten).toBe(true);
+    expect(Buffer.compare(await readFile(targetPath), replacementBytes)).toBe(0);
+  });
+
+  test("cleans up its own fallback target when publish fails while the claim lease is still held", async () => {
+    const storage = createCatalogAssetStorage({
+      onDirectorySync(path, reason) {
+        if (reason === "publish" && path.includes(`${join(assetRoot, "sha256")}`)) {
+          throw new Error("simulated publish sync failure");
+        }
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    });
+    const bytes = await createImageBuffer("png", { g: 181 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-cleanup.png",
+      runId: "claim-cleanup-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+
+    await expect(storage.commitCatalogAsset(manifest)).rejects.toThrow(/publish sync failure/i);
+    await expect(readFile(join(assetRoot, expectedStorageKey))).rejects.toThrow();
   });
 
   test("commits the same digest concurrently when hard links are unsupported", async () => {
