@@ -5,7 +5,10 @@ import { dirname, join } from "node:path";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import type { CatalogAssetCoordinator } from "@/modules/feishu/asset-coordination";
+import type {
+  CatalogAssetCoordinator,
+  CatalogAssetLockGuard,
+} from "@/modules/feishu/asset-coordination";
 import type { TemporaryAssetManifest } from "@/modules/feishu/cargo-types";
 import { createCatalogAssetStorage } from "@/modules/feishu/asset-storage";
 
@@ -17,32 +20,53 @@ function createStagingTempFileName(input: { createdAtMs: number }) {
   return `.catalog-asset-stage-${input.createdAtMs}-${crypto.randomUUID()}.tmp`;
 }
 
-function createFinalTempFileName(input: { createdAtMs: number }) {
-  return `.catalog-asset-digest-${input.createdAtMs}-${crypto.randomUUID()}.tmp`;
+function createFinalTempFileName(input: { contentSha256: string; createdAtMs: number }) {
+  return `.catalog-asset-digest-${input.contentSha256}-${input.createdAtMs}-${crypto.randomUUID()}.tmp`;
 }
 
 function createFakeCoordinator() {
   const activeDigests = new Set<string>();
   const activeRuns = new Set<string>();
+  const digestControllers = new Map<string, AbortController>();
   const events: Array<{ key: string; scope: "digest" | "run" }> = [];
+  const runControllers = new Map<string, AbortController>();
+
+  function createGuard(controller: AbortController): CatalogAssetLockGuard {
+    return {
+      signal: controller.signal,
+      async assertHeld() {
+        if (controller.signal.aborted) {
+          throw controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error("catalog asset lock was lost");
+        }
+      },
+    };
+  }
 
   const coordinator: CatalogAssetCoordinator = {
-    async withDigestLock<T>(digest: string, action: () => Promise<T>) {
+    async withDigestLock<T>(digest: string, action: (guard: CatalogAssetLockGuard) => Promise<T>) {
       events.push({ key: digest, scope: "digest" });
       activeDigests.add(digest);
+      const controller = new AbortController();
+      digestControllers.set(digest, controller);
       try {
-        return await action();
+        return await action(createGuard(controller));
       } finally {
         activeDigests.delete(digest);
+        digestControllers.delete(digest);
       }
     },
-    async withRunLock<T>(runId: string, action: () => Promise<T>) {
+    async withRunLock<T>(runId: string, action: (guard: CatalogAssetLockGuard) => Promise<T>) {
       events.push({ key: runId, scope: "run" });
       activeRuns.add(runId);
+      const controller = new AbortController();
+      runControllers.set(runId, controller);
       try {
-        return await action();
+        return await action(createGuard(controller));
       } finally {
         activeRuns.delete(runId);
+        runControllers.delete(runId);
       }
     },
   };
@@ -50,6 +74,12 @@ function createFakeCoordinator() {
   return {
     activeDigests,
     activeRuns,
+    abortDigest(digest: string, reason = new Error("catalog asset digest lock was lost")) {
+      digestControllers.get(digest)?.abort(reason);
+    },
+    abortRun(runId: string, reason = new Error("catalog asset run lock was lost")) {
+      runControllers.get(runId)?.abort(reason);
+    },
     coordinator,
     events,
   };
@@ -399,6 +429,7 @@ describe("catalog asset storage", () => {
       join(
         finalDirectory,
         createFinalTempFileName({
+          contentSha256: manifest.contentSha256,
           createdAtMs: Date.now() - 5_000,
         }),
       ),
@@ -418,6 +449,85 @@ describe("catalog asset storage", () => {
 
     expect(await commitPromise).toBe(expectedStorageKey);
     expect((await readdir(finalDirectory)).filter((entry) => entry.startsWith(".catalog-asset-digest-"))).toEqual([]);
+  });
+
+  test("does not delete another digest's live temp file when the digests share the same prefix", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let releaseFirstPublish: (() => void) | null = null;
+    let firstPublishPaused = false;
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onFinalPublishReady() {
+        if (!firstPublishPaused) {
+          firstPublishPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseFirstPublish = resolve;
+          });
+        }
+      },
+      temporaryFileStaleMs: -1,
+    });
+
+    let firstManifest: TemporaryAssetManifest | null = null;
+    let secondManifest: TemporaryAssetManifest | null = null;
+    for (let index = 0; index < 256 && (!firstManifest || !secondManifest); index += 1) {
+      const manifest = await storage.stageCatalogAsset({
+        bytes: await createImageBuffer("png", { b: 20 + index, g: 30 + index, r: 40 + index }),
+        contentType: "image/png",
+        originalFileName: `prefix-${index}.png`,
+        runId: `prefix-run-${index}`,
+        skuCode: `TZX-${index}`,
+      });
+      if (!firstManifest) {
+        firstManifest = manifest;
+        continue;
+      }
+      if (
+        manifest.contentSha256 !== firstManifest.contentSha256 &&
+        manifest.contentSha256.slice(0, 2) === firstManifest.contentSha256.slice(0, 2)
+      ) {
+        secondManifest = manifest;
+      }
+    }
+
+    expect(firstManifest).not.toBeNull();
+    expect(secondManifest).not.toBeNull();
+
+    const firstCommit = storage.commitCatalogAsset(firstManifest as TemporaryAssetManifest);
+    while (!firstPublishPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const prefixDirectory = join(
+      assetRoot,
+      "sha256",
+      (firstManifest as TemporaryAssetManifest).contentSha256.slice(0, 2),
+    );
+    const entriesBeforeSecondCommit = await readdir(prefixDirectory);
+    const firstDigestTempEntry = entriesBeforeSecondCommit.find((entry) =>
+      entry.includes((firstManifest as TemporaryAssetManifest).contentSha256),
+    );
+    expect(firstDigestTempEntry).toBeDefined();
+
+    const secondStorageKey = await storage.commitCatalogAsset(secondManifest as TemporaryAssetManifest);
+    const entriesAfterSecondCommit = await readdir(prefixDirectory);
+    expect(entriesAfterSecondCommit).toContain(firstDigestTempEntry as string);
+    expect(entriesAfterSecondCommit).toContain(
+      `${(secondManifest as TemporaryAssetManifest).contentSha256}.png`,
+    );
+
+    const finishFirstPublish = releaseFirstPublish as (() => void) | null;
+    if (finishFirstPublish) {
+      finishFirstPublish();
+    }
+
+    await expect(firstCommit).resolves.toBe(
+      `sha256/${(firstManifest as TemporaryAssetManifest).contentSha256.slice(0, 2)}/${(firstManifest as TemporaryAssetManifest).contentSha256}.png`,
+    );
+    expect(secondStorageKey).toBe(
+      `sha256/${(secondManifest as TemporaryAssetManifest).contentSha256.slice(0, 2)}/${(secondManifest as TemporaryAssetManifest).contentSha256}.png`,
+    );
   });
 
   test("falls back to copy publish when hard links are unsupported", async () => {
@@ -467,6 +577,94 @@ describe("catalog asset storage", () => {
     const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
 
     await expect(storage.commitCatalogAsset(manifest)).rejects.toThrow(/publish sync failure/i);
+    await expect(readFile(join(assetRoot, expectedStorageKey))).rejects.toThrow();
+  });
+
+  test("aborts a staged write when the fake run guard is lost mid-write", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let runId = "";
+    let releaseWrite: (() => void) | null = null;
+    let writePaused = false;
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onTemporaryWriteProgress({ bytesWritten, totalBytes }) {
+        if (!writePaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+          writePaused = true;
+          return new Promise<void>((resolve) => {
+            releaseWrite = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 11, g: 12, r: 13, width: 64, height: 64 });
+    runId = "fake-run-guard-loss";
+
+    const stagePromise = storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "guard-loss-stage.png",
+      runId,
+      skuCode: "TZX-001",
+    });
+
+    while (!writePaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    fakeCoordinator.abortRun(runId);
+    const continueWrite = releaseWrite as (() => void) | null;
+    if (continueWrite) {
+      continueWrite();
+    }
+
+    await expect(stagePromise).rejects.toThrow(/lock was lost/i);
+    expect((await readdir(join(assetRoot, "temporary", runId))).filter((entry) => entry.startsWith(".catalog-asset-stage-"))).toEqual([]);
+  });
+
+  test("aborts a fallback publish when the fake digest guard is lost mid-copy", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let releaseCopy: (() => void) | null = null;
+    let copyPaused = false;
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      onTargetWriteProgress({ bytesWritten, totalBytes }) {
+        if (!copyPaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+          copyPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 14, g: 15, r: 16, width: 64, height: 64 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "guard-loss-commit.png",
+      runId: "fake-digest-guard-loss-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!copyPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    fakeCoordinator.abortDigest(manifest.contentSha256);
+    const continueCopy = releaseCopy as (() => void) | null;
+    if (continueCopy) {
+      continueCopy();
+    }
+
+    await expect(commitPromise).rejects.toThrow(/lock was lost/i);
     await expect(readFile(join(assetRoot, expectedStorageKey))).rejects.toThrow();
   });
 

@@ -23,6 +23,12 @@ function requireDatabaseUrl() {
   return DATABASE_URL;
 }
 
+function unsupportedLinkError() {
+  const error = new Error("hard links are not supported on this volume") as NodeJS.ErrnoException;
+  error.code = "ENOTSUP";
+  return error;
+}
+
 async function createImageBuffer(
   format: "png" | "webp",
   input?: { b?: number; g?: number; height?: number; r?: number; width?: number },
@@ -50,7 +56,7 @@ async function createImageBuffer(
   return image.png().toBuffer();
 }
 
-function createIndependentCoordinator(input?: { lockTimeoutMs?: number }) {
+function createIndependentCoordinator(input?: { heartbeatIntervalMs?: number; lockTimeoutMs?: number }) {
   const client = postgres(requireDatabaseUrl(), { idle_timeout: 1, max: 1 });
   const isolatedDb = drizzle({ client });
 
@@ -58,6 +64,7 @@ function createIndependentCoordinator(input?: { lockTimeoutMs?: number }) {
     client,
     coordinator: createPostgresCatalogAssetCoordinator({
       db: isolatedDb,
+      heartbeatIntervalMs: input?.heartbeatIntervalMs ?? 10,
       lockTimeoutMs: input?.lockTimeoutMs,
     }),
   };
@@ -254,6 +261,71 @@ describe("catalog asset PostgreSQL coordination", () => {
     expect(await sumDirectoryBytes(join(assetRoot, "temporary", "quota-run"))).toBeLessThanOrEqual(maxRunBytes);
   });
 
+  test("aborts a staged write after the lock-holding connection closes and a waiter reclaims the run lock", async () => {
+    assetRoot = await mkdtemp(join(tmpdir(), "catalog-asset-coordination-"));
+    const firstCoordinator = createIndependentCoordinator();
+    const secondCoordinator = createIndependentCoordinator();
+    coordinators.add(firstCoordinator);
+    coordinators.add(secondCoordinator);
+
+    let releaseFirstWrite: (() => void) | null = null;
+    let firstWritePaused = false;
+    const firstStorage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: firstCoordinator.coordinator,
+      onTemporaryWriteProgress({ bytesWritten, totalBytes }) {
+        if (!firstWritePaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+          firstWritePaused = true;
+          return new Promise<void>((resolve) => {
+            releaseFirstWrite = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const secondStorage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: secondCoordinator.coordinator,
+      targetWriteChunkSize: 32,
+    });
+
+    const firstStage = firstStorage.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { b: 1, g: 2, r: 3, width: 64, height: 64 }),
+      contentType: "image/png",
+      originalFileName: "first-stage.png",
+      runId: "connection-loss-run",
+      skuCode: "TZX-001",
+    });
+
+    while (!firstWritePaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const secondStage = secondStorage.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { b: 4, g: 5, r: 6, width: 64, height: 64 }),
+      contentType: "image/png",
+      originalFileName: "second-stage.png",
+      runId: "connection-loss-run",
+      skuCode: "TZX-002",
+    });
+
+    await firstCoordinator.client.end({ timeout: 0 });
+    coordinators.delete(firstCoordinator);
+
+    const continueFirstWrite = releaseFirstWrite as (() => void) | null;
+    if (continueFirstWrite) {
+      continueFirstWrite();
+    }
+
+    await expect(firstStage).rejects.toThrow(/coordination|lock was lost|connection/i);
+    const secondManifest = await secondStage;
+    const runEntries = await readdir(join(assetRoot, "temporary", "connection-loss-run"));
+    expect(runEntries.filter((entry) => entry.startsWith(".catalog-asset-stage-"))).toEqual([]);
+    expect(runEntries.filter((entry) => entry.endsWith(".png"))).toEqual([
+      `${secondManifest.contentSha256}.png`,
+    ]);
+  });
+
   test("deduplicates concurrent same-digest commits across independent coordinators", async () => {
     assetRoot = await mkdtemp(join(tmpdir(), "catalog-asset-coordination-"));
     const firstCoordinator = createIndependentCoordinator();
@@ -310,5 +382,75 @@ describe("catalog asset PostgreSQL coordination", () => {
     const [firstKey, secondKey] = await Promise.all([firstCommit, secondCommit]);
     expect(firstKey).toBe(secondKey);
     expect((await readdir(join(assetRoot, dirname(firstKey)))).filter((entry) => entry.startsWith("."))).toEqual([]);
+  });
+
+  test("aborts a fallback publish after the lock-holding connection closes and a waiter commits the digest", async () => {
+    assetRoot = await mkdtemp(join(tmpdir(), "catalog-asset-coordination-"));
+    const firstCoordinator = createIndependentCoordinator();
+    const secondCoordinator = createIndependentCoordinator();
+    coordinators.add(firstCoordinator);
+    coordinators.add(secondCoordinator);
+
+    let releaseFirstCopy: (() => void) | null = null;
+    let firstCopyPaused = false;
+    const firstStorage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: firstCoordinator.coordinator,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      onTargetWriteProgress({ bytesWritten, totalBytes }) {
+        if (!firstCopyPaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+          firstCopyPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseFirstCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const secondStorage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: secondCoordinator.coordinator,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      targetWriteChunkSize: 32,
+    });
+
+    const bytes = await createImageBuffer("webp");
+    const firstManifest = await firstStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/webp",
+      originalFileName: "first.webp",
+      runId: "connection-loss-digest-a",
+      skuCode: "TZX-001",
+    });
+    const secondManifest = await secondStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/webp",
+      originalFileName: "second.webp",
+      runId: "connection-loss-digest-b",
+      skuCode: "TZX-002",
+    });
+    const expectedStorageKey = `sha256/${firstManifest.contentSha256.slice(0, 2)}/${firstManifest.contentSha256}.webp`;
+
+    const firstCommit = firstStorage.commitCatalogAsset(firstManifest);
+    while (!firstCopyPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const secondCommit = secondStorage.commitCatalogAsset(secondManifest);
+    await firstCoordinator.client.end({ timeout: 0 });
+    coordinators.delete(firstCoordinator);
+
+    const continueFirstCopy = releaseFirstCopy as (() => void) | null;
+    if (continueFirstCopy) {
+      continueFirstCopy();
+    }
+
+    await expect(firstCommit).rejects.toThrow(/coordination|lock was lost|connection/i);
+    await expect(secondCommit).resolves.toBe(expectedStorageKey);
+    expect((await readdir(join(assetRoot, dirname(expectedStorageKey)))).filter((entry) => entry.startsWith("."))).toEqual([]);
   });
 });
