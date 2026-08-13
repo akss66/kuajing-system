@@ -55,6 +55,7 @@ const statusContent: Record<
     consequence: string;
     label: string;
     nextStep: string;
+    readOnlyNextStep: string;
     tone: "danger" | "success" | "warning" | "default";
   }
 > = {
@@ -62,42 +63,49 @@ const statusContent: Record<
     consequence: "不会向极风发送订单。",
     label: "未连接",
     nextStep: "使用一次性令牌完成授权。",
+    readOnlyNextStep: "如需连接极风，请联系超级管理员完成授权。",
     tone: "default",
   },
   AUTHORIZED: {
     consequence: "自动履约保持关闭。",
     label: "已授权，待发现资源",
     nextStep: "重新发现可用仓库和物流渠道。",
+    readOnlyNextStep: "请联系超级管理员发现并确认可用的履约资源。",
     tone: "warning",
   },
   RESOURCE_SELECTION_REQUIRED: {
     consequence: "不会默认选择任何仓库或渠道。",
     label: "待选择履约资源",
     nextStep: "明确选择仓库和物流渠道。",
+    readOnlyNextStep: "请联系超级管理员处理履约资源选择。",
     tone: "warning",
   },
   READY_DISABLED: {
     consequence: "订单仍留在本系统，不会自动推送。",
     label: "已就绪，自动履约未启用",
     nextStep: "运行最新诊断并确认启用。",
+    readOnlyNextStep: "如需启用自动履约，请联系超级管理员完成诊断和确认。",
     tone: "warning",
   },
   ENABLED: {
     consequence: "符合条件的已付款订单会自动推送到极风。",
     label: "自动履约已启用",
     nextStep: "异常时先停用自动履约，再检查连接。",
+    readOnlyNextStep: "如需停用或检查连接，请联系超级管理员处理。",
     tone: "success",
   },
   REFRESH_REQUIRED: {
     consequence: "自动推单已被阻止。",
     label: "授权需要更新",
     nextStep: "获取新的一次性令牌并重新授权。",
+    readOnlyNextStep: "请联系超级管理员更新极风授权。",
     tone: "warning",
   },
   ERROR: {
     consequence: "当前连接不可用于履约。",
     label: "连接异常",
     nextStep: "重新授权；若仍失败请联系系统维护人员。",
+    readOnlyNextStep: "请联系超级管理员重新授权或协调系统维护人员处理。",
     tone: "danger",
   },
 };
@@ -423,7 +431,7 @@ export function JifengConnectionCard({
         </p>
         <p className="min-w-0 leading-6 text-ink">
           <span className="font-medium">下一步：</span>
-          {content.nextStep}
+          {canManage ? content.nextStep : content.readOnlyNextStep}
         </p>
       </div>
 
@@ -432,7 +440,11 @@ export function JifengConnectionCard({
       {canManage ? (
         <ConnectionActions status={connection.status} />
       ) : (
-        <div className="px-4 py-5 sm:px-5">
+        <div
+          aria-label="极风连接权限说明"
+          className="px-4 py-5 sm:px-5"
+          role="note"
+        >
           <p className="font-medium text-ink">只读状态</p>
           <p className="mt-1 text-sm leading-6 text-muted">
             只有超级管理员可以更改授权、资源和自动履约状态。
