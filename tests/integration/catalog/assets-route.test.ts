@@ -288,7 +288,7 @@ describe("catalog asset route", () => {
         );
 
         expect(response.status).toBe(200);
-        expect(response.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+        expect(response.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
         expect(response.headers.get("content-type")).toBe("image/png");
         expect(response.headers.get("x-content-type-options")).toBe("nosniff");
         expect(Buffer.compare(Buffer.from(await response.arrayBuffer()), seeded.bytes)).toBe(0);

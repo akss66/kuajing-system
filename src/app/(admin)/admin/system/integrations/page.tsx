@@ -16,6 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { db } from "@/db/client";
 import { integrationOutbox } from "@/db/schema";
+import { FeishuClient } from "@/integrations/feishu/client";
+import {
+  canWriteFeishuCargo,
+  readFeishuApiBaseUrl,
+  readFeishuConfig,
+} from "@/integrations/feishu/config";
 import {
   confirmCargoMigrationAction,
   createCargoPreflightAction,
@@ -26,7 +32,7 @@ import {
   getLatestCargoMigrationRun,
   getLatestCargoTargetSyncState,
 } from "@/modules/feishu/queries";
-import { canWriteFeishuCargo, readFeishuConfig } from "@/integrations/feishu/config";
+import { discoverFeishuSourceSheets } from "@/modules/feishu/source-reader";
 import { requireAdmin } from "@/modules/identity/guards";
 
 function configured(names: string[]) {
@@ -54,6 +60,46 @@ function safeErrorLabel(errorCode: string | null) {
   return "任务执行未完成，请按原业务路径重试。";
 }
 
+async function loadSourceSheetDiscovery(
+  principalKind: "ADMIN" | "SUPER_ADMIN",
+  feishuConfigured: boolean,
+) {
+  if (principalKind !== "SUPER_ADMIN" || !feishuConfigured) {
+    return {
+      message: null,
+      status: "idle" as const,
+      sourceSheetOptions: [],
+    };
+  }
+
+  const config = readFeishuConfig();
+  const client = new FeishuClient({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    baseUrl: readFeishuApiBaseUrl(),
+  });
+  const discovery = await discoverFeishuSourceSheets({
+    client,
+    config: {
+      sourceWikiToken: config.sourceWikiToken,
+    },
+  });
+
+  if (discovery.status === "ERROR") {
+    return {
+      message: discovery.message,
+      status: "error" as const,
+      sourceSheetOptions: discovery.sheetOptions,
+    };
+  }
+
+  return {
+    message: null,
+    status: "ready" as const,
+    sourceSheetOptions: discovery.sheetOptions,
+  };
+}
+
 export default async function IntegrationsPage() {
   const principal = await requireAdmin();
 
@@ -74,22 +120,24 @@ export default async function IntegrationsPage() {
 
   const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
   const targetConfigured = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
-  const [recent, latestMigrationRun, targetSyncState] = await Promise.all([
-    db
-      .select({
-        eventType: integrationOutbox.eventType,
-        lastErrorCode: integrationOutbox.lastErrorCode,
-        status: integrationOutbox.status,
-        target: integrationOutbox.target,
-        updatedAt: integrationOutbox.updatedAt,
-      })
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.status, "FAILED"))
-      .orderBy(desc(integrationOutbox.updatedAt))
-      .limit(10),
-    getLatestCargoMigrationRun(),
-    getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
-  ]);
+  const [recent, latestMigrationRun, sourceSheetDiscovery, targetSyncState] =
+    await Promise.all([
+      db
+        .select({
+          eventType: integrationOutbox.eventType,
+          lastErrorCode: integrationOutbox.lastErrorCode,
+          status: integrationOutbox.status,
+          target: integrationOutbox.target,
+          updatedAt: integrationOutbox.updatedAt,
+        })
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.status, "FAILED"))
+        .orderBy(desc(integrationOutbox.updatedAt))
+        .limit(10),
+      getLatestCargoMigrationRun(),
+      loadSourceSheetDiscovery(principal.kind, feishuConfigured),
+      getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
+    ]);
 
   const jifengDegraded = recent.some((item) => item.target === "JIFENG");
   const feishuDegraded = recent.some((item) => item.target !== "JIFENG");
@@ -110,7 +158,7 @@ export default async function IntegrationsPage() {
           { href: "/admin/system/health", label: "系统健康" },
           { label: "外部集成" },
         ]}
-        description="仅展示配置状态和脱敏错误摘要，不回显任何密钥、令牌或第三方账号凭据。"
+        description="仅展示配置状态和脱敏错误摘要，不回显任何密钥、令牌或第三方账户凭据。"
         title="外部集成"
       />
 
@@ -209,7 +257,9 @@ export default async function IntegrationsPage() {
                   retryFeishuCargoSyncAction={retryFeishuCargoSyncAction}
                   selectedSourceSheetId={feishuConfig?.sourceSheetId ?? null}
                   sourceConfigured={feishuConfigured}
-                  sourceSheetOptions={[]}
+                  sourceSheetDiscoveryMessage={sourceSheetDiscovery.message}
+                  sourceSheetDiscoveryStatus={sourceSheetDiscovery.status}
+                  sourceSheetOptions={sourceSheetDiscovery.sourceSheetOptions}
                   targetConfigured={targetConfigured}
                   targetSyncState={targetSyncState}
                   testFeishuConnectionAction={testFeishuConnectionAction}

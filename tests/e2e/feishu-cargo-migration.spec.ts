@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import { eq, sql } from "drizzle-orm";
 import sharp from "sharp";
 
+import cargoSourceValues from "@/../tests/fixtures/feishu/cargo-source-values.json" with { type: "json" };
 import { db } from "@/db/client";
 import { seed } from "@/db/seed";
 import {
@@ -65,8 +66,9 @@ class FakeFeishuServer {
   private readonly server = createServer((request, response) => {
     void this.handle(request, response);
   });
-  readonly targetWrites: FakeWriteRecord[] = [];
+
   readonly sourceWrites: FakeWriteRecord[] = [];
+  readonly targetWrites: FakeWriteRecord[] = [];
 
   constructor(
     private readonly dataset: FakeFeishuDataset,
@@ -119,7 +121,10 @@ class FakeFeishuServer {
       return;
     }
 
-    if (method === "GET" && path === `/open-apis/sheets/v3/spreadsheets/${SOURCE_SPREADSHEET_TOKEN}/sheets/query`) {
+    if (
+      method === "GET" &&
+      path === `/open-apis/sheets/v3/spreadsheets/${SOURCE_SPREADSHEET_TOKEN}/sheets/query`
+    ) {
       this.json(response, {
         code: 0,
         data: {
@@ -132,7 +137,10 @@ class FakeFeishuServer {
       return;
     }
 
-    if (method === "GET" && path === `/open-apis/sheets/v3/spreadsheets/${TARGET_SPREADSHEET_TOKEN}/sheets/query`) {
+    if (
+      method === "GET" &&
+      path === `/open-apis/sheets/v3/spreadsheets/${TARGET_SPREADSHEET_TOKEN}/sheets/query`
+    ) {
       this.json(response, {
         code: 0,
         data: {
@@ -272,75 +280,26 @@ async function createImageBuffer(seedValue: number) {
     .toBuffer();
 }
 
-function buildRow(input: {
-  color: string;
-  combination: string;
-  groupKey: string;
-  priceYuan: string;
-  productName: string;
-  productUrl: string;
-  quantity: number;
-  skuCode: string;
-  specification: string;
-  weight: string;
-}) {
-  return [
-    input.groupKey,
-    input.skuCode,
-    {
-      fileToken: `file-token-${input.skuCode}`,
-      text: `Image ${input.skuCode}`,
-    },
-    input.productName,
-    input.priceYuan,
-    String(input.quantity),
-    "可售",
-    input.productUrl,
-    input.specification,
-    input.color,
-    input.combination,
-    input.weight,
-  ];
-}
-
 async function buildValidSourceDataset() {
   const downloads = new Map<string, DownloadRecord>();
-  const values: unknown[][] = [[
-    "序号",
-    "sku",
-    "图片",
-    "名称",
-    "采购价",
-    "总库存",
-    "状态",
-    "链接文字",
-    "规格",
-    "颜色",
-    "组合销售",
-    "重量",
-  ]];
+  const values = structuredClone(cargoSourceValues as unknown[][]);
+  const dataRows = values.slice(1);
 
-  for (let index = 1; index <= 74; index += 1) {
-    const groupNumber = index <= 50 ? index : index - 50;
-    const skuCode = `SKU-${String(index).padStart(3, "0")}`;
-    values.push(
-      buildRow({
-        color: `Color ${index}`,
-        combination: `Combo ${index}`,
-        groupKey: `GROUP-${String(groupNumber).padStart(3, "0")}`,
-        priceYuan: `${10 + index}.50`,
-        productName: index === 1 ? "迁移测试商品 1" : `迁移测试商品 ${groupNumber}`,
-        productUrl: `https://example.test/products/${groupNumber}`,
-        quantity: index % 6 === 0 ? 0 : (index % 9) + 1,
-        skuCode,
-        specification: `Spec ${index}`,
-        weight: `${100 + index}g`,
-      }),
-    );
-    downloads.set(`file-token-${skuCode}`, {
-      bytes: await createImageBuffer(index),
+  for (let index = 0; index < dataRows.length; index += 1) {
+    const row = dataRows[index];
+    const imageCell = row[2];
+    const fileToken =
+      imageCell && typeof imageCell === "object" && "fileToken" in imageCell
+        ? String((imageCell as { fileToken: string }).fileToken)
+        : null;
+    if (!fileToken) {
+      throw new Error(`Expected fixture fileToken at row ${index + 2}`);
+    }
+
+    downloads.set(fileToken, {
+      bytes: await createImageBuffer(index + 1),
       contentType: "image/png",
-      fileName: `${skuCode}.png`,
+      fileName: `${fileToken}.png`,
     });
   }
 
@@ -422,7 +381,10 @@ async function runReadyPreflight(assetDir: string) {
 test.describe.serial("Feishu cargo migration", () => {
   test.setTimeout(180_000);
   let fakeServer: FakeFeishuServer | null = null;
-  const assetDir = resolve(process.cwd(), process.env.CATALOG_ASSET_DIR ?? ".e2e-catalog-assets");
+  const assetDir = resolve(
+    process.cwd(),
+    process.env.CATALOG_ASSET_DIR ?? ".e2e-catalog-assets",
+  );
 
   test.beforeEach(async () => {
     process.env.CATALOG_ASSET_DIR = assetDir;
@@ -444,11 +406,16 @@ test.describe.serial("Feishu cargo migration", () => {
     await expect(page).toHaveURL(/\/admin/);
 
     let drawer = await openFeishuDrawer(page);
-    await drawer.getByRole("button", { name: "开始只读预检" }).click();
     await expect(
-      drawer.getByText("源货盘包含多个工作表，请先选择本次预检的源工作表。"),
+      drawer.getByRole("combobox", { name: "源工作表" }),
     ).toBeVisible();
+    await expect(
+      drawer.getByRole("button", { name: "选择源工作表后开始只读预检" }),
+    ).toHaveJSProperty("disabled", true);
     await drawer.getByRole("combobox", { name: "源工作表" }).selectOption("sheet-source-a");
+    await expect(
+      drawer.getByRole("button", { name: "开始只读预检" }),
+    ).toHaveJSProperty("disabled", false);
     await drawer.getByRole("button", { name: "开始只读预检" }).click();
     await expect
       .poll(async () => {
@@ -463,6 +430,7 @@ test.describe.serial("Feishu cargo migration", () => {
         return latestRun?.status ?? null;
       }, { timeout: 30_000 })
       .toBe("PREFLIGHT_READY");
+
     const [preflightRun] = await db
       .select({ id: feishuCargoMigrationRuns.id })
       .from(feishuCargoMigrationRuns)
@@ -476,15 +444,15 @@ test.describe.serial("Feishu cargo migration", () => {
     await page.reload();
     drawer = await openFeishuDrawer(page);
     await expect(
-      drawer.getByRole("button", { name: "确认迁移 74 个 SKU" }),
+      drawer.getByRole("button", { name: "确认迁移 74 个SKU" }),
     ).toBeVisible();
     await drawer.getByLabel("确认语句").fill("确认迁移74个SKU");
-    await drawer.getByRole("button", { name: "确认迁移 74 个 SKU" }).click();
+    await drawer.getByRole("button", { name: "确认迁移 74 个SKU" }).click();
     const confirmDialog = page.getByRole("alertdialog", {
-      name: "确认导入 74 个 SKU",
+      name: "确认导入 74 个SKU",
     });
     await expect(confirmDialog).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "确认导入 74 个 SKU" }).click();
+    await confirmDialog.getByRole("button", { name: "确认导入 74 个SKU" }).click();
     await expect
       .poll(async () => {
         const [run] = await db
@@ -505,11 +473,11 @@ test.describe.serial("Feishu cargo migration", () => {
     const [assetCountRow] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(catalogAssets);
-    expect(productCountRow?.count).toBe(50);
+    expect(productCountRow?.count).toBe(72);
     expect(skuCountRow?.count).toBe(74);
     expect(assetCountRow?.count).toBe(74);
 
-    await drawer.getByRole("button", { name: "重试目标同步" }).click();
+    await drawer.getByRole("button", { name: "重新同步目标测试表" }).click();
     await expect(
       drawer.getByText("目标测试表同步已加入队列，后台任务会继续重试。"),
     ).toBeVisible();
@@ -552,10 +520,10 @@ test.describe.serial("Feishu cargo migration", () => {
     await page.context().clearCookies();
     await loginThroughUi(page, seededCustomer);
     await expect(page).toHaveURL(/\/portal/);
-    await page.goto("/portal/catalog?q=SKU-001");
+    await page.goto("/portal/catalog?q=TZX-001-1");
 
     const importedRow = page.locator('[data-testid^="catalog-"]:visible').first();
-    await expect(importedRow).toContainText("SKU-001");
+    await expect(importedRow).toContainText("TZX-001-1");
     await expect(importedRow).toContainText("可售");
     const image = importedRow.locator("img").first();
     await expect(image).toBeVisible();
@@ -586,34 +554,48 @@ test.describe.serial("Feishu cargo migration", () => {
     for (const width of [360, 390]) {
       await page.setViewportSize({ width, height: 844 });
       const drawer = await openFeishuDrawer(page);
-      await expect(drawer.getByText("原业务货盘受保护，系统不会写入。")).toBeVisible();
+      await expect(
+        drawer.getByText("原业务货盘受保护，系统不会写入。"),
+      ).toBeVisible();
       await expect(
         drawer.getByRole("button", { name: "验证只读连接" }),
       ).toBeVisible();
       await expect(
-        drawer.getByRole("button", { name: "重试目标同步" }),
+        drawer.getByRole("button", { name: "重新同步目标测试表" }),
       ).toBeVisible();
       await expect(
         drawer.getByRole("button", { name: "验证只读连接" }),
       ).toHaveJSProperty("disabled", false);
       await expect(
-        drawer.getByRole("button", { name: "重试目标同步" }),
+        drawer.getByRole("button", { name: "重新同步目标测试表" }),
       ).toHaveJSProperty("disabled", false);
       await expect(
         drawer.getByRole("button", { name: "开始只读预检" }),
       ).toHaveCount(0);
       await expect(
-        drawer.getByRole("button", { name: "确认迁移 74 个 SKU" }),
+        drawer.getByRole("button", { name: "确认迁移 74 个SKU" }),
       ).toHaveCount(0);
+      await expect(
+        drawer.getByRole("combobox", { name: "源工作表" }),
+      ).toHaveCount(0);
+
+      const detailButtons = drawer.getByRole("button", { name: "查看详情" });
+      await expect(detailButtons.nth(0)).toHaveJSProperty("disabled", false);
+      await expect(detailButtons.nth(1)).toHaveAttribute("aria-expanded", "false");
 
       const readOnlyButtonBox = await drawer
         .getByRole("button", { name: "验证只读连接" })
         .boundingBox();
-      const retryButtonBox = await drawer
-        .getByRole("button", { name: "重试目标同步" })
+      const rerunButtonBox = await drawer
+        .getByRole("button", { name: "重新同步目标测试表" })
+        .boundingBox();
+      const detailsButtonBox = await drawer
+        .getByRole("button", { name: "查看详情" })
+        .first()
         .boundingBox();
       expect(readOnlyButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-      expect(retryButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(rerunButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(detailsButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
       const overflow = await page.evaluate(
         () =>

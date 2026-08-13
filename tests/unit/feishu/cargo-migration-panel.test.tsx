@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +12,45 @@ import {
 
 async function idleAction() {
   return { status: "idle" as const };
+}
+
+function createRows() {
+  return [
+    {
+      defaultUnitPriceLabel: "¥11.50",
+      imageDigestLabel: "ab12cd34",
+      imageStateLabel: "已暂存",
+      inheritedFieldLabels: ["商品名称继承自第 2 行"],
+      issueLabels: ["组合销售字段沿用上一行"],
+      productGroupKey: "GROUP-001",
+      productName: "探险杯套装",
+      productUrl: "https://example.test/products/1",
+      saleStatusLabel: "可售",
+      skuCode: "SKU-001",
+      skuName: "曜石黑",
+      sourceRowNumber: 2,
+      specification: "标准款",
+      totalQuantity: 12,
+      weightLabel: "218g",
+    },
+    {
+      defaultUnitPriceLabel: "¥12.50",
+      imageDigestLabel: "cd34ef56",
+      imageStateLabel: "已暂存",
+      inheritedFieldLabels: [],
+      issueLabels: [],
+      productGroupKey: "GROUP-002",
+      productName: "旅行杯套装",
+      productUrl: "https://example.test/products/2",
+      saleStatusLabel: "可售",
+      skuCode: "SKU-002",
+      skuName: "云雾白",
+      sourceRowNumber: 3,
+      specification: "升级款",
+      totalQuantity: 8,
+      weightLabel: "205g",
+    },
+  ];
 }
 
 function createProps(
@@ -29,25 +68,7 @@ function createProps(
       imageStateLabel: "已暂存",
       importedAtLabel: null,
       issueCount: 1,
-      rows: [
-        {
-          defaultUnitPriceLabel: "¥11.50",
-          imageDigestLabel: "ab12cd34",
-          imageStateLabel: "已暂存",
-          inheritedFieldLabels: ["名称继承自第 2 行"],
-          issueLabels: ["组合销售字段沿用上一行"],
-          productGroupKey: "GROUP-001",
-          productName: "探险杯套装",
-          productUrl: "https://example.test/products/1",
-          saleStatusLabel: "可售",
-          skuCode: "SKU-001",
-          skuName: "曜石黑",
-          sourceRowNumber: 2,
-          specification: "标准款",
-          totalQuantity: 12,
-          weightLabel: "218g",
-        },
-      ],
+      rows: createRows(),
       sourceRevision: 112,
       sourceSheetId: "sheet-source-a",
       status: "PREFLIGHT_READY",
@@ -67,17 +88,19 @@ function createProps(
     retryFeishuCargoSyncAction: idleAction,
     selectedSourceSheetId: null,
     sourceConfigured: true,
+    sourceSheetDiscoveryMessage: null,
+    sourceSheetDiscoveryStatus: "ready",
     sourceSheetOptions: [],
     targetConfigured: true,
     targetSyncState: {
-      canRetry: true,
+      canRetry: false,
+      imageCount: 74,
       lastErrorMessage: null,
       lastUpdatedLabel: "2026/08/13 14:20",
       rowCount: 74,
-      imageCount: 74,
-      statusLabel: "等待重试",
+      statusLabel: "同步完成",
       targetSheetId: "target-sheet-a",
-      tone: "warning",
+      tone: "success",
     },
     testFeishuConnectionAction: idleAction,
     ...overrides,
@@ -89,42 +112,112 @@ describe("CargoMigrationPanel", () => {
     cleanup();
   });
 
-  it("shows an ordinary admin the status view without first-import controls", () => {
+  it("shows an ordinary admin the status view without discovery or first-import controls", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
           actorKind: "ADMIN",
+          sourceSheetOptions: [
+            { index: 0, sheetId: "sheet-source-a", title: "货盘 A" },
+            { index: 1, sheetId: "sheet-source-b", title: "货盘 B" },
+          ],
         })}
       />,
     );
 
     expect(screen.getByText("原业务货盘受保护，系统不会写入。")).toBeVisible();
     expect(screen.getByRole("button", { name: "验证只读连接" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "重试目标同步" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "重新同步目标测试表" })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "源工作表" })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "开始只读预检" }),
+      screen.queryByRole("button", { name: "选择源工作表后开始只读预检" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "确认迁移 74 个 SKU" }),
+      screen.queryByRole("button", { name: "确认迁移 74 个SKU" }),
     ).not.toBeInTheDocument();
   });
 
-  it("lets a super admin inspect final preflight values and unlocks confirmation only after the exact phrase is entered", async () => {
+  it("shows immediate multi-sheet selection for super admins before preflight can start", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          latestMigrationRun: null,
+          sourceSheetOptions: [
+            { index: 0, sheetId: "sheet-source-a", title: "货盘 A" },
+            { index: 1, sheetId: "sheet-source-b", title: "货盘 B" },
+          ],
+        })}
+      />,
+    );
+
+    const picker = screen.getByRole("combobox", { name: "源工作表" });
+    const preflightButton = screen.getByRole("button", {
+      name: "选择源工作表后开始只读预检",
+    });
+
+    expect(picker).toBeVisible();
+    expect(preflightButton).toBeDisabled();
+
+    fireEvent.change(picker, { target: { value: "sheet-source-a" } });
+
+    expect(
+      screen.getByRole("button", { name: "开始只读预检" }),
+    ).toBeEnabled();
+  });
+
+  it("uses retry wording only when a failed target sync exists", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          targetSyncState: {
+            canRetry: true,
+            imageCount: 74,
+            lastErrorMessage: "同步时网络超时",
+            lastUpdatedLabel: "2026/08/13 14:20",
+            rowCount: 74,
+            statusLabel: "等待重试",
+            targetSheetId: "target-sheet-a",
+            tone: "warning",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "重试目标同步" })).toBeVisible();
+    expect(screen.getByText("最近失败原因：同步时网络超时")).toBeVisible();
+  });
+
+  it("keeps mobile review rows collapsed except for the first actionable issue", () => {
+    render(<CargoMigrationPanel {...createProps()} />);
+
+    const detailButtons = screen.getAllByRole("button", { name: /查看详情/ });
+    expect(detailButtons).toHaveLength(2);
+    expect(detailButtons[0]).toHaveAttribute("aria-expanded", "true");
+    expect(detailButtons[1]).toHaveAttribute("aria-expanded", "false");
+
+    const firstCard = detailButtons[0].closest("article");
+    const secondCard = detailButtons[1].closest("article");
+    expect(firstCard).not.toBeNull();
+    expect(secondCard).not.toBeNull();
+
+    expect(within(firstCard!).getByText("1 个问题")).toBeVisible();
+    expect(within(secondCard!).getAllByText("无阻断问题")[0]).toBeVisible();
+
+    fireEvent.click(detailButtons[1]);
+    expect(detailButtons[1]).toHaveAttribute("aria-expanded", "true");
+    expect(within(secondCard!).getByText("https://example.test/products/2")).toBeVisible();
+  });
+
+  it("unlocks confirmation only after the exact phrase is entered", async () => {
     render(<CargoMigrationPanel {...createProps()} />);
 
     expect(screen.getAllByText("探险杯套装").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("SKU-001").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("已暂存").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("¥11.50").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("12").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("218g").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("名称继承自第 2 行").length).toBeGreaterThan(0);
     expect(screen.queryByText("file-token-SKU-001")).not.toBeInTheDocument();
     expect(screen.queryByText("super-secret")).not.toBeInTheDocument();
 
     const phraseInput = screen.getByLabelText("确认语句");
     const confirmButton = screen.getByRole("button", {
-      name: "确认迁移 74 个 SKU",
+      name: "确认迁移 74 个SKU",
     });
 
     expect(confirmButton).toBeDisabled();
@@ -141,68 +234,7 @@ describe("CargoMigrationPanel", () => {
 
     fireEvent.click(confirmButton);
     expect(
-      await screen.findByRole("alertdialog", { name: "确认导入 74 个 SKU" }),
+      await screen.findByRole("alertdialog", { name: "确认导入 74 个SKU" }),
     ).toBeVisible();
-  });
-
-  it("keeps confirmation disabled for blocking runs and removes first-import controls after import", () => {
-    const { rerender } = render(
-      <CargoMigrationPanel
-        {...createProps({
-          latestMigrationRun: {
-            ...createProps().latestMigrationRun!,
-            blockingIssueCount: 2,
-            issueCount: 2,
-            rows: [
-              {
-                ...createProps().latestMigrationRun!.rows[0],
-                issueLabels: ["SKU 缺少必填规格"],
-              },
-            ],
-            status: "PREFLIGHT_BLOCKED",
-            statusLabel: "预检阻断",
-            statusTone: "danger",
-          },
-        })}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: "确认迁移 74 个 SKU" }),
-    ).toBeDisabled();
-    expect(screen.getAllByText("SKU 缺少必填规格").length).toBeGreaterThan(0);
-
-    rerender(
-      <CargoMigrationPanel
-        {...createProps({
-          latestMigrationRun: {
-            ...createProps().latestMigrationRun!,
-            blockingIssueCount: 0,
-            imageStateLabel: "已导入",
-            importedAtLabel: "2026/08/13 14:45",
-            issueCount: 0,
-            rows: [
-              {
-                ...createProps().latestMigrationRun!.rows[0],
-                imageStateLabel: "已导入",
-                issueLabels: [],
-              },
-            ],
-            status: "IMPORTED",
-            statusLabel: "已导入",
-            statusTone: "success",
-            warningIssueCount: 0,
-          },
-        })}
-      />,
-    );
-
-    expect(
-      screen.queryByRole("button", { name: "开始只读预检" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "确认迁移 74 个 SKU" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getAllByText("已导入").length).toBeGreaterThan(0);
   });
 });

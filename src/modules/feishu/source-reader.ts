@@ -40,6 +40,17 @@ export type FeishuSourceSnapshot = {
   values: unknown[][];
 };
 
+export type FeishuSourceSheetDiscovery =
+  | {
+      sheetOptions: FeishuSourceSheet[];
+      status: "READY";
+    }
+  | {
+      message: string;
+      sheetOptions: FeishuSourceSheet[];
+      status: "ERROR";
+    };
+
 type ResolveSourceSheetResult =
   | FeishuSourceSelectionRequired
   | {
@@ -50,6 +61,40 @@ type ResolveSourceSheetResult =
 
 function hashSpreadsheetToken(spreadsheetToken: string) {
   return createHash("sha256").update(spreadsheetToken).digest("hex");
+}
+
+export async function discoverFeishuSourceSheets(input: {
+  client: FeishuSourcePort;
+  config: Pick<FeishuIntegrationConfig, "sourceWikiToken">;
+}): Promise<FeishuSourceSheetDiscovery> {
+  try {
+    const { spreadsheetToken } = await input.client.resolveWikiSpreadsheet(
+      input.config.sourceWikiToken,
+    );
+    const sheetOptions = await input.client.listSheets(spreadsheetToken);
+
+    if (sheetOptions.length === 0) {
+      return {
+        message: "源货盘可访问，但未找到任何工作表。",
+        sheetOptions: [],
+        status: "ERROR",
+      };
+    }
+
+    return {
+      sheetOptions,
+      status: "READY",
+    };
+  } catch (error) {
+    return {
+      message:
+        error instanceof Error
+          ? error.message
+          : "暂时无法读取源工作表列表，请先验证只读连接后重试。",
+      sheetOptions: [],
+      status: "ERROR",
+    };
+  }
 }
 
 export async function resolveFeishuSourceSheet(input: {

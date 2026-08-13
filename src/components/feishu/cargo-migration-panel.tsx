@@ -5,7 +5,10 @@ import { useActionState, useMemo, useRef, useState } from "react";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ActionForm } from "@/components/forms/action-form";
 import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import {
+  WorkspacePanel,
+  WorkspacePanelHeader,
+} from "@/components/layout/workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CargoMigrationActionState } from "@/modules/feishu/actions";
@@ -13,7 +16,11 @@ import type {
   CargoMigrationPanelRun,
   CargoMigrationTargetSyncState,
 } from "@/modules/feishu/queries";
-import { INITIAL_ACTION_STATE, type ActionState, type ManagedAction } from "@/shared/action-state";
+import {
+  INITIAL_ACTION_STATE,
+  type ActionState,
+  type ManagedAction,
+} from "@/shared/action-state";
 
 import { CargoPreflightTable } from "./cargo-preflight-table";
 
@@ -39,6 +46,8 @@ export type CargoMigrationPanelProps = {
   retryFeishuCargoSyncAction: ManagedAction;
   selectedSourceSheetId: string | null;
   sourceConfigured: boolean;
+  sourceSheetDiscoveryMessage: string | null;
+  sourceSheetDiscoveryStatus: "error" | "idle" | "ready";
   sourceSheetOptions: SourceSheetOption[];
   targetConfigured: boolean;
   targetSyncState: CargoMigrationTargetSyncState;
@@ -88,6 +97,8 @@ export function CargoMigrationPanel({
   retryFeishuCargoSyncAction,
   selectedSourceSheetId,
   sourceConfigured,
+  sourceSheetDiscoveryMessage,
+  sourceSheetDiscoveryStatus,
   sourceSheetOptions,
   targetConfigured,
   targetSyncState,
@@ -97,7 +108,10 @@ export function CargoMigrationPanel({
     createCargoPreflightAction,
     INITIAL_ACTION_STATE as CargoMigrationActionState,
   );
-  const [selectedSheetId, setSelectedSheetId] = useState(selectedSourceSheetId ?? "");
+  const [selectedSheetId, setSelectedSheetId] = useState(() => {
+    if (selectedSourceSheetId) return selectedSourceSheetId;
+    return sourceSheetOptions.length === 1 ? sourceSheetOptions[0].sheetId : "";
+  });
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const confirmInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,14 +122,28 @@ export function CargoMigrationPanel({
         : sourceSheetOptions,
     [preflightState.availableSourceSheets, sourceSheetOptions],
   );
+  const hasMultipleSourceSheets = availableSourceSheets.length > 1;
   const effectiveSelectedSheetId =
-    selectedSheetId || availableSourceSheets[0]?.sheetId || "";
-
+    selectedSheetId ||
+    selectedSourceSheetId ||
+    (availableSourceSheets.length === 1 ? availableSourceSheets[0].sheetId : "");
+  const imported = latestMigrationRun?.status === "IMPORTED";
   const skuCount = latestMigrationRun?.summary.skuCount ?? 0;
   const expectedPhrase = `确认迁移${skuCount}个SKU`;
-  const imported = latestMigrationRun?.status === "IMPORTED";
+  const sourceDiscoveryFailed =
+    sourceSheetDiscoveryStatus === "error" && !effectiveSelectedSheetId;
+  const requiresSourceSelection =
+    actorKind === "SUPER_ADMIN" &&
+    !selectedSourceSheetId &&
+    hasMultipleSourceSheets &&
+    !selectedSheetId;
   const canCreatePreflight =
-    actorKind === "SUPER_ADMIN" && !imported && sourceConfigured;
+    actorKind === "SUPER_ADMIN" &&
+    !imported &&
+    sourceConfigured &&
+    !sourceDiscoveryFailed &&
+    !requiresSourceSelection &&
+    Boolean(effectiveSelectedSheetId);
   const canConfirm =
     actorKind === "SUPER_ADMIN" &&
     latestMigrationRun?.status === "PREFLIGHT_READY" &&
@@ -123,6 +151,18 @@ export function CargoMigrationPanel({
   const confirmAction =
     confirmCargoMigrationAction ??
     (async () => INITIAL_ACTION_STATE);
+  const syncSubmitLabel = targetSyncState.canRetry
+    ? "重试目标同步"
+    : "重新同步目标测试表";
+  const preflightSubmitLabel = preflightPending
+    ? "正在执行只读预检"
+    : !sourceConfigured
+      ? "源货盘未配置"
+      : sourceDiscoveryFailed
+        ? "先恢复源工作表读取"
+        : requiresSourceSelection
+          ? "选择源工作表后开始只读预检"
+          : "开始只读预检";
 
   return (
     <div className="space-y-4">
@@ -185,9 +225,7 @@ export function CargoMigrationPanel({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge
-              className={badgeToneClass(
-                latestMigrationRun?.statusTone ?? "default",
-              )}
+              className={badgeToneClass(latestMigrationRun?.statusTone ?? "default")}
               variant="secondary"
             >
               {latestMigrationRun?.statusLabel ?? "尚无预检记录"}
@@ -214,7 +252,7 @@ export function CargoMigrationPanel({
 
       <WorkspacePanel>
         <WorkspacePanelHeader
-          description="连接验证只读执行，目标测试表重试只影响派生同步。"
+          description="连接验证只读执行；目标测试表重试或重跑只影响派生同步。"
           title="连接与目标同步"
         />
         <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-2">
@@ -223,25 +261,47 @@ export function CargoMigrationPanel({
             className="space-y-3"
             submitLabel="验证只读连接"
           >
-            <p className="text-sm leading-6 text-muted-foreground">
-              {readOnlyConnectionMessage}
-            </p>
+            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>{readOnlyConnectionMessage}</p>
+              {actorKind === "SUPER_ADMIN" && sourceSheetDiscoveryMessage ? (
+                <p
+                  className={cn(
+                    "rounded-[var(--radius-surface)] border px-3 py-2 text-sm",
+                    sourceSheetDiscoveryStatus === "error"
+                      ? "border-warning/30 bg-warning/5 text-foreground"
+                      : "border-border bg-muted/40 text-foreground",
+                  )}
+                >
+                  {sourceSheetDiscoveryMessage}
+                </p>
+              ) : null}
+            </div>
           </ActionForm>
+
           <ActionForm
             action={retryFeishuCargoSyncAction}
             className="space-y-3"
-            submitLabel="重试目标同步"
+            submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
+            submitLabel={syncSubmitLabel}
           >
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>
                 {targetConfigured
-                  ? "仅向目标测试表重建同步结果，不会反向改动源业务货盘。"
+                  ? targetSyncState.canRetry
+                    ? "仅重试目标测试表的失败同步，不会反向改动源业务货盘。"
+                    : "按需重新同步目标测试表，不会反向改动源业务货盘。"
                   : "目标测试表尚未配置，当前只能保留只读预检结果。"}
               </p>
+              {targetSyncState.rowCount != null ? (
+                <p>最近同步行数：{targetSyncState.rowCount}</p>
+              ) : null}
+              {targetSyncState.imageCount != null ? (
+                <p>最近同步图片数：{targetSyncState.imageCount}</p>
+              ) : null}
               {targetSyncState.lastUpdatedLabel ? (
                 <p>最近同步时间：{targetSyncState.lastUpdatedLabel}</p>
               ) : null}
-              {targetSyncState.lastErrorMessage ? (
+              {targetSyncState.canRetry && targetSyncState.lastErrorMessage ? (
                 <p>最近失败原因：{targetSyncState.lastErrorMessage}</p>
               ) : null}
             </div>
@@ -266,6 +326,9 @@ export function CargoMigrationPanel({
                     onChange={(event) => setSelectedSheetId(event.target.value)}
                     value={effectiveSelectedSheetId}
                   >
+                    <option disabled={hasMultipleSourceSheets} value="">
+                      {hasMultipleSourceSheets ? "请选择源工作表" : "使用唯一源工作表"}
+                    </option>
                     {availableSourceSheets.map((sheet) => (
                       <option key={sheet.sheetId} value={sheet.sheetId}>
                         {sheet.title}
@@ -274,7 +337,20 @@ export function CargoMigrationPanel({
                   </select>
                 </label>
               ) : effectiveSelectedSheetId ? (
-                <input name="sourceSheetId" type="hidden" value={effectiveSelectedSheetId} />
+                <input
+                  name="sourceSheetId"
+                  type="hidden"
+                  value={effectiveSelectedSheetId}
+                />
+              ) : null}
+
+              {sourceSheetDiscoveryStatus === "error" && sourceSheetDiscoveryMessage ? (
+                <div
+                  className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-foreground"
+                  role="status"
+                >
+                  {sourceSheetDiscoveryMessage}
+                </div>
               ) : null}
 
               {preflightState.message ? (
@@ -294,7 +370,7 @@ export function CargoMigrationPanel({
                 disabled={!canCreatePreflight || preflightPending}
                 type="submit"
               >
-                {preflightPending ? "正在执行只读预检" : "开始只读预检"}
+                {preflightSubmitLabel}
               </button>
             </form>
 
@@ -303,14 +379,13 @@ export function CargoMigrationPanel({
                 action={confirmAction}
                 className="space-y-4"
                 confirmDescription="确认后会把预检通过的首批商品、SKU 和图片正式写入系统。"
-                confirmLabel={`确认导入 ${skuCount} 个 SKU`}
-                confirmTitle={`确认导入 ${skuCount} 个 SKU`}
+                confirmLabel={`确认导入 ${skuCount} 个SKU`}
+                confirmTitle={`确认导入 ${skuCount} 个SKU`}
                 disabled={!canConfirm || confirmationPhrase !== expectedPhrase}
                 onErrorFocus={() => confirmInputRef.current?.focus()}
-                submitLabel={`确认迁移 ${skuCount} 个 SKU`}
+                submitLabel={`确认迁移 ${skuCount} 个SKU`}
                 variant="destructive"
               >
-                <input name="expectedSkuCount" type="hidden" value={String(skuCount)} />
                 <input name="runId" type="hidden" value={latestMigrationRun.id} />
                 <label className="grid gap-2 text-sm font-medium text-foreground">
                   确认语句

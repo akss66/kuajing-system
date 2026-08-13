@@ -14,10 +14,9 @@ import {
 import { requireAdmin, requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
-import {
-  createFeishuCargoMigrationService,
-} from "./migration-service";
+import { createFeishuCargoMigrationService } from "./migration-service";
 import { enqueueCargoSyncEvent } from "./outbox";
+import { findCargoMigrationRunConfirmationSummary } from "./queries";
 import type { FeishuSourceSheet } from "./source-reader";
 
 const INTEGRATIONS_PATH = "/admin/system/integrations";
@@ -49,7 +48,7 @@ function mapMigrationErrorMessage(error: KnownMigrationError) {
     case "MIGRATION_NOT_FOUND":
       return "未找到预检记录，请重新执行只读预检。";
     case "SOURCE_STALE":
-      return "源货盘已变化，请重新执行只读预检。";
+      return "源货盘已经变化，请重新执行只读预检。";
     default:
       return error.message;
   }
@@ -134,7 +133,9 @@ export async function testFeishuConnectionAction(
   } catch (error) {
     return {
       message:
-        error instanceof Error ? error.message : "飞书连接验证失败，请稍后重试。",
+        error instanceof Error
+          ? error.message
+          : "飞书连接验证失败，请稍后重试。",
       status: "error",
     };
   }
@@ -207,14 +208,25 @@ export async function confirmCargoMigrationAction(
   void _previousState;
   const actor = await requireSuperAdmin();
 
-  const expectedSkuCount = Number.parseInt(
-    String(formData.get("expectedSkuCount") ?? ""),
-    10,
-  );
+  const runId = String(formData.get("runId") ?? "").trim();
+  const runSummary = runId
+    ? await findCargoMigrationRunConfirmationSummary(runId)
+    : null;
+  if (
+    !runSummary ||
+    runSummary.status !== "PREFLIGHT_READY" ||
+    runSummary.blockingIssueCount > 0
+  ) {
+    return {
+      message: "当前预检记录不可确认，请重新执行只读预检。",
+      status: "error",
+    };
+  }
+
   const confirmationPhrase = String(
     formData.get("confirmationPhrase") ?? "",
   ).trim();
-  const expectedPhrase = `确认迁移${expectedSkuCount}个SKU`;
+  const expectedPhrase = `确认迁移${runSummary.skuCount}个SKU`;
   if (confirmationPhrase !== expectedPhrase) {
     return {
       fieldErrors: {
@@ -224,7 +236,6 @@ export async function confirmCargoMigrationAction(
     };
   }
 
-  const runId = String(formData.get("runId") ?? "").trim();
   try {
     const { client, config } = createFeishuClient();
     const service = createFeishuCargoMigrationService();
@@ -239,7 +250,7 @@ export async function confirmCargoMigrationAction(
     });
     revalidatePath(INTEGRATIONS_PATH);
     return {
-      message: `迁移已提交：${result.productCount} 个商品、${result.skuCount} 个 SKU、${result.imageCount} 张图片已经导入系统。`,
+      message: `迁移已提交：${result.productCount} 个商品、${result.skuCount} 个SKU、${result.imageCount} 张图片已经导入系统。`,
       status: "success",
     };
   } catch (error) {

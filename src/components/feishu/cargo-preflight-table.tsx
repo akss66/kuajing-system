@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { Badge } from "@/components/ui/badge";
-
+import { cn } from "@/lib/utils";
 import type { CargoMigrationPanelRow } from "@/modules/feishu/queries";
 
 function toneClass(issueCount: number) {
@@ -40,80 +41,140 @@ export function CargoPreflightTable({
 }: {
   rows: CargoMigrationPanelRow[];
 }) {
+  const firstActionableKey = rows.find((row) => row.issueLabels.length > 0)
+    ? `${rows.find((row) => row.issueLabels.length > 0)!.sourceRowNumber}-${rows.find((row) => row.issueLabels.length > 0)!.skuCode}`
+    : null;
+  const [expandedRowKeys, setExpandedRowKeys] = useState<Set<string>>(
+    () => new Set(firstActionableKey ? [firstActionableKey] : []),
+  );
+
   return (
     <div className="space-y-4">
       <div className="space-y-3 md:hidden">
-        {rows.map((row) => (
-          <article
-            className="rounded-[var(--radius-surface)] border border-border bg-background px-4 py-4"
-            key={`${row.sourceRowNumber}-${row.skuCode}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">
-                  {row.productName}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  第 {row.sourceRowNumber} 行 · {row.skuCode}
-                </p>
+        {rows.map((row) => {
+          const rowKey = `${row.sourceRowNumber}-${row.skuCode}`;
+          const expanded = expandedRowKeys.has(rowKey);
+          const issueSummary =
+            row.issueLabels.length > 0 ? `${row.issueLabels.length} 个问题` : "无阻断问题";
+          const detailsId = `cargo-row-details-${rowKey}`;
+
+          return (
+            <article
+              className="rounded-[var(--radius-surface)] border border-border bg-background"
+              key={rowKey}
+            >
+              <div className="flex items-start justify-between gap-3 px-4 py-4">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">
+                    {row.productName}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    第 {row.sourceRowNumber} 行 · {row.skuCode}
+                  </p>
+                </div>
+                <Badge className={toneClass(row.issueLabels.length)} variant="secondary">
+                  {row.issueLabels.length > 0 ? "需处理" : row.imageStateLabel}
+                </Badge>
               </div>
-              <Badge className={toneClass(row.issueLabels.length)} variant="secondary">
-                {row.issueLabels.length > 0 ? "需处理" : row.imageStateLabel}
-              </Badge>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">商品分组</p>
-                <p className="mt-1 break-all text-foreground">{row.productGroupKey}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">价格</p>
-                <p className="mt-1 text-foreground">{row.defaultUnitPriceLabel}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">库存</p>
-                <p className="mt-1 text-foreground">{row.totalQuantity}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">重量</p>
-                <p className="mt-1 text-foreground">{row.weightLabel}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">规格</p>
-                <p className="mt-1 text-foreground">{row.specification}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">状态</p>
-                <p className="mt-1 text-foreground">{row.saleStatusLabel}</p>
-              </div>
-            </div>
-            <div className="mt-4 space-y-3">
-              <div>
-                <p className="text-xs text-muted-foreground">链接</p>
-                <Link
-                  className="mt-1 block break-all text-sm text-primary underline-offset-4 hover:underline"
-                  href={row.productUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {row.productUrl}
-                </Link>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">继承字段</p>
-                <div className="mt-1">
-                  <CompactList emptyLabel="无继承字段" items={row.inheritedFieldLabels} />
+
+              <div className="grid grid-cols-3 gap-3 border-t border-border px-4 py-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">问题</p>
+                  <p className="mt-1 text-foreground">{issueSummary}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">库存</p>
+                  <p className="mt-1 text-foreground">{row.totalQuantity}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">图片</p>
+                  <p className="mt-1 text-foreground">{row.imageStateLabel}</p>
                 </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">问题</p>
-                <div className="mt-1">
-                  <CompactList emptyLabel="无阻断问题" items={row.issueLabels} />
+
+              <button
+                aria-controls={detailsId}
+                aria-expanded={expanded}
+                className="flex min-h-11 w-full items-center justify-between border-t border-border px-4 py-3 text-left text-sm font-medium text-foreground"
+                onClick={() =>
+                  setExpandedRowKeys((current) => {
+                    const next = new Set(current);
+                    if (next.has(rowKey)) {
+                      next.delete(rowKey);
+                    } else {
+                      next.add(rowKey);
+                    }
+                    return next;
+                  })
+                }
+                type="button"
+              >
+                <span>查看详情</span>
+                <span className="text-xs text-muted-foreground">
+                  {expanded ? "收起" : "展开"}
+                </span>
+              </button>
+
+              <div
+                className={cn(
+                  "space-y-3 border-t border-border px-4 py-4",
+                  expanded ? "block" : "hidden",
+                )}
+                id={detailsId}
+              >
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">商品分组</p>
+                    <p className="mt-1 break-all text-foreground">{row.productGroupKey}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">价格</p>
+                    <p className="mt-1 text-foreground">{row.defaultUnitPriceLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">规格</p>
+                    <p className="mt-1 text-foreground">{row.specification}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">重量</p>
+                    <p className="mt-1 text-foreground">{row.weightLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">状态</p>
+                    <p className="mt-1 text-foreground">{row.saleStatusLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">图片摘要</p>
+                    <p className="mt-1 text-foreground">{row.imageDigestLabel}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">链接</p>
+                  <Link
+                    className="mt-1 block break-all text-sm text-primary underline-offset-4 hover:underline"
+                    href={row.productUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {row.productUrl}
+                  </Link>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">继承字段</p>
+                  <div className="mt-1">
+                    <CompactList emptyLabel="无继承字段" items={row.inheritedFieldLabels} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">问题</p>
+                  <div className="mt-1">
+                    <CompactList emptyLabel="无阻断问题" items={row.issueLabels} />
+                  </div>
                 </div>
               </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       <div className="hidden md:block">

@@ -142,6 +142,20 @@ export type CargoMigrationPanelRun = {
   warningIssueCount: number;
 };
 
+export type CargoMigrationRunConfirmationSummary = {
+  blockingIssueCount: number;
+  runId: string;
+  skuCount: number;
+  status:
+    | "FAILED"
+    | "IMPORTED"
+    | "IMPORTING"
+    | "PREFLIGHT_BLOCKED"
+    | "PREFLIGHT_READY"
+    | "PREFLIGHT_RUNNING"
+    | "STALE";
+};
+
 export type CargoMigrationTargetSyncState = {
   canRetry: boolean;
   imageCount: number | null;
@@ -218,6 +232,33 @@ export async function findMigrationRun(
     .where(eq(feishuCargoMigrationRuns.id, runId))
     .limit(1);
   return run ?? null;
+}
+
+export async function findCargoMigrationRunConfirmationSummary(runId: string) {
+  const [run] = await db
+    .select({
+      id: feishuCargoMigrationRuns.id,
+      issuesJson: feishuCargoMigrationRuns.issuesJson,
+      status: feishuCargoMigrationRuns.status,
+      summaryJson: feishuCargoMigrationRuns.summaryJson,
+    })
+    .from(feishuCargoMigrationRuns)
+    .where(eq(feishuCargoMigrationRuns.id, runId))
+    .limit(1);
+  if (!run) {
+    return null;
+  }
+
+  const issues = run.issuesJson as MigrationIssue[];
+  const summary = run.summaryJson as MigrationSummary;
+
+  return {
+    blockingIssueCount: issues.filter((issue) => issue.severity === "BLOCKING")
+      .length,
+    runId: run.id,
+    skuCount: summary.skuCount,
+    status: run.status,
+  } satisfies CargoMigrationRunConfirmationSummary;
 }
 
 export async function importedMigrationExists(
@@ -324,7 +365,7 @@ export async function getLatestCargoTargetSyncState(targetSheetId?: string | nul
 
   if (!event) {
     return {
-      canRetry: true,
+      canRetry: false,
       imageCount: null,
       lastErrorMessage: null,
       lastUpdatedLabel: null,
@@ -344,7 +385,7 @@ export async function getLatestCargoTargetSyncState(targetSheetId?: string | nul
     | undefined;
 
   return {
-    canRetry: true,
+    canRetry: event.status === "FAILED",
     imageCount: payload?.imageCount ?? null,
     lastErrorMessage: event.lastErrorMessage,
     lastUpdatedLabel: formatDateTime(event.updatedAt),

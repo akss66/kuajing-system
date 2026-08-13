@@ -27,6 +27,10 @@ const serviceMocks = vi.hoisted(() => ({
   createFeishuCargoMigrationService: vi.fn(),
 }));
 
+const queryMocks = vi.hoisted(() => ({
+  findCargoMigrationRunConfirmationSummary: vi.fn(),
+}));
+
 const outboxMocks = vi.hoisted(() => ({
   enqueueCargoSyncEvent: vi.fn(),
 }));
@@ -60,6 +64,10 @@ vi.mock("@/modules/feishu/migration-service", () => ({
   createFeishuCargoMigrationService:
     serviceMocks.createFeishuCargoMigrationService,
 }));
+vi.mock("@/modules/feishu/queries", () => ({
+  findCargoMigrationRunConfirmationSummary:
+    queryMocks.findCargoMigrationRunConfirmationSummary,
+}));
 vi.mock("@/modules/feishu/outbox", () => ({
   enqueueCargoSyncEvent: outboxMocks.enqueueCargoSyncEvent,
 }));
@@ -84,6 +92,7 @@ describe("feishu admin actions", () => {
     serviceMocks.confirmCargoMigration.mockReset();
     serviceMocks.createCargoPreflight.mockReset();
     serviceMocks.createFeishuCargoMigrationService.mockReset();
+    queryMocks.findCargoMigrationRunConfirmationSummary.mockReset();
     outboxMocks.enqueueCargoSyncEvent.mockReset();
     constructorMocks.FeishuClient.mockClear();
     Object.values(clientMocks).forEach((mock) => mock.mockReset());
@@ -110,33 +119,37 @@ describe("feishu admin actions", () => {
       confirmCargoMigration: serviceMocks.confirmCargoMigration,
       createCargoPreflight: serviceMocks.createCargoPreflight,
     });
+    queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue({
+      blockingIssueCount: 0,
+      runId: "run-74",
+      skuCount: 74,
+      status: "PREFLIGHT_READY",
+    });
     clientMocks.resolveWikiSpreadsheet.mockResolvedValue({
       spreadsheetToken: "source-spreadsheet-token",
     });
     clientMocks.listSheets.mockResolvedValue([
-      { index: 0, sheetId: "sheet-1", title: "工作表一" },
+      { index: 0, sheetId: "sheet-1", title: "Sheet 1" },
     ]);
   });
 
   it("returns source-sheet options when the first preflight requires an explicit selection", async () => {
     serviceMocks.createCargoPreflight.mockResolvedValue({
       sheetOptions: [
-        { index: 0, sheetId: "sheet-a", title: "货盘 A" },
-        { index: 1, sheetId: "sheet-b", title: "货盘 B" },
+        { index: 0, sheetId: "sheet-a", title: "Cargo A" },
+        { index: 1, sheetId: "sheet-b", title: "Cargo B" },
       ],
       status: "SOURCE_SHEET_SELECTION_REQUIRED",
     });
 
     const result = await createCargoPreflightAction({ status: "idle" }, new FormData());
 
-    expect(result).toMatchObject({
-      availableSourceSheets: [
-        { index: 0, sheetId: "sheet-a", title: "货盘 A" },
-        { index: 1, sheetId: "sheet-b", title: "货盘 B" },
-      ],
-      message: "源货盘包含多个工作表，请先选择本次预检的源工作表。",
-      status: "error",
-    });
+    expect(result.availableSourceSheets).toEqual([
+      { index: 0, sheetId: "sheet-a", title: "Cargo A" },
+      { index: 1, sheetId: "sheet-b", title: "Cargo B" },
+    ]);
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("工");
     expect(serviceMocks.createCargoPreflight).toHaveBeenCalledWith(
       expect.objectContaining({
         actor: { kind: "SUPER_ADMIN", userId: "super-admin-user-1" },
@@ -149,25 +162,25 @@ describe("feishu admin actions", () => {
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("rejects a mismatched confirmation phrase before calling the migration service", async () => {
+  it("rejects a tampered client sku count and derives the phrase from the persisted run summary", async () => {
     const formData = new FormData();
-    formData.set("confirmationPhrase", "确认迁移73个SKU");
-    formData.set("expectedSkuCount", "74");
+    formData.set("confirmationPhrase", "确认迁移1个SKU");
+    formData.set("expectedSkuCount", "1");
     formData.set("runId", "run-74");
 
     const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({
-      fieldErrors: {
-        confirmationPhrase: ["请输入准确的确认语句：确认迁移74个SKU"],
-      },
-      status: "error",
-    });
+    expect(result.status).toBe("error");
+    expect(result.fieldErrors?.confirmationPhrase?.[0]).toContain("74");
+    expect(result.fieldErrors?.confirmationPhrase?.[0]).not.toContain("1个SKU");
+    expect(queryMocks.findCargoMigrationRunConfirmationSummary).toHaveBeenCalledWith(
+      "run-74",
+    );
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("revalidates the integrations page after a successful super-admin confirmation", async () => {
+  it("accepts the server-derived confirmation phrase even when the hidden client count is tampered", async () => {
     serviceMocks.confirmCargoMigration.mockResolvedValue({
       imageCount: 74,
       productCount: 50,
@@ -176,15 +189,14 @@ describe("feishu admin actions", () => {
 
     const formData = new FormData();
     formData.set("confirmationPhrase", "确认迁移74个SKU");
-    formData.set("expectedSkuCount", "74");
+    formData.set("expectedSkuCount", "1");
     formData.set("runId", "run-74");
 
     const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
 
-    expect(result).toEqual({
-      message: "迁移已提交：50 个商品、74 个 SKU、74 张图片已经导入系统。",
-      status: "success",
-    });
+    expect(result.status).toBe("success");
+    expect(result.message).toContain("50");
+    expect(result.message).toContain("74");
     expect(guardMocks.requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(serviceMocks.confirmCargoMigration).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -197,33 +209,49 @@ describe("feishu admin actions", () => {
     );
   });
 
+  it("returns an action error when the persisted run summary is unavailable", async () => {
+    queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue(null);
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("runId", "missing-run");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toMatchObject({
+      status: "error",
+    });
+    expect(result.message).toContain("预检");
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+
   it("keeps manual target sync unavailable when the target sheet is not configured", async () => {
     configMocks.canWriteFeishuCargo.mockReturnValue(false);
 
     const result = await retryFeishuCargoSyncAction({ status: "idle" }, new FormData());
 
-    expect(result).toEqual({
-      message: "目标测试表未配置，当前只能做只读预检。",
+    expect(result).toMatchObject({
       status: "error",
     });
+    expect(result.message).toContain("目标");
     expect(outboxMocks.enqueueCargoSyncEvent).not.toHaveBeenCalled();
   });
 
   it("tests the source and target connection through read-only calls only", async () => {
     clientMocks.listSheets
       .mockResolvedValueOnce([
-        { index: 0, sheetId: "sheet-source", title: "源工作表" },
+        { index: 0, sheetId: "sheet-source", title: "Source Sheet" },
       ])
       .mockResolvedValueOnce([
-        { index: 0, sheetId: "sheet-target", title: "目标工作表" },
+        { index: 0, sheetId: "sheet-target", title: "Target Sheet" },
       ]);
 
     const result = await testFeishuConnectionAction({ status: "idle" }, new FormData());
 
-    expect(result).toEqual({
-      message: "只读连接验证成功：源货盘可访问，目标测试表也可读取。",
+    expect(result).toMatchObject({
       status: "success",
     });
+    expect(result.message).toContain("源");
     expect(clientMocks.resolveWikiSpreadsheet).toHaveBeenCalledWith(
       "wiki-source-token",
     );

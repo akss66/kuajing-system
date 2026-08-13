@@ -70,7 +70,7 @@ export async function GET(
     const opened = await openCatalogAsset(asset.storageKey);
     return new Response(Buffer.from(opened.bytes), {
       headers: {
-        "Cache-Control": "private, max-age=31536000, immutable",
+        "Cache-Control": "private, max-age=0, must-revalidate",
         "Content-Length": String(opened.bytes.byteLength),
         "Content-Type": opened.contentType,
         "X-Content-Type-Options": "nosniff",
