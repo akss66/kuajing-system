@@ -141,6 +141,43 @@ class CatalogAssetConflictError extends CatalogAssetError {
   }
 }
 
+function createSanitizedCleanupError(
+  code:
+    | "CATALOG_ASSET_CLEANUP_HOOK_FAILED"
+    | "CATALOG_ASSET_CLEANUP_UNLINK_FAILED"
+    | "CATALOG_ASSET_CLEANUP_SYNC_FAILED",
+) {
+  const messageByCode = {
+    CATALOG_ASSET_CLEANUP_HOOK_FAILED: "catalog asset cleanup hook failed",
+    CATALOG_ASSET_CLEANUP_UNLINK_FAILED: "catalog asset cleanup unlink failed",
+    CATALOG_ASSET_CLEANUP_SYNC_FAILED: "catalog asset cleanup sync failed",
+  } as const;
+  const error = new Error(messageByCode[code]);
+  error.name = "CatalogAssetCleanupError";
+  Object.defineProperty(error, "code", {
+    value: code,
+    enumerable: true,
+  });
+  return error;
+}
+
+function attachCleanupFailures(error: unknown, cleanupErrors: Error[]) {
+  if (cleanupErrors.length === 0) {
+    return error;
+  }
+
+  const cleanupCause = new AggregateError(cleanupErrors, "catalog asset cleanup failed");
+  if (error instanceof Error) {
+    Object.defineProperty(error, "cause", {
+      value: cleanupCause,
+      configurable: true,
+    });
+    return error;
+  }
+
+  return new Error("catalog asset operation failed", { cause: cleanupCause });
+}
+
 function createStagingTempFileName(createdAtMs: number) {
   return `.catalog-asset-stage-${createdAtMs}-${crypto.randomUUID()}.tmp`;
 }
@@ -419,6 +456,41 @@ async function safeUnlinkOwnedPath(path: string, expectedIdentity: FileIdentity 
   return true;
 }
 
+async function cleanupOwnedPathOnFailure(
+  path: string,
+  ownedIdentity: FileIdentity | null,
+  options: ExclusiveWriteCleanupOptions,
+): Promise<Error[]> {
+  if (!ownedIdentity) {
+    return [];
+  }
+
+  const cleanupErrors: Error[] = [];
+
+  try {
+    await options.onCleanup?.({ targetPath: path });
+  } catch {
+    cleanupErrors.push(createSanitizedCleanupError("CATALOG_ASSET_CLEANUP_HOOK_FAILED"));
+  }
+
+  let removedOwnedPath = false;
+  try {
+    removedOwnedPath = await safeUnlinkOwnedPath(path, ownedIdentity);
+  } catch {
+    cleanupErrors.push(createSanitizedCleanupError("CATALOG_ASSET_CLEANUP_UNLINK_FAILED"));
+  }
+
+  if (removedOwnedPath) {
+    try {
+      await syncDirectory(options.directoryPath, options.dependencies, "cleanup");
+    } catch {
+      cleanupErrors.push(createSanitizedCleanupError("CATALOG_ASSET_CLEANUP_SYNC_FAILED"));
+    }
+  }
+
+  return cleanupErrors;
+}
+
 async function validateImageBytes(
   bytes: Uint8Array,
   limits: Pick<StorageDependencies, "maxFileBytes" | "maxPixelCount">,
@@ -527,18 +599,11 @@ async function writeExclusiveFile(
     await options?.assertCanContinue?.();
   } catch (error) {
     await safeClose(handle);
-    if (ownedIdentity && options?.cleanupOnFailure) {
-      await options.cleanupOnFailure.onCleanup?.({ targetPath: path });
-      const removedOwnedPath = await safeUnlinkOwnedPath(path, ownedIdentity);
-      if (removedOwnedPath) {
-        await syncDirectory(
-          options.cleanupOnFailure.directoryPath,
-          options.cleanupOnFailure.dependencies,
-          "cleanup",
-        );
-      }
-    }
-    throw error;
+    const cleanupErrors =
+      ownedIdentity && options?.cleanupOnFailure
+        ? await cleanupOwnedPathOnFailure(path, ownedIdentity, options.cleanupOnFailure)
+        : [];
+    throw attachCleanupFailures(error, cleanupErrors);
   }
   await safeClose(handle);
   return {
@@ -747,6 +812,8 @@ async function publishBytesAtomically(
     options.expectedDigest ? "storage key" : "temporary asset path",
   );
 
+  let operationError: unknown = null;
+
   try {
     await options.assertCanContinue?.();
     await writeExclusiveFile(tempPath, options.bytes, {
@@ -797,8 +864,8 @@ async function publishBytesAtomically(
             },
             onWriteProgress: options.onWriteProgress,
           });
-          await options.assertCanContinue?.();
           targetIdentity = writeResult.fileIdentity;
+          await options.assertCanContinue?.();
         } catch (fallbackError) {
           const fallbackNodeError = fallbackError as NodeJS.ErrnoException;
           if (fallbackNodeError.code === "EEXIST") {
@@ -807,11 +874,12 @@ async function publishBytesAtomically(
           }
 
           if (targetIdentity) {
-            await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
-            const removedOwnedTarget = await safeUnlinkOwnedPath(options.targetPath, targetIdentity);
-            if (removedOwnedTarget) {
-              await syncDirectory(finalDirectory, dependencies, "cleanup");
-            }
+            const cleanupErrors = await cleanupOwnedPathOnFailure(options.targetPath, targetIdentity, {
+              dependencies,
+              directoryPath: finalDirectory,
+              onCleanup: dependencies.onTargetCleanup,
+            });
+            throw attachCleanupFailures(fallbackError, cleanupErrors);
           }
           throw fallbackError;
         }
@@ -819,12 +887,14 @@ async function publishBytesAtomically(
         try {
           await syncDirectory(finalDirectory, dependencies, "publish", options.assertCanContinue);
         } catch (syncError) {
-          await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
-          const removedOwnedTarget = await safeUnlinkOwnedPath(options.targetPath, targetIdentity);
-          if (removedOwnedTarget) {
-            await syncDirectory(finalDirectory, dependencies, "cleanup", options.assertCanContinue);
-          }
-          throw syncError;
+          const cleanupErrors = targetIdentity
+            ? await cleanupOwnedPathOnFailure(options.targetPath, targetIdentity, {
+                dependencies,
+                directoryPath: finalDirectory,
+                onCleanup: dependencies.onTargetCleanup,
+              })
+            : [];
+          throw attachCleanupFailures(syncError, cleanupErrors);
         }
         return { published: true };
       }
@@ -839,17 +909,29 @@ async function publishBytesAtomically(
 
     await syncDirectory(finalDirectory, dependencies, "publish", options.assertCanContinue);
     return { published: true };
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    const tempRemoved = await unlink(tempPath)
-      .then(() => true)
-      .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") {
-          return false;
-        }
-        throw error;
-      });
-    if (tempRemoved) {
-      await syncDirectory(finalDirectory, dependencies, "cleanup", options.assertCanContinue);
+    try {
+      const tempRemoved = await unlink(tempPath)
+        .then(() => true)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") {
+            return false;
+          }
+          throw error;
+        });
+      if (tempRemoved) {
+        await syncDirectory(finalDirectory, dependencies, "cleanup", options.assertCanContinue);
+      }
+    } catch {
+      if (operationError) {
+        throw attachCleanupFailures(operationError, [
+          createSanitizedCleanupError("CATALOG_ASSET_CLEANUP_SYNC_FAILED"),
+        ]);
+      }
+      throw createSanitizedCleanupError("CATALOG_ASSET_CLEANUP_SYNC_FAILED");
     }
   }
 }

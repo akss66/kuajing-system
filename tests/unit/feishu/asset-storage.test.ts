@@ -744,6 +744,139 @@ describe("catalog asset storage", () => {
     await expect(storage.commitCatalogAsset(manifest)).resolves.toBe(expectedStorageKey);
   });
 
+  test("continues fallback cleanup when onTargetCleanup throws after digest lock loss", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let cleanupSyncs = 0;
+    let releaseCopy: (() => void) | null = null;
+    let copyPaused = false;
+    let expectedTargetPath = "";
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onDirectorySync(path, reason) {
+        if (reason === "cleanup" && path === dirname(expectedTargetPath)) {
+          cleanupSyncs += 1;
+        }
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      onTargetCleanup() {
+        throw new Error("simulated cleanup hook failure");
+      },
+      onTargetWriteProgress({ bytesWritten, targetPath, totalBytes }) {
+        if (
+          !copyPaused &&
+          targetPath === expectedTargetPath &&
+          bytesWritten > 0 &&
+          bytesWritten < totalBytes
+        ) {
+          copyPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 21, g: 22, r: 23, width: 64, height: 64 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "cleanup-hook-failure.png",
+      runId: "fake-digest-cleanup-hook-failure-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    expectedTargetPath = join(assetRoot, expectedStorageKey);
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!copyPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    fakeCoordinator.abortDigest(manifest.contentSha256);
+    const continueCopy = releaseCopy as (() => void) | null;
+    if (continueCopy) {
+      continueCopy();
+    }
+
+    const error = await commitPromise.catch((commitError: unknown) => commitError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ message: expect.stringMatching(/lock was lost/i) });
+    expect((error as Error).cause).toBeInstanceOf(AggregateError);
+    expect(cleanupSyncs).toBeGreaterThan(0);
+    await expect(readFile(expectedTargetPath)).rejects.toThrow();
+    await expect(storage.commitCatalogAsset(manifest)).resolves.toBe(expectedStorageKey);
+  });
+
+  test("preserves replacement targets even when onTargetCleanup throws after digest lock loss", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let releaseCopy: (() => void) | null = null;
+    let copyPaused = false;
+    let replacementWritten = false;
+    let expectedTargetPath = "";
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      async onTargetCleanup({ targetPath }) {
+        if (targetPath !== expectedTargetPath || replacementWritten) {
+          throw new Error("simulated cleanup hook failure");
+        }
+        replacementWritten = true;
+        await rm(targetPath, { force: true });
+        await writeFile(targetPath, bytes);
+        throw new Error("simulated cleanup hook failure");
+      },
+      onTargetWriteProgress({ bytesWritten, targetPath, totalBytes }) {
+        if (
+          !copyPaused &&
+          targetPath === expectedTargetPath &&
+          bytesWritten > 0 &&
+          bytesWritten < totalBytes
+        ) {
+          copyPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 24, g: 25, r: 26, width: 64, height: 64 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "cleanup-hook-replacement.png",
+      runId: "fake-digest-cleanup-hook-replacement-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    expectedTargetPath = join(assetRoot, expectedStorageKey);
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!copyPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    fakeCoordinator.abortDigest(manifest.contentSha256);
+    const continueCopy = releaseCopy as (() => void) | null;
+    if (continueCopy) {
+      continueCopy();
+    }
+
+    const error = await commitPromise.catch((commitError: unknown) => commitError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ message: expect.stringMatching(/lock was lost/i) });
+    expect((error as Error).cause).toBeInstanceOf(AggregateError);
+    expect(replacementWritten).toBe(true);
+    expect(Buffer.compare(await readFile(expectedTargetPath), bytes)).toBe(0);
+    await expect(storage.commitCatalogAsset(manifest)).resolves.toBe(expectedStorageKey);
+  });
+
   test("rejects symlink escapes for staging, commit parent, and final asset reads", async () => {
     const storage = createCatalogAssetStorage({
       assetDir: assetRoot,
