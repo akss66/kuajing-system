@@ -11,26 +11,36 @@ import {
 
 type DatabaseLike = DbTransaction | typeof db;
 
-export async function findAdminMirrorIdForActor(
+export async function findActiveSuperAdminMirrorId(
   database: DatabaseLike,
   actorUserId: string,
 ) {
   const [actor] = await database
     .select({ email: authUsers.email })
     .from(authUsers)
-    .where(eq(authUsers.id, actorUserId))
+    .where(
+      and(
+        eq(authUsers.id, actorUserId),
+        eq(authUsers.role, "super_admin"),
+      ),
+    )
     .limit(1);
   if (!actor) {
-    throw new Error("Super admin actor was not found");
+    throw new Error("Super admin actor is not authorized");
   }
 
   const [mirror] = await database
     .select({ id: adminUsers.id })
     .from(adminUsers)
-    .where(eq(adminUsers.loginIdentifier, actor.email))
+    .where(
+      and(
+        eq(adminUsers.loginIdentifier, actor.email),
+        eq(adminUsers.status, "ACTIVE"),
+      ),
+    )
     .limit(1);
   if (!mirror) {
-    throw new Error("Super admin mirror profile was not found");
+    throw new Error("Super admin mirror profile was not active");
   }
 
   return mirror.id;
@@ -52,6 +62,18 @@ export async function findMigrationRunForUpdate(
     .from(feishuCargoMigrationRuns)
     .where(eq(feishuCargoMigrationRuns.id, runId))
     .for("update")
+    .limit(1);
+  return run ?? null;
+}
+
+export async function findMigrationRun(
+  database: DatabaseLike,
+  runId: string,
+) {
+  const [run] = await database
+    .select()
+    .from(feishuCargoMigrationRuns)
+    .where(eq(feishuCargoMigrationRuns.id, runId))
     .limit(1);
   return run ?? null;
 }

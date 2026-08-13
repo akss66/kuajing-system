@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -26,10 +26,12 @@ import {
   createFeishuCargoMigrationService,
   FeishuCargoMigrationError,
 } from "@/modules/feishu/migration-service";
+import { createCatalogAssetStorage } from "@/modules/feishu/asset-storage";
 import type {
   FeishuSourcePort,
   FeishuSourceSelectionRequired,
 } from "@/modules/feishu/source-reader";
+import type { SuperAdminPrincipal } from "@/modules/identity/principal";
 
 const HEADER_ROW = [
   "\u5e8f\u53f7",
@@ -96,6 +98,22 @@ async function createImageBuffer(seed: number) {
   })
     .png()
     .toBuffer();
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  input?: { intervalMs?: number; timeoutMs?: number },
+) {
+  const startedAt = Date.now();
+  const intervalMs = input?.intervalMs ?? 5;
+  const timeoutMs = input?.timeoutMs ?? 5_000;
+
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 function buildRow(input: {
@@ -174,42 +192,56 @@ function cloneDataset(input: SourceDataset): SourceDataset {
   };
 }
 
-async function createSuperAdminActor() {
+async function createAdminActor(input: {
+  actorKind: "ADMIN" | "SUPER_ADMIN";
+  mirrorStatus?: "ACTIVE" | "DISABLED";
+  role: "admin" | "super_admin";
+}) {
   const userId = crypto.randomUUID();
-  const email = `super-admin-${userId}@example.test`;
+  const email = `${input.role}-${userId}@example.test`;
 
   await db.insert(authUsers).values({
     banned: false,
     email,
     id: userId,
-    name: "Migration Super Admin",
-    role: "super_admin",
+    name: `${input.role} actor`,
+    role: input.role,
   });
   await db.execute(sql`
     insert into admin_users (id, login_identifier, display_name, status)
-    values (${crypto.randomUUID()}::uuid, ${email}, 'Migration Mirror', 'ACTIVE')
+    values (${crypto.randomUUID()}::uuid, ${email}, 'Migration Mirror', ${input.mirrorStatus ?? "ACTIVE"})
   `);
 
-  return { kind: "SUPER_ADMIN" as const, userId };
+  return { kind: input.actorKind, userId };
+}
+
+async function createSuperAdminActor(): Promise<SuperAdminPrincipal> {
+  return (await createAdminActor({
+    actorKind: "SUPER_ADMIN",
+    role: "super_admin",
+  })) as SuperAdminPrincipal;
 }
 
 async function createOrdinaryAdminActor() {
-  const userId = crypto.randomUUID();
-  const email = `admin-${userId}@example.test`;
-
-  await db.insert(authUsers).values({
-    banned: false,
-    email,
-    id: userId,
-    name: "Ordinary Admin",
+  return await createAdminActor({
+    actorKind: "ADMIN",
     role: "admin",
   });
-  await db.execute(sql`
-    insert into admin_users (id, login_identifier, display_name, status)
-    values (${crypto.randomUUID()}::uuid, ${email}, 'Ordinary Admin Mirror', 'ACTIVE')
-  `);
+}
 
-  return { kind: "ADMIN" as const, userId };
+async function createForgedSuperAdminActor(): Promise<SuperAdminPrincipal> {
+  return (await createAdminActor({
+    actorKind: "SUPER_ADMIN",
+    role: "admin",
+  })) as SuperAdminPrincipal;
+}
+
+async function createDisabledMirrorSuperAdminActor(): Promise<SuperAdminPrincipal> {
+  return (await createAdminActor({
+    actorKind: "SUPER_ADMIN",
+    mirrorStatus: "DISABLED",
+    role: "super_admin",
+  })) as SuperAdminPrincipal;
 }
 
 function createMutableSourceClient(input: {
@@ -287,6 +319,50 @@ function createMutableSourceClient(input: {
       state.revision = nextRevision;
     },
     state,
+  };
+}
+
+function createDelayedSourceClient(input: {
+  initialDataset: SourceDataset;
+  revision?: number;
+  spreadsheetToken?: string;
+}) {
+  const source = createMutableSourceClient(input);
+  const originalDownloadMedia = source.client.downloadMedia.bind(source.client);
+  let delayFirstDownload = false;
+  let downloadPaused = false;
+  let releaseDownload: null | (() => void) = null;
+
+  source.client.downloadMedia = async (fileToken: string) => {
+    if (delayFirstDownload) {
+      delayFirstDownload = false;
+      downloadPaused = true;
+      await new Promise<void>((resolve) => {
+        releaseDownload = () => {
+          downloadPaused = false;
+          resolve();
+        };
+      });
+    }
+    return await originalDownloadMedia(fileToken);
+  };
+
+  return {
+    ...source,
+    armFirstDownloadDelay() {
+      delayFirstDownload = true;
+    },
+    async releaseFirstDownload() {
+      if (releaseDownload) {
+        const release = releaseDownload;
+        releaseDownload = null;
+        release();
+      }
+      await waitFor(() => !downloadPaused);
+    },
+    async waitForFirstDownload() {
+      await waitFor(() => downloadPaused);
+    },
   };
 }
 
@@ -515,7 +591,7 @@ describe("Feishu cargo migration service", () => {
 
     await expect(
       service.createCargoPreflight({
-        actor: ordinaryAdmin,
+        actor: ordinaryAdmin as SuperAdminPrincipal,
         client: fakeSource.client,
         config: createConfig(),
       }),
@@ -529,12 +605,56 @@ describe("Feishu cargo migration service", () => {
 
     await expect(
       service.confirmCargoMigration({
-        actor: ordinaryAdmin,
+        actor: ordinaryAdmin as SuperAdminPrincipal,
         client: fakeSource.client,
         config: createConfig(),
         runId: readyRun.runId,
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" satisfies FeishuCargoMigrationError["code"] });
+  });
+
+  test("rejects forged SUPER_ADMIN actors whose auth role is not super_admin", async () => {
+    const forgedActor = await createForgedSuperAdminActor();
+    const superAdmin = await createSuperAdminActor();
+    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+
+    await expect(
+      service.createCargoPreflight({
+        actor: forgedActor,
+        client: fakeSource.client,
+        config: createConfig(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" satisfies FeishuCargoMigrationError["code"] });
+
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor: superAdmin,
+      client: fakeSource.client,
+      config: createConfig(),
+    }));
+
+    await expect(
+      service.confirmCargoMigration({
+        actor: forgedActor,
+        client: fakeSource.client,
+        config: createConfig(),
+        runId: readyRun.runId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" satisfies FeishuCargoMigrationError["code"] });
+  });
+
+  test("rejects super-admin principals whose admin mirror is inactive", async () => {
+    const disabledMirrorActor = await createDisabledMirrorSuperAdminActor();
+    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+
+    await expect(
+      service.createCargoPreflight({
+        actor: disabledMirrorActor,
+        client: fakeSource.client,
+        config: createConfig(),
+      }),
+    ).rejects.toMatchObject({ code: "ACTOR_NOT_FOUND" satisfies FeishuCargoMigrationError["code"] });
   });
 
   test("marks a preflight run stale when the source revision changes before confirmation", async () => {
@@ -590,6 +710,35 @@ describe("Feishu cargo migration service", () => {
         runId: readyRun.runId,
       }),
     ).rejects.toMatchObject({ code: "SOURCE_STALE" satisfies FeishuCargoMigrationError["code"] });
+  });
+
+  test("marks a preflight run stale when image bytes change and removes stale staging files", async () => {
+    const actor = await createSuperAdminActor();
+    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+    }));
+
+    fakeSource.setDownloadRecord("file-token-SKU-001", {
+      bytes: await createImageBuffer(201),
+      contentType: "image/png",
+      fileName: "SKU-001-replacement.png",
+    });
+
+    await expect(
+      service.confirmCargoMigration({
+        actor,
+        client: fakeSource.client,
+        config: createConfig(),
+        runId: readyRun.runId,
+      }),
+    ).rejects.toMatchObject({ code: "SOURCE_STALE" satisfies FeishuCargoMigrationError["code"] });
+
+    expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
   });
 
   test("blocks confirmation when catalog SKUs already exist", async () => {
@@ -661,7 +810,7 @@ describe("Feishu cargo migration service", () => {
     ).rejects.toMatchObject({ code: "ALREADY_IMPORTED" satisfies FeishuCargoMigrationError["code"] });
   });
 
-  test("rolls back database writes and cleans newly published files when confirmation fails inside the transaction", async () => {
+  test("keeps shared final files when a failed import collides with another writer's published digest", async () => {
     const actor = await createSuperAdminActor();
     const failingDataset = await buildValidSourceDataset({
       firstProductName: "X".repeat(260),
@@ -674,6 +823,76 @@ describe("Feishu cargo migration service", () => {
       config: createConfig(),
     }));
 
+    let releaseSharedPublish: null | (() => void) = null;
+    let sharedFinalDirectory = "";
+    let sharedPublishPaused = false;
+    const sharedStorage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      async onDirectorySync(path, reason) {
+        if (reason === "publish" && path === sharedFinalDirectory && !sharedPublishPaused) {
+          sharedPublishPaused = true;
+          await new Promise<void>((resolve) => {
+            releaseSharedPublish = resolve;
+          });
+        }
+      },
+    });
+    const sharedBytes = failingDataset.downloads.get("file-token-SKU-001");
+    if (!sharedBytes) {
+      throw new Error("Expected shared image bytes for SKU-001");
+    }
+    const sharedManifest = await sharedStorage.stageCatalogAsset({
+      bytes: sharedBytes.bytes,
+      contentType: sharedBytes.contentType,
+      originalFileName: sharedBytes.fileName,
+      runId: "shared-final-run",
+      skuCode: "SKU-001",
+    });
+    const expectedSharedStorageKey = `sha256/${sharedManifest.contentSha256.slice(0, 2)}/${sharedManifest.contentSha256}.png`;
+    const sharedFinalPath = join(assetRoot, expectedSharedStorageKey);
+    sharedFinalDirectory = dirname(sharedFinalPath);
+    const sharedCommitPromise = sharedStorage.commitCatalogAsset(sharedManifest);
+
+    await waitFor(() => sharedPublishPaused);
+    await expect(stat(sharedFinalPath)).resolves.toBeDefined();
+
+    const confirmPromise = service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+
+    if (!releaseSharedPublish) {
+      throw new Error("Expected shared final publish to pause");
+    }
+    const releaseSharedPublishBarrier: () => void = releaseSharedPublish;
+    releaseSharedPublishBarrier();
+
+    await expect(confirmPromise).rejects.toThrow();
+    await expect(sharedCommitPromise).resolves.toBe(expectedSharedStorageKey);
+
+    expect(await db.select().from(products)).toEqual([]);
+    expect(await db.select().from(skus)).toEqual([]);
+    expect(await db.select().from(inventoryBalances)).toEqual([]);
+    expect(await db.select().from(inventoryMovements)).toEqual([]);
+    expect(await db.select().from(catalogAssets)).toEqual([]);
+    await expect(stat(sharedFinalPath)).resolves.toBeDefined();
+    expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
+  });
+
+  test("revalidates and commits freshly re-staged assets even when the preflight staging files are gone", async () => {
+    const actor = await createSuperAdminActor();
+    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+    }));
+
+    await rm(join(assetRoot, "temporary", readyRun.runId), { force: true, recursive: true });
+
     await expect(
       service.confirmCargoMigration({
         actor,
@@ -681,14 +900,10 @@ describe("Feishu cargo migration service", () => {
         config: createConfig(),
         runId: readyRun.runId,
       }),
-    ).rejects.toThrow();
+    ).resolves.toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
 
-    expect(await db.select().from(products)).toEqual([]);
-    expect(await db.select().from(skus)).toEqual([]);
-    expect(await db.select().from(inventoryBalances)).toEqual([]);
-    expect(await db.select().from(inventoryMovements)).toEqual([]);
-    expect(await db.select().from(catalogAssets)).toEqual([]);
-    expect(await listFilesRecursively(join(assetRoot, "sha256"))).toEqual([]);
+    expect(fakeSource.calls.downloadMedia).toHaveLength(148);
+    expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
   });
 
   test("imports products, skus, assets, balances, movements, audit and one outbox sync exactly once", async () => {
@@ -793,5 +1008,49 @@ describe("Feishu cargo migration service", () => {
     expect(await db.select().from(products)).toHaveLength(50);
     expect(await db.select().from(skus)).toHaveLength(74);
     expect(await db.select().from(catalogAssets)).toHaveLength(74);
+  });
+
+  test("does not hold the migration row lock while source revalidation downloads are in flight", async () => {
+    const actor = await createSuperAdminActor();
+    const delayedSource = createDelayedSourceClient({ initialDataset: baseDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor,
+      client: delayedSource.client,
+      config: createConfig(),
+    }));
+
+    delayedSource.armFirstDownloadDelay();
+    const confirmPromise = service.confirmCargoMigration({
+      actor,
+      client: delayedSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+
+    await delayedSource.waitForFirstDownload();
+
+    try {
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.execute(sql`select set_config('lock_timeout', ${"150ms"}, true)`);
+          await tx
+            .update(feishuCargoMigrationRuns)
+            .set({ updatedAt: new Date("2026-08-13T10:45:00.000Z") })
+            .where(eq(feishuCargoMigrationRuns.id, readyRun.runId));
+        }),
+      ).resolves.toBeUndefined();
+
+      await delayedSource.releaseFirstDownload();
+
+      await expect(confirmPromise).resolves.toEqual({
+        imageCount: 74,
+        productCount: 50,
+        skuCount: 74,
+      });
+    } finally {
+      await delayedSource.releaseFirstDownload();
+      await confirmPromise.catch(() => undefined);
+    }
   });
 });

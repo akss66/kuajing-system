@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -16,6 +14,7 @@ import {
 } from "@/db/schema";
 import { FeishuApiError } from "@/integrations/feishu/client";
 import type { FeishuIntegrationConfig } from "@/integrations/feishu/config";
+import type { SuperAdminPrincipal } from "@/modules/identity/principal";
 
 import { createCatalogAssetStorage } from "./asset-storage";
 import { parseLegacyCargoSheet } from "./cargo-parser";
@@ -29,7 +28,8 @@ import { enqueueCargoSyncEvent } from "./outbox";
 import {
   catalogAssetExistsForDigest,
   countSkus,
-  findAdminMirrorIdForActor,
+  findActiveSuperAdminMirrorId,
+  findMigrationRun,
   findMigrationRunForUpdate,
   importedMigrationExists,
 } from "./queries";
@@ -66,6 +66,9 @@ type DownloadedRowAsset = {
 type PreparedConfirmation = {
   normalizedRows: NormalizedCargoRow[];
   sourceDigest: string;
+  sourceRevision: number;
+  sourceSheetId: string;
+  sourceSpreadsheetHash: string;
   temporaryAssets: TemporaryAssetManifest[];
 };
 
@@ -117,13 +120,35 @@ export class FeishuCargoMigrationError extends Error {
   }
 }
 
-function assertSuperAdmin(actor: { kind: string }) {
+function assertSuperAdminPrincipal(
+  actor: { kind: string; userId: string },
+): asserts actor is SuperAdminPrincipal {
   if (actor.kind !== "SUPER_ADMIN") {
     throw new FeishuCargoMigrationError(
       "FORBIDDEN_SUPER_ADMIN",
       "Only the super admin can run the Feishu cargo migration",
     );
   }
+}
+
+async function resolveSuperAdminMirrorId(
+  actor: { kind: string; userId: string },
+) {
+  assertSuperAdminPrincipal(actor);
+
+  return await findActiveSuperAdminMirrorId(db, actor.userId).catch((error: Error) => {
+    if (error.message === "Super admin actor is not authorized") {
+      throw new FeishuCargoMigrationError(
+        "FORBIDDEN_SUPER_ADMIN",
+        "Only the super admin can run the Feishu cargo migration",
+      );
+    }
+
+    throw new FeishuCargoMigrationError(
+      "ACTOR_NOT_FOUND",
+      "Super admin mirror profile was not found",
+    );
+  });
 }
 
 async function roundTripJsonb<T>(database: DatabaseLike, value: T): Promise<T> {
@@ -300,35 +325,6 @@ async function validateAndPrepareSource(input: {
   };
 }
 
-async function deletePublishedOrphanAssets(input: {
-  assetDir?: string;
-  storageKeys: string[];
-}) {
-  if (input.storageKeys.length === 0) {
-    return;
-  }
-
-  const uniqueKeys = [...new Set(input.storageKeys)].sort();
-  if (uniqueKeys.length === 0) {
-    return;
-  }
-
-  const referenced = await db
-    .select({ storageKey: catalogAssets.storageKey })
-    .from(catalogAssets)
-    .where(inArray(catalogAssets.storageKey, uniqueKeys));
-  const referencedKeys = new Set(referenced.map((asset) => asset.storageKey));
-  const assetDir = input.assetDir ?? process.env.CATALOG_ASSET_DIR ?? "/app/data/catalog-assets";
-
-  for (const storageKey of uniqueKeys) {
-    if (referencedKeys.has(storageKey)) {
-      continue;
-    }
-    await rm(join(assetDir, storageKey), { force: true }).catch(() => undefined);
-    await rm(join(assetDir, dirname(storageKey)), { force: true }).catch(() => undefined);
-  }
-}
-
 async function ensureCatalogAssetRecord(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   manifest: TemporaryAssetManifest,
@@ -380,6 +376,15 @@ async function revalidateRunSource(input: {
 
   const normalizedRows = input.run.normalizedRowsJson as NormalizedCargoRow[];
   const reparsedRows = parsed.rows;
+  if (
+    sourceSnapshot.selectedSheet.sheetId !== input.run.sourceSheetId ||
+    sourceSnapshot.spreadsheetTokenHash !== input.run.sourceSpreadsheetHash
+  ) {
+    throw new FeishuCargoMigrationError(
+      "SOURCE_STALE",
+      "Feishu source location changed after preflight",
+    );
+  }
   if (sourceSnapshot.revision !== input.run.sourceRevision) {
     throw new FeishuCargoMigrationError(
       "SOURCE_STALE",
@@ -393,7 +398,7 @@ async function revalidateRunSource(input: {
     );
   }
 
-  const reparsedWithoutImages: NormalizedCargoRow[] = [];
+  const reparsedNormalizedRows: NormalizedCargoRow[] = [];
   const storage = createCatalogAssetStorage({ assetDir: input.assetDir });
   const replacementTemporaryAssets: TemporaryAssetManifest[] = [];
 
@@ -410,7 +415,7 @@ async function revalidateRunSource(input: {
     });
     replacementTemporaryAssets.push(staged);
     const normalizedRow = normalizeDownloadedRow(row, staged);
-    reparsedWithoutImages.push(normalizedRow);
+    reparsedNormalizedRows.push(normalizedRow);
 
     if (
       staged.contentSha256 !== existingRow.imageContentSha256 ||
@@ -423,9 +428,8 @@ async function revalidateRunSource(input: {
     }
   }
 
-  if (
-    (await createCanonicalDigest(db, reparsedWithoutImages)) !== input.run.sourceDigest
-  ) {
+  const reparsedDigest = await createCanonicalDigest(db, reparsedNormalizedRows);
+  if (reparsedDigest !== input.run.sourceDigest) {
     throw new FeishuCargoMigrationError(
       "SOURCE_STALE",
       "Feishu source content changed after preflight",
@@ -433,9 +437,12 @@ async function revalidateRunSource(input: {
   }
 
   return {
-    normalizedRows,
-    sourceDigest: input.run.sourceDigest,
-    temporaryAssets: input.run.temporaryAssetsJson as TemporaryAssetManifest[],
+    normalizedRows: reparsedNormalizedRows,
+    sourceDigest: reparsedDigest,
+    sourceRevision: sourceSnapshot.revision,
+    sourceSheetId: sourceSnapshot.selectedSheet.sheetId,
+    sourceSpreadsheetHash: sourceSnapshot.spreadsheetTokenHash,
+    temporaryAssets: replacementTemporaryAssets,
   } satisfies PreparedConfirmation;
 }
 
@@ -463,29 +470,23 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
   const storage = createCatalogAssetStorage({ assetDir: options.assetDir });
 
   async function createCargoPreflight(input: {
-    actor: { kind: string; userId: string };
+    actor: SuperAdminPrincipal;
     client: FeishuSourcePort;
     config: Pick<FeishuIntegrationConfig, "sourceSheetId" | "sourceWikiToken"> & {
       sourceSheetId: string;
     };
   }): Promise<PreflightReadyResult>;
   async function createCargoPreflight(input: {
-    actor: { kind: string; userId: string };
+    actor: SuperAdminPrincipal;
     client: FeishuSourcePort;
     config: Pick<FeishuIntegrationConfig, "sourceSheetId" | "sourceWikiToken">;
   }): Promise<FeishuSourceSelectionRequired | PreflightReadyResult>;
   async function createCargoPreflight(input: {
-    actor: { kind: string; userId: string };
+    actor: SuperAdminPrincipal;
     client: FeishuSourcePort;
     config: Pick<FeishuIntegrationConfig, "sourceSheetId" | "sourceWikiToken">;
   }): Promise<FeishuSourceSelectionRequired | PreflightReadyResult> {
-    assertSuperAdmin(input.actor);
-    const createdByAdminUserId = await findAdminMirrorIdForActor(db, input.actor.userId).catch(() => {
-      throw new FeishuCargoMigrationError(
-        "ACTOR_NOT_FOUND",
-        "Super admin mirror profile was not found",
-      );
-    });
+    const createdByAdminUserId = await resolveSuperAdminMirrorId(input.actor);
     const runId = crypto.randomUUID();
     const prepared = await validateAndPrepareSource({
       assetDir: options.assetDir,
@@ -568,21 +569,48 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
   }
 
   async function confirmCargoMigration(input: {
-    actor: { kind: string; userId: string };
+    actor: SuperAdminPrincipal;
     client: FeishuSourcePort;
     config: Pick<FeishuIntegrationConfig, "sourceSheetId" | "sourceWikiToken">;
     runId: string;
   }): Promise<ConfirmResult> {
-    assertSuperAdmin(input.actor);
-    const confirmedByAdminUserId = await findAdminMirrorIdForActor(db, input.actor.userId).catch(() => {
-      throw new FeishuCargoMigrationError(
-        "ACTOR_NOT_FOUND",
-        "Super admin mirror profile was not found",
-      );
-    });
-
-    const publishedStorageKeys: string[] = [];
+    const confirmedByAdminUserId = await resolveSuperAdminMirrorId(input.actor);
     try {
+      const currentRun = await findMigrationRun(db, input.runId);
+      if (!currentRun) {
+        throw new FeishuCargoMigrationError(
+          "MIGRATION_NOT_FOUND",
+          "Feishu cargo migration run was not found",
+        );
+      }
+      if (currentRun.status === "IMPORTED") {
+        throw new FeishuCargoMigrationError(
+          "ALREADY_IMPORTED",
+          "Feishu cargo migration has already been confirmed",
+        );
+      }
+      if (currentRun.status !== "PREFLIGHT_READY") {
+        throw new FeishuCargoMigrationError(
+          "MIGRATION_NOT_CONFIRMABLE",
+          "Only a ready preflight can be confirmed",
+        );
+      }
+
+      let revalidated: PreparedConfirmation;
+      try {
+        revalidated = await revalidateRunSource({
+          assetDir: options.assetDir,
+          client: input.client,
+          config: input.config,
+          run: currentRun,
+        });
+      } catch (error) {
+        if (error instanceof FeishuCargoMigrationError && error.code === "SOURCE_STALE") {
+          await markRunStale(input.runId).catch(() => undefined);
+        }
+        throw error;
+      }
+
       const result = await db.transaction(async (tx) => {
         await tx.execute(
           sql`select set_config('lock_timeout', ${`${IMPORT_LOCK_TIMEOUT_MS}ms`}, true)`,
@@ -624,32 +652,26 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
             "Catalog SKUs already exist",
           );
         }
-
-        let revalidated: PreparedConfirmation;
-        try {
-          revalidated = await revalidateRunSource({
-            assetDir: options.assetDir,
-            client: input.client,
-            config: input.config,
-            run,
-          });
-        } catch (error) {
-          if (error instanceof FeishuCargoMigrationError && error.code === "SOURCE_STALE") {
-            await tx
-              .update(feishuCargoMigrationRuns)
-              .set({
-                status: "STALE",
-                updatedAt: new Date(),
-              })
-              .where(eq(feishuCargoMigrationRuns.id, run.id));
-          }
-          throw error;
+        const lockedRunDigest = await createCanonicalDigest(
+          tx,
+          run.normalizedRowsJson as NormalizedCargoRow[],
+        );
+        if (
+          run.sourceDigest !== revalidated.sourceDigest ||
+          lockedRunDigest !== revalidated.sourceDigest ||
+          run.sourceRevision !== revalidated.sourceRevision ||
+          run.sourceSheetId !== revalidated.sourceSheetId ||
+          run.sourceSpreadsheetHash !== revalidated.sourceSpreadsheetHash
+        ) {
+          throw new FeishuCargoMigrationError(
+            "SOURCE_STALE",
+            "Feishu source content no longer matches the approved preflight",
+          );
         }
 
         const assetBySkuCode = new Map<string, CatalogAssetRecord>();
         for (const manifest of revalidated.temporaryAssets) {
           const storageKey = await storage.commitCatalogAsset(manifest);
-          publishedStorageKeys.push(storageKey);
           const asset = await ensureCatalogAssetRecord(tx, manifest, storageKey);
           assetBySkuCode.set(manifest.skuCode, asset);
         }
@@ -761,11 +783,9 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
       if (error instanceof FeishuCargoMigrationError && error.code === "SOURCE_STALE") {
         await markRunStale(input.runId).catch(() => undefined);
       }
-      await deletePublishedOrphanAssets({
-        assetDir: options.assetDir,
-        storageKeys: publishedStorageKeys,
-      });
       throw error;
+    } finally {
+      await storage.discardStagedAssets(input.runId).catch(() => undefined);
     }
   }
 
