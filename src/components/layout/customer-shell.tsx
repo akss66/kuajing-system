@@ -3,6 +3,7 @@
 import { Banknote, ClipboardList, Clock3, LayoutDashboard, PackageSearch, Store, Upload } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
+import type { AuthenticatedIdentity } from "@/modules/identity/principal";
 
 import { MerchantShellFrame } from "./merchant-shell-frame";
 import { MerchantTopbar } from "./merchant-topbar";
@@ -66,7 +67,13 @@ function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
   );
 }
 
-export function CustomerShell({ children }: { children: ReactNode }) {
+export function CustomerShell({
+  children,
+  identity,
+}: {
+  children: ReactNode;
+  identity: AuthenticatedIdentity;
+}) {
   return (
     <MerchantShellFrame
       audience="customer"
@@ -74,9 +81,10 @@ export function CustomerShell({ children }: { children: ReactNode }) {
       topbar={
         <MerchantTopbar
           audience="customer"
-          badgeLabel="合作客户"
+          identity={identity}
           mobileNavigation={<CustomerNavigation mobile />}
           mobileNavigationTitle="客户导航"
+          roleLabel="合作客户"
           subtitle="加拿大本地货盘 · 多店铺统一拿货"
           title="同舟行客户中心"
         />

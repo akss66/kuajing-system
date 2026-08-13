@@ -2,6 +2,13 @@ import { AccountManagementWorkspace } from "@/components/accounts/account-manage
 import { PageHeading } from "@/components/layout/page-heading";
 import { listManagedAccounts } from "@/modules/accounts/queries";
 import { requireAdmin } from "@/modules/identity/guards";
+import { z } from "zod";
+
+type AccountsPageProps = {
+  searchParams?: Promise<{ customerId?: string | string[] }>;
+};
+
+const customerIdSchema = z.string().trim().uuid();
 
 function AccessDeniedState() {
   return (
@@ -18,11 +25,22 @@ function AccessDeniedState() {
   );
 }
 
-export default async function AccountsPage() {
+export default async function AccountsPage({ searchParams }: AccountsPageProps = {}) {
   const principal = await requireAdmin();
   if (principal.kind !== "SUPER_ADMIN") {
     return <AccessDeniedState />;
   }
 
-  return <AccountManagementWorkspace accounts={await listManagedAccounts()} />;
+  const rawCustomerId = searchParams ? (await searchParams).customerId : undefined;
+  const parsedCustomerId =
+    typeof rawCustomerId === "string" ? customerIdSchema.safeParse(rawCustomerId) : null;
+  const focusedCustomerId = parsedCustomerId?.success ? parsedCustomerId.data : undefined;
+
+  return (
+    <AccountManagementWorkspace
+      accounts={await listManagedAccounts()}
+      focusedCustomerId={focusedCustomerId}
+      key={focusedCustomerId ?? "all-accounts"}
+    />
+  );
 }

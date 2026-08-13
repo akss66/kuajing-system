@@ -1,6 +1,7 @@
 "use client";
 
-import { LockKeyhole, Plus, Search } from "lucide-react";
+import { LockKeyhole, Plus, Search, X } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -131,24 +132,42 @@ function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] })
   );
 }
 
-export function AccountManagementWorkspace({ accounts }: { accounts: ManagedAccountSummary[] }) {
-  const [tab, setTab] = useState<AccountTab>("admins");
+export function AccountManagementWorkspace({
+  accounts,
+  focusedCustomerId,
+}: {
+  accounts: ManagedAccountSummary[];
+  focusedCustomerId?: string;
+}) {
+  const [tab, setTab] = useState<AccountTab>(focusedCustomerId ? "customers" : "admins");
   const [query, setQuery] = useState("");
   const [role, setRole] = useState<RoleFilter>("ALL");
   const [status, setStatus] = useState<StatusFilter>("ALL");
 
+  const scopedAccounts = useMemo(
+    () =>
+      focusedCustomerId
+        ? accounts.filter((account) => account.customerId === focusedCustomerId)
+        : accounts,
+    [accounts, focusedCustomerId],
+  );
+  const focusedCustomerName = focusedCustomerId
+    ? scopedAccounts.find((account) => account.customerName)?.customerName ?? null
+    : null;
+  const focusedFilterLabel = focusedCustomerName ? `客户：${focusedCustomerName}` : "指定客户";
+
   const counts = useMemo(
     () => ({
-      admins: accounts.filter((account) => account.kind !== "CUSTOMER").length,
-      customers: accounts.filter((account) => account.kind === "CUSTOMER").length,
-      disabled: accounts.filter((account) => account.status === "DISABLED").length,
+      admins: scopedAccounts.filter((account) => account.kind !== "CUSTOMER").length,
+      customers: scopedAccounts.filter((account) => account.kind === "CUSTOMER").length,
+      disabled: scopedAccounts.filter((account) => account.status === "DISABLED").length,
     }),
-    [accounts],
+    [scopedAccounts],
   );
 
   function filteredAccounts(selectedTab: AccountTab) {
     const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-    return accounts.filter((account) => {
+    return scopedAccounts.filter((account) => {
       const matchesTab =
         selectedTab === "admins"
           ? account.kind !== "CUSTOMER"
@@ -248,6 +267,24 @@ export function AccountManagementWorkspace({ accounts }: { accounts: ManagedAcco
           </label>
         </section>
 
+        {focusedCustomerId ? (
+          <div aria-label="已启用筛选" className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">已启用</span>
+            <Link
+              aria-label={
+                focusedCustomerName
+                  ? `移除筛选：客户 ${focusedCustomerName}`
+                  : "移除筛选：指定客户"
+              }
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-[var(--radius-control)] border border-border bg-background px-3 text-sm text-foreground transition-colors hover:bg-[var(--merchant-nav-hover)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/22"
+              href="/admin/accounts"
+            >
+              <span>{focusedFilterLabel}</span>
+              <X aria-hidden="true" className="size-3.5" />
+            </Link>
+          </div>
+        ) : null}
+
         {tabs.map((item) => {
           const rows = filteredAccounts(item.value);
           return (
@@ -257,19 +294,23 @@ export function AccountManagementWorkspace({ accounts }: { accounts: ManagedAcco
               ) : (
                 <ActionableEmptyState
                   action={
-                    accounts.length > 0 ? (
+                    focusedCustomerId ? (
+                      <Button asChild className="min-h-11" variant="outline">
+                        <Link href="/admin/accounts">清除筛选</Link>
+                      </Button>
+                    ) : accounts.length > 0 ? (
                       <Button className="min-h-11" onClick={clearFilters} variant="outline">
                         清除筛选
                       </Button>
                     ) : undefined
                   }
                   description={
-                    accounts.length > 0
+                    focusedCustomerId || accounts.length > 0
                       ? "当前标签或筛选条件下没有结果，请调整条件后重试。"
                       : "创建管理员或客户后，账号会显示在这里。"
                   }
-                  kind={accounts.length > 0 ? "filtered" : "initial"}
-                  title={accounts.length > 0 ? "没有符合条件的账号" : "暂无账号"}
+                  kind={focusedCustomerId || accounts.length > 0 ? "filtered" : "initial"}
+                  title={focusedCustomerId || accounts.length > 0 ? "没有符合条件的账号" : "暂无账号"}
                 />
               )}
             </TabsContent>

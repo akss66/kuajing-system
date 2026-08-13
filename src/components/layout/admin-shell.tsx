@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import type { AuthenticatedIdentity } from "@/modules/identity/principal";
 
 import { MerchantShellFrame } from "./merchant-shell-frame";
 import { MerchantTopbar } from "./merchant-topbar";
@@ -115,12 +116,14 @@ function AdminNavigation({
 
 export function AdminShell({
   children,
+  identity,
   principalKind,
 }: {
   children: ReactNode;
+  identity: AuthenticatedIdentity;
   principalKind: AdminPrincipalKind;
 }) {
-  const badgeLabel = principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员";
+  const roleLabel = principalKind === "SUPER_ADMIN" ? "超级管理员" : "普通管理员";
 
   return (
     <MerchantShellFrame
@@ -129,9 +132,10 @@ export function AdminShell({
       topbar={
         <MerchantTopbar
           audience="admin"
-          badgeLabel={badgeLabel}
+          identity={identity}
           mobileNavigation={<AdminNavigation mobile principalKind={principalKind} />}
           mobileNavigationTitle="管理员导航"
+          roleLabel={roleLabel}
           subtitle="加拿大本地货盘 · TEMU 一件代发"
           title="同舟行运营中心"
         />

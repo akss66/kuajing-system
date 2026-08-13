@@ -249,7 +249,7 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
   }
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();
-  await page.getByRole("button", { name: "退出登录" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/\/login$/);
 });
 

@@ -47,6 +47,16 @@ vi.mock("next/navigation", () => ({
 import { AdminShell } from "@/components/layout/admin-shell";
 import { CustomerShell } from "@/components/layout/customer-shell";
 
+const adminIdentity = {
+  displayName: "本地演示管理员",
+  email: "admin@tongzhouxing.local",
+};
+
+const customerIdentity = {
+  displayName: "渥太华演示客户",
+  email: "customer@tongzhouxing.local",
+};
+
 describe("merchant shells", () => {
   beforeEach(() => {
     navigationState.pathname = "/admin";
@@ -60,7 +70,7 @@ describe("merchant shells", () => {
 
   it("renders the admin merchant shell with the shared topbar and role-aware navigation", () => {
     render(
-      <AdminShell principalKind="SUPER_ADMIN">
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
@@ -81,13 +91,23 @@ describe("merchant shells", () => {
     fireEvent.click(within(navigation).getByRole("button", { name: "系统管理" }));
     expect(within(navigation).getByRole("link", { name: "账号管理" })).toBeVisible();
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
-    expect(screen.getByRole("button", { name: "退出登录" })).toBeVisible();
+    const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
+    expect(accountMenu).not.toBeNull();
+    expect(within(accountMenu!).getByText(adminIdentity.displayName, { exact: true })).toBeVisible();
+    expect(within(accountMenu!).getByText(adminIdentity.email, { exact: true })).toBeVisible();
+    expect(within(accountMenu!).getByText("超级管理员", { exact: true })).toBeVisible();
+    expect(within(accountMenu!).queryByText("管理员账号", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
     expect(screen.getByText("内容")).toBeVisible();
   });
 
   it("keeps ordinary admin navigation without the super-admin account entry", () => {
+    const namelessIdentity = {
+      displayName: null,
+      email: "nameless-admin@test.local",
+    };
     render(
-      <AdminShell principalKind="ADMIN">
+      <AdminShell identity={namelessIdentity} principalKind="ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
@@ -97,11 +117,17 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
     fireEvent.click(within(navigation).getByRole("button", { name: "系统管理" }));
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
+    const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
+    expect(accountMenu).not.toBeNull();
+    expect(within(accountMenu!).getByText("未设置姓名", { exact: true })).toBeVisible();
+    expect(within(accountMenu!).getByText(namelessIdentity.email, { exact: true })).toBeVisible();
+    expect(within(accountMenu!).getByText("普通管理员", { exact: true })).toBeVisible();
   });
 
   it("persists navigation section collapse state in the current browser", async () => {
     const firstRender = render(
-      <AdminShell principalKind="SUPER_ADMIN">
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
@@ -114,7 +140,7 @@ describe("merchant shells", () => {
 
     firstRender.unmount();
     render(
-      <AdminShell principalKind="SUPER_ADMIN">
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
@@ -133,7 +159,7 @@ describe("merchant shells", () => {
     navigationState.pathname = "/admin/system/health";
 
     render(
-      <AdminShell principalKind="SUPER_ADMIN">
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
@@ -155,7 +181,7 @@ describe("merchant shells", () => {
     navigationState.pathname = "/portal";
 
     render(
-      <CustomerShell>
+      <CustomerShell identity={customerIdentity}>
         <div>客户内容</div>
       </CustomerShell>,
     );
@@ -174,7 +200,17 @@ describe("merchant shells", () => {
 
     const accountMenu = document.querySelector("[data-slot='dropdown-menu-content']");
     expect(accountMenu).toHaveClass("w-[236px]", "p-1.5", "sm:w-64", "sm:p-2");
-    expect(screen.getByRole("button", { name: "退出登录" })).toBeVisible();
+    expect(
+      within(accountMenu as HTMLElement).getByText(customerIdentity.displayName, { exact: true }),
+    ).toBeVisible();
+    expect(
+      within(accountMenu as HTMLElement).getByText(customerIdentity.email, { exact: true }),
+    ).toBeVisible();
+    expect(within(accountMenu as HTMLElement).getByText("合作客户", { exact: true })).toBeVisible();
+    expect(
+      within(accountMenu as HTMLElement).queryByText("客户账号", { exact: true }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
     expect(within(navigation).queryByRole("link", { name: "运营总览" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
     expect(screen.getByText("客户内容")).toBeVisible();

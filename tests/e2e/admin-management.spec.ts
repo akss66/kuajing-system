@@ -43,7 +43,7 @@ async function openAdminNavigationIfNeeded(page: Page) {
 
 async function signOutThroughShell(page: Page) {
   await page.getByRole("button", { name: "打开账号菜单" }).click();
-  await page.getByRole("button", { name: "退出登录" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
 }
 
 function accountCreationForm(scope: Locator) {
@@ -363,6 +363,43 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
 
   await loginThroughUi(page, { email: updatedEmail, password: resetPassword });
   await expect(page).toHaveURL(/\/admin$/);
+});
+
+test("customer detail account handoff scopes the account workspace to that customer", async ({
+  page,
+}) => {
+  await resetAdminManagementBaseline();
+  const [customer] = await db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.code, "DEMO-CUSTOMER"))
+    .limit(1);
+  expect(customer).toBeDefined();
+
+  await loginThroughUi(page, seededSuperAdmin);
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.goto(`/admin/customers/${customer!.id}`);
+  const accountHandoff = page.getByRole("link", { name: "前往账号管理" });
+  await expect(accountHandoff).toHaveAttribute(
+    "href",
+    `/admin/accounts?customerId=${customer!.id}`,
+  );
+  await accountHandoff.click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/admin/accounts\\?customerId=${customer!.id}$`),
+  );
+  await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
+  const activeFilters = page.getByLabel("已启用筛选");
+  await expect(activeFilters).toContainText(`客户：${customer!.name}`);
+  await expect(
+    activeFilters.getByRole("link", {
+      name: `移除筛选：客户 ${customer!.name}`,
+    }),
+  ).toHaveAttribute("href", "/admin/accounts");
+  await expect(page.getByRole("button", { name: "查看 渥太华演示客户" })).toBeVisible();
+  await expect(page.locator("[data-account-card]")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "查看 本地演示管理员" })).toHaveCount(0);
 });
 
 test("ordinary admins can manage customer details and multi-store operations", async ({ page }) => {

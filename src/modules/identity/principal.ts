@@ -19,9 +19,19 @@ export type CustomerPrincipal = {
 export type Principal = AdminPrincipal | CustomerPrincipal | SuperAdminPrincipal;
 export type PrincipalResolver = () => Promise<Principal | null>;
 
-export async function getCurrentPrincipal(
+export type AuthenticatedIdentity = {
+  displayName: string | null;
+  email: string;
+};
+
+export type AuthenticatedPrincipal = {
+  identity: AuthenticatedIdentity;
+  principal: Principal;
+};
+
+export async function getCurrentAuthenticatedPrincipal(
   requestHeaders?: Headers,
-): Promise<Principal | null> {
+): Promise<AuthenticatedPrincipal | null> {
   const resolvedHeaders =
     requestHeaders ?? (await (await import("next/headers")).headers());
   const session = await auth.api.getSession({ headers: resolvedHeaders });
@@ -32,22 +42,41 @@ export async function getCurrentPrincipal(
     ?.split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const identity: AuthenticatedIdentity = {
+    displayName: session.user.name?.trim() || null,
+    email: session.user.email,
+  };
 
   if (role?.includes("super_admin")) {
-    return { kind: "SUPER_ADMIN", userId: session.user.id };
+    return {
+      identity,
+      principal: { kind: "SUPER_ADMIN", userId: session.user.id },
+    };
   }
 
   if (role?.includes("admin")) {
-    return { kind: "ADMIN", userId: session.user.id };
+    return {
+      identity,
+      principal: { kind: "ADMIN", userId: session.user.id },
+    };
   }
 
   if (session.user.customerId) {
     return {
-      kind: "CUSTOMER",
-      customerId: session.user.customerId,
-      userId: session.user.id,
+      identity,
+      principal: {
+        kind: "CUSTOMER",
+        customerId: session.user.customerId,
+        userId: session.user.id,
+      },
     };
   }
 
   return null;
+}
+
+export async function getCurrentPrincipal(
+  requestHeaders?: Headers,
+): Promise<Principal | null> {
+  return (await getCurrentAuthenticatedPrincipal(requestHeaders))?.principal ?? null;
 }

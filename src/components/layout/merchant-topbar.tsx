@@ -3,7 +3,7 @@
 import { Bell, Menu, ShieldCheck, UserCircle2, X } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { SignOutButton } from "@/components/auth/sign-out-button";
+import { SignOutMenuItem } from "@/components/auth/sign-out-button";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,27 +20,30 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import type { AuthenticatedIdentity } from "@/modules/identity/principal";
 
 import { MerchantBrand } from "./merchant-shell-frame";
 
 type MerchantTopbarProps = {
   audience: "admin" | "customer";
-  badgeLabel: string;
+  identity: AuthenticatedIdentity;
   mobileNavigation: ReactNode;
   mobileNavigationTitle: string;
+  roleLabel: string;
   subtitle?: string;
   title: string;
 };
 
 export function MerchantTopbar({
   audience,
-  badgeLabel,
+  identity,
   mobileNavigation,
   mobileNavigationTitle,
+  roleLabel,
   subtitle,
   title,
 }: MerchantTopbarProps) {
-  const accountLabel = audience === "admin" ? "管理员账号" : "客户账号";
+  const displayName = identity.displayName?.trim() || "未设置姓名";
 
   return (
     <div className="flex h-full min-w-0 items-center justify-between px-3 sm:px-5 lg:px-6">
@@ -97,7 +100,7 @@ export function MerchantTopbar({
         >
           <Bell aria-hidden="true" />
         </Button>
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
               aria-label="打开账号菜单"
@@ -113,15 +116,23 @@ export function MerchantTopbar({
             className="w-[236px] rounded-lg border border-border bg-[var(--merchant-panel)] p-1.5 shadow-lg sm:w-64 sm:p-2"
             sideOffset={6}
           >
-            <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground sm:py-1.5">
-              <ShieldCheck aria-hidden="true" className="size-4 text-primary" />
-              <span>{accountLabel}</span>
+            <DropdownMenuLabel className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 px-2 py-1 text-foreground sm:py-1.5">
+              <UserCircle2 aria-hidden="true" className="mt-0.5 size-4 text-primary" />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium" title={displayName}>
+                  {displayName}
+                </span>
+                <span className="mt-0.5 block break-all text-xs font-normal text-muted-foreground">
+                  {identity.email}
+                </span>
+              </span>
             </DropdownMenuLabel>
-            <div className="px-2 pb-0.5 text-xs text-muted-foreground sm:pb-1">{badgeLabel}</div>
+            <DropdownMenuLabel className="flex items-center gap-2 px-2 pb-0.5 text-xs font-normal text-muted-foreground sm:pb-1">
+              <ShieldCheck aria-hidden="true" className="size-3.5 text-primary" />
+              <span>{roleLabel}</span>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <div className="px-0.5 py-0.5 sm:px-1 sm:py-1">
-              <SignOutButton className="h-8.5 w-full justify-start rounded-md px-2 text-sm sm:h-9 sm:px-2.5" size="sm" variant="ghost" />
-            </div>
+            <SignOutMenuItem className="mx-0.5 my-0.5 min-h-11 cursor-pointer justify-start px-2 text-sm sm:mx-1 sm:my-1 sm:min-h-9 sm:px-2.5" />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

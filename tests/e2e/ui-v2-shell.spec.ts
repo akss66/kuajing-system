@@ -22,14 +22,26 @@ const audiences = [
   {
     account: accounts.admin,
     drawerTitle: "管理员导航",
+    genericAccountLabel: "管理员账号",
     groups: ["工作台", "客户与货品", "订单履约", "资金与数据", "系统管理"],
+    identity: {
+      displayName: "本地演示管理员",
+      email: accounts.admin.email,
+      role: "超级管理员",
+    },
     navigationName: "管理员主导航",
     path: "/admin",
   },
   {
     account: accounts.customer,
     drawerTitle: "客户导航",
+    genericAccountLabel: "客户账号",
     groups: ["工作台", "拿货", "订单与付款"],
+    identity: {
+      displayName: "渥太华演示客户",
+      email: accounts.customer.email,
+      role: "合作客户",
+    },
     navigationName: "客户主导航",
     path: "/portal",
   },
@@ -100,6 +112,24 @@ for (const audience of audiences) {
     const desktopNavigation = page.getByRole("navigation", { name: audience.navigationName });
     await expect(page.getByRole("button", { name: "帮助" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "消息" })).toHaveCount(0);
+    await page.getByRole("button", { name: "打开账号菜单" }).click();
+    const accountMenu = page.locator("[data-slot='dropdown-menu-content']");
+    await expect(accountMenu).toBeVisible();
+    await expect(accountMenu.getByText(audience.identity.displayName, { exact: true })).toBeVisible();
+    await expect(accountMenu.getByText(audience.identity.email, { exact: true })).toBeVisible();
+    await expect(accountMenu.getByText(audience.identity.role, { exact: true })).toBeVisible();
+    await expect(accountMenu.getByText(audience.genericAccountLabel, { exact: true })).toHaveCount(0);
+    const signOutButton = accountMenu.getByRole("menuitem", { name: "退出登录" });
+    await expect(signOutButton).toBeVisible();
+    if ((page.viewportSize()?.width ?? 1440) < 640) {
+      const signOutBox = await signOutButton.boundingBox();
+      expect(signOutBox).not.toBeNull();
+      expect(signOutBox!.height).toBeGreaterThanOrEqual(44);
+      await expectNoPageOverflow(page);
+      await expectNoSeriousAccessibilityViolations(page);
+    }
+    await page.keyboard.press("Escape");
+    await expect(accountMenu).toBeHidden();
 
     for (const viewport of viewports) {
       await test.step(`${viewport.width}px ${viewport.kind} shell`, async () => {
