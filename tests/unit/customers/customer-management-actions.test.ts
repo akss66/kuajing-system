@@ -208,6 +208,32 @@ describe("customer management actions", () => {
     expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
   });
 
+  it("returns Chinese business validation messages for every customer creation field", async () => {
+    const formData = new FormData();
+    formData.set("code", "2");
+    formData.set("customerName", "A");
+    formData.set("email", "not-an-email");
+    formData.set("password", "short");
+    formData.set("reason", "");
+    formData.set("storeName", "B");
+
+    const result = await createCustomerWithStoreAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      fieldErrors: {
+        code: ["客户编号至少需要 2 个字符。"],
+        customerName: ["客户名称至少需要 2 个字符。"],
+        email: ["请输入有效的登录邮箱。"],
+        password: ["初始密码至少需要 12 个字符。"],
+        reason: ["请输入创建原因。"],
+        storeName: ["店铺名称至少需要 2 个字符。"],
+      },
+      status: "error",
+    });
+    expect(JSON.stringify(result)).not.toMatch(/Too small|Invalid/i);
+    expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
+  });
+
   it("returns a safe duplicate constraint error when provisioning a customer with an existing code, store, or email", async () => {
     serviceMocks.provisionCustomerWithStore.mockRejectedValue(
       Object.assign(new Error("duplicate key value violates unique constraint"), {

@@ -33,12 +33,30 @@ const CUSTOMER_CODE_DUPLICATE_CONSTRAINTS = new Set(["customers_code_unique"]);
 const STORE_NAME_DUPLICATE_CONSTRAINTS = new Set(["stores_customer_name_unique"]);
 
 const createCustomerSchema = z.object({
-  code: z.string().trim().min(2).max(40),
-  customerName: z.string().trim().min(2).max(160),
-  email: z.email(),
-  password: z.string().min(12),
-  reason: z.string().trim().min(1).max(500),
-  storeName: z.string().trim().min(2).max(160),
+  code: z
+    .string({ error: "请输入客户编号。" })
+    .trim()
+    .min(2, "客户编号至少需要 2 个字符。")
+    .max(40, "客户编号不能超过 40 个字符。"),
+  customerName: z
+    .string({ error: "请输入客户名称。" })
+    .trim()
+    .min(2, "客户名称至少需要 2 个字符。")
+    .max(160, "客户名称不能超过 160 个字符。"),
+  email: z.email({ error: "请输入有效的登录邮箱。" }),
+  password: z
+    .string({ error: "请输入初始密码。" })
+    .min(12, "初始密码至少需要 12 个字符。"),
+  reason: z
+    .string({ error: "请输入创建原因。" })
+    .trim()
+    .min(1, "请输入创建原因。")
+    .max(500, "创建原因不能超过 500 个字符。"),
+  storeName: z
+    .string({ error: "请输入店铺名称。" })
+    .trim()
+    .min(2, "店铺名称至少需要 2 个字符。")
+    .max(160, "店铺名称不能超过 160 个字符。"),
 });
 
 const updateCustomerSchema = z.object({
