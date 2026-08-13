@@ -1,13 +1,15 @@
 import { eq, sql } from "drizzle-orm";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { db } from "@/db/client";
 import {
+  adminUsers,
   auditLogs,
   customers,
   fulfillmentOrders,
   integrationAttempts,
   integrationOutbox,
+  jifengConnections,
   inventoryBalances,
   inventoryReservations,
   orderLines,
@@ -19,6 +21,8 @@ import {
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
+import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
+import { runJifengFulfillmentCycle } from "@/modules/jifeng-connection/provider";
 import {
   enqueuePaidOrdersForFulfillment,
   JIFENG_RECONCILIATION_LEASE_MS,
@@ -48,6 +52,54 @@ const recipient: TemuRecipient = {
   province: "Ontario",
   taxNumber: null,
 };
+
+const providerEncryptionKey = Buffer.alloc(32, 31);
+
+async function insertRuntimeConnection(status: "READY_DISABLED" | "ENABLED") {
+  const [admin] = await db
+    .insert(adminUsers)
+    .values({
+      displayName: `Cycle ${status}`,
+      loginIdentifier: `cycle-${status.toLowerCase()}@example.test`,
+    })
+    .returning();
+  const now = new Date();
+  await db.insert(jifengConnections).values({
+    accessTokenEncrypted: encryptJifengSecret(
+      "cycle-database-access-token",
+      providerEncryptionKey,
+    ),
+    accessTokenExpiresAt: new Date(now.getTime() + 60 * 60_000),
+    authorizedAt: now,
+    authorizedByAdminUserId: admin.id,
+    connectionKey: "PRIMARY",
+    fulfillmentEnabledAt: status === "ENABLED" ? now : null,
+    fulfillmentEnabledByAdminUserId: status === "ENABLED" ? admin.id : null,
+    logisticsId: 310,
+    refreshTokenEncrypted: encryptJifengSecret(
+      "cycle-database-refresh-token",
+      providerEncryptionKey,
+    ),
+    refreshTokenExpiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+    status,
+    updatedAt: now,
+    userId: "cycle-database-user",
+    warehouseCode: "CA-YYZ",
+  });
+  return admin;
+}
+
+function configureRuntimeEnvironment() {
+  vi.stubEnv("JIFENG_ACCESS_TOKEN", "legacy-access-token");
+  vi.stubEnv("JIFENG_BASE_URL", "https://jifeng.example.test");
+  vi.stubEnv("JIFENG_CLIENT_ID", "client-id");
+  vi.stubEnv("JIFENG_CLIENT_SECRET", "client-secret");
+  vi.stubEnv("JIFENG_LEGACY_FULFILLMENT_ENABLED", "true");
+  vi.stubEnv("JIFENG_LOGISTICS_ID", "999");
+  vi.stubEnv("JIFENG_TOKEN_ENCRYPTION_KEY", providerEncryptionKey.toString("base64url"));
+  vi.stubEnv("JIFENG_USER_ID", "legacy-user");
+  vi.stubEnv("JIFENG_WAREHOUSE_CODE", "LEGACY-WAREHOUSE");
+}
 
 function deferred() {
   let resolve!: () => void;
@@ -130,8 +182,11 @@ async function createShipmentFixture(
 
 describe("paid order Jifeng dispatch", () => {
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     await db.execute(sql.raw(`
       truncate table
+        jifeng_connections,
         audit_logs,
         integration_attempts,
         integration_outbox,
@@ -141,12 +196,134 @@ describe("paid order Jifeng dispatch", () => {
         fulfillment_orders,
         inventory_reservations,
         inventory_balances,
+        admin_users,
         skus,
         products,
         stores,
         customers
       restart identity cascade
     `));
+  });
+
+  test("does no write work while disabled and re-reads activation on the next cycle", async () => {
+    configureRuntimeEnvironment();
+    const { order } = await createShipmentFixture();
+    const admin = await insertRuntimeConnection("READY_DISABLED");
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
+      const isOrderQuery = String(url).endsWith("/api/order/get");
+      const erpNo = isOrderQuery
+        ? String(JSON.parse(String(request?.body)).erpNo)
+        : undefined;
+      return Response.json({
+        code: 0,
+        data: isOrderQuery
+          ? { erpNo, orderNo: "JF-CYCLE-1", status: 6 }
+          : { orderNo: "JF-CYCLE-1" },
+        message: "SUCCESS",
+        requestId: isOrderQuery ? "cycle-query" : "cycle-create",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runJifengFulfillmentCycle()).resolves.toMatchObject({
+      enabled: false,
+      enqueuedCount: 0,
+    });
+    expect(await db.select().from(integrationOutbox)).toHaveLength(0);
+    expect(await db.select().from(shipmentFulfillments)).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const enabledAt = new Date();
+    await db
+      .update(jifengConnections)
+      .set({
+        fulfillmentEnabledAt: enabledAt,
+        fulfillmentEnabledByAdminUserId: admin.id,
+        status: "ENABLED",
+        updatedAt: enabledAt,
+      })
+      .where(eq(jifengConnections.connectionKey, "PRIMARY"));
+
+    await expect(runJifengFulfillmentCycle()).resolves.toMatchObject({
+      enabled: true,
+      enqueuedCount: 1,
+      processed: { completed: 1, failed: 0, retryScheduled: 0 },
+    });
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).endsWith("/api/order/create"),
+      ),
+    ).toHaveLength(1);
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, order.id));
+    expect(savedOrder.status).toBe("FULFILLING");
+  });
+
+  test("reconciles ambiguous remote state read-only while disabled and never claims new create work", async () => {
+    configureRuntimeEnvironment();
+    const existing = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [existingEvent] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.aggregateId, existing.shipment.id));
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          throw new JifengApiError({
+            code: "TIMEOUT",
+            message: "create result was ambiguous",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: existingEvent.id,
+      now: new Date(Date.now() - 10 * 60_000),
+    });
+    const pending = await createShipmentFixture();
+    await insertRuntimeConnection("READY_DISABLED");
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
+      const erpNo = String(JSON.parse(String(request?.body)).erpNo);
+      return Response.json({
+        code: 0,
+        data: { erpNo, orderNo: "JF-EXISTING", status: 6 },
+        message: "SUCCESS",
+        requestId: "disabled-read-query",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runJifengFulfillmentCycle()).resolves.toMatchObject({
+      enabled: false,
+      enqueuedCount: 0,
+      statuses: { exceptions: 0, shipped: 0, synced: 1 },
+    });
+
+    const requestedPaths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(requestedPaths).toEqual(["/api/order/get"]);
+    expect(requestedPaths).not.toContain("/api/order/create");
+    expect(requestedPaths).not.toContain("/api/order/cancel");
+    const outboxRows = await db.select().from(integrationOutbox);
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows[0]).toMatchObject({
+      aggregateId: existing.shipment.id,
+      claimToken: null,
+      status: "FAILED",
+    });
+    expect(
+      outboxRows.some((row) => row.aggregateId === pending.shipment.id),
+    ).toBe(false);
+    const [reconciledFulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, existing.shipment.id));
+    expect(reconciledFulfillment).toMatchObject({
+      externalOrderNo: "JF-EXISTING",
+      status: "FULFILLING",
+    });
   });
 
   test("enqueues each paid shipment once and never copies recipient PII into the outbox", async () => {

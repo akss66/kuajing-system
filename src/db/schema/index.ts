@@ -5,5 +5,6 @@ export * from "./customers";
 export * from "./fulfillment";
 export * from "./identity";
 export * from "./inventory";
+export * from "./jifeng";
 export * from "./notifications";
 export * from "./orders";

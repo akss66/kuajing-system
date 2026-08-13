@@ -7,6 +7,11 @@ x-app: &app
     dockerfile: Dockerfile
   env_file:
     - ${APP_ENV_FILE:-.env.production}
+  environment:
+    JIFENG_BASE_URL: ${JIFENG_BASE_URL:?JIFENG_BASE_URL is required}
+    JIFENG_CLIENT_ID: ${JIFENG_CLIENT_ID:?JIFENG_CLIENT_ID is required}
+    JIFENG_CLIENT_SECRET: ${JIFENG_CLIENT_SECRET:?JIFENG_CLIENT_SECRET is required}
+    JIFENG_TOKEN_ENCRYPTION_KEY: ${JIFENG_TOKEN_ENCRYPTION_KEY:?JIFENG_TOKEN_ENCRYPTION_KEY is required}
   init: true
   restart: unless-stopped
   security_opt:

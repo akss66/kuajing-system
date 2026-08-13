@@ -9,6 +9,8 @@ const E2E_RESET_TABLES = [
   "integration_outbox",
   "replacement_requests",
   "shipment_fulfillments",
+  "jifeng_authorization_attempts",
+  "jifeng_connections",
   "audit_logs",
   "settlement_payment_claims",
   "settlement_batch_orders",

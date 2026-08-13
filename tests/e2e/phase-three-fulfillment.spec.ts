@@ -172,6 +172,12 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
 
   await page.goto("/admin/system/integrations");
   await expect(page.getByRole("heading", { name: "外部集成" })).toBeVisible();
-  await expect(page.getByText("未配置", { exact: true })).toHaveCount(2);
+  const jifengMetric = page.locator("[data-metric-strip] article").filter({ hasText: "极风连接" });
+  const feishuPanel = page
+    .locator("section[data-workspace-panel]")
+    .filter({ has: page.getByRole("heading", { name: "飞书货盘与机器人" }) });
+  await expect(feishuPanel.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(jifengMetric.getByText("未连接", { exact: true })).toHaveCount(1);
+  await expect(jifengMetric.getByText("开发者配置待补齐", { exact: true })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
