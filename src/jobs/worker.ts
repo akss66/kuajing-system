@@ -1,7 +1,13 @@
 import { PgBoss } from "pg-boss";
 
 import { FeishuClient } from "@/integrations/feishu/client";
-import { readFeishuConfig } from "@/integrations/feishu/config";
+import {
+  canProcessFeishuBot,
+  canWriteFeishuCargo,
+  hasFeishuRuntimeConfiguration,
+  readFeishuApiBaseUrl,
+  readFeishuConfig,
+} from "@/integrations/feishu/config";
 import { JifengClient } from "@/integrations/jifeng/client";
 import { readJifengConfig } from "@/integrations/jifeng/config";
 import {
@@ -36,9 +42,6 @@ await boss.start();
 await boss.createQueue(EXPIRE_PENDING_ORDERS_QUEUE);
 await boss.createQueue(EXPIRE_SETTLEMENT_BATCHES_QUEUE);
 
-// pg-boss 12.27: schedules are upserted by name and should use five-field cron
-// expressions because the scheduler checks on a 30-second cadence.
-// Source: https://pgboss.io/api/scheduling
 await boss.schedule(EXPIRE_PENDING_ORDERS_QUEUE, "* * * * *", null, {
   tz: "UTC",
 });
@@ -46,9 +49,6 @@ await boss.schedule(EXPIRE_SETTLEMENT_BATCHES_QUEUE, "* * * * *", null, {
   tz: "UTC",
 });
 
-// pg-boss workers receive an array of jobs; batchSize 1 keeps this maintenance
-// job single-purpose while database row locks make the domain operation idempotent.
-// Source: https://pgboss.io/api/workers
 await boss.work(EXPIRE_PENDING_ORDERS_QUEUE, { batchSize: 1 }, async () => {
   const expiredCount = await expirePendingPaymentOrders();
   console.info(`[worker] expired ${expiredCount} pending payment order(s)`);
@@ -115,43 +115,41 @@ if (configuredJifengVariables.length === jifengRequiredVariables.length) {
   console.info("[worker] Jifeng fulfillment jobs disabled: credentials not configured");
 }
 
-const feishuRequiredVariables = [
-  "FEISHU_APP_ID",
-  "FEISHU_APP_SECRET",
-  "FEISHU_CARGO_WIKI_TOKEN",
-  "FEISHU_INTERNAL_CHAT_ID",
-] as const;
-const configuredFeishuVariables = feishuRequiredVariables.filter(
-  (name) => Boolean(process.env[name]),
-);
-if (
-  configuredFeishuVariables.length > 0 &&
-  configuredFeishuVariables.length !== feishuRequiredVariables.length
-) {
-  throw new Error("飞书集成仅配置了部分环境变量，请补齐后再启动任务进程");
-}
+const hasAnyFeishuConfiguration = hasFeishuRuntimeConfiguration();
 
-if (configuredFeishuVariables.length === feishuRequiredVariables.length) {
+if (hasAnyFeishuConfiguration) {
   const feishuConfig = readFeishuConfig();
-  const feishuClient = new FeishuClient({
-    appId: feishuConfig.appId,
-    appSecret: feishuConfig.appSecret,
-  });
-  await boss.createQueue(FEISHU_SYNC_QUEUE);
-  await boss.schedule(FEISHU_SYNC_QUEUE, "* * * * *", null, { tz: "UTC" });
-  await boss.work(FEISHU_SYNC_QUEUE, { batchSize: 1 }, async () => {
-    await enqueueFeishuCargoSync({ reason: "five-minute-reconciliation" });
-    const result = await processFeishuOutbox({
-      botClient: feishuClient,
-      cargoClient: feishuClient,
-      config: feishuConfig,
+  const cargoWriterEnabled = canWriteFeishuCargo(feishuConfig);
+  const botEnabled = canProcessFeishuBot(feishuConfig);
+
+  if (cargoWriterEnabled || botEnabled) {
+    const feishuClient = new FeishuClient({
+      appId: feishuConfig.appId,
+      appSecret: feishuConfig.appSecret,
+      baseUrl: readFeishuApiBaseUrl(),
+    });
+    await boss.createQueue(FEISHU_SYNC_QUEUE);
+    await boss.schedule(FEISHU_SYNC_QUEUE, "* * * * *", null, { tz: "UTC" });
+    await boss.work(FEISHU_SYNC_QUEUE, { batchSize: 1 }, async () => {
+      if (cargoWriterEnabled) {
+        await enqueueFeishuCargoSync({ reason: "five-minute-reconciliation" });
+      }
+      const result = await processFeishuOutbox({
+        botClient: feishuClient,
+        cargoClient: feishuClient,
+        config: feishuConfig,
+      });
+      console.info(
+        `[worker] Feishu cycle cargo=${result.cargoCompleted} bot=${result.botCompleted} failed=${result.failed}`,
+      );
+      return result;
     });
     console.info(
-      `[worker] Feishu cycle cargo=${result.cargoCompleted} bot=${result.botCompleted} failed=${result.failed}`,
+      `[worker] Feishu jobs enabled: cargo=${cargoWriterEnabled ? "on" : "off"} bot=${botEnabled ? "on" : "off"}`,
     );
-    return result;
-  });
-  console.info("[worker] Feishu sheet and bot jobs enabled");
+  } else {
+    console.info("[worker] Feishu writer disabled: source preflight only");
+  }
 } else {
   console.info("[worker] Feishu jobs disabled: credentials not configured");
 }

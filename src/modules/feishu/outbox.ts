@@ -7,6 +7,12 @@ import {
   integrationOutbox,
 } from "@/db/schema";
 import { FeishuApiError } from "@/integrations/feishu/client";
+import {
+  canProcessFeishuBot,
+  canWriteFeishuCargo,
+  readFeishuConfig,
+  type FeishuIntegrationConfig,
+} from "@/integrations/feishu/config";
 
 import { syncCargoSnapshot, type FeishuCargoPort } from "./cargo-sync";
 
@@ -14,16 +20,26 @@ export type FeishuBotPort = {
   sendTextMessage(input: { chatId: string; text: string }): Promise<unknown>;
 };
 
-type FeishuWorkerConfig = {
-  cargoSheetId?: string;
-  cargoWikiToken: string;
-  internalChatId: string;
-};
+type FeishuWorkerConfig = Pick<
+  FeishuIntegrationConfig,
+  "internalChatId" | "sourceWikiToken" | "targetSheetId" | "targetSpreadsheetToken"
+>;
+
+function isCargoWriterEnabledInEnvironment(
+  environment: Record<string, string | undefined> = process.env,
+) {
+  try {
+    return canWriteFeishuCargo(readFeishuConfig(environment));
+  } catch {
+    return false;
+  }
+}
 
 export async function enqueueCargoSyncEvent(
   tx: DbTransaction,
   input: { idempotencyKey: string; now?: Date; reason: string },
 ) {
+  if (!isCargoWriterEnabledInEnvironment()) return;
   const now = input.now ?? new Date();
   await tx
     .insert(integrationOutbox)
@@ -43,6 +59,7 @@ export async function enqueueFeishuCargoSync(input?: {
   now?: Date;
   reason?: string;
 }) {
+  if (!isCargoWriterEnabledInEnvironment()) return false;
   const now = input?.now ?? new Date();
   const fiveMinuteSlot = Math.floor(now.getTime() / (5 * 60_000));
   const [event] = await db
@@ -181,40 +198,44 @@ export async function processFeishuOutbox(input: {
   const now = input.now ?? new Date();
   const summary = { botCompleted: 0, cargoCompleted: 0, failed: 0 };
 
-  const cargoEvents = await claimEvents("FEISHU_SHEET", now);
-  if (cargoEvents.length > 0) {
-    const ids = cargoEvents.map((event) => event.id);
-    const attempts = new Map(
-      cargoEvents.map((event) => [event.id, event.attemptNumber]),
-    );
-    try {
-      const result = await syncCargoSnapshot({
-        client: input.cargoClient,
-        config: input.config,
-      });
-      await markEventsCompleted(ids, attempts, now, result);
-      summary.cargoCompleted = ids.length;
-    } catch (error) {
-      await markEventsFailed(ids, attempts, error, now);
-      summary.failed += ids.length;
+  if (canWriteFeishuCargo(input.config)) {
+    const cargoEvents = await claimEvents("FEISHU_SHEET", now);
+    if (cargoEvents.length > 0) {
+      const ids = cargoEvents.map((event) => event.id);
+      const attempts = new Map(
+        cargoEvents.map((event) => [event.id, event.attemptNumber]),
+      );
+      try {
+        const result = await syncCargoSnapshot({
+          client: input.cargoClient,
+          config: input.config,
+        });
+        await markEventsCompleted(ids, attempts, now, result);
+        summary.cargoCompleted = ids.length;
+      } catch (error) {
+        await markEventsFailed(ids, attempts, error, now);
+        summary.failed += ids.length;
+      }
     }
   }
 
-  const botEvents = await claimEvents("FEISHU_BOT", now);
-  for (const event of botEvents) {
-    const attempts = new Map([[event.id, event.attemptNumber]]);
-    const title = String(event.payload.title ?? "系统通知");
-    const message = String(event.payload.message ?? "请登录系统查看详情");
-    try {
-      await input.botClient.sendTextMessage({
-        chatId: input.config.internalChatId,
-        text: `【同舟行跨境】${title}\n${message}`,
-      });
-      await markEventsCompleted([event.id], attempts, now, {});
-      summary.botCompleted += 1;
-    } catch (error) {
-      await markEventsFailed([event.id], attempts, error, now);
-      summary.failed += 1;
+  if (canProcessFeishuBot(input.config)) {
+    const botEvents = await claimEvents("FEISHU_BOT", now);
+    for (const event of botEvents) {
+      const attempts = new Map([[event.id, event.attemptNumber]]);
+      const title = String(event.payload.title ?? "系统通知");
+      const message = String(event.payload.message ?? "请登录系统查看详情");
+      try {
+        await input.botClient.sendTextMessage({
+          chatId: input.config.internalChatId!,
+          text: `【同舟行跨境】${title}\n${message}`,
+        });
+        await markEventsCompleted([event.id], attempts, now, {});
+        summary.botCompleted += 1;
+      } catch (error) {
+        await markEventsFailed([event.id], attempts, error, now);
+        summary.failed += 1;
+      }
     }
   }
   return summary;

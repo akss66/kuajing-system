@@ -6,7 +6,11 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/db/client";
 import { FeishuClient } from "@/integrations/feishu/client";
-import { readFeishuConfig } from "@/integrations/feishu/config";
+import {
+  canWriteFeishuCargo,
+  readFeishuApiBaseUrl,
+  readFeishuConfig,
+} from "@/integrations/feishu/config";
 import { requireAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
@@ -17,6 +21,15 @@ export async function manualFeishuCargoSyncAction(
 ): Promise<ActionState> {
   void _previousState;
   await requireAdmin();
+
+  const config = readFeishuConfig();
+  if (!canWriteFeishuCargo(config)) {
+    return {
+      message: "飞书目标测试表未配置，当前只允许预检，不允许手动写入货盘。",
+      status: "error",
+    };
+  }
+
   await db.transaction((tx) =>
     enqueueCargoSyncEvent(tx, {
       idempotencyKey: `manual:${randomUUID()}`,
@@ -37,14 +50,15 @@ export async function testFeishuConnectionAction(
     const client = new FeishuClient({
       appId: config.appId,
       appSecret: config.appSecret,
+      baseUrl: readFeishuApiBaseUrl(),
     });
     const spreadsheet = await client.resolveWikiSpreadsheet(
-      config.cargoWikiToken,
+      config.sourceWikiToken,
     );
     const sheets = await client.listSheets(spreadsheet.spreadsheetToken);
-    if (sheets.length === 0) throw new Error("货盘电子表格没有工作表");
+    if (sheets.length === 0) throw new Error("源飞书电子表格没有工作表");
     return {
-      message: `连接成功：应用可访问货盘电子表格，共 ${sheets.length} 个工作表。`,
+      message: `连接成功：应用可访问源飞书电子表格，共 ${sheets.length} 个工作表。`,
       status: "success",
     };
   } catch (error) {

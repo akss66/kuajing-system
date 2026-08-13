@@ -31,8 +31,7 @@ export default async function IntegrationsPage() {
   const feishuConfigured = configured([
     "FEISHU_APP_ID",
     "FEISHU_APP_SECRET",
-    "FEISHU_CARGO_WIKI_TOKEN",
-    "FEISHU_INTERNAL_CHAT_ID",
+    "FEISHU_CARGO_SOURCE_WIKI_TOKEN",
   ]);
 
   const recent = await db
@@ -56,7 +55,7 @@ export default async function IntegrationsPage() {
           { href: "/admin/system/health", label: "系统健康" },
           { label: "外部集成" },
         ]}
-        description="只显示配置状态和脱敏错误摘要，不会回显任何密钥、令牌或第三方账号凭证。"
+        description="只显示配置状态和脱敏错误摘要，不会回显任何密钥、令牌或第三方账户凭证。"
         title="外部集成"
       />
 
@@ -132,7 +131,7 @@ export default async function IntegrationsPage() {
               <div>
                 <h2 className="font-semibold text-ink">飞书货盘与机器人</h2>
                 <p className="mt-1 text-sm text-muted">
-                  用于货盘镜像、异常通知与库存预警。
+                  源 wiki 只用于预检；目标测试表与机器人通知按需独立启用。
                 </p>
               </div>
             </div>
@@ -150,7 +149,7 @@ export default async function IntegrationsPage() {
               submitLabel="测试飞书连接"
             >
               <p className="text-xs text-muted">
-                验证应用、知识库与工作表访问权限。
+                预检源 wiki 与源电子表格访问权限。
               </p>
             </ActionForm>
             <ActionForm
@@ -159,7 +158,7 @@ export default async function IntegrationsPage() {
               submitLabel="重新同步货盘"
             >
               <p className="text-xs text-muted">
-                手动加入一次全量覆盖任务。
+                仅当目标测试表完整配置后才允许手动写入。
               </p>
             </ActionForm>
           </div>

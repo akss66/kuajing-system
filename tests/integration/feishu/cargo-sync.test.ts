@@ -92,7 +92,7 @@ describe("Feishu cargo sheet sync", () => {
     ]);
   });
 
-  test("resolves the wiki spreadsheet, keeps the selected sheet and clears stale trailing rows", async () => {
+  test("writes cargo data into the configured target spreadsheet and clears stale trailing rows", async () => {
     const [product] = await db.insert(products).values({ name: "商品" }).returning();
     const [sku] = await db
       .insert(skus)
@@ -108,14 +108,17 @@ describe("Feishu cargo sheet sync", () => {
       | { range: string; spreadsheetToken: string; values: Array<Array<number | string | null>> }
       | undefined;
     const client: FeishuCargoPort = {
-      async listSheets() {
+      async listSheets(spreadsheetToken) {
+        expect(spreadsheetToken).toBe("target-spreadsheet-token");
         return [{ index: 0, sheetId: "cargo-sheet", title: "加拿大货盘" }];
       },
-      async readRange() {
+      async readRange(input) {
+        expect(input.spreadsheetToken).toBe("target-spreadsheet-token");
         return [["序号"], [1], [2], [3]];
       },
-      async resolveWikiSpreadsheet() {
-        return { spreadsheetToken: "spreadsheet-token" };
+      async resolveWikiSpreadsheet(wikiToken) {
+        expect(wikiToken).toBe("Mr9Pw5XgriFyIXkv8tzcZzIpnNb");
+        return { spreadsheetToken: "source-spreadsheet-token" };
       },
       async writeRange(input) {
         written = input;
@@ -124,16 +127,48 @@ describe("Feishu cargo sheet sync", () => {
 
     const result = await syncCargoSnapshot({
       client,
-      config: { cargoWikiToken: "Mr9Pw5XgriFyIXkv8tzcZzIpnNb" },
+      config: {
+        sourceWikiToken: "Mr9Pw5XgriFyIXkv8tzcZzIpnNb",
+        targetSheetId: "cargo-sheet",
+        targetSpreadsheetToken: "target-spreadsheet-token",
+      },
     });
 
     expect(result).toEqual({ rowCount: 2, sheetId: "cargo-sheet", writtenRows: 4 });
     expect(written).toMatchObject({
       range: "cargo-sheet!A1:M4",
-      spreadsheetToken: "spreadsheet-token",
+      spreadsheetToken: "target-spreadsheet-token",
     });
     expect(written?.values).toHaveLength(4);
     expect(written?.values[2]).toEqual(Array(13).fill(null));
     expect(written?.values[3]).toEqual(Array(13).fill(null));
+  });
+
+  test("rejects writing cargo data back into the resolved source spreadsheet", async () => {
+    const client: FeishuCargoPort = {
+      async listSheets() {
+        return [{ index: 0, sheetId: "cargo-sheet", title: "加拿大货盘" }];
+      },
+      async readRange() {
+        return [];
+      },
+      async resolveWikiSpreadsheet() {
+        return { spreadsheetToken: "same-spreadsheet-token" };
+      },
+      async writeRange() {
+        throw new Error("should not write when source and target collide");
+      },
+    };
+
+    await expect(
+      syncCargoSnapshot({
+        client,
+        config: {
+          sourceWikiToken: "Mr9Pw5XgriFyIXkv8tzcZzIpnNb",
+          targetSheetId: "cargo-sheet",
+          targetSpreadsheetToken: "same-spreadsheet-token",
+        },
+      }),
+    ).rejects.toThrowError("飞书源货盘与目标测试表不能是同一电子表格");
   });
 });

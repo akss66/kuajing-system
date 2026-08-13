@@ -1,5 +1,9 @@
 import { asc, eq, sql } from "drizzle-orm";
 
+import {
+  assertSafeCargoTarget,
+  type FeishuIntegrationConfig,
+} from "@/integrations/feishu/config";
 import { db } from "@/db/client";
 import { inventoryBalances, inventoryReservations, skus } from "@/db/schema";
 
@@ -95,30 +99,45 @@ export async function buildCargoSnapshot(): Promise<CargoCell[][]> {
   ];
 }
 
+type FeishuCargoSyncConfig = Pick<
+  FeishuIntegrationConfig,
+  "sourceWikiToken" | "targetSheetId" | "targetSpreadsheetToken"
+>;
+
 export async function syncCargoSnapshot(input: {
   client: FeishuCargoPort;
-  config: { cargoSheetId?: string; cargoWikiToken: string };
+  config: FeishuCargoSyncConfig;
 }) {
-  const { spreadsheetToken } = await input.client.resolveWikiSpreadsheet(
-    input.config.cargoWikiToken,
+  const { spreadsheetToken: sourceSpreadsheetToken } =
+    await input.client.resolveWikiSpreadsheet(input.config.sourceWikiToken);
+  assertSafeCargoTarget(
+    {
+      appId: "unused",
+      appSecret: "unused",
+      sourceWikiToken: input.config.sourceWikiToken,
+      targetSheetId: input.config.targetSheetId,
+      targetSpreadsheetToken: input.config.targetSpreadsheetToken,
+    },
+    sourceSpreadsheetToken,
   );
-  const sheets = await input.client.listSheets(spreadsheetToken);
-  const sheet = input.config.cargoSheetId
-    ? sheets.find((candidate) => candidate.sheetId === input.config.cargoSheetId)
-    : [...sheets].sort((a, b) => a.index - b.index)[0];
+
+  const targetSpreadsheetToken = input.config.targetSpreadsheetToken!;
+  const targetSheetId = input.config.targetSheetId!;
+  const sheets = await input.client.listSheets(targetSpreadsheetToken);
+  const sheet = sheets.find((candidate) => candidate.sheetId === targetSheetId);
   if (!sheet) throw new Error("未找到配置的飞书货盘工作表");
 
   const snapshot = await buildCargoSnapshot();
   const existing = await input.client.readRange({
     range: `${sheet.sheetId}!A1:A5000`,
-    spreadsheetToken,
+    spreadsheetToken: targetSpreadsheetToken,
   });
   const writtenRows = Math.max(snapshot.length, existing.length, 1);
   const values = [...snapshot];
   while (values.length < writtenRows) values.push(Array(13).fill(null));
   await input.client.writeRange({
     range: `${sheet.sheetId}!A1:M${writtenRows}`,
-    spreadsheetToken,
+    spreadsheetToken: targetSpreadsheetToken,
     values,
   });
   return { rowCount: snapshot.length, sheetId: sheet.sheetId, writtenRows };
