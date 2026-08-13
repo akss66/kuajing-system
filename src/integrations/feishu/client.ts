@@ -5,6 +5,8 @@ type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+export const MAX_SOURCE_IMAGE_BYTES = 8 * 1024 * 1024;
+
 const baseResponseSchema = z.object({
   code: z.coerce.number().int(),
   data: z.unknown().optional(),
@@ -45,12 +47,46 @@ const sheetsResponseSchema = baseResponseSchema.extend({
 const rangeResponseSchema = baseResponseSchema.extend({
   data: z
     .object({
+      revision: z.coerce.number().int().nonnegative().optional(),
       valueRange: z
-        .object({ values: z.array(z.array(z.unknown())).optional().default([]) })
+        .object({
+          range: z.string().optional(),
+          revision: z.coerce.number().int().nonnegative().optional(),
+          values: z.array(z.array(z.unknown())).optional().default([]),
+        })
         .optional(),
     })
     .optional(),
 });
+
+export type FeishuRangeResult = {
+  revision: number;
+  range: string;
+  values: unknown[][];
+};
+
+export type FeishuStyleBatchUpdate = Array<{
+  ranges: string[];
+  style: Record<string, unknown>;
+}>;
+
+export type FeishuDimensionInput = {
+  sheetId: string;
+  majorDimension: "ROWS" | "COLUMNS";
+  startIndex: number;
+  endIndex: number;
+};
+
+export type FeishuDimensionProperties = {
+  visible?: boolean;
+  fixedSize?: number;
+};
+
+export type FeishuFilterCondition = {
+  filter_type: string;
+  compare_type?: string;
+  expected?: string[];
+};
 
 export class FeishuApiError extends Error {
   constructor(
@@ -65,9 +101,37 @@ export class FeishuApiError extends Error {
 
 function errorMessage(code: number) {
   if (code === 1310213 || code === 131006) {
-    return "飞书文档权限不足，请将应用添加为知识库或电子表格协作者";
+    return "Feishu document permission is missing";
   }
-  return `飞书接口调用失败（${code}）`;
+  return `Feishu API returned error code ${code}`;
+}
+
+function sanitizeSuggestedFileName(fileName: string | null) {
+  if (!fileName) return null;
+  const stripped = fileName.split(/[\\/]/).pop()?.trim() ?? "";
+  const cleaned = stripped.replace(/[\u0000-\u001F\u007F]/g, "");
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function parseSuggestedFileName(contentDisposition: string | null) {
+  if (!contentDisposition) return null;
+
+  const encodedMatch = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (encodedMatch) {
+    try {
+      return sanitizeSuggestedFileName(decodeURIComponent(encodedMatch[1]));
+    } catch {
+      return sanitizeSuggestedFileName(encodedMatch[1]);
+    }
+  }
+
+  const quotedMatch = /filename\s*=\s*"([^"]+)"/i.exec(contentDisposition);
+  if (quotedMatch) {
+    return sanitizeSuggestedFileName(quotedMatch[1]);
+  }
+
+  const unquotedMatch = /filename\s*=\s*([^;]+)/i.exec(contentDisposition);
+  return sanitizeSuggestedFileName(unquotedMatch?.[1]?.trim() ?? null);
 }
 
 export class FeishuClient {
@@ -105,7 +169,7 @@ export class FeishuClient {
     if (response.data.data.node.obj_type !== "sheet") {
       throw new FeishuApiError(
         "WIKI_NODE_NOT_SHEET",
-        "飞书知识库节点不是电子表格",
+        "Feishu wiki node is not a sheet",
         false,
       );
     }
@@ -146,7 +210,10 @@ export class FeishuClient {
     );
   }
 
-  async readRange(input: { range: string; spreadsheetToken: string }) {
+  async readRangeDetails(input: {
+    range: string;
+    spreadsheetToken: string;
+  }): Promise<FeishuRangeResult> {
     const response = rangeResponseSchema.safeParse(
       await this.authorizedJson(
         `/open-apis/sheets/v2/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/values/${encodeURIComponent(input.range)}`,
@@ -155,7 +222,123 @@ export class FeishuClient {
     if (!response.success || response.data.code !== 0 || !response.data.data) {
       this.throwResponseError(response);
     }
-    return response.data.data.valueRange?.values ?? [];
+
+    const valueRange = response.data.data.valueRange;
+    return {
+      range: valueRange?.range ?? input.range,
+      revision: valueRange?.revision ?? response.data.data.revision ?? 0,
+      values: valueRange?.values ?? [],
+    };
+  }
+
+  async readRange(input: { range: string; spreadsheetToken: string }) {
+    return (await this.readRangeDetails(input)).values;
+  }
+
+  async downloadMedia(fileToken: string): Promise<{
+    bytes: Uint8Array;
+    contentType: string;
+    fileName: string | null;
+  }> {
+    const response = await this.authorizedResponse(
+      `/open-apis/drive/v1/medias/${encodeURIComponent(fileToken)}/download`,
+    );
+    const declaredLength = Number.parseInt(
+      response.headers.get("Content-Length") ?? "",
+      10,
+    );
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_IMAGE_BYTES) {
+      throw new FeishuApiError(
+        "MEDIA_TOO_LARGE",
+        "Feishu media exceeds the 8 MiB download limit",
+        false,
+      );
+    }
+
+    return {
+      bytes: await this.readBinaryBody(response),
+      contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
+      fileName: parseSuggestedFileName(
+        response.headers.get("Content-Disposition"),
+      ),
+    };
+  }
+
+  async writeImage(input: {
+    spreadsheetToken: string;
+    range: string;
+    bytes: Uint8Array;
+    fileName: string;
+  }) {
+    return this.expectSuccess(
+      await this.authorizedJson(
+        `/open-apis/sheets/v2/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/values_image`,
+        {
+          body: JSON.stringify({
+            image: Array.from(input.bytes),
+            name: input.fileName,
+            range: input.range,
+          }),
+          method: "POST",
+        },
+      ),
+    );
+  }
+
+  async setRangeStyle(input: {
+    spreadsheetToken: string;
+    data: FeishuStyleBatchUpdate;
+  }) {
+    return this.expectSuccess(
+      await this.authorizedJson(
+        `/open-apis/sheets/v2/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/styles_batch_update`,
+        {
+          body: JSON.stringify({ data: input.data }),
+          method: "PUT",
+        },
+      ),
+    );
+  }
+
+  async updateDimension(input: {
+    spreadsheetToken: string;
+    dimension: FeishuDimensionInput;
+    dimensionProperties: FeishuDimensionProperties;
+  }) {
+    return this.expectSuccess(
+      await this.authorizedJson(
+        `/open-apis/sheets/v2/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/dimension_range`,
+        {
+          body: JSON.stringify({
+            dimension: input.dimension,
+            dimensionProperties: input.dimensionProperties,
+          }),
+          method: "PUT",
+        },
+      ),
+    );
+  }
+
+  async createFilter(input: {
+    spreadsheetToken: string;
+    sheetId: string;
+    range: string;
+    col: string;
+    condition: FeishuFilterCondition;
+  }) {
+    return this.expectSuccess(
+      await this.authorizedJson(
+        `/open-apis/sheets/v3/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/sheets/${encodeURIComponent(input.sheetId)}/filter`,
+        {
+          body: JSON.stringify({
+            col: input.col,
+            condition: input.condition,
+            range: input.range,
+          }),
+          method: "POST",
+        },
+      ),
+    );
   }
 
   async sendTextMessage(input: { chatId: string; text: string }) {
@@ -190,7 +373,7 @@ export class FeishuClient {
     if (!response.success) {
       throw new FeishuApiError(
         "INVALID_RESPONSE",
-        "飞书接口响应格式无效",
+        "Feishu API returned an invalid response",
         true,
       );
     }
@@ -203,12 +386,22 @@ export class FeishuClient {
   }
 
   private async authorizedJson(path: string | URL, init: RequestInit = {}) {
+    const response = await this.authorizedResponse(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        ...init.headers,
+      },
+    });
+    return this.parseJson(response);
+  }
+
+  private async authorizedResponse(path: string | URL, init: RequestInit = {}) {
     const token = await this.tenantToken();
-    return this.fetchJson(path, {
+    return this.fetchResponse(path, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
         ...init.headers,
       },
     });
@@ -219,16 +412,18 @@ export class FeishuClient {
       return this.token.value;
     }
     const response = tokenResponseSchema.safeParse(
-      await this.fetchJson("/open-apis/auth/v3/tenant_access_token/internal", {
-        body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        method: "POST",
-      }),
+      await this.parseJson(
+        await this.fetchResponse("/open-apis/auth/v3/tenant_access_token/internal", {
+          body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          method: "POST",
+        }),
+      ),
     );
     if (!response.success || response.data.code !== 0) {
       throw new FeishuApiError(
         response.success ? String(response.data.code) : "INVALID_RESPONSE",
-        "飞书应用访问凭证获取失败",
+        "Failed to obtain Feishu tenant access token",
         true,
       );
     }
@@ -239,7 +434,7 @@ export class FeishuClient {
     return this.token.value;
   }
 
-  private async fetchJson(path: string | URL, init: RequestInit) {
+  private async fetchResponse(path: string | URL, init: RequestInit) {
     const url =
       path instanceof URL
         ? path
@@ -251,20 +446,68 @@ export class FeishuClient {
       if (!response.ok) {
         throw new FeishuApiError(
           `HTTP_${response.status}`,
-          `飞书接口网络响应异常（${response.status}）`,
+          `Feishu API request failed with HTTP ${response.status}`,
           response.status === 429 || response.status >= 500,
         );
       }
-      return await response.json();
+      return response;
     } catch (error) {
       if (error instanceof FeishuApiError) throw error;
       throw new FeishuApiError(
         controller.signal.aborted ? "TIMEOUT" : "NETWORK_ERROR",
-        controller.signal.aborted ? "飞书接口请求超时" : "飞书接口网络请求失败",
+        controller.signal.aborted
+          ? "Feishu API request timed out"
+          : "Feishu API network request failed",
         true,
       );
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async parseJson(response: Response) {
+    try {
+      return await response.json();
+    } catch {
+      throw new FeishuApiError(
+        "INVALID_RESPONSE",
+        "Feishu API returned invalid JSON",
+        true,
+      );
+    }
+  }
+
+  private async readBinaryBody(response: Response) {
+    if (!response.body) return new Uint8Array();
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      total += value.byteLength;
+      if (total > MAX_SOURCE_IMAGE_BYTES) {
+        await reader.cancel();
+        throw new FeishuApiError(
+          "MEDIA_TOO_LARGE",
+          "Feishu media exceeds the 8 MiB download limit",
+          false,
+        );
+      }
+
+      chunks.push(value);
+    }
+
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged;
   }
 }
