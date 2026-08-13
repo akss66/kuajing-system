@@ -321,6 +321,21 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
+  test("treats a numeric Feishu weight cell as grams", () => {
+    const values = sampleRows();
+    values[3][11] = 57;
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.find((row) => row.sourceRowNumber === 4)?.weightGrams).toBe(57);
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_INVALID_WEIGHT",
+        sourceRowNumber: 4,
+      }),
+    );
+  });
+
   test("rejects image cells that contain multiple file tokens", () => {
     const values = sampleRows();
     values[1][2] = [

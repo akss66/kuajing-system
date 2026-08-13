@@ -186,6 +186,10 @@ function parseNonNegativeSafeInteger(value: unknown) {
 }
 
 function parseWeightGrams(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
   const raw = extractDisplayText(value);
   if (raw.length === 0) return null;
 
