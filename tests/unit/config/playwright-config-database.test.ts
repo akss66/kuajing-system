@@ -21,6 +21,17 @@ describe("playwright.config isolation", () => {
     expect(webServer?.env?.DATABASE_URL).toBe("postgres://test-user:test-pass@127.0.0.1:5432/tongzhouxing_test");
   });
 
+  test("explicitly enables Feishu writes only inside the fake E2E server", async () => {
+    vi.stubEnv("E2E_PORT", "3101");
+    vi.stubEnv("TEST_DATABASE_URL", "");
+    vi.stubEnv("FEISHU_CARGO_WRITES_ENABLED", "");
+
+    const { default: config } = await importPlaywrightConfig();
+    const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
+
+    expect(webServer?.env?.FEISHU_CARGO_WRITES_ENABLED).toBe("true");
+  });
+
   test("starts this worktree on an explicit isolated port without reusing another listener", async () => {
     vi.stubEnv("E2E_PORT", "3217");
     vi.stubEnv("BETTER_AUTH_URL", "");

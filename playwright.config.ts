@@ -60,6 +60,9 @@ export default defineConfig({
         process.env.FEISHU_APP_SECRET ?? "e2e-feishu-app-secret",
       FEISHU_CARGO_SOURCE_WIKI_TOKEN:
         process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN ?? "wiki-source-token",
+      // The fake Feishu server exercises import/sync behavior. Production stays
+      // default-off through compose.production.yaml and its secret env file.
+      FEISHU_CARGO_WRITES_ENABLED: "true",
       FEISHU_CARGO_TARGET_SHEET_ID:
         process.env.FEISHU_CARGO_TARGET_SHEET_ID ?? "target-sheet-id",
       FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN:
