@@ -52,6 +52,7 @@ vi.mock("@/modules/orders/queries", () => queryMocks);
 import AdminOrdersPage from "@/app/(admin)/admin/orders/page";
 import CustomerOrderDetailPage from "@/app/(customer)/portal/orders/[orderId]/page";
 import CustomerOrdersPage from "@/app/(customer)/portal/orders/page";
+import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
 
 const order = {
   createdAt: new Date("2026-08-12T10:00:00.000Z"),
@@ -159,6 +160,8 @@ describe("order workspace hierarchy", () => {
       },
       lines: [],
       paidAt: null,
+      refundedAt: null,
+      shipments: [],
     });
 
     render(
@@ -170,5 +173,76 @@ describe("order workspace hierarchy", () => {
     const timeline = screen.getByRole("region", { name: "订单状态时间线" });
     expect(within(timeline).getByText("待核款")).toHaveAttribute("aria-current", "step");
     expect(within(timeline).queryByText("PENDING")).not.toBeInTheDocument();
+  });
+
+  it("keeps payment and proven wallet refund facts visible before cancellation", () => {
+    render(
+      <OrderStatusTimeline
+        orderStatus="CANCELLED"
+        paidAt="2026-08-12T10:30:00.000Z"
+        refundedAt="2026-08-12T11:00:00.000Z"
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(Array.from(timeline.querySelectorAll("li"), (item) => item.textContent)).toEqual([
+      "订单已创建",
+      "已付款",
+      "余额已退回",
+      "已取消",
+    ]);
+  });
+
+  it("does not claim a refund when a paid cancellation has no refund record", () => {
+    render(
+      <OrderStatusTimeline
+        orderStatus="CANCELLED"
+        paidAt="2026-08-12T10:30:00.000Z"
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(Array.from(timeline.querySelectorAll("li"), (item) => item.textContent)).toEqual([
+      "订单已创建",
+      "已付款",
+      "已取消",
+    ]);
+    expect(within(timeline).queryByText("余额已退回")).not.toBeInTheDocument();
+  });
+
+  it("shows real shipment and replacement progress on the customer detail", async () => {
+    queryMocks.getCustomerOrderDetail.mockResolvedValue({
+      ...order,
+      cancelReason: null,
+      latestPaymentClaim: null,
+      lines: [],
+      paidAt: new Date("2026-08-12T10:30:00.000Z"),
+      refundedAt: null,
+      shipments: [
+        {
+          fulfillmentStatus: "SHIPPED",
+          id: "shipment-1",
+          kind: "NORMAL",
+          replacementStatus: null,
+        },
+        {
+          fulfillmentStatus: "FULFILLING",
+          id: "shipment-2",
+          kind: "REPLACEMENT",
+          replacementStatus: "FULFILLING",
+        },
+      ],
+      status: "SHIPPED",
+    });
+
+    render(
+      await CustomerOrderDetailPage({
+        params: Promise.resolve({ orderId: "order-1" }),
+      }),
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("已发货")).toBeVisible();
+    expect(within(timeline).getByText("补发履约中")).toHaveAttribute("aria-current", "step");
   });
 });

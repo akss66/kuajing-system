@@ -10,6 +10,7 @@ import {
   replacementRequests,
   shipmentFulfillments,
   stores,
+  walletTransactions,
 } from "@/db/schema";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -97,37 +98,67 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
     .limit(1);
   if (!order) return null;
 
-  const lines = await db
-    .select({
-      externalSku: orderLines.externalSku,
-      externalSubOrderNo: orderLines.externalSubOrderNo,
-      id: orderLines.id,
-      lineAmountFen: orderLines.lineAmountFen,
-      quantity: orderLines.quantity,
-      skuCode: orderLines.skuCodeSnapshot,
-      skuName: orderLines.skuNameSnapshot,
-      unitPriceFen: orderLines.unitPriceFen,
-    })
-    .from(orderLines)
-    .where(eq(orderLines.orderId, order.id))
-    .orderBy(orderLines.createdAt);
+  const [lines, paymentClaimRows, shipments, refundRows] = await Promise.all([
+    db
+      .select({
+        externalSku: orderLines.externalSku,
+        externalSubOrderNo: orderLines.externalSubOrderNo,
+        id: orderLines.id,
+        lineAmountFen: orderLines.lineAmountFen,
+        quantity: orderLines.quantity,
+        skuCode: orderLines.skuCodeSnapshot,
+        skuName: orderLines.skuNameSnapshot,
+        unitPriceFen: orderLines.unitPriceFen,
+      })
+      .from(orderLines)
+      .where(eq(orderLines.orderId, order.id))
+      .orderBy(orderLines.createdAt),
+    db
+      .select({
+        amountFen: paymentClaims.amountFen,
+        createdAt: paymentClaims.createdAt,
+        id: paymentClaims.id,
+        note: paymentClaims.note,
+        rejectionReason: paymentClaims.rejectionReason,
+        reviewedAt: paymentClaims.reviewedAt,
+        status: paymentClaims.status,
+      })
+      .from(paymentClaims)
+      .where(eq(paymentClaims.orderId, order.id))
+      .orderBy(desc(paymentClaims.createdAt))
+      .limit(1),
+    db
+      .select({
+        fulfillmentStatus: shipmentFulfillments.status,
+        id: orderShipments.id,
+        kind: orderShipments.kind,
+        replacementStatus: replacementRequests.status,
+      })
+      .from(orderShipments)
+      .leftJoin(shipmentFulfillments, eq(shipmentFulfillments.shipmentId, orderShipments.id))
+      .leftJoin(replacementRequests, eq(replacementRequests.replacementShipmentId, orderShipments.id))
+      .where(eq(orderShipments.orderId, order.id))
+      .orderBy(orderShipments.createdAt),
+    db
+      .select({ refundedAt: walletTransactions.createdAt })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.customerId, customerId),
+          eq(walletTransactions.orderId, order.id),
+          eq(walletTransactions.transactionType, "ORDER_REFUND"),
+        ),
+      )
+      .limit(1),
+  ]);
 
-  const [latestPaymentClaim] = await db
-    .select({
-      amountFen: paymentClaims.amountFen,
-      createdAt: paymentClaims.createdAt,
-      id: paymentClaims.id,
-      note: paymentClaims.note,
-      rejectionReason: paymentClaims.rejectionReason,
-      reviewedAt: paymentClaims.reviewedAt,
-      status: paymentClaims.status,
-    })
-    .from(paymentClaims)
-    .where(eq(paymentClaims.orderId, order.id))
-    .orderBy(desc(paymentClaims.createdAt))
-    .limit(1);
-
-  return { ...order, latestPaymentClaim: latestPaymentClaim ?? null, lines };
+  return {
+    ...order,
+    latestPaymentClaim: paymentClaimRows[0] ?? null,
+    lines,
+    refundedAt: refundRows[0]?.refundedAt ?? null,
+    shipments,
+  };
 }
 
 export type CustomerOrderDetail = NonNullable<
@@ -231,6 +262,7 @@ export async function getAdminOrderDetail(orderId: string) {
       customerName: customers.name,
       id: fulfillmentOrders.id,
       orderNumber: fulfillmentOrders.orderNumber,
+      paidAt: fulfillmentOrders.paidAt,
       paymentMode: fulfillmentOrders.paymentMode,
       status: fulfillmentOrders.status,
       storeName: stores.name,
@@ -245,7 +277,7 @@ export async function getAdminOrderDetail(orderId: string) {
     .limit(1);
   if (!order) return null;
 
-  const [shipments, lines] = await Promise.all([
+  const [shipments, lines, refundRows] = await Promise.all([
     db
       .select({
         attemptCount: shipmentFulfillments.attemptCount,
@@ -292,10 +324,21 @@ export async function getAdminOrderDetail(orderId: string) {
       .from(orderLines)
       .where(eq(orderLines.orderId, orderId))
       .orderBy(orderLines.createdAt),
+    db
+      .select({ refundedAt: walletTransactions.createdAt })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.orderId, orderId),
+          eq(walletTransactions.transactionType, "ORDER_REFUND"),
+        ),
+      )
+      .limit(1),
   ]);
 
   return {
     ...order,
+    refundedAt: refundRows[0]?.refundedAt ?? null,
     shipments: shipments.map((shipment) => ({
       ...shipment,
       lines: lines.filter((line) => line.shipmentId === shipment.id),

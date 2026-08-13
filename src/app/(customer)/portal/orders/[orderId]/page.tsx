@@ -78,7 +78,11 @@ export default async function CustomerOrderDetailPage({
 
       <OrderStatusTimeline
         orderStatus={order.status}
+        paidAt={order.paidAt}
         paymentClaimStatus={order.latestPaymentClaim?.status ?? null}
+        refundedAt={order.refundedAt}
+        replacementStatuses={order.shipments.map((shipment) => shipment.replacementStatus)}
+        shipmentStatuses={order.shipments.map((shipment) => shipment.fulfillmentStatus)}
       />
 
       <OrderStatusPanel order={order} />

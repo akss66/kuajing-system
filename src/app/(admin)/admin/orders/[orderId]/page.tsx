@@ -96,6 +96,8 @@ export default async function AdminOrderDetailPage({
 
       <OrderStatusTimeline
         orderStatus={order.status}
+        paidAt={order.paidAt}
+        refundedAt={order.refundedAt}
         replacementStatuses={order.shipments.map((shipment) => shipment.replacementStatus)}
         shipmentStatuses={order.shipments.map((shipment) => shipment.fulfillmentStatus)}
       />

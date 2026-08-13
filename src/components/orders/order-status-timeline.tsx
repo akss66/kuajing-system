@@ -5,7 +5,9 @@ import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-la
 
 type OrderStatusTimelineProps = {
   orderStatus: string;
+  paidAt?: Date | string | null;
   paymentClaimStatus?: string | null;
+  refundedAt?: Date | string | null;
   replacementStatuses?: Array<string | null>;
   shipmentStatuses?: Array<string | null>;
 };
@@ -43,17 +45,26 @@ function mostRelevantStatus(statuses: Array<string | null>) {
 
 function buildStages({
   orderStatus,
+  paidAt,
   paymentClaimStatus,
+  refundedAt,
   replacementStatuses = [],
   shipmentStatuses = [],
 }: OrderStatusTimelineProps): TimelineStage[] {
   const stages: TimelineStage[] = [{ label: "订单已创建" }];
 
-  if (orderStatus === "CANCELLED" || orderStatus === "EXPIRED") {
+  if (orderStatus === "EXPIRED") {
     stages.push({
       label: getAdminSettlementOrderStatusLabel(orderStatus),
       tone: "danger",
     });
+    return stages;
+  }
+
+  if (orderStatus === "CANCELLED") {
+    if (paidAt) stages.push({ label: "已付款" });
+    if (refundedAt) stages.push({ label: "余额已退回" });
+    stages.push({ label: getAdminSettlementOrderStatusLabel(orderStatus), tone: "danger" });
     return stages;
   }
 
