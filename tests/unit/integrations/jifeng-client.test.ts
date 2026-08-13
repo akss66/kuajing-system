@@ -217,6 +217,44 @@ describe("Jifeng API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  test("awaits managed authentication rejection without refreshing or replaying", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      void url;
+      return Response.json({
+        code: 10002,
+        data: null,
+        message: "access token rejected",
+        requestId: "managed-auth-rejection",
+      });
+    });
+    let rejectionCompleted = false;
+    const onAuthenticationRejected = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      rejectionCompleted = true;
+    });
+    const client = new JifengClient({
+      automaticRefresh: false,
+      credentials: { ...credentials },
+      fetch: fetchMock,
+      onAuthenticationRejected,
+    });
+
+    await expect(
+      client.cancelOrder({ erpNo: "TZX-JF-MANAGED-AUTH" }),
+    ).rejects.toMatchObject({
+      code: "REFRESH_REQUIRED",
+      requestId: "managed-auth-rejection",
+      retryable: false,
+    });
+
+    expect(onAuthenticationRejected).toHaveBeenCalledTimes(1);
+    expect(rejectionCompleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "https://test.jfwms.com/api/order/cancel",
+    );
+  });
+
   test("rejects an incomplete refresh response instead of replaying a business request", async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
       if (String(url).includes("/api/oauth/refreshToken")) {

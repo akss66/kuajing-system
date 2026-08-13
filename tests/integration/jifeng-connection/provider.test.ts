@@ -1,8 +1,8 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { db } from "@/db/client";
-import { adminUsers, jifengConnections } from "@/db/schema";
+import { adminUsers, auditLogs, jifengConnections } from "@/db/schema";
 import { JifengClient } from "@/integrations/jifeng/client";
 import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
 import {
@@ -177,6 +177,76 @@ describe("Jifeng runtime credential provider", () => {
     expect(businessHeaders.get("userId")).toBe("refreshed-database-user");
   });
 
+  test("persists a managed write authentication rejection and never refreshes or replays", async () => {
+    await insertConnection("ENABLED");
+    const [before] = await db.select().from(jifengConnections);
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      void url;
+      return Response.json({
+        code: 10002,
+        data: null,
+        message: "access token rejected",
+        requestId: "managed-write-rejection",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = await getEnabledJifengWriteClient();
+    await expect(
+      runtime.client.createOrder({
+        buyerName: "Managed Buyer",
+        buyerPhone: "+1-416-555-0100",
+        erpNo: "PROVIDER-MANAGED-AUTH",
+        platform: "other",
+        recipientAddress: "1 Test Street",
+        recipientCity: "Toronto",
+        recipientCountry: "CA",
+        recipientProvince: "ON",
+        skuList: [{ num: 1, sku: "MANAGED-SKU" }],
+        type: 1,
+        warehouse: "DB-WAREHOUSE",
+        zipCode: "M5V 2T6",
+      }),
+    ).rejects.toMatchObject({
+      code: "REFRESH_REQUIRED",
+      requestId: "managed-write-rejection",
+      retryable: false,
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/order/create",
+    ]);
+    const [after] = await db.select().from(jifengConnections);
+    expect(after).toMatchObject({
+      accessTokenEncrypted: before.accessTokenEncrypted,
+      fulfillmentEnabledAt: before.fulfillmentEnabledAt,
+      fulfillmentEnabledByAdminUserId: before.fulfillmentEnabledByAdminUserId,
+      lastErrorCode: "ACCESS_TOKEN_REJECTED",
+      refreshTokenEncrypted: before.refreshTokenEncrypted,
+      status: "REFRESH_REQUIRED",
+    });
+    expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_RUNTIME_AUTH_REJECTED"));
+    expect(audit).toMatchObject({
+      actorId: null,
+      actorType: "SYSTEM",
+      afterJson: {
+        errorCategory: "ACCESS_TOKEN_REJECTED",
+        status: "REFRESH_REQUIRED",
+      },
+      beforeJson: { status: "ENABLED" },
+    });
+    expect(JSON.stringify(audit)).not.toMatch(
+      /database-access-token|database-refresh-token|client-secret/i,
+    );
+    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+      code: "FULFILLMENT_DISABLED",
+    });
+  });
+
   test("allows stored credentials for read-only reconciliation while fulfillment is disabled", async () => {
     await insertConnection("READY_DISABLED");
 
@@ -184,6 +254,31 @@ describe("Jifeng runtime credential provider", () => {
 
     expect(runtime.client).toBeInstanceOf(JifengClient);
     expect(runtime).not.toHaveProperty("config");
+  });
+
+  test("routes a stored read authentication rejection through persisted state", async () => {
+    await insertConnection("READY_DISABLED");
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      void url;
+      return Response.json({
+        code: 10015,
+        data: null,
+        requestId: "managed-read-rejection",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = await getJifengReadClient();
+    await expect(
+      runtime.client.getOrder({ erpNo: "PROVIDER-MANAGED-READ" }),
+    ).rejects.toMatchObject({ code: "REFRESH_REQUIRED", retryable: false });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      "/api/order/get",
+    );
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored.status).toBe("REFRESH_REQUIRED");
   });
 
   test.each(["AUTHORIZED", "RESOURCE_SELECTION_REQUIRED"] as const)(
@@ -242,6 +337,47 @@ describe("Jifeng runtime credential provider", () => {
     await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
       name: "JifengConfigError",
     });
+  });
+
+  test("keeps absent-row legacy internal refresh compatibility without mutating the database", async () => {
+    vi.stubEnv("JIFENG_LOGISTICS_ID", "");
+    vi.stubEnv("JIFENG_WAREHOUSE_CODE", "");
+    let businessCalls = 0;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/api/oauth/refreshToken") {
+        return Response.json({
+          code: 0,
+          data: {
+            accessToken: "legacy-refreshed-access",
+            expireIn: 86_400,
+            refreshExpireIn: 31_536_000,
+            refreshToken: "legacy-refreshed-refresh",
+            userId: "legacy-refreshed-user",
+          },
+        });
+      }
+      businessCalls += 1;
+      return businessCalls === 1
+        ? Response.json({ code: 10002, data: null })
+        : Response.json({
+            code: 0,
+            data: { erpNo: "LEGACY-REFRESH", status: 6 },
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = await getJifengReadClient();
+    await expect(
+      runtime.client.getOrder({ erpNo: "LEGACY-REFRESH" }),
+    ).resolves.toMatchObject({ erpNo: "LEGACY-REFRESH", status: 6 });
+
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/order/get",
+      "/api/oauth/refreshToken",
+      "/api/order/get",
+    ]);
+    expect(await db.select().from(jifengConnections)).toEqual([]);
   });
 
   test("denies absent-row legacy writes unless compatibility is exactly true", async () => {

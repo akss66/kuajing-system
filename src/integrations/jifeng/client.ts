@@ -70,10 +70,12 @@ export class JifengApiError extends Error {
 }
 
 export class JifengClient {
+  private readonly automaticRefresh: boolean;
   private readonly credentials: JifengCredentials;
   private readonly fetcher: FetchLike;
   private readonly nonce: () => string;
   private readonly now: () => number;
+  private readonly onAuthenticationRejected?: () => void | Promise<void>;
   private readonly onTokensRefreshed?: (tokens: {
     accessToken: string;
     refreshToken?: string;
@@ -81,16 +83,19 @@ export class JifengClient {
   private readonly timeoutMs: number;
 
   constructor(input: {
+    automaticRefresh?: boolean;
     credentials: JifengCredentials;
     fetch?: FetchLike;
     nonce?: () => string;
     now?: () => number;
+    onAuthenticationRejected?: () => void | Promise<void>;
     onTokensRefreshed?: (tokens: {
       accessToken: string;
       refreshToken?: string;
     }) => void | Promise<void>;
     timeoutMs?: number;
   }) {
+    this.automaticRefresh = input.automaticRefresh ?? true;
     this.credentials = {
       ...input.credentials,
       baseUrl: input.credentials.baseUrl.replace(/\/$/, ""),
@@ -98,6 +103,7 @@ export class JifengClient {
     this.fetcher = input.fetch ?? fetch;
     this.nonce = input.nonce ?? createJifengNonce;
     this.now = input.now ?? Date.now;
+    this.onAuthenticationRejected = input.onAuthenticationRejected;
     this.onTokensRefreshed = input.onTokensRefreshed;
     this.timeoutMs = input.timeoutMs ?? 10_000;
   }
@@ -206,13 +212,20 @@ export class JifengClient {
     }
     if (parsed.data.code === 0) return parsed.data;
 
-    if (
-      !refreshed &&
-      accessTokenErrorCodes.has(parsed.data.code) &&
-      this.credentials.refreshToken
-    ) {
-      await this.refreshAccessToken();
-      return this.businessPost(path, body, true);
+    if (!refreshed && accessTokenErrorCodes.has(parsed.data.code)) {
+      if (this.automaticRefresh && this.credentials.refreshToken) {
+        await this.refreshAccessToken();
+        return this.businessPost(path, body, true);
+      }
+      if (!this.automaticRefresh) {
+        await this.onAuthenticationRejected?.();
+        throw new JifengApiError({
+          code: "REFRESH_REQUIRED",
+          message: "极风连接需要重新授权",
+          requestId: parsed.data.requestId,
+          retryable: false,
+        });
+      }
     }
 
     throw new JifengApiError({

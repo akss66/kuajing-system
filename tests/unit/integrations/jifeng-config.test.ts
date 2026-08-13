@@ -103,6 +103,90 @@ describe("Jifeng configuration", () => {
     expect((error as Error).message).not.toContain(baseUrlOverride);
   });
 
+  test("accepts an HTTPS origin with an explicit port in production", () => {
+    const config = readJifengAuthorizedConfig({
+      JIFENG_ACCESS_TOKEN: "access-token",
+      JIFENG_BASE_URL: "https://api.example.test:8443/",
+      JIFENG_CLIENT_ID: "developer-id",
+      JIFENG_CLIENT_SECRET: "developer-secret",
+      JIFENG_USER_ID: "oms-user-7",
+      NODE_ENV: "production",
+    });
+
+    expect(config.baseUrl).toBe("https://api.example.test:8443");
+  });
+
+  test.each([
+    "http://api.example.test",
+    "https://api.example.test/proxy",
+    "https://api.example.test?tenant=secret",
+    "https://api.example.test#fragment-secret",
+    "https://operator:password@api.example.test",
+  ])("rejects a non-origin production base URL without echoing it: %s", (baseUrl) => {
+    const error = (() => {
+      try {
+        readJifengAuthorizedConfig({
+          JIFENG_ACCESS_TOKEN: "access-token",
+          JIFENG_BASE_URL: baseUrl,
+          JIFENG_CLIENT_ID: "developer-id",
+          JIFENG_CLIENT_SECRET: "developer-secret",
+          JIFENG_USER_ID: "oms-user-7",
+          NODE_ENV: "production",
+        });
+      } catch (cause) {
+        return cause;
+      }
+      throw new Error("expected config error");
+    })();
+
+    expect(error).toBeInstanceOf(JifengConfigError);
+    expect(error).toMatchObject({
+      invalidFields: ["JIFENG_BASE_URL"],
+      missingFields: [],
+    });
+    expect((error as Error).message).not.toContain(baseUrl);
+  });
+
+  test.each([
+    "http://127.0.0.1:15489/",
+    "http://localhost:15489/",
+    "http://[::1]:15489/",
+  ])("accepts an explicit loopback HTTP origin outside production: %s", (baseUrl) => {
+    const config = readJifengAuthorizedConfig({
+      JIFENG_ACCESS_TOKEN: "access-token",
+      JIFENG_BASE_URL: baseUrl,
+      JIFENG_CLIENT_ID: "developer-id",
+      JIFENG_CLIENT_SECRET: "developer-secret",
+      JIFENG_USER_ID: "oms-user-7",
+      NODE_ENV: "test",
+    });
+
+    expect(config.baseUrl).toBe(new URL(baseUrl).origin);
+  });
+
+  test("rejects remote HTTP outside production without echoing the URL", () => {
+    const baseUrl = "http://remote.example.test:8080";
+    const error = (() => {
+      try {
+        readJifengAuthorizedConfig({
+          JIFENG_ACCESS_TOKEN: "access-token",
+          JIFENG_BASE_URL: baseUrl,
+          JIFENG_CLIENT_ID: "developer-id",
+          JIFENG_CLIENT_SECRET: "developer-secret",
+          JIFENG_USER_ID: "oms-user-7",
+          NODE_ENV: "test",
+        });
+      } catch (cause) {
+        return cause;
+      }
+      throw new Error("expected config error");
+    })();
+
+    expect(error).toBeInstanceOf(JifengConfigError);
+    expect(error).toMatchObject({ invalidFields: ["JIFENG_BASE_URL"] });
+    expect((error as Error).message).not.toContain(baseUrl);
+  });
+
   test("inspects the configuration layers without requiring warehouse parameters for read-only probes", () => {
     const state = inspectJifengConfiguration({
       JIFENG_ACCESS_TOKEN: "access-token",

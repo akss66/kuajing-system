@@ -17,8 +17,8 @@ import {
 import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
 
 import {
+  getPersistedJifengRuntime,
   JifengConnectionError,
-  refreshJifengConnection,
 } from "./service";
 
 const PRIMARY_CONNECTION_KEY = "PRIMARY";
@@ -63,8 +63,19 @@ function providerError(code: string, message: string): never {
   throw new JifengProviderError(code, message);
 }
 
-function buildReadRuntime(credentials: JifengCredentials): JifengReadRuntime {
-  return { client: new JifengClient({ credentials }) };
+type AuthenticationRejectedCallback = () => void | Promise<void>;
+
+function buildReadRuntime(
+  credentials: JifengCredentials,
+  onAuthenticationRejected?: AuthenticationRejectedCallback,
+): JifengReadRuntime {
+  return {
+    client: new JifengClient({
+      automaticRefresh: onAuthenticationRejected ? false : undefined,
+      credentials,
+      onAuthenticationRejected,
+    }),
+  };
 }
 
 function buildWriteRuntime(
@@ -72,6 +83,7 @@ function buildWriteRuntime(
     logisticsId: number | null;
     warehouseCode: string | null;
   },
+  onAuthenticationRejected?: AuthenticationRejectedCallback,
 ): JifengWriteRuntime {
   if (
     !Number.isSafeInteger(credentials.logisticsId) ||
@@ -86,7 +98,11 @@ function buildWriteRuntime(
   }
 
   return {
-    client: new JifengClient({ credentials }),
+    client: new JifengClient({
+      automaticRefresh: onAuthenticationRejected ? false : undefined,
+      credentials,
+      onAuthenticationRejected,
+    }),
     config: {
       logisticsId: credentials.logisticsId,
       warehouseCode: credentials.warehouseCode,
@@ -125,7 +141,7 @@ async function readStoredRuntimeSource(input: {
     providerError("FULFILLMENT_DISABLED", "Jifeng fulfillment is disabled");
   }
 
-  const credentials = await refreshJifengConnection();
+  const runtime = await getPersistedJifengRuntime();
   const after = await readConnectionState();
   if (!after) {
     providerError("CONNECTION_CHANGED", "Jifeng connection changed");
@@ -135,9 +151,12 @@ async function readStoredRuntimeSource(input: {
   }
 
   return {
-    ...credentials,
-    logisticsId: after.logisticsId,
-    warehouseCode: after.warehouseCode,
+    credentials: {
+      ...runtime.credentials,
+      logisticsId: after.logisticsId,
+      warehouseCode: after.warehouseCode,
+    },
+    onAuthenticationRejected: runtime.onAuthenticationRejected,
   };
 }
 
@@ -145,14 +164,21 @@ export async function getJifengReadClient(): Promise<JifengReadRuntime> {
   const stored = await readStoredRuntimeSource({
     requireFulfillmentEnabled: false,
   });
-  return stored ? buildReadRuntime(stored) : readLegacyReadRuntime();
+  return stored
+    ? buildReadRuntime(stored.credentials, stored.onAuthenticationRejected)
+    : readLegacyReadRuntime();
 }
 
 export async function getEnabledJifengWriteClient(): Promise<JifengWriteRuntime> {
   const stored = await readStoredRuntimeSource({
     requireFulfillmentEnabled: true,
   });
-  if (stored) return buildWriteRuntime(stored);
+  if (stored) {
+    return buildWriteRuntime(
+      stored.credentials,
+      stored.onAuthenticationRejected,
+    );
+  }
 
   if (process.env.JIFENG_LEGACY_FULFILLMENT_ENABLED !== "true") {
     providerError(

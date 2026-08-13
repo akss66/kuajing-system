@@ -8,7 +8,10 @@ import {
   jifengConnections,
 } from "@/db/schema";
 import { JifengClient } from "@/integrations/jifeng/client";
-import { readJifengDeveloperConfig } from "@/integrations/jifeng/config";
+import {
+  normalizeJifengBaseUrl,
+  readJifengDeveloperConfig,
+} from "@/integrations/jifeng/config";
 import {
   authorizeJifengUser,
   exchangeJifengAuthorizationCode,
@@ -216,11 +219,7 @@ function getBaseUrl() {
   const raw = process.env.JIFENG_BASE_URL;
   try {
     if (!raw) throw new Error("missing");
-    const url = new URL(raw);
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new Error("invalid");
-    }
-    return url.toString().replace(/\/$/, "");
+    return normalizeJifengBaseUrl(raw, process.env.NODE_ENV);
   } catch {
     connectionError("DEVELOPER_CONFIG_INVALID", "极风服务器配置不完整");
   }
@@ -610,15 +609,15 @@ async function readConnectionRevision() {
   return row.updatedAt;
 }
 
-export async function refreshJifengConnection(
+async function loadPersistedJifengRuntime(
   input: RefreshOptions = {},
-): Promise<JifengRuntimeCredentials> {
+) {
   const now = input.now ?? new Date();
   return withRefreshAdvisoryLock(async (connection) => {
     const row = await readStoredCredentials(connection);
     if (isAccessTokenUsable(row, now)) {
       try {
-        return decryptRuntimeCredentials(row);
+        return { credentials: decryptRuntimeCredentials(row), source: row };
       } catch (error) {
         if (!(error instanceof JifengSecretError)) throw error;
         const recorded = await markCredentialFailure(connection, now, row);
@@ -714,8 +713,17 @@ export async function refreshJifengConnection(
     });
     const [committed] = committedRows;
     if (!committed) connectionError("AUTHORIZATION_REQUIRED", "极风连接尚未完成授权");
-    return decryptRuntimeCredentials(committed);
+    return {
+      credentials: decryptRuntimeCredentials(committed),
+      source: committed,
+    };
   });
+}
+
+export async function refreshJifengConnection(
+  input: RefreshOptions = {},
+): Promise<JifengRuntimeCredentials> {
+  return (await loadPersistedJifengRuntime(input)).credentials;
 }
 
 function hasSameCredentialRevision(
@@ -792,8 +800,6 @@ async function markRefreshFailure(
     await tx`
       update jifeng_connections
       set status = 'REFRESH_REQUIRED',
-          fulfillment_enabled_at = null,
-          fulfillment_enabled_by_admin_user_id = null,
           last_error_code = ${category},
           last_error_summary = '极风令牌刷新失败，需要重新授权',
           updated_at = ${now}
@@ -811,6 +817,59 @@ async function markRefreshFailure(
     `;
     return true;
   });
+}
+
+async function markRuntimeAuthenticationRejected(
+  connection: Awaited<ReturnType<typeof refreshDatabase.reserve>>,
+  source: StoredCredentialRow,
+) {
+  const nextUpdatedAt = new Date(
+    Math.max(Date.now(), source.updated_at.getTime() + 1),
+  );
+  return withReservedTransaction(connection, async (tx) => {
+    const [before] = await tx<StoredCredentialRow[]>`
+      select access_token_encrypted, access_token_expires_at, logistics_id,
+             refresh_token_encrypted, refresh_token_expires_at, status,
+             updated_at, user_id, warehouse_code
+      from jifeng_connections
+      where connection_key = ${PRIMARY_KEY}
+      for update
+    `;
+    if (!before || !hasSameCredentialRevision(before, source)) return false;
+    await tx`
+      update jifeng_connections
+      set status = 'REFRESH_REQUIRED',
+          last_error_code = 'ACCESS_TOKEN_REJECTED',
+          last_error_summary = '极风访问令牌已失效，需要重新授权',
+          updated_at = ${nextUpdatedAt}
+      where connection_key = ${PRIMARY_KEY}
+    `;
+    await tx`
+      insert into audit_logs (
+        actor_type, action, entity_type, entity_id, before_json, after_json, reason
+      ) values (
+        'SYSTEM', 'JIFENG_RUNTIME_AUTH_REJECTED', 'JIFENG_CONNECTION', ${PRIMARY_KEY},
+        ${tx.json({ status: before.status })},
+        ${tx.json({ errorCategory: "ACCESS_TOKEN_REJECTED", status: "REFRESH_REQUIRED" })},
+        '极风运行时访问令牌被拒绝，已阻止后续履约写入'
+      )
+    `;
+    return true;
+  });
+}
+
+export async function getPersistedJifengRuntime(
+  input: RefreshOptions = {},
+) {
+  const runtime = await loadPersistedJifengRuntime(input);
+  return {
+    credentials: runtime.credentials,
+    async onAuthenticationRejected() {
+      await withRefreshAdvisoryLock(async (connection) => {
+        await markRuntimeAuthenticationRejected(connection, runtime.source);
+      });
+    },
+  };
 }
 
 async function applyDiscovery(input: {

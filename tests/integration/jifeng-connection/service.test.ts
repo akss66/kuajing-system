@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 import { and, eq, gte, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { db } from "@/db/client";
 import {
@@ -28,6 +28,7 @@ import {
   setJifengFulfillmentEnabled,
   type JifengAuthorizationPort,
 } from "@/modules/jifeng-connection/service";
+import { getJifengReadClient } from "@/modules/jifeng-connection/provider";
 import {
   getJifengConnectionAdminView,
   getJifengConnectionPublicStatus,
@@ -147,6 +148,7 @@ describe("Jifeng connection lifecycle", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await db.execute(sql.raw(`
       truncate table
         jifeng_authorization_attempts,
@@ -774,6 +776,7 @@ describe("Jifeng token refresh single-flight", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await db.execute(sql.raw(`
       truncate table
         jifeng_authorization_attempts,
@@ -817,11 +820,19 @@ describe("Jifeng token refresh single-flight", () => {
     expect(remoteCalls).toBe(1);
   });
 
-  test("marks refresh required without clearing encrypted token material", async () => {
+  test("marks refresh required without clearing credentials or enablement provenance", async () => {
     const admin = await createAdmin("refresh-failure");
     await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
+    await db
+      .update(jifengConnections)
+      .set({
+        fulfillmentEnabledAt: startedAt,
+        fulfillmentEnabledByAdminUserId: admin.adminUserId,
+        status: "ENABLED",
+      })
+      .where(eq(jifengConnections.connectionKey, "PRIMARY"));
     const [before] = await db.select().from(jifengConnections);
 
     await expect(
@@ -834,6 +845,8 @@ describe("Jifeng token refresh single-flight", () => {
     const [after] = await db.select().from(jifengConnections);
     expect(after).toMatchObject({
       accessTokenEncrypted: before.accessTokenEncrypted,
+      fulfillmentEnabledAt: before.fulfillmentEnabledAt,
+      fulfillmentEnabledByAdminUserId: before.fulfillmentEnabledByAdminUserId,
       refreshTokenEncrypted: before.refreshTokenEncrypted,
       status: "REFRESH_REQUIRED",
     });
@@ -936,6 +949,111 @@ describe("Jifeng token refresh single-flight", () => {
         .select()
         .from(auditLogs)
         .where(eq(auditLogs.action, "JIFENG_TOKEN_REFRESH_FAILED")),
+    ).toEqual([]);
+  });
+
+  test("does not let an in-flight runtime authentication rejection overwrite disconnect", async () => {
+    const admin = await createAdmin("runtime-rejection-disconnect");
+    await authorizeFixture(admin.authUserId, {
+      tokens: { ...tokenSet(), expireIn: 31_536_000 },
+    });
+    let releaseBusiness!: () => void;
+    let businessStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      businessStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseBusiness = resolve;
+    });
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (new URL(String(url)).pathname !== "/api/order/get") {
+        return Response.json({ code: 40001, data: null });
+      }
+      businessStarted();
+      await gate;
+      return Response.json({ code: 10002, data: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runtime = await getJifengReadClient();
+    const rejection = expect(
+      runtime.client.getOrder({ erpNo: "RUNTIME-DISCONNECT-RACE" }),
+    ).rejects.toMatchObject({ code: "REFRESH_REQUIRED", retryable: false });
+    await started;
+
+    await disconnectJifengConnection({
+      actor: actor(admin.authUserId),
+      now: new Date(startedAt.getTime() + 1_000),
+      reason: "disconnect wins over stale runtime rejection",
+    });
+    releaseBusiness();
+    await rejection;
+
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored).toMatchObject({
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      status: "DISCONNECTED",
+      userId: null,
+    });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/order/get",
+    ]);
+    expect(
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "JIFENG_RUNTIME_AUTH_REJECTED")),
+    ).toEqual([]);
+  });
+
+  test("does not let an in-flight runtime authentication rejection overwrite reauthorization", async () => {
+    const admin = await createAdmin("runtime-rejection-reauthorize");
+    await authorizeFixture(admin.authUserId, {
+      tokens: { ...tokenSet("old"), expireIn: 31_536_000 },
+    });
+    let releaseBusiness!: () => void;
+    let businessStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      businessStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseBusiness = resolve;
+    });
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (new URL(String(url)).pathname !== "/api/order/get") {
+        return Response.json({ code: 40001, data: null });
+      }
+      businessStarted();
+      await gate;
+      return Response.json({ code: 10016, data: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runtime = await getJifengReadClient();
+    const rejection = expect(
+      runtime.client.getOrder({ erpNo: "RUNTIME-REAUTHORIZE-RACE" }),
+    ).rejects.toMatchObject({ code: "REFRESH_REQUIRED", retryable: false });
+    await started;
+
+    await authorizeFixture(admin.authUserId, { tokens: tokenSet("replacement") });
+    releaseBusiness();
+    await rejection;
+
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored).toMatchObject({ status: "READY_DISABLED", userId: "user-replacement" });
+    expect(
+      decryptJifengSecret(stored.accessTokenEncrypted!, encryptionKey),
+    ).toBe("access-replacement");
+    expect(
+      decryptJifengSecret(stored.refreshTokenEncrypted!, encryptionKey),
+    ).toBe("refresh-replacement");
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/order/get",
+    ]);
+    expect(
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "JIFENG_RUNTIME_AUTH_REJECTED")),
     ).toEqual([]);
   });
 

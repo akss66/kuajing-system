@@ -13,17 +13,62 @@ const developerSchema = z.object({
   JIFENG_CLIENT_SECRET: z.string().min(1),
 });
 
-const authorizedSchema = developerSchema.extend({
-  JIFENG_ACCESS_TOKEN: z.string().min(1),
-  JIFENG_BASE_URL: z.url().transform((value) => value.replace(/\/$/, "")),
-  JIFENG_REFRESH_TOKEN: z.string().min(1).optional(),
-  JIFENG_USER_ID: z.string().min(1),
-});
+function isLoopbackHostname(hostname: string) {
+  if (hostname === "localhost" || hostname === "[::1]") return true;
+  const octets = hostname.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+  );
+}
 
-const fulfillmentSchema = authorizedSchema.extend({
-  JIFENG_LOGISTICS_ID: z.coerce.number().int().positive(),
-  JIFENG_WAREHOUSE_CODE: z.string().min(1),
-});
+export function normalizeJifengBaseUrl(value: string, nodeEnv?: string) {
+  const url = new URL(value);
+  const isHttps = url.protocol === "https:";
+  const isAllowedLoopbackHttp =
+    nodeEnv !== "production" &&
+    url.protocol === "http:" &&
+    isLoopbackHostname(url.hostname);
+  if (
+    (!isHttps && !isAllowedLoopbackHttp) ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error("invalid Jifeng base URL");
+  }
+  return url.origin;
+}
+
+function baseUrlSchema(nodeEnv?: string) {
+  return z.string().transform((value, context) => {
+    try {
+      return normalizeJifengBaseUrl(value, nodeEnv);
+    } catch {
+      context.addIssue({ code: "custom", message: "invalid Jifeng base URL" });
+      return z.NEVER;
+    }
+  });
+}
+
+function authorizedSchema(nodeEnv?: string) {
+  return developerSchema.extend({
+    JIFENG_ACCESS_TOKEN: z.string().min(1),
+    JIFENG_BASE_URL: baseUrlSchema(nodeEnv),
+    JIFENG_REFRESH_TOKEN: z.string().min(1).optional(),
+    JIFENG_USER_ID: z.string().min(1),
+  });
+}
+
+function fulfillmentSchema(nodeEnv?: string) {
+  return authorizedSchema(nodeEnv).extend({
+    JIFENG_LOGISTICS_ID: z.coerce.number().int().positive(),
+    JIFENG_WAREHOUSE_CODE: z.string().min(1),
+  });
+}
 
 const developerFields = [
   "JIFENG_CLIENT_ID",
@@ -204,6 +249,13 @@ function normalizeEnvironment(
   };
 }
 
+function resolveNodeEnvironment(
+  environment: EnvironmentSource,
+  options?: BaseUrlOverrideOptions,
+) {
+  return options?.nodeEnv ?? environment.NODE_ENV ?? process.env.NODE_ENV;
+}
+
 function determineLevel(state: Omit<JifengConfigurationState, "level">) {
   if (state.fulfillment.configured) return "FULFILLMENT_READY";
   if (state.authorized.configured) return "AUTHORIZED_ONLY";
@@ -216,14 +268,15 @@ export function inspectJifengConfiguration(
   options?: BaseUrlOverrideOptions,
 ): JifengConfigurationState {
   const normalized = normalizeEnvironment(environment, options);
+  const nodeEnv = resolveNodeEnvironment(environment, options);
   const developer = toPublicInspection(
     inspectSchema(developerSchema, normalized),
   );
   const authorized = toPublicInspection(
-    inspectSchema(authorizedSchema, normalized),
+    inspectSchema(authorizedSchema(nodeEnv), normalized),
   );
   const fulfillment = toPublicInspection(
-    inspectSchema(fulfillmentSchema, normalized),
+    inspectSchema(fulfillmentSchema(nodeEnv), normalized),
   );
   const anyConfigured = allKnownFields.some((field) => {
     const value = normalized[field];
@@ -256,7 +309,10 @@ export function readJifengAuthorizedConfig(
   options?: BaseUrlOverrideOptions,
 ): JifengAuthorizedConfig {
   const normalized = normalizeEnvironment(environment, options);
-  const inspection = inspectSchema(authorizedSchema, normalized);
+  const inspection = inspectSchema(
+    authorizedSchema(resolveNodeEnvironment(environment, options)),
+    normalized,
+  );
   if (!inspection.configured || !inspection.value) {
     throwForInspection("authorized", inspection);
   }
@@ -276,7 +332,10 @@ export function readJifengConfig(
   options?: BaseUrlOverrideOptions,
 ): JifengIntegrationConfig {
   const normalized = normalizeEnvironment(environment, options);
-  const inspection = inspectSchema(fulfillmentSchema, normalized);
+  const inspection = inspectSchema(
+    fulfillmentSchema(resolveNodeEnvironment(environment, options)),
+    normalized,
+  );
   if (!inspection.configured || !inspection.value) {
     throwForInspection("fulfillment", inspection);
   }
