@@ -28,7 +28,7 @@ export async function listCustomerManagementRows(): Promise<CustomerManagementLi
         login_identifier,
         status
       from customer_users
-      order by customer_id, created_at, id
+      order by customer_id, created_at desc, id desc
     ),
     store_summary as (
       select

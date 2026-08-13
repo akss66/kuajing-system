@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "vitest";
 
 import { db } from "@/db/client";
 import {
+  authUsers,
   customerUsers,
   customers,
   fulfillmentOrders,
@@ -13,9 +14,59 @@ import { listCustomerManagementRows } from "@/modules/customers/queries";
 afterEach(async () => {
   await db.delete(fulfillmentOrders);
   await db.delete(customerUsers);
+  await db.delete(authUsers);
   await db.delete(stores);
   await db.delete(walletAccounts);
   await db.delete(customers);
+});
+
+test("uses the newest customer mirror when duplicate rows exist and still returns one customer row", async () => {
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: "MIRROR-QUERY", name: "镜像选择客户" })
+    .returning({ id: customers.id });
+  const oldCreatedAt = new Date("2026-01-10T08:00:00.000Z");
+  const latestCreatedAt = new Date("2026-02-10T08:00:00.000Z");
+
+  await db.insert(authUsers).values({
+    createdAt: latestCreatedAt,
+    customerId: customer.id,
+    email: "latest-mirror@test.local",
+    id: "auth-latest-mirror",
+    name: "最新镜像负责人",
+    role: "user",
+    updatedAt: latestCreatedAt,
+  });
+  await db.insert(customerUsers).values([
+    {
+      createdAt: oldCreatedAt,
+      customerId: customer.id,
+      displayName: "过期镜像负责人",
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      loginIdentifier: "stale-mirror@test.local",
+      status: "DISABLED",
+      updatedAt: oldCreatedAt,
+    },
+    {
+      createdAt: latestCreatedAt,
+      customerId: customer.id,
+      displayName: "最新镜像负责人",
+      id: "00000000-0000-4000-8000-000000000001",
+      loginIdentifier: "latest-mirror@test.local",
+      status: "ACTIVE",
+      updatedAt: latestCreatedAt,
+    },
+  ]);
+
+  const rows = await listCustomerManagementRows();
+
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    accountDisplayName: "最新镜像负责人",
+    accountEmail: "latest-mirror@test.local",
+    accountStatus: "ACTIVE",
+    customerId: customer.id,
+  });
 });
 
 test("returns one exact management row per customer without multiplying wallet, store, or order aggregates", async () => {
