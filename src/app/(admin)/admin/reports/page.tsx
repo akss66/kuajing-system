@@ -39,11 +39,19 @@ export default async function ReportsPage({
     getOperationsReport(range),
     getStockCoverageReport(),
   ]);
-  const hasOperations =
-    report.skuSales.length > 0 || report.stores.length > 0 || report.replacements.length > 0;
   const coverageRisks = coverage.filter(
     (row) => row.alertLevel === "CRITICAL" || row.alertLevel === "WARNING",
   );
+  const hasTrendData = report.trend.some(
+    (point) => point.orderCount > 0 || point.revenueFen !== 0,
+  );
+  const hasReportData =
+    report.skuSales.length > 0 ||
+    report.stores.length > 0 ||
+    report.replacements.length > 0 ||
+    hasTrendData ||
+    coverageRisks.length > 0 ||
+    Object.values(report.funds).some((value) => value !== 0);
 
   return (
     <div className="space-y-6">
@@ -93,7 +101,7 @@ export default async function ReportsPage({
         </form>
       </section>
 
-      {!hasOperations ? (
+      {!hasReportData ? (
         <ActionableEmptyState
           action={<Link className="text-sm font-semibold text-primary hover:text-primary-hover" href="/admin/reports">查看最近 7 天</Link>}
           description="该时间段没有已发货普通包裹或补发记录。可调整日期，或返回默认区间继续查看。"
@@ -115,7 +123,7 @@ export default async function ReportsPage({
             <div><dt className="text-xs text-muted-foreground">实际销售额</dt><dd className="mt-1 font-semibold tabular-nums">{money(report.summary.revenueFen)}</dd></div>
           </dl>
         </div>
-        {report.trend.length > 0 ? <OperationsReportTrend series={report.trend} /> : <p className="py-8 text-sm text-muted-foreground">所选日期内暂无可绘制的发货趋势。</p>}
+        {hasTrendData ? <OperationsReportTrend series={report.trend} /> : <p className="py-8 text-sm text-muted-foreground">所选日期内暂无可绘制的发货趋势。</p>}
       </section>
 
       <WorkspacePanel className="overflow-hidden">

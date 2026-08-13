@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
+import { DateTime } from "luxon";
 
 import { db } from "@/db/client";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import type {
   FundsReport,
@@ -159,17 +161,43 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
     orderRefundsFen: number(wallet?.orderRefundsFen),
     pendingReceivableFen: number(receivableRows[0]?.pendingReceivableFen),
   };
+  const trendByDate = new Map(
+    trendRows.map((row) => [
+      row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date),
+      {
+        orderCount: number(row.orderCount),
+        revenueFen: number(row.revenueFen),
+      },
+    ]),
+  );
+  const firstTrendDate = DateTime.fromJSDate(window.fromUtc, { zone: "utc" })
+    .setZone(BUSINESS_TIME_ZONE)
+    .startOf("day");
+  const lastTrendDate = DateTime.fromJSDate(window.toExclusiveUtc, { zone: "utc" })
+    .minus({ milliseconds: 1 })
+    .setZone(BUSINESS_TIME_ZONE)
+    .startOf("day");
+  const trend: OperationsReport["trend"] = [];
+  for (
+    let cursor = firstTrendDate;
+    cursor.toMillis() <= lastTrendDate.toMillis();
+    cursor = cursor.plus({ days: 1 })
+  ) {
+    const date = cursor.toISODate()!;
+    const activity = trendByDate.get(date);
+    trend.push({
+      date,
+      orderCount: activity?.orderCount ?? 0,
+      revenueFen: activity?.revenueFen ?? 0,
+    });
+  }
 
   return {
     funds,
     replacements,
     skuSales,
     stores,
-    trend: trendRows.map((row) => ({
-      date: row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date),
-      orderCount: number(row.orderCount),
-      revenueFen: number(row.revenueFen),
-    })),
+    trend,
     summary: {
       orderCount: stores.reduce((sum, row) => sum + row.orderCount, 0),
       packageCount: stores.reduce((sum, row) => sum + row.packageCount, 0),

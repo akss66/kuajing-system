@@ -82,7 +82,7 @@ async function seedReportFixture() {
     storeId: store.id,
     unitPriceFen: 450,
   });
-  return { admin, sku, store };
+  return { admin, customer, sku, store };
 }
 
 test("administrator can read the shipped SKU and store report @desktop-only", async ({ page }) => {
@@ -120,6 +120,31 @@ test("an empty report range explains how to recover @desktop-only", async ({ pag
   const emptyState = page.getByRole("status", { name: "所选区间暂无经营数据" });
   await expect(emptyState).toBeVisible();
   await expect(emptyState.getByRole("link", { name: "查看最近 7 天" })).toBeVisible();
+});
+
+test("a funds-only range does not claim there is no operating data @desktop-only", async ({
+  page,
+}) => {
+  const fixture = await seedReportFixture();
+  const dayOffset = Number.parseInt(crypto.randomUUID().slice(0, 8), 16) % (365 * 50);
+  const submittedAt = new Date(Date.UTC(2100, 0, 1 + dayOffset, 15));
+  const reportDate = submittedAt.toISOString().slice(0, 10);
+  await db.insert(fulfillmentOrders).values({
+    customerId: fixture.customer.id,
+    orderNumber: `REPORT-PENDING-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+    status: "PENDING_PAYMENT",
+    storeId: fixture.store.id,
+    submittedAt,
+    totalAmountFen: 1_200,
+    totalPackageCount: 1,
+    totalQuantity: 2,
+  });
+  await loginThroughUi(page, fixture.admin);
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.goto(`/admin/reports?from=${reportDate}&to=${reportDate}`);
+
+  await expect(page.getByText("¥12.00", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status", { name: "所选区间暂无经营数据" })).toHaveCount(0);
 });
 
 test("reports and stock coverage fit approved mobile widths @mobile-only", async ({ page }) => {
