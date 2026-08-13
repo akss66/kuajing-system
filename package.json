@@ -19,6 +19,7 @@
     "worker": "tsx src/jobs/worker.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:bootstrap-super-admin": "tsx src/db/bootstrap-super-admin.ts",
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {

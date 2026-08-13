@@ -33,6 +33,17 @@ npm.cmd run db:migrate
 npm.cmd run build
 ```
 
+全新生产数据库完成迁移后，只运行一次受控超级管理员初始化命令：
+
+```powershell
+$env:BOOTSTRAP_SUPER_ADMIN_EMAIL="admin@example.com"
+$env:BOOTSTRAP_SUPER_ADMIN_DISPLAY_NAME="超级管理员"
+$env:BOOTSTRAP_SUPER_ADMIN_PASSWORD="use-a-random-password"
+npm.cmd run db:bootstrap-super-admin
+```
+
+该命令只允许账号表为空时创建固定的受保护超级管理员。对同一账号重复执行不会重置密码；数据库已有其他账号时会拒绝执行。生产环境仍然禁止运行 `db:seed`。
+
 然后由服务管理器分别启动：
 
 ```powershell

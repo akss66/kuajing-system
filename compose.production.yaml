@@ -1,0 +1,91 @@
+name: tongzhouxing-shop
+
+x-app: &app
+  image: tongzhouxing-shop:${APP_VERSION:-current}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - ${APP_ENV_FILE:-.env.production}
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-file: "3"
+      max-size: 20m
+  networks:
+    - backend
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    shm_size: 128mb
+    mem_limit: 640m
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 20m
+    networks:
+      backend:
+        aliases:
+          - shop-postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  web:
+    <<: *app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 896m
+    networks:
+      backend:
+      edge:
+        aliases:
+          - tongzhouxing-web
+
+  worker:
+    <<: *app
+    command: ["npm", "run", "worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    mem_limit: 640m
+
+networks:
+  backend:
+  edge:
+    external: true
+    name: dyflow_default
+
+volumes:
+  postgres_data:
+    name: tongzhouxing_shop_postgres_data
