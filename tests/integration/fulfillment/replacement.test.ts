@@ -1,5 +1,13 @@
 import { eq, sql } from "drizzle-orm";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/modules/identity/guards", () => ({
+  requireAdmin: vi.fn(async () => ({
+    kind: "ADMIN",
+    userId: "auth-admin-replacement",
+  })),
+}));
 
 import { db } from "@/db/client";
 import {
@@ -11,6 +19,7 @@ import {
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
+  jifengConnections,
   orderLines,
   orderShipments,
   products,
@@ -20,6 +29,7 @@ import {
   stores,
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
+import { cancelJifengShipmentAction } from "@/modules/fulfillment/actions";
 import { processJifengCreateOrderEvent } from "@/modules/fulfillment/dispatch";
 import {
   cancelJifengShipment,
@@ -27,7 +37,10 @@ import {
   ReplacementError,
 } from "@/modules/fulfillment/replacement";
 import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
+import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
 import { encryptPii } from "@/shared/pii-crypto";
+
+const actionEncryptionKey = Buffer.alloc(32, 37);
 
 async function createShippedFixture() {
   const suffix = crypto.randomUUID().slice(0, 8);
@@ -123,8 +136,11 @@ async function createShippedFixture() {
 
 describe("replacement fulfillment", () => {
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     await db.execute(sql.raw(`
       truncate table
+        jifeng_connections,
         audit_logs,
         integration_attempts,
         integration_outbox,
@@ -301,6 +317,65 @@ describe("replacement fulfillment", () => {
         (entry) => entry.action === "JIFENG_SHIPMENT_CANCELLED",
       ),
     ).toBe(true);
+  });
+
+  test("does not call Jifeng or mutate cancellation state when the connection is disabled", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "disabled cancellation gate fixture",
+    });
+    const now = new Date();
+    await db.insert(jifengConnections).values({
+      accessTokenEncrypted: encryptJifengSecret("database-access", actionEncryptionKey),
+      accessTokenExpiresAt: new Date(now.getTime() + 60 * 60_000),
+      authorizedAt: now,
+      authorizedByAdminUserId: fixture.admin.id,
+      connectionKey: "PRIMARY",
+      logisticsId: 310,
+      refreshTokenEncrypted: encryptJifengSecret("database-refresh", actionEncryptionKey),
+      refreshTokenExpiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+      status: "READY_DISABLED",
+      updatedAt: now,
+      userId: "database-user",
+      warehouseCode: "CA-YYZ",
+    });
+    vi.stubEnv("JIFENG_ACCESS_TOKEN", "legacy-access-token");
+    vi.stubEnv("JIFENG_BASE_URL", "https://jifeng.example.test");
+    vi.stubEnv("JIFENG_CLIENT_ID", "client-id");
+    vi.stubEnv("JIFENG_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("JIFENG_LEGACY_FULFILLMENT_ENABLED", "true");
+    vi.stubEnv("JIFENG_LOGISTICS_ID", "999");
+    vi.stubEnv("JIFENG_TOKEN_ENCRYPTION_KEY", actionEncryptionKey.toString("base64url"));
+    vi.stubEnv("JIFENG_USER_ID", "legacy-user");
+    vi.stubEnv("JIFENG_WAREHOUSE_CODE", "LEGACY-WAREHOUSE");
+    const fetchMock = vi.fn(async () =>
+      Response.json({ code: 0, data: null, message: "SUCCESS" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const formData = new FormData();
+    formData.set("orderId", fixture.order.id);
+    formData.set("reason", "connection disabled");
+    formData.set("shipmentId", created.replacementShipmentId);
+
+    await expect(
+      cancelJifengShipmentAction({ status: "idle" }, formData),
+    ).resolves.toMatchObject({ status: "error" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+    expect(fulfillment.status).toBe("PENDING");
+    const [reservation] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, created.replacementRequestId));
+    expect(reservation.status).toBe("ACTIVE");
   });
 
   test.each([

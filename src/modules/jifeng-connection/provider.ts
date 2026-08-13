@@ -1,0 +1,188 @@
+import { eq } from "drizzle-orm";
+
+import { db } from "@/db/client";
+import { jifengConnections } from "@/db/schema";
+import { JifengClient } from "@/integrations/jifeng/client";
+import {
+  JifengConfigError,
+  readJifengConfig,
+} from "@/integrations/jifeng/config";
+import type { JifengCredentials } from "@/integrations/jifeng/types";
+import {
+  enqueuePaidOrdersForFulfillment,
+  processDueJifengCreateOrderEvents,
+  type DispatchConfig,
+} from "@/modules/fulfillment/dispatch";
+import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
+
+import {
+  JifengConnectionError,
+  refreshJifengConnection,
+} from "./service";
+
+const PRIMARY_CONNECTION_KEY = "PRIMARY";
+
+export class JifengProviderError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "JifengProviderError";
+  }
+}
+
+type JifengRuntime = {
+  client: JifengClient;
+  config: DispatchConfig;
+};
+
+export type JifengCycleSummary = {
+  enabled: boolean;
+  enqueuedCount: number;
+  processed: {
+    completed: number;
+    failed: number;
+    retryScheduled: number;
+  };
+  statuses: {
+    exceptions: number;
+    shipped: number;
+    synced: number;
+  };
+};
+
+const noProcessedEvents = () => ({ completed: 0, failed: 0, retryScheduled: 0 });
+const noStatusUpdates = () => ({ exceptions: 0, shipped: 0, synced: 0 });
+
+function providerError(code: string, message: string): never {
+  throw new JifengProviderError(code, message);
+}
+
+function buildRuntime(
+  credentials: JifengCredentials & {
+    logisticsId: number | null;
+    warehouseCode: string | null;
+  },
+): JifengRuntime {
+  if (
+    !Number.isSafeInteger(credentials.logisticsId) ||
+    credentials.logisticsId === null ||
+    credentials.logisticsId <= 0 ||
+    !credentials.warehouseCode?.trim()
+  ) {
+    providerError(
+      "RUNTIME_CONFIG_INVALID",
+      "Jifeng runtime resources are not ready",
+    );
+  }
+
+  return {
+    client: new JifengClient({ credentials }),
+    config: {
+      logisticsId: credentials.logisticsId,
+      warehouseCode: credentials.warehouseCode,
+    },
+  };
+}
+
+async function readConnectionState() {
+  const [row] = await db
+    .select({
+      logisticsId: jifengConnections.logisticsId,
+      status: jifengConnections.status,
+      warehouseCode: jifengConnections.warehouseCode,
+    })
+    .from(jifengConnections)
+    .where(eq(jifengConnections.connectionKey, PRIMARY_CONNECTION_KEY))
+    .limit(1);
+  return row;
+}
+
+function readLegacyRuntime(): JifengRuntime {
+  return buildRuntime(readJifengConfig());
+}
+
+async function readStoredRuntime(input: {
+  requireFulfillmentEnabled: boolean;
+}): Promise<JifengRuntime | null> {
+  const before = await readConnectionState();
+  if (!before) return null;
+
+  if (input.requireFulfillmentEnabled && before.status !== "ENABLED") {
+    providerError("FULFILLMENT_DISABLED", "Jifeng fulfillment is disabled");
+  }
+
+  const credentials = await refreshJifengConnection();
+  const after = await readConnectionState();
+  if (!after) {
+    providerError("CONNECTION_CHANGED", "Jifeng connection changed");
+  }
+  if (input.requireFulfillmentEnabled && after.status !== "ENABLED") {
+    providerError("FULFILLMENT_DISABLED", "Jifeng fulfillment is disabled");
+  }
+
+  return buildRuntime({
+    ...credentials,
+    logisticsId: after.logisticsId,
+    warehouseCode: after.warehouseCode,
+  });
+}
+
+export async function getJifengReadClient(): Promise<JifengRuntime> {
+  return (
+    (await readStoredRuntime({ requireFulfillmentEnabled: false })) ??
+    readLegacyRuntime()
+  );
+}
+
+export async function getEnabledJifengWriteClient(): Promise<JifengRuntime> {
+  const stored = await readStoredRuntime({ requireFulfillmentEnabled: true });
+  if (stored) return stored;
+
+  if (process.env.JIFENG_LEGACY_FULFILLMENT_ENABLED !== "true") {
+    providerError(
+      "LEGACY_FULFILLMENT_DISABLED",
+      "Legacy Jifeng fulfillment is disabled",
+    );
+  }
+  return readLegacyRuntime();
+}
+
+function isUnavailableConnection(error: unknown) {
+  return (
+    error instanceof JifengProviderError ||
+    error instanceof JifengConnectionError ||
+    error instanceof JifengConfigError
+  );
+}
+
+async function pollWithReadClient() {
+  try {
+    const runtime = await getJifengReadClient();
+    return await pollActiveJifengFulfillments({ client: runtime.client });
+  } catch (error) {
+    if (isUnavailableConnection(error)) return noStatusUpdates();
+    throw error;
+  }
+}
+
+export async function runJifengFulfillmentCycle(): Promise<JifengCycleSummary> {
+  let runtime: JifengRuntime;
+  try {
+    runtime = await getEnabledJifengWriteClient();
+  } catch (error) {
+    if (!isUnavailableConnection(error)) throw error;
+    return {
+      enabled: false,
+      enqueuedCount: 0,
+      processed: noProcessedEvents(),
+      statuses: await pollWithReadClient(),
+    };
+  }
+
+  const enqueuedCount = await enqueuePaidOrdersForFulfillment();
+  const processed = await processDueJifengCreateOrderEvents(runtime);
+  const statuses = await pollActiveJifengFulfillments({ client: runtime.client });
+  return { enabled: true, enqueuedCount, processed, statuses };
+}
