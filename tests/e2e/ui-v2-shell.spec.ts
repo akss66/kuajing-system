@@ -35,6 +35,25 @@ const audiences = [
   },
 ] as const;
 
+const viewports = [
+  { height: 900, kind: "desktop", width: 1440 },
+  { height: 1080, kind: "desktop", width: 1920 },
+  { height: 932, kind: "mobile", width: 430 },
+  { height: 844, kind: "mobile", width: 390 },
+  { height: 800, kind: "mobile", width: 360 },
+] as const;
+
+function observeBrowserErrors(page: Page) {
+  const errors: string[] = [];
+
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+
+  return errors;
+}
+
 async function expectNoPageOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -51,12 +70,23 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
   ).toEqual([]);
 }
 
+async function waitForResponsiveLayout(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+}
+
 test.describe.configure({ mode: "serial" });
 
 for (const audience of audiences) {
   test(`${audience.path} uses the V2 shell geometry, grouped navigation and accessible mobile drawer`, async ({
     page,
   }) => {
+    const browserErrors = observeBrowserErrors(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await resetE2EDatabaseToSeedState({
       context: `UI V2 shell ${audience.path}`,
       database: db,
@@ -67,40 +97,52 @@ for (const audience of audiences) {
 
     const shell = page.getByTestId("merchant-shell");
     await expect(shell).toHaveAttribute("data-shell-version", "v2");
-
-    const topbar = await page.locator("[data-merchant-topbar]").boundingBox();
-    const brand = await page.locator("[data-merchant-brand]").boundingBox();
-    const sidebar = await page.locator("[data-merchant-sidebar]").boundingBox();
-    expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });
-    expect(brand).toMatchObject({ x: 0, y: 0, width: 224, height: 56 });
-    expect(sidebar).toMatchObject({ x: 0, y: 56, width: 224 });
-
     const desktopNavigation = page.getByRole("navigation", { name: audience.navigationName });
-    await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-    await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
-      audience.groups.length,
-    );
-    for (const group of audience.groups) {
-      await expect(desktopNavigation.getByRole("button", { name: group })).toBeVisible();
-    }
     await expect(page.getByRole("button", { name: "帮助" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "消息" })).toHaveCount(0);
-    await expectNoPageOverflow(page);
 
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.setViewportSize({ width: 390, height: 844 });
-    const menuButton = page.getByRole("button", { name: "打开导航" });
-    await menuButton.click();
+    for (const viewport of viewports) {
+      await test.step(`${viewport.width}px ${viewport.kind} shell`, async () => {
+        await page.setViewportSize({ height: viewport.height, width: viewport.width });
+        await waitForResponsiveLayout(page);
 
-    const drawer = page.getByRole("dialog", { name: audience.drawerTitle });
-    await expect(drawer).toBeVisible();
-    const mobileNavigation = drawer.getByRole("navigation", { name: audience.navigationName });
-    await expect(mobileNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-    await expectNoPageOverflow(page);
-    await expectNoSeriousAccessibilityViolations(page);
+        if (viewport.kind === "desktop") {
+          const topbar = await page.locator("[data-merchant-topbar]").boundingBox();
+          const brand = await page.locator("[data-merchant-brand]").boundingBox();
+          const sidebar = await page.locator("[data-merchant-sidebar]").boundingBox();
+          expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });
+          expect(brand).toMatchObject({ x: 0, y: 0, width: 224, height: 56 });
+          expect(sidebar).toMatchObject({ x: 0, y: 56, width: 224 });
+          await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
+          await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
+            audience.groups.length,
+          );
+          for (const group of audience.groups) {
+            await expect(desktopNavigation.getByRole("button", { name: group })).toBeVisible();
+          }
+        } else {
+          const menuButton = page.getByRole("button", { name: "打开导航" });
+          await menuButton.click();
 
-    await page.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
-    await expect(menuButton).toBeFocused();
+          const drawer = page.getByRole("dialog", { name: audience.drawerTitle });
+          await expect(drawer).toBeVisible();
+          const mobileNavigation = drawer.getByRole("navigation", {
+            name: audience.navigationName,
+          });
+          await expect(mobileNavigation.locator('[aria-current="page"]')).toHaveCount(1);
+          await expectNoPageOverflow(page);
+          await expectNoSeriousAccessibilityViolations(page);
+
+          await page.keyboard.press("Escape");
+          await expect(drawer).toBeHidden();
+          await expect(menuButton).toBeFocused();
+        }
+
+        await expectNoPageOverflow(page);
+        await expectNoSeriousAccessibilityViolations(page);
+      });
+    }
+
+    expect(browserErrors, "unexpected browser console/page errors").toEqual([]);
   });
 }
