@@ -12,7 +12,11 @@ import {
   type FeishuIntegrationConfig,
 } from "@/integrations/feishu/config";
 
-import { syncCargoSnapshot, type FeishuCargoPort } from "./cargo-sync";
+import {
+  FeishuCargoSyncError,
+  syncCargoSnapshot,
+  type FeishuCargoTargetPort,
+} from "./cargo-sync";
 
 export type FeishuBotPort = {
   sendTextMessage(input: { chatId: string; text: string }): Promise<unknown>;
@@ -25,6 +29,14 @@ type FeishuWorkerConfig = Pick<
   | "targetSheetId"
   | "targetSpreadsheetToken"
 >;
+
+type FeishuSourceResolverPort = {
+  resolveWikiSpreadsheet(
+    wikiToken: string,
+  ): Promise<{ spreadsheetToken: string }>;
+};
+
+const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 
 function isCargoWriterEnabledInEnvironment(
   environment: Record<string, string | undefined> = process.env,
@@ -79,6 +91,13 @@ export async function enqueueFeishuCargoSync(input?: {
 }
 
 function safeError(error: unknown) {
+  if (error instanceof FeishuCargoSyncError) {
+    return {
+      code: error.code.slice(0, 80),
+      message: error.message.slice(0, 500),
+      retryable: error.retryable,
+    };
+  }
   if (error instanceof FeishuApiError) {
     return {
       code: error.code.slice(0, 80),
@@ -91,6 +110,15 @@ function safeError(error: unknown) {
     message: "飞书同步任务失败",
     retryable: true,
   };
+}
+
+function retryAt(now: Date, attemptNumber: number) {
+  const clampedAttempt = Math.max(1, attemptNumber);
+  const delayMs = Math.min(
+    6 * 60 * 60_000,
+    5 * 60_000 * 2 ** (clampedAttempt - 1),
+  );
+  return new Date(now.getTime() + delayMs);
 }
 
 async function markEventsCompleted(
@@ -133,19 +161,23 @@ async function markEventsFailed(
 ) {
   if (ids.length === 0) return;
   const failure = safeError(error);
-  const nextAttemptAt = new Date(now.getTime() + 5 * 60_000);
   await db.transaction(async (tx) => {
-    await tx
-      .update(integrationOutbox)
-      .set({
-        lastErrorCode: failure.code,
-        lastErrorMessage: failure.message,
-        lockedAt: null,
-        nextAttemptAt,
-        status: "FAILED",
-        updatedAt: now,
-      })
-      .where(inArray(integrationOutbox.id, ids));
+    for (const id of ids) {
+      const attemptNumber = attempts.get(id) ?? 1;
+      await tx
+        .update(integrationOutbox)
+        .set({
+          lastErrorCode: failure.code,
+          lastErrorMessage: failure.message,
+          lockedAt: null,
+          nextAttemptAt: failure.retryable
+            ? retryAt(now, attemptNumber)
+            : NEVER_RETRY_AT,
+          status: "FAILED",
+          updatedAt: now,
+        })
+        .where(eq(integrationOutbox.id, id));
+    }
     await tx.insert(integrationAttempts).values(
       ids.map((id) => ({
         attemptNumber: attempts.get(id)!,
@@ -195,12 +227,16 @@ async function claimEvents(target: "FEISHU_SHEET" | "FEISHU_BOT", now: Date) {
 
 export async function processFeishuOutbox(input: {
   botClient: FeishuBotPort;
-  cargoClient: FeishuCargoPort;
+  cargoClient: FeishuCargoTargetPort;
   config: FeishuWorkerConfig;
   now?: Date;
+  sourceClient?: FeishuSourceResolverPort;
 }) {
   const now = input.now ?? new Date();
   const summary = { botCompleted: 0, cargoCompleted: 0, failed: 0 };
+  const sourceClient =
+    input.sourceClient ??
+    (input.cargoClient as FeishuCargoTargetPort & FeishuSourceResolverPort);
 
   if (canWriteFeishuCargo(input.config)) {
     const cargoEvents = await claimEvents("FEISHU_SHEET", now);
@@ -210,11 +246,23 @@ export async function processFeishuOutbox(input: {
         cargoEvents.map((event) => [event.id, event.attemptNumber]),
       );
       try {
+        const { spreadsheetToken: sourceSpreadsheetToken } =
+          await sourceClient.resolveWikiSpreadsheet(
+            input.config.sourceWikiToken,
+          );
         const result = await syncCargoSnapshot({
           client: input.cargoClient,
-          config: input.config,
+          config: {
+            sourceSpreadsheetToken,
+            targetSheetId: input.config.targetSheetId!,
+            targetSpreadsheetToken: input.config.targetSpreadsheetToken!,
+          },
         });
-        await markEventsCompleted(ids, attempts, now, result);
+        await markEventsCompleted(ids, attempts, now, {
+          imageCount: result.imageCount,
+          rowCount: result.rowCount,
+          targetSheetId: result.targetSheetId,
+        });
         summary.cargoCompleted = ids.length;
       } catch (error) {
         await markEventsFailed(ids, attempts, error, now);

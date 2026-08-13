@@ -110,6 +110,12 @@ export type FeishuFilterCondition = {
   expected?: string[];
 };
 
+export type FeishuSheetProperties = {
+  frozenColCount?: number;
+  frozenRowCount?: number;
+  sheetId: string;
+};
+
 export class FeishuApiError extends Error {
   constructor(
     public readonly code: string,
@@ -388,6 +394,29 @@ export class FeishuClient {
             col: input.col,
             condition: input.condition,
             range: input.range,
+          }),
+          method: "POST",
+        },
+      ),
+    );
+  }
+
+  async updateSheetProperties(input: {
+    spreadsheetToken: string;
+    properties: FeishuSheetProperties;
+  }) {
+    return this.expectSuccess(
+      await this.authorizedJson(
+        `/open-apis/sheets/v2/spreadsheets/${encodeURIComponent(input.spreadsheetToken)}/sheets_batch_update`,
+        {
+          body: JSON.stringify({
+            requests: [
+              {
+                updateSheet: {
+                  properties: input.properties,
+                },
+              },
+            ],
           }),
           method: "POST",
         },
