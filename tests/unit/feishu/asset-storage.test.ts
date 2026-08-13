@@ -534,6 +534,154 @@ describe("catalog asset storage", () => {
     await thirdPromise;
   });
 
+  test("keeps a live publish claim across stale-ttl heartbeats", async () => {
+    let releaseFirstClaim: (() => void) | null = null;
+    let firstClaimHeld = false;
+    let secondFinished = false;
+    const sharedOptions = {
+      claimHeartbeatIntervalMs: 10,
+      claimStaleMs: 40,
+      lockRetryDelayMs: 5,
+      lockTimeoutMs: 400,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    } as const;
+    const bytes = await createImageBuffer("png", { b: 31 });
+    const firstStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onClaimAcquired() {
+        firstClaimHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseFirstClaim = resolve;
+        });
+      },
+    });
+    const secondStorage = createCatalogAssetStorage(sharedOptions);
+    const firstManifest = await firstStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-live-first.png",
+      runId: "claim-live-a",
+      skuCode: "TZX-001",
+    });
+    const secondManifest = await secondStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-live-second.png",
+      runId: "claim-live-b",
+      skuCode: "TZX-002",
+    });
+
+    const firstCommit = firstStorage.commitCatalogAsset(firstManifest);
+    while (!firstClaimHeld) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const secondCommit = secondStorage.commitCatalogAsset(secondManifest).then(() => {
+      secondFinished = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(secondFinished).toBe(false);
+
+    const finishFirstClaim = releaseFirstClaim as (() => void) | null;
+    finishFirstClaim?.();
+
+    await firstCommit;
+    await secondCommit;
+  });
+
+  test("reclaims a stale publish claim after heartbeat stops without letting the old owner delete the new claim", async () => {
+    let releaseFirstClaim: (() => void) | null = null;
+    let releaseSecondClaim: (() => void) | null = null;
+    let firstClaimControl: { stopHeartbeat(): void } | null = null;
+    let firstClaimHeld = false;
+    let secondClaimHeld = false;
+    let thirdFinished = false;
+    const sharedOptions = {
+      claimHeartbeatIntervalMs: 10,
+      claimStaleMs: 40,
+      lockRetryDelayMs: 5,
+      lockTimeoutMs: 500,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    } as const;
+    const bytes = await createImageBuffer("png", { g: 41 });
+    const firstStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onClaimLeaseAcquired(control) {
+        firstClaimControl = control;
+      },
+      onClaimAcquired() {
+        firstClaimHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseFirstClaim = resolve;
+        });
+      },
+    });
+    const secondStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onClaimAcquired() {
+        secondClaimHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseSecondClaim = resolve;
+        });
+      },
+    });
+    const thirdStorage = createCatalogAssetStorage(sharedOptions);
+
+    const firstManifest = await firstStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-stale-first.png",
+      runId: "claim-stale-a",
+      skuCode: "TZX-001",
+    });
+    const secondManifest = await secondStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-stale-second.png",
+      runId: "claim-stale-b",
+      skuCode: "TZX-002",
+    });
+    const thirdManifest = await thirdStorage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "claim-stale-third.png",
+      runId: "claim-stale-c",
+      skuCode: "TZX-003",
+    });
+
+    const firstCommit = firstStorage.commitCatalogAsset(firstManifest);
+    while (!firstClaimHeld || !firstClaimControl) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    (firstClaimControl as { stopHeartbeat(): void } | null)?.stopHeartbeat();
+    const secondCommit = secondStorage.commitCatalogAsset(secondManifest);
+    while (!secondClaimHeld) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const thirdCommit = thirdStorage.commitCatalogAsset(thirdManifest).then(() => {
+      thirdFinished = true;
+    });
+
+    const finishFirstClaim = releaseFirstClaim as (() => void) | null;
+    finishFirstClaim?.();
+    await firstCommit;
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(thirdFinished).toBe(false);
+
+    const finishSecondClaim = releaseSecondClaim as (() => void) | null;
+    finishSecondClaim?.();
+    await secondCommit;
+    await thirdCommit;
+  });
+
   test("commits the same digest concurrently without leaving partial publishes behind", async () => {
     const bytes = await createImageBuffer("png");
     const first = await stageCatalogAsset({
@@ -637,6 +785,154 @@ describe("catalog asset storage", () => {
     const finalDirectory = join(assetRoot, dirname(expectedStorageKey));
     expect((await readdir(finalDirectory)).filter((entry) => entry.includes(".claim"))).toEqual([]);
     expect((await readdir(finalDirectory)).filter((entry) => entry.startsWith(".catalog-asset-"))).toEqual([]);
+  });
+
+  test("does not overwrite an external target that appears after claim acquisition", async () => {
+    let externalWritten = false;
+    const storage = createCatalogAssetStorage({
+      onClaimAcquired({ targetPath }) {
+        return (async () => {
+          if (!externalWritten) {
+            externalWritten = true;
+            await writeFile(targetPath, await createImageBuffer("png", { r: 211 }));
+          }
+        })();
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    });
+    const bytes = await createImageBuffer("png", { b: 51 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "external-target.png",
+      runId: "external-target-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    const targetPath = join(assetRoot, expectedStorageKey);
+
+    await expect(storage.commitCatalogAsset(manifest)).rejects.toThrow(/conflict|digest/i);
+    expect(Buffer.compare(await readFile(targetPath), await createImageBuffer("png", { r: 211 }))).toBe(0);
+  });
+
+  test("does not return partial bytes while fallback copy is in progress", async () => {
+    let releaseCopy: (() => void) | null = null;
+    let partialVisible = false;
+    const storage = createCatalogAssetStorage({
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      onTargetWriteProgress({ bytesWritten, totalBytes }) {
+        if (!partialVisible && bytesWritten > 0 && bytesWritten < totalBytes) {
+          partialVisible = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { g: 144 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "partial-copy.png",
+      runId: "partial-copy-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!partialVisible) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    await expect(storage.openCatalogAsset(expectedStorageKey)).rejects.toThrow();
+    const finishCopy = releaseCopy as (() => void) | null;
+    finishCopy?.();
+    expect(await commitPromise).toBe(expectedStorageKey);
+  });
+
+  test("aborts staged writes after the run lease heartbeat is lost", async () => {
+    let releaseStage: (() => void) | null = null;
+    let heartbeatWrites = 0;
+    const storage = createCatalogAssetStorage({
+      heartbeatIntervalMs: 10,
+      lockStaleMs: 80,
+      onLeaseWrite({ kind }) {
+        if (kind !== "run") {
+          return;
+        }
+        heartbeatWrites += 1;
+        if (heartbeatWrites >= 2) {
+          throw new Error("simulated run lease heartbeat failure");
+        }
+      },
+      onStageWriteReady() {
+        return new Promise<void>((resolve) => {
+          releaseStage = resolve;
+        });
+      },
+    });
+    const bytes = await createImageBuffer("png", { b: 61 });
+    const stagePromise = storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "lease-lost-stage.png",
+      runId: "lease-lost-stage-run",
+      skuCode: "TZX-001",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const continueStage = releaseStage as (() => void) | null;
+    continueStage?.();
+
+    await expect(stagePromise).rejects.toThrow(/lease/i);
+  });
+
+  test("aborts fallback publish after the claim lease heartbeat is lost", async () => {
+    let releaseClaim: (() => void) | null = null;
+    let claimHeartbeatWrites = 0;
+    const storage = createCatalogAssetStorage({
+      claimHeartbeatIntervalMs: 10,
+      claimStaleMs: 80,
+      onClaimAcquired() {
+        return new Promise<void>((resolve) => {
+          releaseClaim = resolve;
+        });
+      },
+      onLeaseWrite({ kind }) {
+        if (kind !== "claim") {
+          return;
+        }
+        claimHeartbeatWrites += 1;
+        if (claimHeartbeatWrites >= 2) {
+          throw new Error("simulated claim lease heartbeat failure");
+        }
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    });
+    const bytes = await createImageBuffer("png", { g: 171 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "lease-lost-claim.png",
+      runId: "lease-lost-claim-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    const commitPromise = storage.commitCatalogAsset(manifest);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const continueClaim = releaseClaim as (() => void) | null;
+    continueClaim?.();
+
+    await expect(commitPromise).rejects.toThrow(/lease/i);
+    await expect(storage.openCatalogAsset(expectedStorageKey)).rejects.toThrow();
   });
 
   test("commits the same digest concurrently when hard links are unsupported", async () => {

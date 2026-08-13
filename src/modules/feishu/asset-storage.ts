@@ -6,7 +6,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   readdir,
   realpath,
   rename,
@@ -45,16 +44,37 @@ const HARD_LINK_UNSUPPORTED_CODES = new Set(["ENOTSUP", "EOPNOTSUPP", "EXDEV", "
 type ImageMimeType = TemporaryAssetManifest["mimeType"];
 type ImageExtension = "jpg" | "png" | "webp";
 type DirectorySyncReason = "cleanup" | "publish";
+type LeaseKind = "claim" | "run";
 type AssetRootState = {
   absoluteRoot: string;
   realRoot: string;
 };
 type RunLockControl = {
+  assertHeld(): void;
   ownerToken: string;
   stopHeartbeat(): void;
 };
+type ClaimLeaseControl = RunLockControl & {
+  targetPath: string;
+};
+type LeaseWriteContext = {
+  kind: LeaseKind;
+  ownerToken: string;
+  path: string;
+};
+type ClaimAcquiredContext = {
+  ownerToken: string;
+  targetPath: string;
+};
+type TargetWriteProgress = {
+  bytesWritten: number;
+  targetPath: string;
+  totalBytes: number;
+};
 type CatalogAssetStorageOptions = {
   assetDir?: string;
+  claimHeartbeatIntervalMs?: number;
+  claimStaleMs?: number;
   heartbeatIntervalMs?: number;
   lockRetryDelayMs?: number;
   lockStaleMs?: number;
@@ -62,11 +82,16 @@ type CatalogAssetStorageOptions = {
   maxFileBytes?: number;
   maxPixelCount?: number;
   maxRunBytes?: number;
+  onClaimAcquired?: ((context: ClaimAcquiredContext) => Promise<void> | void) | undefined;
+  onClaimLeaseAcquired?: ((control: ClaimLeaseControl) => Promise<void> | void) | undefined;
   onDirectorySync?: ((path: string, reason: DirectorySyncReason) => Promise<void> | void) | undefined;
   onFinalPublishReady?: (() => Promise<void> | void) | undefined;
+  onLeaseWrite?: ((context: LeaseWriteContext) => Promise<void> | void) | undefined;
   onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
+  onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  targetWriteChunkSize?: number;
 };
 type PublishBytesOptions = {
   bytes: Uint8Array;
@@ -92,6 +117,7 @@ type LockLease = LockLeasePayload & {
   heartbeatAtMs: number;
 };
 type HeartbeatController = {
+  assertHeld(): void;
   awaitStopped(): Promise<void>;
   stop(): void;
 };
@@ -99,6 +125,8 @@ type StorageDependencies = Required<
   Pick<
     CatalogAssetStorageOptions,
     | "assetDir"
+    | "claimHeartbeatIntervalMs"
+    | "claimStaleMs"
     | "heartbeatIntervalMs"
     | "lockRetryDelayMs"
     | "lockStaleMs"
@@ -106,19 +134,38 @@ type StorageDependencies = Required<
     | "maxFileBytes"
     | "maxPixelCount"
     | "maxRunBytes"
+    | "targetWriteChunkSize"
   >
 > & {
+  onClaimAcquired?: ((context: ClaimAcquiredContext) => Promise<void> | void) | undefined;
+  onClaimLeaseAcquired?: ((control: ClaimLeaseControl) => Promise<void> | void) | undefined;
   onDirectorySync?: ((path: string, reason: DirectorySyncReason) => Promise<void> | void) | undefined;
   onFinalPublishReady?: (() => Promise<void> | void) | undefined;
+  onLeaseWrite?: ((context: LeaseWriteContext) => Promise<void> | void) | undefined;
   onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
+  onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
 };
 
 class CatalogAssetError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CatalogAssetError";
+  }
+}
+
+class CatalogAssetConflictError extends CatalogAssetError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogAssetConflictError";
+  }
+}
+
+class CatalogAssetLeaseLostError extends CatalogAssetError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogAssetLeaseLostError";
   }
 }
 
@@ -548,7 +595,7 @@ async function verifyExistingPublishedTarget(
   if (options.expectedDigest && options.expectedMimeType) {
     const validation = await validateImageBytes(existingBytes, dependencies, options.expectedMimeType);
     if (validation.contentSha256 !== options.expectedDigest) {
-      throw new CatalogAssetError("stored catalog asset digest does not match the storage key");
+      throw new CatalogAssetConflictError("existing catalog asset conflicts with the requested digest");
     }
   }
 }
@@ -578,80 +625,93 @@ async function fallbackPublishByClaim(
   state: AssetRootState,
   dependencies: StorageDependencies,
   options: PublishBytesOptions,
-  tempPath: string,
 ): Promise<PublishBytesResult> {
   const finalDirectory = dirname(options.targetPath);
   const claimPath = `${options.targetPath}.claim`;
-  const claimToken = crypto.randomUUID();
-  const deadline = Date.now() + dependencies.lockTimeoutMs;
-  let claimAcquired = false;
 
-  while (!claimAcquired) {
-    if (Date.now() > deadline) {
-      throw new CatalogAssetError("timed out waiting for the catalog asset publish claim");
-    }
+  const publishResult = await withLeasedDirectory(
+    state,
+    dependencies,
+    {
+      heartbeatIntervalMs: dependencies.claimHeartbeatIntervalMs,
+      kind: "claim",
+      lockPath: claimPath,
+      onAcquired: async (control) => {
+        await dependencies.onClaimLeaseAcquired?.({
+          ...control,
+          targetPath: options.targetPath,
+        });
+      },
+      resourceId: options.targetPath,
+      staleMs: dependencies.claimStaleMs,
+    },
+    async (claimControl) => {
+      await dependencies.onClaimAcquired?.({
+        ownerToken: claimControl.ownerToken,
+        targetPath: options.targetPath,
+      });
+      claimControl.assertHeld();
 
-    try {
-      await writeExclusiveFile(claimPath, Buffer.from(claimToken, "utf8"));
-      claimAcquired = true;
-      break;
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "EEXIST") {
+      try {
+        await verifyExistingPublishedTarget(state, dependencies, options);
+        return { published: false } satisfies PublishBytesResult;
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code !== "ENOENT") {
+          throw error;
+        }
+      }
+
+      claimControl.assertHeld();
+
+      let targetHandle: FileHandle | null = null;
+      let targetCreated = false;
+      try {
+        targetHandle = await open(options.targetPath, WRITE_NOFOLLOW_FLAGS, 0o600);
+        targetCreated = true;
+
+        let bytesWritten = 0;
+        const chunkSize = Math.max(1, dependencies.targetWriteChunkSize);
+        while (bytesWritten < options.bytes.byteLength) {
+          claimControl.assertHeld();
+
+          const nextBytesWritten = Math.min(bytesWritten + chunkSize, options.bytes.byteLength);
+          const chunk = Buffer.from(options.bytes.subarray(bytesWritten, nextBytesWritten));
+          await targetHandle.write(chunk, 0, chunk.byteLength, bytesWritten);
+          bytesWritten = nextBytesWritten;
+
+          await dependencies.onTargetWriteProgress?.({
+            bytesWritten,
+            targetPath: options.targetPath,
+            totalBytes: options.bytes.byteLength,
+          });
+          claimControl.assertHeld();
+        }
+
+        await targetHandle.sync();
+        await safeClose(targetHandle);
+        targetHandle = null;
+        await syncDirectory(finalDirectory, dependencies, "publish");
+        return { published: true } satisfies PublishBytesResult;
+      } catch (error) {
+        await safeClose(targetHandle);
+        const nodeError = error as NodeJS.ErrnoException;
+        if (!targetCreated && nodeError.code === "EEXIST") {
+          await verifyExistingPublishedTarget(state, dependencies, options);
+          return { published: false } satisfies PublishBytesResult;
+        }
+
+        if (targetCreated) {
+          await safeUnlink(options.targetPath);
+          await syncDirectory(finalDirectory, dependencies, "cleanup");
+        }
         throw error;
       }
-    }
+    },
+  );
 
-    try {
-      await verifyExistingPublishedTarget(state, dependencies, options);
-      return { published: false };
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "ENOENT") {
-        throw error;
-      }
-    }
-
-    await wait(dependencies.lockRetryDelayMs);
-  }
-
-  try {
-    try {
-      await verifyExistingPublishedTarget(state, dependencies, options);
-      return { published: false };
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "ENOENT") {
-        throw error;
-      }
-    }
-
-    try {
-      await rename(tempPath, options.targetPath);
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "EEXIST") {
-        throw error;
-      }
-
-      await verifyExistingPublishedTarget(state, dependencies, options);
-      return { published: false };
-    }
-
-    await syncDirectory(finalDirectory, dependencies, "publish");
-    return { published: true };
-  } finally {
-    const claimBytes = await readFile(claimPath).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        return null;
-      }
-      throw error;
-    });
-    if (claimBytes && Buffer.from(claimBytes).toString("utf8") === claimToken) {
-      await safeUnlink(claimPath);
-      await syncDirectory(finalDirectory, dependencies, "cleanup");
-    }
-  }
+  await syncDirectory(finalDirectory, dependencies, "cleanup");
+  return publishResult;
 }
 
 async function publishBytesAtomically(
@@ -659,6 +719,7 @@ async function publishBytesAtomically(
   dependencies: StorageDependencies,
   options: PublishBytesOptions,
 ): Promise<PublishBytesResult> {
+  const isFinalPublish = Boolean(options.expectedDigest && options.expectedMimeType);
   const finalDirectory = dirname(options.targetPath);
   await ensureManagedDirectory(state, finalDirectory, {
     create: true,
@@ -674,23 +735,32 @@ async function publishBytesAtomically(
     await options.onReady?.();
 
     try {
-      if (dependencies.onStorageLink) {
+      if (isFinalPublish && dependencies.onStorageLink) {
         await dependencies.onStorageLink(tempPath, options.targetPath);
       } else {
-        await link(tempPath, options.targetPath);
+        if (isFinalPublish) {
+          await link(tempPath, options.targetPath);
+        } else {
+          const moved = await renameWithinRoot(state, tempPath, options.targetPath, "temporary asset path");
+          if (!moved) {
+            throw new CatalogAssetError("temporary asset publish source disappeared before rename");
+          }
+        }
       }
       await syncDirectory(finalDirectory, dependencies, "publish");
       return { published: true };
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
-      if (HARD_LINK_UNSUPPORTED_CODES.has(nodeError.code ?? "")) {
-        return await fallbackPublishByClaim(state, dependencies, options, tempPath);
+      if (isFinalPublish && HARD_LINK_UNSUPPORTED_CODES.has(nodeError.code ?? "")) {
+        return await fallbackPublishByClaim(state, dependencies, options);
       }
       if (nodeError.code !== "EEXIST") {
         throw error;
       }
 
-      await verifyExistingPublishedTarget(state, dependencies, options);
+      if (isFinalPublish) {
+        await verifyExistingPublishedTarget(state, dependencies, options);
+      }
       return { published: false };
     }
   } finally {
@@ -712,14 +782,21 @@ async function writeLockLease(
   leasePath: string,
   ownerToken: string,
   runId: string,
+  kind: LeaseKind,
+  dependencies: StorageDependencies,
 ) {
   const currentLease = await readLockLeaseFromPath(leasePath);
   if (currentLease && currentLease.ownerToken !== ownerToken) {
-    throw new CatalogAssetError("run lock owner token no longer matches the lease");
+    throw new CatalogAssetLeaseLostError(`${kind} lease owner token no longer matches the current lease`);
   }
 
   const tempLeasePath = `${leasePath}.${ownerToken}.next`;
   try {
+    await dependencies.onLeaseWrite?.({
+      kind,
+      ownerToken,
+      path: leasePath,
+    });
     await writeExclusiveFile(
       tempLeasePath,
       Buffer.from(
@@ -743,8 +820,11 @@ function startLockHeartbeat(
   dependencies: StorageDependencies,
   ownerToken: string,
   runId: string,
+  kind: LeaseKind,
+  heartbeatIntervalMs: number,
 ): HeartbeatController {
   let stopped = false;
+  let lostError: Error | null = null;
   let timer: NodeJS.Timeout | null = null;
   let resolveStopped: (() => void) | null = null;
   let tickInFlight = 0;
@@ -777,8 +857,12 @@ function startLockHeartbeat(
 
     tickInFlight += 1;
     try {
-      await writeLockLease(leasePath, ownerToken, runId);
-    } catch {
+      await writeLockLease(leasePath, ownerToken, runId, kind, dependencies);
+    } catch (error) {
+      lostError =
+        error instanceof Error
+          ? error
+          : new CatalogAssetLeaseLostError(`lost the ${kind} lease while renewing the heartbeat`);
       tickInFlight -= 1;
       finish();
       return;
@@ -792,16 +876,21 @@ function startLockHeartbeat(
 
     timer = setTimeout(() => {
       void tick();
-    }, dependencies.heartbeatIntervalMs);
+    }, heartbeatIntervalMs);
     timer.unref?.();
   };
 
   timer = setTimeout(() => {
     void tick();
-  }, dependencies.heartbeatIntervalMs);
+  }, heartbeatIntervalMs);
   timer.unref?.();
 
   return {
+    assertHeld() {
+      if (lostError) {
+        throw lostError;
+      }
+    },
     async awaitStopped() {
       await stoppedPromise;
     },
@@ -813,9 +902,9 @@ function startLockHeartbeat(
 
 async function tryReclaimStaleLock(
   state: AssetRootState,
-  dependencies: StorageDependencies,
   lockPath: string,
   leasePath: string,
+  staleMs: number,
 ) {
   const lockStats = await lstat(lockPath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") {
@@ -832,7 +921,7 @@ async function tryReclaimStaleLock(
 
   const lease = await readLockLeaseFromPath(leasePath);
   const lastHeartbeatAtMs = lease?.heartbeatAtMs ?? lockStats.mtimeMs;
-  if (Date.now() - lastHeartbeatAtMs <= dependencies.lockStaleMs) {
+  if (Date.now() - lastHeartbeatAtMs <= staleMs) {
     return false;
   }
 
@@ -872,24 +961,37 @@ async function releaseRunLock(
   await rm(releasedPath, { force: true, recursive: true });
 }
 
-async function withRunLock<T>(
+async function withLeasedDirectory<T>(
   state: AssetRootState,
   dependencies: StorageDependencies,
-  runId: string,
-  action: () => Promise<T>,
+  input: {
+    heartbeatIntervalMs: number;
+    kind: LeaseKind;
+    lockPath: string;
+    onAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
+    resourceId: string;
+    staleMs: number;
+  },
+  action: (control: RunLockControl) => Promise<T>,
 ) {
-  const lockParent = resolve(state.absoluteRoot, ".locks", "runs");
-  const lockPath = join(lockParent, `${runId}.lock`);
+  const lockParent = dirname(input.lockPath);
+  const lockPath = input.lockPath;
   const leasePath = join(lockPath, "lease.json");
   const startedAt = Date.now();
 
-  await ensureManagedDirectory(state, lockParent, { create: true, label: "lock path" });
+  await ensureManagedDirectory(state, lockParent, {
+    create: true,
+    label: input.kind === "run" ? "lock path" : "claim path",
+  });
 
   while (true) {
     const ownerToken = crypto.randomUUID();
     try {
       await mkdir(lockPath);
-      await ensureManagedDirectory(state, lockPath, { create: false, label: "lock path" });
+      await ensureManagedDirectory(state, lockPath, {
+        create: false,
+        label: input.kind === "run" ? "lock path" : "claim path",
+      });
 
       try {
         await writeExclusiveFile(
@@ -899,21 +1001,33 @@ async function withRunLock<T>(
               heartbeatAt: new Date().toISOString(),
               ownerToken,
               pid: process.pid,
-              runId,
+              runId: input.resourceId,
             }),
             "utf8",
           ),
         );
-        const heartbeat = startLockHeartbeat(leasePath, dependencies, ownerToken, runId);
-        await dependencies.onRunLockAcquired?.({
+        const heartbeat = startLockHeartbeat(
+          leasePath,
+          dependencies,
+          ownerToken,
+          input.resourceId,
+          input.kind,
+          input.heartbeatIntervalMs,
+        );
+        const control: RunLockControl = {
+          assertHeld() {
+            heartbeat.assertHeld();
+          },
           ownerToken,
           stopHeartbeat() {
             heartbeat.stop();
           },
-        });
+        };
+        await input.onAcquired?.(control);
+        control.assertHeld();
 
         try {
-          return await action();
+          return await action(control);
         } finally {
           heartbeat.stop();
           await heartbeat.awaitStopped();
@@ -929,7 +1043,7 @@ async function withRunLock<T>(
         throw error;
       }
 
-      const reclaimed = await tryReclaimStaleLock(state, dependencies, lockPath, leasePath);
+      const reclaimed = await tryReclaimStaleLock(state, lockPath, leasePath, input.staleMs);
       if (reclaimed) {
         continue;
       }
@@ -943,6 +1057,27 @@ async function withRunLock<T>(
   }
 }
 
+async function withRunLock<T>(
+  state: AssetRootState,
+  dependencies: StorageDependencies,
+  runId: string,
+  action: (control: RunLockControl) => Promise<T>,
+) {
+  return await withLeasedDirectory(
+    state,
+    dependencies,
+    {
+      heartbeatIntervalMs: dependencies.heartbeatIntervalMs,
+      kind: "run",
+      lockPath: join(resolve(state.absoluteRoot, ".locks", "runs"), `${runId}.lock`),
+      onAcquired: dependencies.onRunLockAcquired,
+      resourceId: runId,
+      staleMs: dependencies.lockStaleMs,
+    },
+    action,
+  );
+}
+
 export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = {}) {
   const lockStaleMs = options.lockStaleMs ?? DEFAULT_LOCK_STALE_MS;
   const heartbeatIntervalMs =
@@ -951,9 +1086,18 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
   if (heartbeatIntervalMs >= lockStaleMs) {
     throw new CatalogAssetError("heartbeat interval must be smaller than the run lock stale timeout");
   }
+  const claimStaleMs = options.claimStaleMs ?? lockStaleMs;
+  const claimHeartbeatIntervalMs =
+    options.claimHeartbeatIntervalMs ??
+    Math.min(DEFAULT_HEARTBEAT_INTERVAL_MS, Math.max(10, Math.floor(claimStaleMs / 3)));
+  if (claimHeartbeatIntervalMs >= claimStaleMs) {
+    throw new CatalogAssetError("heartbeat interval must be smaller than the claim stale timeout");
+  }
 
   const dependencies: StorageDependencies = {
     assetDir: options.assetDir?.trim() || process.env.CATALOG_ASSET_DIR?.trim() || DEFAULT_CATALOG_ASSET_DIR,
+    claimHeartbeatIntervalMs,
+    claimStaleMs,
     heartbeatIntervalMs,
     lockRetryDelayMs: options.lockRetryDelayMs ?? DEFAULT_LOCK_RETRY_DELAY_MS,
     lockStaleMs,
@@ -961,11 +1105,16 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     maxFileBytes: options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
     maxPixelCount: options.maxPixelCount ?? DEFAULT_MAX_PIXEL_COUNT,
     maxRunBytes: options.maxRunBytes ?? DEFAULT_MAX_RUN_BYTES,
+    onClaimAcquired: options.onClaimAcquired,
+    onClaimLeaseAcquired: options.onClaimLeaseAcquired,
     onDirectorySync: options.onDirectorySync,
     onFinalPublishReady: options.onFinalPublishReady,
+    onLeaseWrite: options.onLeaseWrite,
     onRunLockAcquired: options.onRunLockAcquired,
     onStageWriteReady: options.onStageWriteReady,
     onStorageLink: options.onStorageLink,
+    onTargetWriteProgress: options.onTargetWriteProgress,
+    targetWriteChunkSize: options.targetWriteChunkSize ?? 64 * 1024,
   };
 
   async function stageCatalogAsset(input: {
@@ -987,7 +1136,7 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     const runDirectoryPath = resolve(state.absoluteRoot, "temporary", input.runId);
     const temporaryPath = await resolveManagedFilePath(state, temporaryKey, "temporary asset path");
 
-    await withRunLock(state, dependencies, input.runId, async () => {
+    await withRunLock(state, dependencies, input.runId, async (runLock) => {
       try {
         const existingBytes = await readManagedFile(state, temporaryKey, "temporary asset path");
         const existingValidation = await validateImageBytes(
@@ -1009,12 +1158,14 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
         }
       }
 
+      runLock.assertHeld();
       const currentRunBytes = await sumDirectoryBytes(runDirectoryPath);
       if (currentRunBytes + input.bytes.byteLength > dependencies.maxRunBytes) {
         throw new CatalogAssetError("catalog migration assets must stay within the 1 GiB per-run limit");
       }
 
       await dependencies.onStageWriteReady?.();
+      runLock.assertHeld();
 
       await publishBytesAtomically(state, dependencies, {
         bytes: input.bytes,
