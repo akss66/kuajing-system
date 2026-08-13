@@ -21,10 +21,10 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "运营总览",
-    expectedTexts: ["合作客户", "TEMU 店铺", "在售 SKU", "当前可售件数", "10"],
+    expectedTexts: ["今日经营", "待办与预警", "近 7 天趋势", "快捷处理"],
     path: "/admin",
     screenshot: "admin-overview",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
   },
   {
     audience: "admin" as const,
@@ -52,11 +52,11 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
-    heading: "欢迎使用同舟行跨境",
-    expectedTexts: ["上传 TEMU 订单", "多店铺批量拿货", "快捷入口"],
+    heading: "客户首页",
+    expectedTexts: ["继续处理", "快捷拿货", "店铺摘要", "资金摘要"],
     path: "/portal",
     screenshot: "customer-home",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
   },
   {
     audience: "customer" as const,
@@ -125,6 +125,12 @@ for (const route of workspaceRoutes) {
   test(`${route.audience} workspace route ${route.path} uses the shared merchant-center visual structure`, async ({
     page,
   }, testInfo) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => consoleErrors.push(error.message));
+
     await loginAsAudience(route.audience, page);
     await page.goto(route.path);
 
@@ -136,6 +142,8 @@ for (const route of workspaceRoutes) {
 
     if (route.shouldShowMetricStrip) {
       await expect(page.locator("[data-metric-strip]")).toBeVisible();
+    } else {
+      await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
     }
 
     for (const text of route.expectedTexts) {
@@ -156,11 +164,69 @@ for (const route of workspaceRoutes) {
         ["serious", "critical"].includes(violation.impact ?? ""),
       ),
     ).toEqual([]);
+    expect(consoleErrors).toEqual([]);
 
     await waitForVisualStability(page);
     await expect(page).toHaveScreenshot(`${route.screenshot}-${testInfo.project.name}.png`, {
       animations: "disabled",
       fullPage: false,
     });
+  });
+}
+
+for (const dashboard of [
+  {
+    audience: "admin" as const,
+    actionSectionId: "quick-actions-title",
+    path: "/admin",
+    firstSectionId: "today-operations-title",
+    summarySectionId: "operations-trend-title",
+  },
+  {
+    audience: "customer" as const,
+    actionSectionId: "continuation-title",
+    path: "/portal",
+    firstSectionId: "continuation-title",
+    summarySectionId: "store-summary-title",
+  },
+]) {
+  test(`${dashboard.audience} dashboard fits 360, 390, and 430px @mobile-only`, async ({
+    page,
+  }) => {
+    await loginAsAudience(dashboard.audience, page);
+
+    for (const width of [360, 390, 430]) {
+      await page.setViewportSize({ height: 844, width });
+      await page.goto(dashboard.path);
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `${dashboard.path} overflowed at ${width}px`).toBeLessThanOrEqual(1);
+
+      const firstSection = page.locator(
+        `section[aria-labelledby="${dashboard.firstSectionId}"]`,
+      );
+      const summarySection = page.locator(
+        `section[aria-labelledby="${dashboard.summarySectionId}"]`,
+      );
+      await expect(firstSection).toBeVisible();
+      const firstBox = await firstSection.boundingBox();
+      const summaryBox = await summarySection.boundingBox();
+      expect(firstBox).not.toBeNull();
+      expect(summaryBox).not.toBeNull();
+      expect(firstBox!.y).toBeLessThan(summaryBox!.y);
+
+      const actionBox = await page
+        .locator(`section[aria-labelledby="${dashboard.actionSectionId}"] a`)
+        .first()
+        .boundingBox();
+      expect(actionBox).not.toBeNull();
+      expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+
+      if (dashboard.audience === "customer") {
+        expect(summaryBox!.y).toBeGreaterThanOrEqual(844);
+      }
+    }
   });
 }
