@@ -8,10 +8,15 @@ import {
   fulfillmentOrders,
   stores,
   walletAccounts,
+  walletTransactions,
 } from "@/db/schema";
-import { listCustomerManagementRows } from "@/modules/customers/queries";
+import {
+  getCustomerManagementDetail,
+  listCustomerManagementRows,
+} from "@/modules/customers/queries";
 
 afterEach(async () => {
+  await db.delete(walletTransactions);
   await db.delete(fulfillmentOrders);
   await db.delete(customerUsers);
   await db.delete(authUsers);
@@ -208,4 +213,185 @@ test("returns one exact management row per customer without multiplying wallet, 
       storeCount: 1,
     },
   ]);
+});
+
+test("returns exact isolated customer detail summaries and at most 20 deterministically ordered recent rows", async () => {
+  const [customer, otherCustomer] = await db
+    .insert(customers)
+    .values([
+      { code: "DETAIL-QUERY", name: "详情聚合客户" },
+      { code: "OTHER-DETAIL", name: "其他客户" },
+    ])
+    .returning({ id: customers.id });
+
+  await db.insert(customerUsers).values([
+    {
+      customerId: customer.id,
+      displayName: "详情负责人",
+      loginIdentifier: "detail-query@test.local",
+    },
+    {
+      customerId: otherCustomer.id,
+      displayName: "其他负责人",
+      loginIdentifier: "other-detail@test.local",
+    },
+  ]);
+  await db.insert(walletAccounts).values([
+    { balanceFen: 123_456, customerId: customer.id },
+    { balanceFen: 999_999, customerId: otherCustomer.id },
+  ]);
+
+  const [firstStore, secondStore, otherStore] = await db
+    .insert(stores)
+    .values([
+      { customerId: customer.id, name: "详情一店" },
+      { customerId: customer.id, name: "详情二店" },
+      { customerId: otherCustomer.id, name: "其他店铺" },
+    ])
+    .returning({ id: stores.id });
+
+  const submittedAt = new Date();
+  const targetOrders = Array.from({ length: 22 }, (_, index) => {
+    const sequence = index + 1;
+    const pending = sequence <= 3;
+
+    return {
+      customerId: customer.id,
+      id: `10000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+      orderNumber: `DETAIL-${String(sequence).padStart(2, "0")}`,
+      paymentMode: pending ? null : ("WALLET" as const),
+      status: pending ? ("PENDING_PAYMENT" as const) : ("SHIPPED" as const),
+      storeId: sequence % 2 === 0 ? secondStore.id : firstStore.id,
+      submittedAt,
+      totalAmountFen: pending ? sequence * 100 : 1_000 + sequence,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    };
+  });
+  await db.insert(fulfillmentOrders).values([
+    ...targetOrders,
+    {
+      customerId: customer.id,
+      id: "10000000-0000-4000-8000-999999999999",
+      orderNumber: "DETAIL-OLD-PENDING",
+      status: "PENDING_PAYMENT",
+      storeId: firstStore.id,
+      submittedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1_000),
+      totalAmountFen: 400,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    },
+    {
+      customerId: otherCustomer.id,
+      id: "20000000-0000-4000-8000-999999999999",
+      orderNumber: "OTHER-NEWEST",
+      paymentMode: "WALLET",
+      status: "SHIPPED",
+      storeId: otherStore.id,
+      submittedAt: new Date(Date.now() + 60_000),
+      totalAmountFen: 88_888,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    },
+  ]);
+
+  const createdAt = new Date();
+  await db.insert(walletTransactions).values([
+    ...Array.from({ length: 22 }, (_, index) => {
+      const sequence = index + 1;
+      return {
+        actorId: "detail-test-admin",
+        actorType: "ADMIN" as const,
+        afterBalanceFen: sequence * 10,
+        beforeBalanceFen: (sequence - 1) * 10,
+        createdAt,
+        customerId: customer.id,
+        deltaFen: 10,
+        id: `30000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        reason: `详情充值-${String(sequence).padStart(2, "0")}`,
+        transactionType: "ADMIN_CREDIT" as const,
+      };
+    }),
+    {
+      actorId: "other-test-admin",
+      actorType: "ADMIN",
+      afterBalanceFen: 999_999,
+      beforeBalanceFen: 999_899,
+      createdAt: new Date(Date.now() + 60_000),
+      customerId: otherCustomer.id,
+      deltaFen: 100,
+      id: "40000000-0000-4000-8000-999999999999",
+      reason: "其他客户充值",
+      transactionType: "ADMIN_CREDIT",
+    },
+  ]);
+
+  const detail = await getCustomerManagementDetail(customer.id);
+
+  expect(detail.summary).toEqual({
+    balanceFen: 123_456,
+    pendingPaymentFen: 1_000,
+    recentOrderCount: 22,
+    storeCount: 2,
+  });
+  expect(detail.recentOrders).toHaveLength(20);
+  expect(detail.recentOrders[0]).toEqual({
+    id: "10000000-0000-4000-8000-000000000022",
+    orderNumber: "DETAIL-22",
+    status: "SHIPPED",
+    storeName: "详情二店",
+    submittedAt,
+    totalAmountFen: 1_022,
+  });
+  expect(
+    detail.recentOrders.map(({ id, orderNumber, storeName }) => ({
+      id,
+      orderNumber,
+      storeName,
+    })),
+  ).toEqual(
+    Array.from({ length: 20 }, (_, index) => {
+      const sequence = 22 - index;
+      return {
+        id: `10000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        orderNumber: `DETAIL-${String(sequence).padStart(2, "0")}`,
+        storeName: sequence % 2 === 0 ? "详情二店" : "详情一店",
+      };
+    }),
+  );
+  expect(detail.recentTransactions).toHaveLength(20);
+  expect(detail.recentTransactions[0]).toEqual({
+    afterBalanceFen: 220,
+    createdAt,
+    deltaFen: 10,
+    id: "30000000-0000-4000-8000-000000000022",
+    reason: "详情充值-22",
+    transactionType: "ADMIN_CREDIT",
+  });
+  expect(
+    detail.recentTransactions.map(({ afterBalanceFen, id, reason }) => ({
+      afterBalanceFen,
+      id,
+      reason,
+    })),
+  ).toEqual(
+    Array.from({ length: 20 }, (_, index) => {
+      const sequence = 22 - index;
+      return {
+        afterBalanceFen: sequence * 10,
+        id: `30000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        reason: `详情充值-${String(sequence).padStart(2, "0")}`,
+      };
+    }),
+  );
+  expect(detail.recentOrders.every((order) => order.orderNumber.startsWith("DETAIL-"))).toBe(true);
+  expect(
+    detail.recentTransactions.every((transaction) => transaction.reason.startsWith("详情充值-")),
+  ).toBe(true);
+});
+
+test("preserves the missing-customer error contract", async () => {
+  await expect(
+    getCustomerManagementDetail("00000000-0000-4000-8000-000000000000"),
+  ).rejects.toThrow("CUSTOMER_NOT_FOUND");
 });

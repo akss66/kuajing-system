@@ -177,7 +177,7 @@ describe("customer management pages", () => {
     expect(within(filteredState).getByRole("button", { name: "清除筛选" })).toBeEnabled();
   });
 
-  it("renders desktop store editing and mobile collapsed store cards on the detail page", async () => {
+  it("keeps customer and store management read-only until their drawers open", async () => {
     detailQueryMocks.getCustomerManagementDetail.mockResolvedValue({
       account: {
         displayName: "北区负责人",
@@ -192,6 +192,26 @@ describe("customer management pages", () => {
         name: "华北客户",
         status: "ACTIVE",
       },
+      recentOrders: [
+        {
+          id: "order-1",
+          orderNumber: "ORDER-20260813-001",
+          status: "PENDING_PAYMENT",
+          storeName: "华北一店",
+          submittedAt: new Date("2026-08-13T08:00:00.000Z"),
+          totalAmountFen: 12_300,
+        },
+      ],
+      recentTransactions: [
+        {
+          afterBalanceFen: 123_456,
+          createdAt: new Date("2026-08-13T09:00:00.000Z"),
+          deltaFen: 10_000,
+          id: "transaction-1",
+          reason: "运营充值",
+          transactionType: "ADMIN_CREDIT",
+        },
+      ],
       stores: [
         {
           customerId: "customer-1",
@@ -210,6 +230,12 @@ describe("customer management pages", () => {
           status: "DISABLED",
         },
       ],
+      summary: {
+        balanceFen: 123_456,
+        pendingPaymentFen: 12_300,
+        recentOrderCount: 8,
+        storeCount: 2,
+      },
     });
 
     render(
@@ -218,33 +244,50 @@ describe("customer management pages", () => {
       }),
     );
 
-    expect(screen.getByRole("heading", { name: "客户详情" })).toBeVisible();
-    expect(screen.getByDisplayValue("华北客户")).toBeVisible();
-    expect(screen.getByDisplayValue("north-owner@test.local")).toBeVisible();
-    expect(screen.getByText("唯一客户账号")).toBeVisible();
-    expect(screen.getByRole("button", { name: "保存客户资料" })).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "华北客户" })).toBeVisible();
+    expect(screen.getByText("NORTH-01")).toBeVisible();
+    expect(screen.getByRole("button", { name: "编辑客户" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "概览" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "店铺" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "订单与补发" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "资金记录" })).toBeVisible();
+    expect(screen.getByText("¥1,234.56")).toBeVisible();
+    expect(screen.getByText("¥123.00")).toBeVisible();
+    expect(screen.getByText("8 单")).toBeVisible();
+    expect(screen.getByText("2 家")).toBeVisible();
+    expect(screen.getByText("north-owner@test.local")).toBeVisible();
+    expect(screen.getByRole("link", { name: "前往账号管理" })).toHaveAttribute(
+      "href",
+      "/admin/accounts?customerId=customer-1",
+    );
+    expect(screen.queryByLabelText("客户名称")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存客户资料" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "停用客户" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑客户" }));
+    const customerDrawer = await screen.findByRole("dialog", { name: "编辑客户" });
+    expect(within(customerDrawer).getByLabelText("客户名称")).toHaveValue("华北客户");
+    expect(within(customerDrawer).getByRole("button", { name: "保存客户资料" })).toBeEnabled();
+    expect(within(customerDrawer).getByRole("button", { name: "停用客户" })).toBeEnabled();
+    fireEvent.click(within(customerDrawer).getByRole("button", { name: "关闭" }));
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "店铺" }), { button: 0 });
     expect(screen.getByRole("button", { name: "新增店铺" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "管理店铺 华北二店" })).toBeEnabled();
+    expect(screen.queryByLabelText("店铺名称")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存店铺资料" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "恢复店铺" })).not.toBeInTheDocument();
 
-    const desktopSummaryRow = screen.getAllByRole("row", { name: /华北二店.*已停用/ })[0];
-    expect(within(desktopSummaryRow).getByText("已停用")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "新增店铺" }));
+    const createStoreDrawer = await screen.findByRole("dialog", { name: "新增店铺" });
+    expect(within(createStoreDrawer).getByLabelText("店铺名称")).toBeVisible();
+    expect(within(createStoreDrawer).getByRole("button", { name: "创建店铺" })).toBeEnabled();
+    fireEvent.click(within(createStoreDrawer).getByRole("button", { name: "关闭" }));
 
-    const storeCard = screen
-      .getAllByText("华北二店")
-      .map((node) => node.closest("details"))
-      .find((node): node is HTMLDetailsElement => node instanceof HTMLDetailsElement);
-    expect(storeCard).not.toBeNull();
-
-    const storeCardScope = within(storeCard as HTMLDetailsElement);
-    expect(storeCardScope.getByText("编辑店铺")).toBeVisible();
-    expect(
-      storeCardScope.getByText(/已停用后新拿货已关闭，历史数据.*保留。/),
-    ).toBeVisible();
-    expect(storeCardScope.getByDisplayValue("华北二店")).not.toBeVisible();
-
-    (storeCard as HTMLDetailsElement).open = true;
-
-    expect(storeCardScope.getByDisplayValue("华北二店")).toBeVisible();
-    expect(storeCardScope.getByRole("button", { name: "保存店铺资料" })).toBeEnabled();
-    expect(storeCardScope.getByRole("button", { name: "恢复店铺" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "管理店铺 华北二店" }));
+    const storeDrawer = await screen.findByRole("dialog", { name: "管理店铺 · 华北二店" });
+    expect(within(storeDrawer).getByLabelText("店铺名称")).toHaveValue("华北二店");
+    expect(within(storeDrawer).getByRole("button", { name: "保存店铺资料" })).toBeEnabled();
+    expect(within(storeDrawer).getByRole("button", { name: "恢复店铺" })).toBeEnabled();
   });
 });

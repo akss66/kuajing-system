@@ -81,55 +81,62 @@ async function closeAccountDrawer(dialog: Locator) {
   await expect(dialog).toHaveCount(0);
 }
 
-function customerProfileForm(customerId: string, page: Page) {
-  return page
+function customerProfileForm(customerId: string, scope: Locator) {
+  return scope
     .locator(`form:has(input[name="customerId"][value="${customerId}"]):has(input[name="code"])`)
     .first();
 }
 
-function addStoreForm(customerId: string, page: Page) {
-  return page
+function customerStatusForm(
+  customerId: string,
+  nextStatus: "ACTIVE" | "DISABLED",
+  scope: Locator,
+) {
+  return scope
+    .locator(
+      `form:has(input[name="customerId"][value="${customerId}"]):has(input[name="status"][value="${nextStatus}"]):not(:has(input[name="storeId"]))`,
+    )
+    .first();
+}
+
+function addStoreForm(customerId: string, scope: Locator) {
+  return scope
     .locator(
       `form:has(input[name="customerId"][value="${customerId}"]):has(input[name="platform"]):not(:has(input[name="storeId"]))`,
     )
     .first();
 }
 
-async function visibleStoreUpdateForm(
-  page: Page,
-  input: {
-    storeId: string;
-    storeName: string;
-  },
-) {
-  if ((page.viewportSize()?.width ?? 1440) < 1024) {
-    const card = page
-      .locator("details")
-      .filter({ has: page.locator(`input[name="storeId"][value="${input.storeId}"]`) })
-      .first();
-
-    await expect(card).toBeVisible();
-    await expect(card.locator('input[name="name"]')).not.toBeVisible();
-    await card.getByText("编辑店铺").click();
-    await expect(card.locator('input[name="name"]')).toBeVisible();
-    await expect(card.locator(`text=${input.storeName}`)).toBeVisible();
-
-    return card
-      .locator(`form:visible:has(input[name="storeId"][value="${input.storeId}"]):has(input[name="name"])`)
-      .first();
-  }
-
-  return page
-    .locator(`form:visible:has(input[name="storeId"][value="${input.storeId}"]):has(input[name="name"])`)
+function storeUpdateForm(storeId: string, scope: Locator) {
+  return scope
+    .locator(`form:has(input[name="storeId"][value="${storeId}"]):has(input[name="name"])`)
     .first();
 }
 
-async function visibleStoreStatusForm(page: Page, storeId: string, nextStatus: "ACTIVE" | "DISABLED") {
-  return page
+function storeStatusForm(
+  storeId: string,
+  nextStatus: "ACTIVE" | "DISABLED",
+  scope: Locator,
+) {
+  return scope
     .locator(
-      `form:visible:has(input[name="storeId"][value="${storeId}"]):has(input[name="status"][value="${nextStatus}"])`,
+      `form:has(input[name="storeId"][value="${storeId}"]):has(input[name="status"][value="${nextStatus}"])`,
     )
     .first();
+}
+
+async function openCustomerEditDrawer(page: Page) {
+  await page.getByRole("button", { name: "编辑客户" }).click();
+  const dialog = page.getByRole("dialog", { name: "编辑客户" });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function openStoreDrawer(page: Page, storeName: string) {
+  await page.getByRole("button", { name: `管理店铺 ${storeName}` }).click();
+  const dialog = page.getByRole("dialog", { name: `管理店铺 · ${storeName}` });
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 
 async function confirmDialog(scope: Locator, page: Page, buttonName: string) {
@@ -466,10 +473,37 @@ test("ordinary admins can manage customer details and multi-store operations", a
   await customerDetailsLink.click();
 
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${customerId}$`));
-  await expect(page.getByRole("heading", { name: "客户详情" })).toBeVisible();
-  await expect(page.locator(`input[value="${customerEmail}"]`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: `多店客户 ${suffix}` })).toBeVisible();
+  await expect(page.getByText(customerEmail)).toBeVisible();
+  await expect(page.getByRole("link", { name: "前往账号管理" })).toHaveAttribute(
+    "href",
+    `/admin/accounts?customerId=${customerId}`,
+  );
+  await expect(page.getByLabel("客户名称")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "保存客户资料" })).toHaveCount(0);
+  await expect(page.locator('form:has(input[name="storeId"])')).toHaveCount(0);
 
-  const customerForm = customerProfileForm(customerId, page);
+  for (const width of [360, 390, 430]) {
+    await page.setViewportSize({ height: 844, width });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+  await page.setViewportSize({
+    height: (page.viewportSize()?.height ?? 844),
+    width: test.info().project.name === "mobile-chromium" ? 390 : 1440,
+  });
+  const detailAccessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    detailAccessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+
+  const customerDrawer = await openCustomerEditDrawer(page);
+  const customerForm = customerProfileForm(customerId, customerDrawer);
   await customerForm.getByLabel("客户名称").fill(`多店客户 ${suffix} 更新`);
   await customerForm.getByLabel("联系人").fill("李青");
   await customerForm.getByLabel("微信").fill(`wechat-${suffix.toLowerCase()}`);
@@ -492,13 +526,21 @@ test("ordinary admins can manage customer details and multi-store operations", a
     contactWechat: `wechat-${suffix.toLowerCase()}`,
     name: `多店客户 ${suffix} 更新`,
   });
+  await closeAccountDrawer(customerDrawer);
 
-  const createStoreForm = addStoreForm(customerId, page);
+  await page.getByRole("tab", { name: "店铺" }).click();
+  await expect(page.getByRole("button", { name: "新增店铺" })).toBeVisible();
+  await expect(page.locator('form:has(input[name="storeId"])')).toHaveCount(0);
+
+  await page.getByRole("button", { name: "新增店铺" }).click();
+  const createStoreDrawer = page.getByRole("dialog", { name: "新增店铺" });
+  await expect(createStoreDrawer).toBeVisible();
+  const createStoreForm = addStoreForm(customerId, createStoreDrawer);
   await createStoreForm.getByLabel("店铺名称").fill(secondStoreName);
   await createStoreForm.getByLabel("平台").fill("TEMU");
   await createStoreForm.getByLabel("外部店铺编号").fill(`TEMU-${suffix}-002`);
   await createStoreForm.getByLabel("创建原因").fill("E2E 新增第二家店铺");
-  await createStoreForm.getByRole("button", { name: "新增店铺" }).click();
+  await createStoreForm.getByRole("button", { name: "创建店铺" }).click();
   await expect(page.getByText("店铺已新增。")).toBeVisible();
 
   await expect.poll(async () => {
@@ -513,11 +555,10 @@ test("ordinary admins can manage customer details and multi-store operations", a
     const customerStores = await db.select({ id: stores.id }).from(stores).where(eq(stores.customerId, customerId));
     return customerStores.length;
   }).toBe(2);
+  await closeAccountDrawer(createStoreDrawer);
 
-  const updateStoreForm = await visibleStoreUpdateForm(page, {
-    storeId: secondStoreId,
-    storeName: secondStoreName,
-  });
+  const updateStoreDrawer = await openStoreDrawer(page, secondStoreName);
+  const updateStoreForm = storeUpdateForm(secondStoreId, updateStoreDrawer);
   await updateStoreForm.getByLabel("店铺名称").fill(secondStoreUpdatedName);
   await updateStoreForm.getByLabel("平台").fill("TEMU");
   await updateStoreForm.getByLabel("外部店铺编号").fill(`TEMU-${suffix}-002-UPDATED`);
@@ -538,8 +579,10 @@ test("ordinary admins can manage customer details and multi-store operations", a
     externalStoreCode: `TEMU-${suffix}-002-UPDATED`,
     name: secondStoreUpdatedName,
   });
+  await closeAccountDrawer(updateStoreDrawer);
 
-  const disableStoreForm = await visibleStoreStatusForm(page, secondStoreId, "DISABLED");
+  const disableStoreDrawer = await openStoreDrawer(page, secondStoreUpdatedName);
+  const disableStoreForm = storeStatusForm(secondStoreId, "DISABLED", disableStoreDrawer);
   await disableStoreForm.getByLabel("操作原因").fill("E2E 停用第二家店铺");
   await confirmDialog(disableStoreForm, page, "停用店铺");
   await expect(page.getByText("店铺已停用。")).toBeVisible();
@@ -548,8 +591,10 @@ test("ordinary admins can manage customer details and multi-store operations", a
     const [store] = await db.select({ status: stores.status }).from(stores).where(eq(stores.id, secondStoreId));
     return store?.status;
   }).toBe("DISABLED");
+  await closeAccountDrawer(disableStoreDrawer);
 
-  const restoreStoreForm = await visibleStoreStatusForm(page, secondStoreId, "ACTIVE");
+  const restoreStoreDrawer = await openStoreDrawer(page, secondStoreUpdatedName);
+  const restoreStoreForm = storeStatusForm(secondStoreId, "ACTIVE", restoreStoreDrawer);
   await restoreStoreForm.getByLabel("操作原因").fill("E2E 恢复第二家店铺");
   await confirmDialog(restoreStoreForm, page, "恢复店铺");
   await expect(page.getByText("店铺已恢复。")).toBeVisible();
@@ -558,6 +603,61 @@ test("ordinary admins can manage customer details and multi-store operations", a
     const [store] = await db.select({ status: stores.status }).from(stores).where(eq(stores.id, secondStoreId));
     return store?.status;
   }).toBe("ACTIVE");
+  await closeAccountDrawer(restoreStoreDrawer);
+
+  const customerAuthUserId = (
+    await db.select({ id: authUsers.id }).from(authUsers).where(eq(authUsers.email, customerEmail))
+  )[0]!.id;
+  const disableCustomerDrawer = await openCustomerEditDrawer(page);
+  const disableCustomerForm = customerStatusForm(customerId, "DISABLED", disableCustomerDrawer);
+  await disableCustomerForm.getByLabel("操作原因").fill("E2E 暂停客户合作");
+  await confirmDialog(disableCustomerForm, page, "停用客户");
+  await expect(page.getByText("客户已停用。")).toBeVisible();
+  await expect.poll(async () => {
+    const [customer] = await db
+      .select({ status: customers.status })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    const [mirror] = await db
+      .select({ status: customerUsers.status })
+      .from(customerUsers)
+      .where(eq(customerUsers.customerId, customerId));
+    const [authUser] = await db
+      .select({ banned: authUsers.banned })
+      .from(authUsers)
+      .where(eq(authUsers.id, customerAuthUserId));
+    return { authBanned: authUser?.banned, customerStatus: customer?.status, mirrorStatus: mirror?.status };
+  }).toEqual({ authBanned: true, customerStatus: "DISABLED", mirrorStatus: "DISABLED" });
+  await expect.poll(async () => {
+    const sessions = await db
+      .select({ id: authSessions.id })
+      .from(authSessions)
+      .where(eq(authSessions.userId, customerAuthUserId));
+    return sessions.length;
+  }).toBe(0);
+  await closeAccountDrawer(disableCustomerDrawer);
+
+  const restoreCustomerDrawer = await openCustomerEditDrawer(page);
+  const restoreCustomerForm = customerStatusForm(customerId, "ACTIVE", restoreCustomerDrawer);
+  await restoreCustomerForm.getByLabel("操作原因").fill("E2E 恢复客户合作");
+  await confirmDialog(restoreCustomerForm, page, "恢复客户");
+  await expect(page.getByText("客户已恢复。")).toBeVisible();
+  await expect.poll(async () => {
+    const [customer] = await db
+      .select({ status: customers.status })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    const [mirror] = await db
+      .select({ status: customerUsers.status })
+      .from(customerUsers)
+      .where(eq(customerUsers.customerId, customerId));
+    const [authUser] = await db
+      .select({ banned: authUsers.banned })
+      .from(authUsers)
+      .where(eq(authUsers.id, customerAuthUserId));
+    return { authBanned: authUser?.banned, customerStatus: customer?.status, mirrorStatus: mirror?.status };
+  }).toEqual({ authBanned: false, customerStatus: "ACTIVE", mirrorStatus: "ACTIVE" });
+  await closeAccountDrawer(restoreCustomerDrawer);
 
   await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
@@ -577,4 +677,7 @@ test("ordinary admins can manage customer details and multi-store operations", a
     loginIdentifier: customerEmail,
     status: "ACTIVE",
   });
+
+  await loginThroughUi(page, { email: customerEmail, password: customerPassword });
+  await expect(page).toHaveURL(/\/portal$/);
 });

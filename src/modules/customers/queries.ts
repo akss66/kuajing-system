@@ -1,7 +1,14 @@
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { customerUsers, customers, stores } from "@/db/schema";
+import {
+  customerUsers,
+  customers,
+  fulfillmentOrders,
+  stores,
+  walletAccounts,
+  walletTransactions,
+} from "@/db/schema";
 
 export type CustomerManagementListRow = {
   accountDisplayName: string | null;
@@ -99,15 +106,78 @@ export async function getCustomerManagementDetail(customerId: string) {
     throw new Error("CUSTOMER_NOT_FOUND");
   }
 
-  const [account] = await db
-    .select()
-    .from(customerUsers)
-    .where(eq(customerUsers.customerId, customerId))
-    .limit(1);
-  const customerStores = await db
-    .select()
-    .from(stores)
-    .where(eq(stores.customerId, customerId));
+  const [
+    [account],
+    customerStores,
+    [wallet],
+    [storeSummary],
+    [orderSummary],
+    recentOrders,
+    recentTransactions,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(customerUsers)
+      .where(eq(customerUsers.customerId, customerId))
+      .orderBy(desc(customerUsers.createdAt), desc(customerUsers.id))
+      .limit(1),
+    db
+      .select()
+      .from(stores)
+      .where(eq(stores.customerId, customerId))
+      .orderBy(stores.name, stores.id),
+    db
+      .select({ balanceFen: walletAccounts.balanceFen })
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, customerId))
+      .limit(1),
+    db
+      .select({
+        storeCount: sql<number>`count(*)::int`.mapWith(Number),
+      })
+      .from(stores)
+      .where(eq(stores.customerId, customerId)),
+    db
+      .select({
+        pendingPaymentFen:
+          sql<number>`coalesce(sum(${fulfillmentOrders.totalAmountFen}) filter (where ${fulfillmentOrders.status} = 'PENDING_PAYMENT'), 0)::int`.mapWith(
+            Number,
+          ),
+        recentOrderCount:
+          sql<number>`count(*) filter (where ${fulfillmentOrders.submittedAt} >= now() - interval '30 days')::int`.mapWith(
+            Number,
+          ),
+      })
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.customerId, customerId)),
+    db
+      .select({
+        id: fulfillmentOrders.id,
+        orderNumber: fulfillmentOrders.orderNumber,
+        status: fulfillmentOrders.status,
+        storeName: stores.name,
+        submittedAt: fulfillmentOrders.submittedAt,
+        totalAmountFen: fulfillmentOrders.totalAmountFen,
+      })
+      .from(fulfillmentOrders)
+      .innerJoin(stores, eq(stores.id, fulfillmentOrders.storeId))
+      .where(eq(fulfillmentOrders.customerId, customerId))
+      .orderBy(desc(fulfillmentOrders.submittedAt), desc(fulfillmentOrders.id))
+      .limit(20),
+    db
+      .select({
+        afterBalanceFen: walletTransactions.afterBalanceFen,
+        createdAt: walletTransactions.createdAt,
+        deltaFen: walletTransactions.deltaFen,
+        id: walletTransactions.id,
+        reason: walletTransactions.reason,
+        transactionType: walletTransactions.transactionType,
+      })
+      .from(walletTransactions)
+      .where(eq(walletTransactions.customerId, customerId))
+      .orderBy(desc(walletTransactions.createdAt), desc(walletTransactions.id))
+      .limit(20),
+  ]);
 
   return {
     account:
@@ -119,6 +189,14 @@ export async function getCustomerManagementDetail(customerId: string) {
             status: account.status,
           },
     customer,
+    recentOrders,
+    recentTransactions,
     stores: customerStores,
+    summary: {
+      balanceFen: wallet?.balanceFen ?? 0,
+      pendingPaymentFen: orderSummary?.pendingPaymentFen ?? 0,
+      recentOrderCount: orderSummary?.recentOrderCount ?? 0,
+      storeCount: storeSummary?.storeCount ?? 0,
+    },
   };
 }
