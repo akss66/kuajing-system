@@ -19,6 +19,12 @@ export const skuSaleStatus = pgEnum("sku_sale_status", [
   "NOT_SELLABLE",
 ]);
 
+export const catalogAssetMimeType = pgEnum("catalog_asset_mime_type", [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
 const timestamps = {
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
     .defaultNow()
@@ -36,6 +42,28 @@ export const products = pgTable("products", {
   ...timestamps,
 });
 
+export const catalogAssets = pgTable(
+  "catalog_assets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contentSha256: varchar("content_sha256", { length: 64 }).notNull(),
+    storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    mimeType: catalogAssetMimeType("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    originalFileName: varchar("original_file_name", { length: 255 }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("catalog_assets_content_sha256_unique").on(table.contentSha256),
+    uniqueIndex("catalog_assets_storage_key_unique").on(table.storageKey),
+    check(
+      "catalog_assets_content_sha256_format",
+      sql`${table.contentSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("catalog_assets_byte_size_non_negative", sql`${table.byteSize} >= 0`),
+  ],
+);
+
 export const skus = pgTable(
   "skus",
   {
@@ -45,6 +73,9 @@ export const skus = pgTable(
       .references(() => products.id, { onDelete: "restrict" }),
     skuCode: varchar("sku_code", { length: 80 }).notNull().unique(),
     name: varchar("name", { length: 200 }).notNull(),
+    imageAssetId: uuid("image_asset_id").references(() => catalogAssets.id, {
+      onDelete: "set null",
+    }),
     imageUrl: text("image_url"),
     productUrl: text("product_url"),
     specification: varchar("specification", { length: 240 }),
