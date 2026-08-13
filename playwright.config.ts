@@ -17,16 +17,18 @@ function resolveE2EPort(rawPort: string | undefined) {
 const e2eDatabaseUrl = configureE2ETestDatabaseEnvironment(process.env);
 const e2ePort = resolveE2EPort(process.env.E2E_PORT);
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
-const e2eJifengEnvironment = {
-  JIFENG_BASE_URL: `http://127.0.0.1:${e2ePort + 1}`,
-  JIFENG_CLIENT_ID: "e2e-only-client-id",
-  JIFENG_CLIENT_SECRET: "e2e-only-client-secret",
-  JIFENG_TOKEN_ENCRYPTION_KEY:
-    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-};
-Object.assign(process.env, e2eJifengEnvironment);
+const e2eJifengEnvironment = Object.fromEntries(
+  [
+    "JIFENG_BASE_URL",
+    "JIFENG_CLIENT_ID",
+    "JIFENG_CLIENT_SECRET",
+    "JIFENG_TOKEN_ENCRYPTION_KEY",
+  ].flatMap((name) =>
+    process.env[name] === undefined ? [] : [[name, process.env[name]]],
+  ),
+);
 process.env.BETTER_AUTH_SECRET ??= "e2e-only-secret-with-at-least-32-characters";
-process.env.BETTER_AUTH_URL ??= e2eBaseUrl;
+process.env.BETTER_AUTH_URL = e2eBaseUrl;
 process.env.PII_ENCRYPTION_KEY ??=
   "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
@@ -56,7 +58,7 @@ export default defineConfig({
     command: `npm run dev -- --port ${e2ePort}`,
     env: {
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
-      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+      BETTER_AUTH_URL: e2eBaseUrl,
       DATABASE_URL: e2eDatabaseUrl,
       ...e2eJifengEnvironment,
       PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY,

@@ -399,17 +399,22 @@ test("super admin authorizes, validates read-only access, and explicitly enables
     .select({ value: count() })
     .from(auditLogs)
     .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_ENABLED"));
+  const mockRequestCountBefore = mockRequests.length;
   const forbiddenResponse = await replayActionAsCurrentSession(
     page.context().request,
     capturedEnableAction,
   );
-  expect(forbiddenResponse.ok()).toBe(false);
+  const forbiddenResponseBody = await forbiddenResponse.text();
+  actionResponses.push(forbiddenResponseBody);
+  expect(forbiddenResponse.status()).toBe(500);
+  expect(forbiddenResponseBody).toContain("FORBIDDEN_ADMIN");
   const [{ value: auditCountAfter }] = await db
     .select({ value: count() })
     .from(auditLogs)
     .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_ENABLED"));
   expect(auditCountAfter).toBe(auditCountBefore);
   expect((await db.select().from(jifengConnections))[0]?.status).toBe("ENABLED");
+  expect(mockRequests).toHaveLength(mockRequestCountBefore);
 
   await assertMockBoundary();
   await expectNoSensitiveBrowserState(page, actionResponses, consoleMessages);
