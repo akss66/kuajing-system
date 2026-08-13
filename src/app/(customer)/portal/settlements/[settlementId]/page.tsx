@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { SettlementPaymentForm } from "@/components/settlement/settlement-payment-form";
+import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import {
@@ -78,16 +78,15 @@ export default async function CustomerSettlementDetailPage({
         ]}
       />
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">
+      <SettlementWorkspace className="grid gap-6 space-y-0 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">
         <div className="space-y-4 xl:order-2">
-          <WorkspacePanel className="p-4 sm:p-5">
-            <div className="flex items-center gap-2">
-              <Clock3 className="size-4 text-primary" />
-              <h2 className="font-semibold text-ink">付款声明</h2>
-            </div>
-            <p className="mt-1 text-sm text-muted">表单金额只读，等于当前微信待付；待审核时可撤回整笔声明。</p>
-
-            <div className="mt-4">
+          <SettlementRegion
+            description="表单金额只读，等于当前微信待付；待审核时可撤回整笔声明。"
+            kind="review"
+            title="付款任务"
+          >
+            <div className="p-4 sm:p-5">
+              <Clock3 aria-hidden="true" className="mb-3 size-4 text-primary" />
               <SettlementPaymentForm
                 claimStatus={detail.claim?.status ?? null}
                 formId="settlement-payment-form"
@@ -96,10 +95,9 @@ export default async function CustomerSettlementDetailPage({
                 settlementBatchId={detail.id}
               />
             </div>
-          </WorkspacePanel>
 
-          {detail.claim ? (
-            <WorkspacePanel className="p-4 sm:p-5">
+            {detail.claim ? (
+            <section className="border-t border-border p-4 sm:p-5">
               <h2 className="font-semibold text-ink">最近一次声明</h2>
               <div className="mt-3 space-y-2 text-sm text-muted">
                 <p>{`状态：${getCustomerSettlementClaimStatusLabel(detail.claim.status)}`}</p>
@@ -111,20 +109,17 @@ export default async function CustomerSettlementDetailPage({
                 {detail.claim.withdrawnAt ? <p>{`撤回时间：${dateTime(detail.claim.withdrawnAt)}（渥太华）`}</p> : null}
                 {detail.claim.withdrawalReason ? <p>{`撤回原因：${detail.claim.withdrawalReason}`}</p> : null}
               </div>
-            </WorkspacePanel>
-          ) : null}
+            </section>
+            ) : null}
+          </SettlementRegion>
         </div>
 
-        <WorkspacePanel className="overflow-hidden xl:order-1">
-          <WorkspacePanelHeader
-            description="批次内所有成功提交的店铺会在这里集中付款与跟进。"
-            title={
-              <span className="inline-flex items-center gap-2">
-                <WalletCards className="size-4 text-primary" />
-                批次内拿货单
-              </span>
-            }
-          />
+        <SettlementRegion
+          action={<WalletCards aria-hidden="true" className="size-4 text-primary" />}
+          className="xl:order-1"
+          description="批次内所有成功提交的店铺会在这里集中付款与跟进。"
+          kind="batches"
+        >
           <div className="divide-y divide-border">
             {detail.orders.map((order) => (
               <article className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5" key={order.orderId}>
@@ -140,8 +135,8 @@ export default async function CustomerSettlementDetailPage({
               </article>
             ))}
           </div>
-        </WorkspacePanel>
-      </section>
+        </SettlementRegion>
+      </SettlementWorkspace>
     </div>
   );
 }

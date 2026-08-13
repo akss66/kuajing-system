@@ -7,6 +7,7 @@ import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { CustomerOrderActions } from "@/components/orders/customer-order-actions";
 import { OrderStatusPanel } from "@/components/orders/order-status-panel";
+import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import { getCustomerOrderDetail } from "@/modules/orders/queries";
@@ -73,6 +74,11 @@ export default async function CustomerOrderDetailPage({
           { label: "商品件数", value: String(order.totalQuantity) },
           { hint: "履约与付款状态见下方", label: "订单状态", tone: paid ? "success" : "warning", value: labels[order.status] },
         ]}
+      />
+
+      <OrderStatusTimeline
+        orderStatus={order.status}
+        paymentClaimStatus={order.latestPaymentClaim?.status ?? null}
       />
 
       <OrderStatusPanel order={order} />

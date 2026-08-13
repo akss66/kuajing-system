@@ -124,6 +124,9 @@ test("administrator can inspect a shipped package and create a replacement @desk
   await page.goto(`/admin/orders/${fixture.order.id}`);
 
   await expect(page.getByRole("heading", { name: fixture.order.orderNumber })).toBeVisible();
+  const statusTimeline = page.getByRole("region", { name: "订单状态时间线" });
+  await expect(statusTimeline).toContainText("已发货");
+  await expect(statusTimeline).not.toContainText("SHIPPED");
   await expect(page.getByRole("link", { name: "返回订单列表" })).toBeVisible();
   await expect(page.getByText("包裹数", { exact: true })).toHaveCount(1);
   await expect(page.getByText("商品件数", { exact: true })).toHaveCount(1);
@@ -166,6 +169,7 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
     await page.setViewportSize({ width, height: 844 });
     await page.goto(`/admin/orders/${fixture.order.id}`);
     await expect(page.getByRole("heading", { name: fixture.order.orderNumber })).toBeVisible();
+    await expect(page.getByRole("region", { name: "订单状态时间线" })).toContainText("已发货");
     await expect(page.getByRole("button", { name: "创建补发并锁定库存" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   }

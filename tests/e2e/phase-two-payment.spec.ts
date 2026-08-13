@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 
@@ -102,6 +103,7 @@ test("customer declares an exact WeChat payment and admin confirms it without us
   await expect(
     page.getByRole("heading", { name: fixture.order.orderNumber }),
   ).toBeVisible();
+  await expect(page.getByRole("region", { name: "订单状态时间线" })).toContainText("待付款");
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("5.00");
   await page.getByLabel("付款备注（选填）").fill("微信转账 E2E");
   await page.getByRole("button", { name: "我已微信付款" }).click();
@@ -123,10 +125,18 @@ test("customer declares an exact WeChat payment and admin confirms it without us
   await expect(
     page.getByRole("heading", { name: "订单管理" }),
   ).toBeVisible();
+  await expect(page.getByRole("region", { name: "订单筛选" })).toBeVisible();
+  await page.getByRole("button", { name: "更多筛选" }).click();
+  await expect(page.getByRole("dialog", { name: "更多订单筛选" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(
     page.getByRole("cell", { name: fixture.order.orderNumber }),
   ).toBeVisible();
   await page.goto("/admin/settlement");
+  await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
   const claimCard = page.locator("article").filter({
     hasText: fixture.order.orderNumber,
   });
@@ -163,6 +173,11 @@ test("customer order payment controls remain usable at approved mobile widths @m
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal/);
 
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+
   for (const width of [360, 390, 430]) {
     await page.setViewportSize({ height: 844, width });
     await page.goto(`/portal/orders/${fixture.order.id}`);
@@ -186,5 +201,26 @@ test("customer order payment controls remain usable at approved mobile widths @m
         document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
+
+    await page.goto("/portal/orders");
+    const orderCard = page.locator("[data-mobile-order-card]").filter({
+      hasText: fixture.order.orderNumber,
+    });
+    await expect(orderCard).toContainText("下一步：去付款");
+    const nextActionHeight = await orderCard.getByRole("link", { name: "去付款" }).evaluate(
+      (link) => link.getBoundingClientRect().height,
+    );
+    expect(nextActionHeight).toBeGreaterThanOrEqual(44);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    ).toBeLessThanOrEqual(0);
   }
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });

@@ -4,9 +4,11 @@ import Link from "next/link";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import { listCustomerOrders } from "@/modules/orders/queries";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const labels = {
   PENDING_PAYMENT: "待付款",
@@ -22,17 +24,52 @@ function money(fen: number) {
   return `¥${(fen / 100).toFixed(2)}`;
 }
 
+function value(input: string | string[] | undefined) {
+  return Array.isArray(input) ? input[0] : input;
+}
+
+function localDate(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+  }).format(value);
+}
+
+function nextAction(status: keyof typeof labels) {
+  if (status === "PENDING_PAYMENT") return "去付款";
+  if (status === "FULFILLMENT_EXCEPTION") return "处理异常";
+  if (status === "SHIPPED") return "查看物流";
+  return "查看进度";
+}
+
 export default async function CustomerOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const principal = await requireCustomer();
-  const pendingOnly = (await searchParams).status === "PENDING_PAYMENT";
-  const orders = await listCustomerOrders(
-    principal.customerId,
-    pendingOnly ? "PENDING_PAYMENT" : undefined,
-  );
+  const raw = await searchParams;
+  const selectedStatus = value(raw.status);
+  const filters = {
+    dateFrom: value(raw.dateFrom),
+    dateTo: value(raw.dateTo),
+    orderNumber: value(raw.orderNumber),
+    status: selectedStatus && selectedStatus in labels ? selectedStatus : undefined,
+  };
+  const pendingOnly = filters.status === "PENDING_PAYMENT";
+  const allOrders = await listCustomerOrders(principal.customerId);
+  const orders = allOrders.filter((order) => {
+    if (filters.status && order.status !== filters.status) return false;
+    if (filters.orderNumber && !order.orderNumber.toLocaleLowerCase().includes(filters.orderNumber.toLocaleLowerCase())) {
+      return false;
+    }
+    const createdDate = localDate(order.createdAt);
+    if (filters.dateFrom && createdDate < filters.dateFrom) return false;
+    if (filters.dateTo && createdDate > filters.dateTo) return false;
+    return true;
+  });
 
   const totalAmountFen = orders.reduce(
     (sum, order) => sum + order.totalAmountFen,
@@ -71,13 +108,19 @@ export default async function CustomerOrdersPage({
         ]}
       />
 
+      <OrderFilterBar
+        statusOptions={Object.entries(labels).map(([status, label]) => ({ label, value: status }))}
+        values={filters}
+      />
+
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
           description="点击任一订单可查看付款记录、库存锁定与明细状态。"
           title={pendingOnly ? "待付款清单" : "订单列表"}
         />
         {orders.length ? (
-          <div className="divide-y divide-border">
+          <>
+          <div className="hidden divide-y divide-border md:block">
             {orders.map((order) => (
               <Link
                 className="flex min-h-20 items-center gap-4 p-4 transition-colors hover:bg-surface sm:px-5"
@@ -105,6 +148,48 @@ export default async function CustomerOrdersPage({
               </Link>
             ))}
           </div>
+          <div className="divide-y divide-border md:hidden">
+            {orders.map((order) => {
+              const action = nextAction(order.status);
+              return (
+                <article
+                  aria-label={`订单 ${order.orderNumber}`}
+                  className="space-y-4 p-4"
+                  data-mobile-order-card
+                  key={order.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-ink">{order.orderNumber}</p>
+                      <p className="mt-1 text-sm text-muted">{order.storeName}</p>
+                    </div>
+                    <Badge variant="secondary">{labels[order.status]}</Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted">金额</p>
+                      <p className="mt-1 font-semibold tabular-nums text-ink">{money(order.totalAmountFen)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted">包裹 / 件数</p>
+                      <p className="mt-1 text-ink">{`${order.totalPackageCount} 包 · ${order.totalQuantity} 件`}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-border pt-3">
+                    <p className="mb-2 text-xs font-medium text-muted">{`下一步：${action}`}</p>
+                    <Link
+                      className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/22"
+                      href={`/portal/orders/${order.id}`}
+                    >
+                      {action}
+                      <ArrowRight aria-hidden="true" className="size-4" />
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          </>
         ) : (
           <div className="px-6 py-16 text-center">
             <p className="font-medium text-ink">

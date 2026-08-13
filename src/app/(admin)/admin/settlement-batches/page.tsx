@@ -3,7 +3,8 @@ import Link from "next/link";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { WorkspacePanel } from "@/components/layout/workspace-panel";
+import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,8 +80,9 @@ export default async function AdminSettlementBatchesPage({
         ]}
       />
 
-      <WorkspacePanel className="p-4 sm:p-5">
-        <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_auto_auto] xl:items-end">
+      <SettlementWorkspace>
+        <WorkspacePanel className="p-4 sm:p-5">
+          <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_0.8fr_0.8fr_auto_auto] xl:items-end">
           <label className="space-y-2 text-sm font-medium text-ink">
             客户
             <select
@@ -140,14 +142,13 @@ export default async function AdminSettlementBatchesPage({
           <Button asChild className="min-h-11 px-4" variant="outline">
             <Link href="/admin/settlement-batches">清空</Link>
           </Button>
-        </form>
-      </WorkspacePanel>
+          </form>
+        </WorkspacePanel>
 
-      <WorkspacePanel className="overflow-hidden">
-        <WorkspacePanelHeader
+        <SettlementRegion
           description={`当前条件共 ${batches.length} 条。`}
-          title="批次列表"
-        />
+          kind="batches"
+        >
         <div className="hidden md:block">
           <ResponsiveDataTable>
             <Table>
@@ -221,7 +222,8 @@ export default async function AdminSettlementBatchesPage({
             <div className="p-10 text-center text-sm text-muted">没有符合条件的结算批次。</div>
           )}
         </div>
-      </WorkspacePanel>
+        </SettlementRegion>
+      </SettlementWorkspace>
     </div>
   );
 }

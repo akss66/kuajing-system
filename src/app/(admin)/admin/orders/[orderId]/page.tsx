@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/forms/action-form";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
+import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,9 @@ import {
   createReplacementAction,
   retryJifengShipmentAction,
 } from "@/modules/fulfillment/actions";
+import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
 import { getAdminOrderDetail } from "@/modules/orders/queries";
+import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const statusLabels: Record<string, string> = {
@@ -69,7 +72,7 @@ export default async function AdminOrderDetailPage({
               </Link>
             </Button>
             <Badge className="w-fit bg-primary-soft px-3 py-1.5 text-primary-hover" variant="secondary">
-              {order.status}
+              {getAdminSettlementOrderStatusLabel(order.status)}
             </Badge>
           </div>
         }
@@ -89,6 +92,12 @@ export default async function AdminOrderDetailPage({
           { label: "实际成交额", value: `¥${(order.totalAmountFen / 100).toFixed(2)}` },
           { label: "创建时间", value: dateTime(order.createdAt) },
         ]}
+      />
+
+      <OrderStatusTimeline
+        orderStatus={order.status}
+        replacementStatuses={order.shipments.map((shipment) => shipment.replacementStatus)}
+        shipmentStatuses={order.shipments.map((shipment) => shipment.fulfillmentStatus)}
       />
 
       <div className="space-y-5">
@@ -111,7 +120,7 @@ export default async function AdminOrderDetailPage({
                 <div><p className="text-xs text-muted">发货时间</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.shippedAt)}</p></div>
                 <div><p className="text-xs text-muted">外部调用次数</p><p className="mt-1 font-medium text-ink">{shipment.attemptCount ?? 0} 次</p></div>
                 <div><p className="text-xs text-muted">下次重试</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.nextRetryAt)}</p></div>
-                <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus ?? "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
+                <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus === "FULFILLING" ? "履约中" : shipment.replacementStatus ? formatReplacementStatus(shipment.replacementStatus) : "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
               </div>
 
               {shipment.lastErrorCode ? <div className="flex gap-3 border-b border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger sm:px-5"><CircleAlert className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">{shipment.lastErrorCode}</p><p className="mt-1">{shipment.lastErrorMessage}</p></div></div> : null}

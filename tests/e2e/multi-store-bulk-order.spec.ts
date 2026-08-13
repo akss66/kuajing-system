@@ -238,6 +238,8 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   await expect(page).toHaveURL(/\/portal\/settlements\//, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "统一付款结算" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "付款任务" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("80.00");
   await expect(page.locator("header").getByText("待付款", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "跳到付款声明" })).toHaveAttribute(
@@ -314,18 +316,25 @@ test("administrator can open unified settlement/bulk diagnostics routes", async 
 
   await page.goto("/admin/settlement");
   await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
   const settlementShortcut = page.locator("main a[href='/admin/settlement-batches']").last();
   await expect(settlementShortcut).toBeVisible();
   await expect(settlementShortcut).toContainText(/\d+/);
 
   await page.goto("/admin/settlement-batches");
   await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
 
   await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);
   await expect(page).toHaveURL(
     new RegExp(`/admin/settlement-batches/${fixture.settlementBatchId}`),
   );
   await expect(page.getByRole("heading").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "结算批次明细" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "付款审核" })).toBeVisible();
   await page.screenshot({
     fullPage: true,
     path: `${VISUAL_REVIEW_DIR}/admin-settlement-review-1440.png`,

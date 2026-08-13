@@ -61,6 +61,8 @@ describe("AdminSettlementReview", () => {
     );
 
     expect(screen.getByRole("heading", { name: "统一款项审核 · 8 张拿货单" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "结算批次明细" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "付款审核" })).toBeVisible();
     expect(screen.getByText("逐店分摊")).toBeVisible();
     expect(screen.getByText("客户提交付款声明")).toBeVisible();
     expect(screen.getByRole("button", { name: "确认已收款" })).toBeEnabled();

@@ -22,26 +22,28 @@ export default async function AdminSettlementBatchDetailPage({
   const detail = await getAdminSettlementBatchDetail(settlementId);
   if (!detail) notFound();
 
+  const auditEntries = detail.auditEntries.map((entry) => ({
+    ...entry,
+    createdAtLabel: dateTime(entry.createdAt),
+  }));
+  const batch = {
+    ...detail.batch,
+    paidAtLabel: dateTime(detail.batch.paidAt),
+    paymentReportedAtLabel: dateTime(detail.batch.paymentReportedAt),
+    reviewable: detail.batch.status === "PAYMENT_REPORTED",
+  };
+  const claim = detail.claim
+    ? {
+        ...detail.claim,
+        createdAtLabel: dateTime(detail.claim.createdAt),
+      }
+    : null;
+
   return (
     <AdminSettlementReview
-      auditEntries={detail.auditEntries.map((entry) => ({
-        ...entry,
-        createdAtLabel: dateTime(entry.createdAt),
-      }))}
-      batch={{
-        ...detail.batch,
-        paidAtLabel: dateTime(detail.batch.paidAt),
-        paymentReportedAtLabel: dateTime(detail.batch.paymentReportedAt),
-        reviewable: detail.batch.status === "PAYMENT_REPORTED",
-      }}
-      claim={
-        detail.claim
-          ? {
-              ...detail.claim,
-              createdAtLabel: dateTime(detail.claim.createdAt),
-            }
-          : null
-      }
+      auditEntries={auditEntries}
+      batch={batch}
+      claim={claim}
       orders={detail.orders}
     />
   );
