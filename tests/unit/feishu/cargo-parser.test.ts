@@ -293,9 +293,26 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
-  test("rejects missing explicit sale status instead of inheriting it", () => {
+  test("inherits a merged sale status within the same product group", () => {
     const values = sampleRows();
     values[2][12] = "";
+
+    const result = parseLegacyCargoSheet(values);
+
+    const inherited = result.rows.find((row) => row.sourceRowNumber === 3);
+    expect(inherited?.saleStatus).toBe("SELLABLE");
+    expect(inherited?.inheritedFrom.saleStatus).toBe(2);
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_MISSING_SALE_STATUS",
+        sourceRowNumber: 3,
+      }),
+    );
+  });
+
+  test("rejects a missing sale status when no product-group value exists", () => {
+    const values = sampleRows();
+    values[1][12] = "";
 
     const result = parseLegacyCargoSheet(values);
 
@@ -303,7 +320,7 @@ describe("parseLegacyCargoSheet", () => {
       code: "CARGO_MISSING_SALE_STATUS",
       message: "状态不能为空",
       severity: "BLOCKING",
-      sourceRowNumber: 3,
+      sourceRowNumber: 2,
     });
   });
 

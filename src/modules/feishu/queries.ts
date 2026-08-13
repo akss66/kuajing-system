@@ -26,6 +26,7 @@ const inheritedFieldLabels: Record<CargoInheritedField, string> = {
   productGroupKey: "商品分组",
   productName: "商品名称",
   productUrl: "商品链接",
+  saleStatus: "销售状态",
   specification: "规格",
   weight: "重量",
 };

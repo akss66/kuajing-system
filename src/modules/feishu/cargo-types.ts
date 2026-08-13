@@ -29,7 +29,8 @@ export type CargoInheritedField =
   | "productUrl"
   | "specification"
   | "combination"
-  | "weight";
+  | "weight"
+  | "saleStatus";
 
 export type NormalizedCargoRow = {
   sourceRowNumber: number;

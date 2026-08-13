@@ -58,6 +58,7 @@ type GroupContext = {
   productName: GroupFieldState | null;
   productUrl: ({ text: string; url: string } & { rowNumber: number }) | null;
   specification: GroupFieldState | null;
+  saleStatus: GroupFieldState | null;
   weight: GroupFieldState | null;
 };
 
@@ -291,6 +292,7 @@ function createEmptyContext(): GroupContext {
     productName: null,
     productUrl: null,
     specification: null,
+    saleStatus: null,
     weight: null,
   };
 }
@@ -407,6 +409,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       context.productName = reset.productName;
       context.productUrl = reset.productUrl;
       context.specification = reset.specification;
+      context.saleStatus = reset.saleStatus;
       context.weight = reset.weight;
       continue;
     }
@@ -596,8 +599,21 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       continue;
     }
 
-    const status = parseSaleStatus(row[headerMap.status]);
-    if (status.kind === "missing") {
+    const explicitStatus = parseSaleStatus(row[headerMap.status]);
+    let parsedSaleStatus: "SELLABLE" | "NOT_SELLABLE" | null = null;
+    if (explicitStatus.kind === "value") {
+      parsedSaleStatus = explicitStatus.value;
+      context.saleStatus = {
+        rowNumber: sourceRowNumber,
+        value: explicitStatus.value,
+      };
+    } else if (
+      explicitStatus.kind === "missing" &&
+      typeof context.saleStatus?.value === "string"
+    ) {
+      parsedSaleStatus = context.saleStatus.value as "SELLABLE" | "NOT_SELLABLE";
+      inheritedFrom.saleStatus = context.saleStatus.rowNumber;
+    } else if (explicitStatus.kind === "missing") {
       issues.push(
         buildIssue({
           code: "CARGO_MISSING_SALE_STATUS",
@@ -606,8 +622,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         }),
       );
       continue;
-    }
-    if (status.kind === "invalid") {
+    } else {
       issues.push(
         buildIssue({
           code: "CARGO_INVALID_SALE_STATUS",
@@ -617,7 +632,6 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       );
       continue;
     }
-    const parsedSaleStatus = status.value as "SELLABLE" | "NOT_SELLABLE";
 
     rows.push({
       color: extractDisplayText(row[headerMap.color]) || null,
@@ -629,7 +643,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       productGroupKey,
       productName,
       productUrl: resolvedLink!.url,
-      saleStatus: quantity === 0 ? "NOT_SELLABLE" : parsedSaleStatus,
+      saleStatus: quantity === 0 ? "NOT_SELLABLE" : parsedSaleStatus!,
       skuCode,
       skuName: buildSkuName({
         color: extractDisplayText(row[headerMap.color]) || null,
