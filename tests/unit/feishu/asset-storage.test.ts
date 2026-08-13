@@ -627,14 +627,20 @@ describe("catalog asset storage", () => {
     const fakeCoordinator = createFakeCoordinator();
     let releaseCopy: (() => void) | null = null;
     let copyPaused = false;
+    let expectedTargetPath = "";
     const storage = createCatalogAssetStorage({
       assetDir: assetRoot,
       coordinator: fakeCoordinator.coordinator,
       onStorageLink() {
         throw unsupportedLinkError();
       },
-      onTargetWriteProgress({ bytesWritten, totalBytes }) {
-        if (!copyPaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+      onTargetWriteProgress({ bytesWritten, targetPath, totalBytes }) {
+        if (
+          !copyPaused &&
+          targetPath === expectedTargetPath &&
+          bytesWritten > 0 &&
+          bytesWritten < totalBytes
+        ) {
           copyPaused = true;
           return new Promise<void>((resolve) => {
             releaseCopy = resolve;
@@ -652,6 +658,74 @@ describe("catalog asset storage", () => {
       skuCode: "TZX-001",
     });
     const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    expectedTargetPath = join(assetRoot, expectedStorageKey);
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!copyPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const partialStats = await lstat(expectedTargetPath);
+    expect(partialStats.isFile()).toBe(true);
+    expect(partialStats.size).toBeGreaterThan(0);
+    expect(partialStats.size).toBeLessThan(bytes.byteLength);
+
+    fakeCoordinator.abortDigest(manifest.contentSha256);
+    const continueCopy = releaseCopy as (() => void) | null;
+    if (continueCopy) {
+      continueCopy();
+    }
+
+    await expect(commitPromise).rejects.toThrow(/lock was lost/i);
+    await expect(readFile(join(assetRoot, expectedStorageKey))).rejects.toThrow();
+    await expect(storage.commitCatalogAsset(manifest)).resolves.toBe(expectedStorageKey);
+  });
+
+  test("preserves a replacement fallback target created during cleanup after digest lock loss", async () => {
+    const fakeCoordinator = createFakeCoordinator();
+    let releaseCopy: (() => void) | null = null;
+    let copyPaused = false;
+    let replacementWritten = false;
+    let expectedTargetPath = "";
+    const storage = createCatalogAssetStorage({
+      assetDir: assetRoot,
+      coordinator: fakeCoordinator.coordinator,
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+      async onTargetCleanup({ targetPath }) {
+        if (targetPath !== expectedTargetPath || replacementWritten) {
+          return;
+        }
+        replacementWritten = true;
+        await rm(targetPath, { force: true });
+        await writeFile(targetPath, bytes);
+      },
+      onTargetWriteProgress({ bytesWritten, targetPath, totalBytes }) {
+        if (
+          !copyPaused &&
+          targetPath === expectedTargetPath &&
+          bytesWritten > 0 &&
+          bytesWritten < totalBytes
+        ) {
+          copyPaused = true;
+          return new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+          });
+        }
+      },
+      targetWriteChunkSize: 32,
+    });
+    const bytes = await createImageBuffer("png", { b: 17, g: 18, r: 19, width: 64, height: 64 });
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "guard-loss-replacement.png",
+      runId: "fake-digest-replacement-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+    expectedTargetPath = join(assetRoot, expectedStorageKey);
 
     const commitPromise = storage.commitCatalogAsset(manifest);
     while (!copyPaused) {
@@ -665,7 +739,9 @@ describe("catalog asset storage", () => {
     }
 
     await expect(commitPromise).rejects.toThrow(/lock was lost/i);
-    await expect(readFile(join(assetRoot, expectedStorageKey))).rejects.toThrow();
+    expect(replacementWritten).toBe(true);
+    expect(Buffer.compare(await readFile(expectedTargetPath), bytes)).toBe(0);
+    await expect(storage.commitCatalogAsset(manifest)).resolves.toBe(expectedStorageKey);
   });
 
   test("rejects symlink escapes for staging, commit parent, and final asset reads", async () => {

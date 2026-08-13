@@ -393,14 +393,20 @@ describe("catalog asset PostgreSQL coordination", () => {
 
     let releaseFirstCopy: (() => void) | null = null;
     let firstCopyPaused = false;
+    let expectedTargetPath = "";
     const firstStorage = createCatalogAssetStorage({
       assetDir: assetRoot,
       coordinator: firstCoordinator.coordinator,
       onStorageLink() {
         throw unsupportedLinkError();
       },
-      onTargetWriteProgress({ bytesWritten, totalBytes }) {
-        if (!firstCopyPaused && bytesWritten > 0 && bytesWritten < totalBytes) {
+      onTargetWriteProgress({ bytesWritten, targetPath, totalBytes }) {
+        if (
+          !firstCopyPaused &&
+          targetPath === expectedTargetPath &&
+          bytesWritten > 0 &&
+          bytesWritten < totalBytes
+        ) {
           firstCopyPaused = true;
           return new Promise<void>((resolve) => {
             releaseFirstCopy = resolve;
@@ -434,11 +440,16 @@ describe("catalog asset PostgreSQL coordination", () => {
       skuCode: "TZX-002",
     });
     const expectedStorageKey = `sha256/${firstManifest.contentSha256.slice(0, 2)}/${firstManifest.contentSha256}.webp`;
+    expectedTargetPath = join(assetRoot, expectedStorageKey);
 
     const firstCommit = firstStorage.commitCatalogAsset(firstManifest);
     while (!firstCopyPaused) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
+
+    const partialStats = await stat(expectedTargetPath);
+    expect(partialStats.size).toBeGreaterThan(0);
+    expect(partialStats.size).toBeLessThan(bytes.byteLength);
 
     const secondCommit = secondStorage.commitCatalogAsset(secondManifest);
     await firstCoordinator.client.end({ timeout: 0 });

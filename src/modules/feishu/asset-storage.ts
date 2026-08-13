@@ -98,6 +98,14 @@ type PublishBytesOptions = {
 type PublishBytesResult = {
   published: boolean;
 };
+type ExclusiveWriteCleanupOptions = {
+  dependencies: StorageDependencies;
+  directoryPath: string;
+  onCleanup?: ((context: TargetCleanupContext) => Promise<void> | void) | undefined;
+};
+type ExclusiveWriteResult = {
+  fileIdentity: FileIdentity | null;
+};
 type ManagedFile = {
   handle: FileHandle;
   path: string;
@@ -487,13 +495,16 @@ async function writeExclusiveFile(
   options?: {
     assertCanContinue?: (() => Promise<void>) | undefined;
     chunkSize?: number | undefined;
+    cleanupOnFailure?: ExclusiveWriteCleanupOptions | undefined;
     onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   },
-) {
+): Promise<ExclusiveWriteResult> {
   let handle: FileHandle | null = null;
+  let ownedIdentity: FileIdentity | null = null;
   try {
     await options?.assertCanContinue?.();
     handle = await open(path, WRITE_NOFOLLOW_FLAGS, 0o600);
+    ownedIdentity = toFileIdentity(await handle.stat());
     const chunkSize = Math.max(1, options?.chunkSize ?? bytes.byteLength);
     let bytesWritten = 0;
     while (bytesWritten < bytes.byteLength) {
@@ -516,9 +527,23 @@ async function writeExclusiveFile(
     await options?.assertCanContinue?.();
   } catch (error) {
     await safeClose(handle);
+    if (ownedIdentity && options?.cleanupOnFailure) {
+      await options.cleanupOnFailure.onCleanup?.({ targetPath: path });
+      const removedOwnedPath = await safeUnlinkOwnedPath(path, ownedIdentity);
+      if (removedOwnedPath) {
+        await syncDirectory(
+          options.cleanupOnFailure.directoryPath,
+          options.cleanupOnFailure.dependencies,
+          "cleanup",
+        );
+      }
+    }
     throw error;
   }
   await safeClose(handle);
+  return {
+    fileIdentity: ownedIdentity,
+  };
 }
 
 async function syncDirectory(
@@ -727,6 +752,10 @@ async function publishBytesAtomically(
     await writeExclusiveFile(tempPath, options.bytes, {
       assertCanContinue: options.assertCanContinue,
       chunkSize: dependencies.targetWriteChunkSize,
+      cleanupOnFailure: {
+        dependencies,
+        directoryPath: finalDirectory,
+      },
       onWriteProgress: options.onWriteProgress,
     });
     await options.assertCanContinue?.();
@@ -758,13 +787,18 @@ async function publishBytesAtomically(
       if (options.expectedDigest && HARD_LINK_UNSUPPORTED_CODES.has(nodeError.code ?? "")) {
         let targetIdentity: FileIdentity | null = null;
         try {
-          await writeExclusiveFile(options.targetPath, options.bytes, {
+          const writeResult = await writeExclusiveFile(options.targetPath, options.bytes, {
             assertCanContinue: options.assertCanContinue,
             chunkSize: dependencies.targetWriteChunkSize,
+            cleanupOnFailure: {
+              dependencies,
+              directoryPath: finalDirectory,
+              onCleanup: dependencies.onTargetCleanup,
+            },
             onWriteProgress: options.onWriteProgress,
           });
           await options.assertCanContinue?.();
-          targetIdentity = toFileIdentity(await stat(options.targetPath));
+          targetIdentity = writeResult.fileIdentity;
         } catch (fallbackError) {
           const fallbackNodeError = fallbackError as NodeJS.ErrnoException;
           if (fallbackNodeError.code === "EEXIST") {
