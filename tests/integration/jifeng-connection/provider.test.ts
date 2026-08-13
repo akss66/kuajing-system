@@ -183,19 +183,64 @@ describe("Jifeng runtime credential provider", () => {
     const runtime = await getJifengReadClient();
 
     expect(runtime.client).toBeInstanceOf(JifengClient);
-    expect(runtime.config).toEqual({
-      logisticsId: 73,
-      warehouseCode: "DB-WAREHOUSE",
-    });
+    expect(runtime).not.toHaveProperty("config");
   });
 
-  test("allows legacy static credentials for reads only when the database row is absent", async () => {
+  test.each(["AUTHORIZED", "RESOURCE_SELECTION_REQUIRED"] as const)(
+    "allows stored %s credentials to query without selected fulfillment resources",
+    async (status) => {
+      await insertConnection(status, {
+        logisticsId: null,
+        warehouseCode: null,
+      });
+      const fetchMock = vi.fn<
+        (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+      >(async () =>
+        Response.json({
+          code: 0,
+          data: { erpNo: `READ-${status}`, status: 6 },
+          message: "SUCCESS",
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const runtime = await getJifengReadClient();
+      await runtime.client.getOrder({ erpNo: `READ-${status}` });
+
+      expect(runtime).not.toHaveProperty("config");
+      expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+        "/api/order/get",
+      );
+      await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+        code: "FULFILLMENT_DISABLED",
+      });
+    },
+  );
+
+  test("allows legacy authorized-only credentials to read when the database row is absent", async () => {
+    vi.stubEnv("JIFENG_LOGISTICS_ID", "");
+    vi.stubEnv("JIFENG_WAREHOUSE_CODE", "");
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >(async () =>
+      Response.json({
+        code: 0,
+        data: { erpNo: "LEGACY-AUTHORIZED-READ", status: 6 },
+        message: "SUCCESS",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
     const runtime = await getJifengReadClient();
+    await runtime.client.getOrder({ erpNo: "LEGACY-AUTHORIZED-READ" });
 
     expect(runtime.client).toBeInstanceOf(JifengClient);
-    expect(runtime.config).toEqual({
-      logisticsId: 91,
-      warehouseCode: "LEGACY-WAREHOUSE",
+    expect(runtime).not.toHaveProperty("config");
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      "/api/order/get",
+    );
+    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+      name: "JifengConfigError",
     });
   });
 
