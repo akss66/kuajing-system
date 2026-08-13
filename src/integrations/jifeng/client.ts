@@ -5,10 +5,20 @@ import {
   signJifengRequest,
   type JifengSigningInput,
 } from "./signing";
+import {
+  JifengAuthorizationError,
+  refreshJifengTokenSet,
+} from "./oauth-client";
+import {
+  parseJifengOfflineLogistics,
+  parseJifengWarehouses,
+} from "./resources";
 import type {
   JifengCreateOrderInput,
   JifengCredentials,
+  JifengOfflineLogistics,
   JifengOrderDetail,
+  JifengWarehouse,
 } from "./types";
 
 type FetchLike = (
@@ -33,16 +43,6 @@ const orderDetailSchema = z.object({
   shippedTime: z.string().optional(),
   status: z.coerce.number().int().min(1).max(11),
   trackingNo: z.string().optional(),
-});
-
-const refreshResponseSchema = responseSchema.extend({
-  data: z
-    .object({
-      accessToken: z.string().min(1),
-      refreshToken: z.string().min(1).optional(),
-      userId: z.coerce.string().optional(),
-    })
-    .nullable(),
 });
 
 const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
@@ -99,7 +99,7 @@ export class JifengClient {
     this.nonce = input.nonce ?? createJifengNonce;
     this.now = input.now ?? Date.now;
     this.onTokensRefreshed = input.onTokensRefreshed;
-    this.timeoutMs = input.timeoutMs ?? 15_000;
+    this.timeoutMs = input.timeoutMs ?? 10_000;
   }
 
   async createOrder(input: JifengCreateOrderInput) {
@@ -127,6 +127,40 @@ export class JifengClient {
   async cancelOrder(input: { deleteRecord?: boolean; erpNo: string }) {
     const response = await this.businessPost("/api/order/cancel", input);
     return { data: response.data, requestId: response.requestId };
+  }
+
+  async getWarehouses(): Promise<JifengWarehouse[]> {
+    const response = await this.businessPost("/api/warehouse/getList", {
+      codeList: [],
+    });
+    try {
+      return parseJifengWarehouses(response.data);
+    } catch {
+      throw new JifengApiError({
+        code: "INVALID_RESPONSE",
+        message: "极风仓库响应格式无效",
+        requestId: response.requestId,
+        retryable: true,
+      });
+    }
+  }
+
+  async getOfflineLogistics(): Promise<JifengOfflineLogistics[]> {
+    const response = await this.businessPost("/api/logistics/offline/page", {
+      pageNo: 1,
+      pageSize: 300,
+      returnAll: true,
+    });
+    try {
+      return parseJifengOfflineLogistics(response.data);
+    } catch {
+      throw new JifengApiError({
+        code: "INVALID_RESPONSE",
+        message: "极风物流响应格式无效",
+        requestId: response.requestId,
+        retryable: true,
+      });
+    }
   }
 
   private async businessPost(
@@ -198,30 +232,36 @@ export class JifengClient {
         retryable: false,
       });
     }
-    const url = new URL(
-      "/api/oauth/refreshToken",
-      `${this.credentials.baseUrl}/`,
-    );
-    url.searchParams.set("clientId", this.credentials.clientId);
-    url.searchParams.set("clientSecret", this.credentials.clientSecret);
-    url.searchParams.set("refreshToken", refreshToken);
-    url.searchParams.set("userId", this.credentials.userId);
-
-    const response = await this.fetchJson(url, { method: "GET" });
-    const parsed = refreshResponseSchema.safeParse(response);
-    if (!parsed.success || parsed.data.code !== 0 || !parsed.data.data) {
+    let tokens;
+    try {
+      tokens = await refreshJifengTokenSet(
+        {
+          baseUrl: this.credentials.baseUrl,
+          clientId: this.credentials.clientId,
+          clientSecret: this.credentials.clientSecret,
+          refreshToken,
+          userId: this.credentials.userId,
+        },
+        { fetch: this.fetcher, timeoutMs: this.timeoutMs },
+      );
+    } catch (error) {
+      if (error instanceof JifengAuthorizationError) {
+        throw new JifengApiError({
+          code: error.code,
+          message: "极风访问令牌刷新失败",
+          requestId: error.requestId,
+          retryable: error.retryable,
+        });
+      }
       throw new JifengApiError({
-        code: parsed.success ? String(parsed.data.code) : "INVALID_RESPONSE",
+        code: "NETWORK_ERROR",
         message: "极风访问令牌刷新失败",
-        requestId: parsed.success ? parsed.data.requestId : undefined,
-        retryable: false,
+        retryable: true,
       });
     }
 
-    this.credentials.accessToken = parsed.data.data.accessToken;
-    if (parsed.data.data.refreshToken) {
-      this.credentials.refreshToken = parsed.data.data.refreshToken;
-    }
+    this.credentials.accessToken = tokens.accessToken;
+    this.credentials.refreshToken = tokens.refreshToken;
     await this.onTokensRefreshed?.({
       accessToken: this.credentials.accessToken,
       refreshToken: this.credentials.refreshToken,

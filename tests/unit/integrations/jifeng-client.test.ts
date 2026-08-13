@@ -93,6 +93,63 @@ describe("Jifeng API client", () => {
     expect(headers.get("Accept-Language")).toBe("zh_CN");
   });
 
+  test.each([
+    [
+      "warehouses",
+      (client: JifengClient) => client.getWarehouses(),
+      "/api/warehouse/getList",
+      { codeList: [] },
+      { code: 0, data: [{ code: "CA-YYZ", name: "Toronto", country: "CA" }] },
+      [{ code: "CA-YYZ", name: "Toronto", country: "CA" }],
+    ],
+    [
+      "offline logistics",
+      (client: JifengClient) => client.getOfflineLogistics(),
+      "/api/logistics/offline/page",
+      { pageNo: 1, pageSize: 300, returnAll: true },
+      {
+        code: 0,
+        data: {
+          page: {
+            pageNo: 1,
+            pageSize: 300,
+            rows: [{ code: "api-code", id: 7, name: "Canada Post" }],
+            totalPage: 1,
+            totalSize: 1,
+          },
+        },
+      },
+      [{ code: "api-code", id: 7, name: "Canada Post" }],
+    ],
+  ])(
+    "reads typed %s with the official signed endpoint and exact body",
+    async (_label, invoke, path, body, responseBody, expected) => {
+      const fetchMock = vi.fn(
+        async (url: RequestInfo | URL, request?: RequestInit) => {
+          void url;
+          void request;
+          return Response.json(responseBody);
+        },
+      );
+      const client = new JifengClient({
+        credentials,
+        fetch: fetchMock,
+        nonce: () => "resource-nonce",
+        now: () => 1_692_889_556_000,
+      });
+
+      await expect(invoke(client)).resolves.toEqual(expected);
+
+      const [url, request] = fetchMock.mock.calls[0];
+      expect(String(url)).toBe(`https://test.jfwms.com${path}`);
+      expect(request?.method).toBe("POST");
+      expect(JSON.parse(String(request?.body))).toEqual(body);
+      const headers = new Headers(request?.headers);
+      expect(headers.get("sign")).toBeTruthy();
+      expect(headers.get("accessToken")).toBe(credentials.accessToken);
+    },
+  );
+
   test("refreshes an invalid access token once and replays with a fresh nonce", async () => {
     const seenAccessTokens: Array<string | null> = [];
     const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
@@ -158,6 +215,31 @@ describe("Jifeng API client", () => {
       refreshToken: "fresh-refresh-token",
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("rejects an incomplete refresh response instead of replaying a business request", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).includes("/api/oauth/refreshToken")) {
+        return Response.json({
+          code: 0,
+          data: {
+            accessToken: "fresh-access-token",
+            refreshToken: "fresh-refresh-token",
+            userId: 8,
+          },
+        });
+      }
+      return Response.json({ code: 10002, data: null });
+    });
+    const client = new JifengClient({
+      credentials: { ...credentials },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      client.getOrder({ erpNo: "TZX-JF-INCOMPLETE-REFRESH" }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE", retryable: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   test("turns an aborted request into a retryable timeout without exposing credentials", async () => {
