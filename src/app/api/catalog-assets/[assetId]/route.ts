@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { catalogAssets, customerSkuPrices, products, skus } from "@/db/schema";
+import { catalogAssets, products, skus } from "@/db/schema";
 import { getCurrentPrincipal } from "@/modules/identity/principal";
 import { openCatalogAsset } from "@/modules/feishu/asset-storage";
 
@@ -21,7 +21,7 @@ async function findAdminAsset(assetId: string) {
   return asset ?? null;
 }
 
-async function findCustomerAsset(assetId: string, customerId: string) {
+async function findCustomerAsset(assetId: string) {
   const [asset] = await db
     .select({
       id: catalogAssets.id,
@@ -31,12 +31,9 @@ async function findCustomerAsset(assetId: string, customerId: string) {
     .from(catalogAssets)
     .innerJoin(skus, eq(skus.imageAssetId, catalogAssets.id))
     .innerJoin(products, eq(products.id, skus.productId))
-    .innerJoin(customerSkuPrices, eq(customerSkuPrices.skuId, skus.id))
     .where(
       and(
         eq(catalogAssets.id, assetId),
-        eq(customerSkuPrices.customerId, customerId),
-        eq(customerSkuPrices.active, true),
         eq(products.status, "ACTIVE"),
         eq(skus.saleStatus, "SELLABLE"),
       ),
@@ -62,17 +59,10 @@ export async function GET(
   const { assetId } = await params;
   const asset =
     principal.kind === "CUSTOMER"
-      ? await findCustomerAsset(assetId, principal.customerId)
+      ? await findCustomerAsset(assetId)
       : await findAdminAsset(assetId);
 
   if (!asset) {
-    if (principal.kind === "CUSTOMER") {
-      const existingAsset = await findAdminAsset(assetId);
-      if (existingAsset) {
-        return jsonError(403, "FORBIDDEN");
-      }
-    }
-
     return jsonError(404, "NOT_FOUND");
   }
 
@@ -82,7 +72,7 @@ export async function GET(
       headers: {
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Length": String(opened.bytes.byteLength),
-        "Content-Type": asset.mimeType,
+        "Content-Type": opened.contentType,
         "X-Content-Type-Options": "nosniff",
       },
       status: 200,

@@ -13,10 +13,15 @@ type AuthModule = typeof import("@/modules/identity/auth").auth;
 type RouteModule = typeof import("@/app/api/catalog-assets/[assetId]/route");
 type StorageModule = typeof import("@/modules/feishu/asset-storage");
 
-async function createImageBuffer() {
+async function createImageBuffer(input?: { b?: number; g?: number; r?: number }) {
   return sharp({
     create: {
-      background: { alpha: 1, b: 117, g: 80, r: 32 },
+      background: {
+        alpha: 1,
+        b: input?.b ?? 117,
+        g: input?.g ?? 80,
+        r: input?.r ?? 32,
+      },
       channels: 4,
       height: 9,
       width: 13,
@@ -157,6 +162,82 @@ async function seedCatalogAsset(storage: StorageModule) {
   return { assetId: asset.id, bytes, customerId: customer.id, otherCustomerId: otherCustomer.id };
 }
 
+async function seedCustomerVisibleAsset(
+  storage: StorageModule,
+  input?: {
+    includeCustomerPrice?: boolean;
+    productStatus?: "ACTIVE" | "DISABLED";
+    saleStatus?: "SELLABLE" | "NOT_SELLABLE";
+    storedMimeType?: "image/jpeg" | "image/png" | "image/webp";
+  },
+) {
+  const seed = crypto.randomUUID();
+  const bytes = await createImageBuffer({
+    b: Number.parseInt(seed.slice(0, 2), 16),
+    g: Number.parseInt(seed.slice(2, 4), 16),
+    r: Number.parseInt(seed.slice(4, 6), 16),
+  });
+  const manifest = await storage.stageCatalogAsset({
+    bytes,
+    contentType: "image/png",
+    originalFileName: "customer-visible.png",
+    runId: `route-run-${crypto.randomUUID().slice(0, 8)}`,
+    skuCode: "TZX-CUSTOMER-001",
+  });
+  const storageKey = await storage.commitCatalogAsset(manifest);
+
+  const [customer] = await db
+    .insert(customers)
+    .values({
+      code: `C-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+      name: "Visible Customer",
+    })
+    .returning({ id: customers.id });
+  const [otherCustomer] = await db
+    .insert(customers)
+    .values({
+      code: `X-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+      name: "Other Visible Customer",
+    })
+    .returning({ id: customers.id });
+  const [asset] = await db
+    .insert(catalogAssets)
+    .values({
+      byteSize: manifest.byteSize,
+      contentSha256: manifest.contentSha256,
+      mimeType: input?.storedMimeType ?? manifest.mimeType,
+      originalFileName: manifest.originalFileName,
+      storageKey,
+    })
+    .returning({ id: catalogAssets.id });
+  const [product] = await db
+    .insert(products)
+    .values({ name: "Visible Product", status: input?.productStatus ?? "ACTIVE" })
+    .returning({ id: products.id });
+  const [sku] = await db
+    .insert(skus)
+    .values({
+      defaultUnitPriceFen: 699,
+      imageAssetId: asset.id,
+      name: "Visible SKU",
+      productId: product.id,
+      saleStatus: input?.saleStatus ?? "SELLABLE",
+      skuCode: `TZX-VISIBLE-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning({ id: skus.id });
+
+  if (input?.includeCustomerPrice ?? false) {
+    await db.insert(customerSkuPrices).values({
+      active: true,
+      customerId: customer.id,
+      skuId: sku.id,
+      unitPriceFen: 799,
+    });
+  }
+
+  return { assetId: asset.id, bytes, customerId: customer.id, otherCustomerId: otherCustomer.id };
+}
+
 afterEach(async () => {
   await db.execute(sql.raw(`
     truncate table
@@ -217,7 +298,7 @@ describe("catalog asset route", () => {
     }
   });
 
-  test("serves the asset to the owning customer and rejects other tenants", async () => {
+  test("serves catalog-visible assets to authenticated customers", async () => {
     const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
 
     try {
@@ -248,8 +329,80 @@ describe("catalog asset route", () => {
         );
 
         expect(ownerResponse.status).toBe(200);
+        expect(otherResponse.status).toBe(200);
         expect(Buffer.compare(Buffer.from(await ownerResponse.arrayBuffer()), seeded.bytes)).toBe(0);
-        expect(otherResponse.status).toBe(403);
+        expect(Buffer.compare(Buffer.from(await otherResponse.arrayBuffer()), seeded.bytes)).toBe(0);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("serves a customer-visible asset even without a customer-specific price row", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route, storage }) => {
+        const seeded = await seedCustomerVisibleAsset(storage, {
+          includeCustomerPrice: false,
+          storedMimeType: "image/jpeg",
+        });
+        const ownerCookie = await createSessionCookie(auth, {
+          customerId: seeded.customerId,
+          role: "user",
+          scope: "customer",
+        });
+
+        const response = await route.GET(
+          new Request(`http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}`, {
+            headers: { cookie: ownerCookie },
+          }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe("image/png");
+        expect(Buffer.compare(Buffer.from(await response.arrayBuffer()), seeded.bytes)).toBe(0);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("hides inactive and not-sellable assets from customers with a unified 404", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route, storage }) => {
+        const inactive = await seedCustomerVisibleAsset(storage, {
+          includeCustomerPrice: true,
+          productStatus: "DISABLED",
+        });
+        const notSellable = await seedCustomerVisibleAsset(storage, {
+          includeCustomerPrice: true,
+          saleStatus: "NOT_SELLABLE",
+        });
+        const ownerCookie = await createSessionCookie(auth, {
+          customerId: inactive.customerId,
+          role: "user",
+          scope: "customer",
+        });
+
+        const inactiveResponse = await route.GET(
+          new Request(`http://127.0.0.1:3000/api/catalog-assets/${inactive.assetId}`, {
+            headers: { cookie: ownerCookie },
+          }),
+          { params: Promise.resolve({ assetId: inactive.assetId }) },
+        );
+        const notSellableResponse = await route.GET(
+          new Request(`http://127.0.0.1:3000/api/catalog-assets/${notSellable.assetId}`, {
+            headers: { cookie: ownerCookie },
+          }),
+          { params: Promise.resolve({ assetId: notSellable.assetId }) },
+        );
+
+        expect(inactiveResponse.status).toBe(404);
+        expect(notSellableResponse.status).toBe(404);
       });
     } finally {
       await rm(assetDir, { force: true, recursive: true });

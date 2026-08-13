@@ -1,12 +1,15 @@
-import { link, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { TemporaryAssetManifest } from "@/modules/feishu/cargo-types";
 import {
+  createCatalogAssetStorage,
   commitCatalogAsset,
   discardStagedAssets,
   openCatalogAsset,
@@ -50,6 +53,96 @@ async function createImageBuffer(
 
 function stagedRunDirectory(manifest: TemporaryAssetManifest) {
   return join(assetRoot, dirname(manifest.temporaryKey));
+}
+
+async function sumDirectoryBytes(directoryPath: string): Promise<number> {
+  let total = 0;
+  for (const entry of await readdir(directoryPath, { withFileTypes: true })) {
+    const absolutePath = join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      total += await sumDirectoryBytes(absolutePath);
+      continue;
+    }
+    if (entry.isFile()) {
+      total += (await stat(absolutePath)).size;
+    }
+  }
+  return total;
+}
+
+async function runStageInChildProcess(input: {
+  assetDir: string;
+  bytesPath: string;
+  maxRunBytes: number;
+  originalFileName: string;
+  runId: string;
+  skuCode: string;
+}) {
+  const scriptPath = join(input.assetDir, `stage-worker-${crypto.randomUUID()}.mjs`);
+  const storageModuleUrl = pathToFileURL(
+    join(process.cwd(), "src/modules/feishu/asset-storage.ts"),
+  ).href;
+  await writeFile(
+    scriptPath,
+    `
+import { readFile } from "node:fs/promises";
+import { createCatalogAssetStorage } from ${JSON.stringify(storageModuleUrl)};
+
+const storage = createCatalogAssetStorage({
+  lockRetryDelayMs: 10,
+  lockStaleMs: 5_000,
+  lockTimeoutMs: 5_000,
+  maxRunBytes: Number(process.env.TEST_MAX_RUN_BYTES),
+});
+
+try {
+  const bytes = await readFile(process.env.TEST_BYTES_PATH);
+  const manifest = await storage.stageCatalogAsset({
+    bytes,
+    contentType: "image/png",
+    originalFileName: process.env.TEST_ORIGINAL_FILE_NAME,
+    runId: process.env.TEST_RUN_ID,
+    skuCode: process.env.TEST_SKU_CODE,
+  });
+  process.stdout.write(JSON.stringify({ ok: true, temporaryKey: manifest.temporaryKey }));
+} catch (error) {
+  process.stderr.write(String(error instanceof Error ? error.message : error));
+  process.exit(1);
+}
+`,
+  );
+
+  return await new Promise<{ code: number | null; stderr: string; stdout: string }>((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", scriptPath],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CATALOG_ASSET_DIR: input.assetDir,
+          TEST_BYTES_PATH: input.bytesPath,
+          TEST_MAX_RUN_BYTES: String(input.maxRunBytes),
+          TEST_ORIGINAL_FILE_NAME: input.originalFileName,
+          TEST_RUN_ID: input.runId,
+          TEST_SKU_CODE: input.skuCode,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (code) => resolve({ code, stderr, stdout }));
+  });
 }
 
 beforeEach(async () => {
@@ -241,6 +334,115 @@ describe("catalog asset storage", () => {
     ).rejects.toThrow(/1\s*GiB/i);
   });
 
+  test("serializes same-run quota accounting across concurrent processes", async () => {
+    const maxRunBytes = 18_000;
+    const storage = createCatalogAssetStorage({ maxRunBytes });
+    const first = await storage.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { b: 20 }),
+      contentType: "image/png",
+      originalFileName: "first.png",
+      runId: "quota-run",
+      skuCode: "TZX-001",
+    });
+    const secondBytes = await createImageBuffer("png", { g: 60 });
+    const thirdBytes = await createImageBuffer("png", { r: 90 });
+    const fillerSize =
+      maxRunBytes - first.byteSize - Math.max(secondBytes.byteLength, thirdBytes.byteLength) - 16;
+    await writeFile(join(stagedRunDirectory(first), "filler.bin"), Buffer.alloc(fillerSize));
+
+    const secondBytesPath = join(assetRoot, "second-bytes.png");
+    const thirdBytesPath = join(assetRoot, "third-bytes.png");
+    await writeFile(secondBytesPath, secondBytes);
+    await writeFile(thirdBytesPath, thirdBytes);
+
+    const [second, third] = await Promise.all([
+      runStageInChildProcess({
+        assetDir: assetRoot,
+        bytesPath: secondBytesPath,
+        maxRunBytes,
+        originalFileName: "second.png",
+        runId: "quota-run",
+        skuCode: "TZX-002",
+      }),
+      runStageInChildProcess({
+        assetDir: assetRoot,
+        bytesPath: thirdBytesPath,
+        maxRunBytes,
+        originalFileName: "third.png",
+        runId: "quota-run",
+        skuCode: "TZX-003",
+      }),
+    ]);
+
+    expect([second.code, third.code].sort()).toEqual([0, 1]);
+    expect(`${second.stderr}\n${third.stderr}`).toMatch(/1\s*GiB|limit/i);
+    expect(await sumDirectoryBytes(stagedRunDirectory(first))).toBeLessThanOrEqual(maxRunBytes);
+  });
+
+  test("commits the same digest concurrently without leaving partial publishes behind", async () => {
+    const bytes = await createImageBuffer("png");
+    const first = await stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "first.png",
+      runId: "commit-a",
+      skuCode: "TZX-001",
+    });
+    const second = await stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "second.png",
+      runId: "commit-b",
+      skuCode: "TZX-002",
+    });
+
+    const [firstKey, secondKey] = await Promise.all([
+      commitCatalogAsset(first),
+      commitCatalogAsset(second),
+    ]);
+
+    expect(firstKey).toBe(secondKey);
+    const finalDirectory = join(assetRoot, dirname(firstKey));
+    expect((await readdir(finalDirectory)).filter((entry) => entry.startsWith("."))).toEqual([]);
+    const opened = await openCatalogAsset(firstKey);
+    expect(Buffer.compare(Buffer.from(opened.bytes), bytes)).toBe(0);
+  });
+
+  test("keeps final assets invisible until atomic publish completes", async () => {
+    let releasePublish: (() => void) | null = null;
+    let publishPaused: Promise<void> | null = null;
+    const storage = createCatalogAssetStorage({
+      onFinalPublishReady() {
+        publishPaused = new Promise<void>((resolve) => {
+          releasePublish = resolve;
+        });
+        return publishPaused;
+      },
+    });
+    const bytes = await createImageBuffer("png");
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "publish.png",
+      runId: "publish-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!publishPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    await expect(storage.openCatalogAsset(expectedStorageKey)).rejects.toThrow();
+    const finishPublish = releasePublish as (() => void) | null;
+    if (finishPublish) {
+      finishPublish();
+    }
+    expect(await commitPromise).toBe(expectedStorageKey);
+    expect(Buffer.compare(Buffer.from((await storage.openCatalogAsset(expectedStorageKey)).bytes), bytes)).toBe(0);
+  });
+
   test("rejects symlink escapes for staging and final asset reads", async () => {
     const outside = await mkdtemp(join(tmpdir(), "catalog-assets-outside-"));
 
@@ -272,6 +474,26 @@ describe("catalog asset storage", () => {
       await symlink(outside, join(assetRoot, "sha256"), "junction");
 
       await expect(openCatalogAsset(storageKey)).rejects.toThrow(/outside/i);
+    } finally {
+      await rm(outside, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects symlink escapes for final publish parents", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "catalog-assets-outside-"));
+
+    try {
+      const manifest = await stageCatalogAsset({
+        bytes: await createImageBuffer("png"),
+        contentType: "image/png",
+        originalFileName: "commit-parent.png",
+        runId: "commit-parent",
+        skuCode: "TZX-001",
+      });
+      await rm(join(assetRoot, "sha256"), { force: true, recursive: true });
+      await symlink(outside, join(assetRoot, "sha256"), "junction");
+
+      await expect(commitCatalogAsset(manifest)).rejects.toThrow(/outside/i);
     } finally {
       await rm(outside, { force: true, recursive: true });
     }
