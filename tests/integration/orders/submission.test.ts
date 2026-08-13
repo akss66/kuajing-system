@@ -95,6 +95,7 @@ async function createSku(input: {
   totalQuantity: number;
   defaultPriceFen: number;
   customerPriceFen?: number;
+  saleStatus?: "SELLABLE" | "NOT_SELLABLE";
 }) {
   const [product] = await db
     .insert(products)
@@ -106,6 +107,7 @@ async function createSku(input: {
       defaultUnitPriceFen: input.defaultPriceFen,
       name: input.externalSku,
       productId: product.id,
+      saleStatus: input.saleStatus,
       skuCode: `TZX-${crypto.randomUUID()}`,
     })
     .returning();
@@ -287,6 +289,34 @@ describe("atomic TEMU take-order submission", () => {
       .from(orderImportBatches)
       .where(eq(orderImportBatches.id, preview.batchId));
     expect(batch.status).toBe("PREVIEW");
+  });
+
+  test("rejects a manually not-sellable SKU even when stock is available", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-BLOCKED",
+      saleStatus: "NOT_SELLABLE",
+      storeId: store.id,
+      totalQuantity: 5,
+    });
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [{ SKU货号: "EXT-BLOCKED" }],
+    });
+
+    await expect(
+      submitTemuImportBatch({
+        actorUserId: "auth-customer-submit",
+        batchId: preview.batchId,
+        customerId: customer.id,
+      }),
+    ).rejects.toMatchObject({ code: "SKU_NOT_SELLABLE" });
+
+    expect(await db.select().from(fulfillmentOrders)).toEqual([]);
+    expect(await db.select().from(inventoryReservations)).toEqual([]);
   });
 
   test("two batches cannot reserve the same final unit", async () => {

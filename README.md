@@ -52,6 +52,7 @@ npm.cmd run build
 ## 文档
 
 - [生产运行手册](docs/operations/production-runbook.md)
+- [飞书货盘迁移上线手册](docs/operations/feishu-cargo-migration.md)
 - [备份恢复演练](docs/operations/backup-restore-drill-2026-08-12.md)
 - [v0.1.0 版本说明](docs/releases/v0.1.0.md)
 - [产品定义](PRODUCT.md)

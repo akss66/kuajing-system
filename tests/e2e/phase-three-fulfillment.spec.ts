@@ -176,6 +176,7 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
 
   await page.goto("/admin/system/integrations");
   await expect(page.getByRole("heading", { name: "外部集成" })).toBeVisible();
-  await expect(page.getByText("未配置", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("已配置", { exact: true })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });

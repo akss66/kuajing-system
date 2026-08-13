@@ -1,10 +1,12 @@
 import ExcelJS from "exceljs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
 
 import { db } from "@/db/client";
 import { seed } from "@/db/seed";
 import {
+  catalogAssets,
   customerSkuPrices,
   customers,
   inventoryBalances,
@@ -14,6 +16,7 @@ import {
   skus,
   stores,
 } from "@/db/schema";
+import { commitCatalogAsset, stageCatalogAsset } from "@/modules/feishu/asset-storage";
 import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 
@@ -29,8 +32,47 @@ function visibleCatalogItem(page: import("@playwright/test").Page, skuId: string
   return page.locator(`[data-testid="catalog-${skuId}"]:visible`);
 }
 
+async function createCatalogImage(seedValue: number) {
+  const bytes = await sharp({
+    create: {
+      background: {
+        alpha: 1,
+        b: (seedValue * 37) % 255,
+        g: (seedValue * 19) % 255,
+        r: (seedValue * 11) % 255,
+      },
+      channels: 4,
+      height: 12,
+      width: 12,
+    },
+  })
+    .png()
+    .toBuffer();
+  const manifest = await stageCatalogAsset({
+    bytes,
+    contentType: "image/png",
+    originalFileName: `catalog-${seedValue}.png`,
+    runId: `catalog-${crypto.randomUUID().slice(0, 8)}`,
+    skuCode: `CATALOG-${seedValue}`,
+  });
+  const storageKey = await commitCatalogAsset(manifest);
+  const [asset] = await db
+    .insert(catalogAssets)
+    .values({
+      byteSize: manifest.byteSize,
+      contentSha256: manifest.contentSha256,
+      mimeType: manifest.mimeType,
+      originalFileName: manifest.originalFileName,
+      storageKey,
+    })
+    .returning({ id: catalogAssets.id });
+
+  return asset;
+}
+
 async function seedCustomerCatalog() {
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+  const asset = await createCatalogImage(Number.parseInt(suffix, 16));
   const productName = `客户货盘测试商品 ${suffix}`;
   const [customerA, customerB] = await db
     .insert(customers)
@@ -48,6 +90,8 @@ async function seedCustomerCatalog() {
     .values([
       {
         defaultUnitPriceFen: 690,
+        imageAssetId: asset.id,
+        imageUrl: `/api/catalog-assets/${asset.id}`,
         name: "红色",
         productId: product.id,
         skuCode: `TZX-A-${suffix}`,
@@ -180,13 +224,25 @@ async function seedImportPreview() {
 test("customer sees only its own price and real available inventory", async ({ page }, testInfo) => {
   const fixture = await seedCustomerCatalog();
   await loginThroughUi(page, fixture.user);
-  await expect(page).toHaveURL(/\/portal/);
+  await expect(page).toHaveURL(/\/portal/, { timeout: 15_000 });
   await page.goto("/portal/catalog");
 
   const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
+  const protectedImage = availableRow.locator("img").first();
   await expect(availableRow).toContainText("¥7.60");
   await expect(availableRow).toContainText("可售 6");
   await expect(page.getByText("¥6.20")).toHaveCount(0);
+
+  await expect(protectedImage).toBeVisible();
+  const protectedImageUrl = await protectedImage.getAttribute("src");
+  expect(protectedImageUrl).toMatch(/^\/api\/catalog-assets\//);
+  const protectedImageResponse = await page.context().request.get(
+    new URL(protectedImageUrl ?? "", page.url()).toString(),
+  );
+  expect(protectedImageResponse.status()).toBe(200);
+  await expect
+    .poll(() => protectedImage.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
 
   const soldOutRow = visibleCatalogItem(page, fixture.soldOutSku.id);
   await expect(soldOutRow).toContainText("不可售");
@@ -233,6 +289,7 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
+    await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("不可售");
     await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
     await expect(page.locator("[data-customer-catalog-cards]")).toBeVisible();
     await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();

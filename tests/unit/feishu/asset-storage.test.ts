@@ -355,7 +355,8 @@ describe("catalog asset storage", () => {
     const freshTempPath = join(
       runDirectory,
       createStagingTempFileName({
-        createdAtMs: Date.now(),
+        // Keep the non-stale temp file safely outside the cleanup window even under full-suite load.
+        createdAtMs: Date.now() + 60_000,
       }),
     );
     const outsideDirectory = await mkdtemp(join(tmpdir(), "catalog-assets-stage-symlink-"));

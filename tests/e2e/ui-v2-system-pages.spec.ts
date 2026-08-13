@@ -111,7 +111,8 @@ test("integrations show safe configuration and degraded states without secrets",
   await page.goto("/admin/system/integrations");
 
   await expect(page.getByRole("heading", { name: "集成运行状态" })).toBeVisible();
-  await expect(page.getByText("未配置", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("已配置", { exact: true })).toHaveCount(1);
   await expect(page.getByRole("status", { name: "当前没有失败任务" })).toContainText(
     "查看系统健康",
   );
@@ -119,7 +120,7 @@ test("integrations show safe configuration and degraded states without secrets",
   await expect(page.getByRole("button", { name: "测试飞书连接" })).toHaveCount(0);
   await page.getByRole("button", { name: "管理飞书" }).click();
   await expect(page.getByRole("dialog", { name: "管理飞书集成" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "测试飞书连接" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "验证只读连接" })).toBeVisible();
   await page.keyboard.press("Escape");
 
   await db.insert(integrationOutbox).values({
