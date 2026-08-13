@@ -179,7 +179,7 @@ function sanitizeAuditReason(
       sensitiveValues.push(decryptJifengSecret(row.refreshTokenEncrypted, key));
     }
   } catch {
-    // Disconnect must remain available even when ciphertext cannot be opened.
+    return "操作原因已提供，但因凭据不可读取而未保存原文";
   }
 
   let sanitized = redactSensitiveText(reason)
@@ -477,6 +477,7 @@ type StoredCredentialRow = {
   refresh_token_encrypted: EncryptedSecret | null;
   refresh_token_expires_at: Date | null;
   status: JifengConnectionStatus;
+  updated_at: Date;
   user_id: string | null;
   warehouse_code: string | null;
 };
@@ -548,7 +549,7 @@ async function readStoredCredentials(
   const [row] = await connection<StoredCredentialRow[]>`
     select access_token_encrypted, access_token_expires_at, logistics_id,
            refresh_token_encrypted, refresh_token_expires_at, status, user_id,
-           warehouse_code
+           updated_at, warehouse_code
     from jifeng_connections
     where connection_key = ${PRIMARY_KEY}
   `;
@@ -593,7 +594,10 @@ export async function refreshJifengConnection(
         return decryptRuntimeCredentials(row);
       } catch (error) {
         if (!(error instanceof JifengSecretError)) throw error;
-        await markCredentialFailure(connection, now);
+        const recorded = await markCredentialFailure(connection, now, row);
+        if (!recorded) {
+          connectionError("CONNECTION_CHANGED", "极风连接已变更，已丢弃过期失败结果");
+        }
         connectionError("CREDENTIALS_INVALID", "极风授权凭据无法安全读取");
       }
     }
@@ -601,7 +605,15 @@ export async function refreshJifengConnection(
       !row.refresh_token_expires_at ||
       row.refresh_token_expires_at.getTime() <= now.getTime()
     ) {
-      await markRefreshFailure(connection, now, "REFRESH_TOKEN_EXPIRED");
+      const recorded = await markRefreshFailure(
+        connection,
+        now,
+        "REFRESH_TOKEN_EXPIRED",
+        row,
+      );
+      if (!recorded) {
+        connectionError("CONNECTION_CHANGED", "极风连接已变更，已丢弃过期失败结果");
+      }
       connectionError("REFRESH_FAILED", "极风令牌刷新失败，需要重新授权");
     }
 
@@ -610,7 +622,10 @@ export async function refreshJifengConnection(
       current = decryptRuntimeCredentials(row);
     } catch (error) {
       if (!(error instanceof JifengSecretError)) throw error;
-      await markCredentialFailure(connection, now);
+      const recorded = await markCredentialFailure(connection, now, row);
+      if (!recorded) {
+        connectionError("CONNECTION_CHANGED", "极风连接已变更，已丢弃过期失败结果");
+      }
       connectionError("CREDENTIALS_INVALID", "极风授权凭据无法安全读取");
     }
     let refreshed: JifengTokenSet;
@@ -623,7 +638,15 @@ export async function refreshJifengConnection(
         userId: current.userId,
       });
     } catch (error) {
-      await markRefreshFailure(connection, now, safeErrorCategory(error));
+      const recorded = await markRefreshFailure(
+        connection,
+        now,
+        safeErrorCategory(error),
+        row,
+      );
+      if (!recorded) {
+        connectionError("CONNECTION_CHANGED", "极风连接已变更，已丢弃过期失败结果");
+      }
       connectionError("REFRESH_FAILED", "极风令牌刷新失败，需要重新授权");
     }
 
@@ -634,7 +657,7 @@ export async function refreshJifengConnection(
       const [locked] = await tx<StoredCredentialRow[]>`
         select access_token_encrypted, access_token_expires_at, logistics_id,
                refresh_token_encrypted, refresh_token_expires_at, status, user_id,
-               warehouse_code
+               updated_at, warehouse_code
         from jifeng_connections
         where connection_key = ${PRIMARY_KEY}
         for update
@@ -659,7 +682,7 @@ export async function refreshJifengConnection(
         where connection_key = ${PRIMARY_KEY}
         returning access_token_encrypted, access_token_expires_at, logistics_id,
                   refresh_token_encrypted, refresh_token_expires_at, status,
-                  user_id, warehouse_code
+                  updated_at, user_id, warehouse_code
       `;
     });
     const [committed] = committedRows;
@@ -668,17 +691,37 @@ export async function refreshJifengConnection(
   });
 }
 
+function hasSameCredentialRevision(
+  current: StoredCredentialRow,
+  source: StoredCredentialRow,
+) {
+  return (
+    current.status === source.status &&
+    current.updated_at.getTime() === source.updated_at.getTime() &&
+    JSON.stringify(current.access_token_encrypted) ===
+      JSON.stringify(source.access_token_encrypted) &&
+    JSON.stringify(current.refresh_token_encrypted) ===
+      JSON.stringify(source.refresh_token_encrypted)
+  );
+}
+
 async function markCredentialFailure(
   connection: Awaited<ReturnType<typeof refreshDatabase.reserve>>,
   now: Date,
+  source: StoredCredentialRow,
 ) {
-  await withReservedTransaction(connection, async (tx) => {
-    const [before] = await tx<{ status: JifengConnectionStatus }[]>`
-      select status from jifeng_connections
+  return withReservedTransaction(connection, async (tx) => {
+    const [before] = await tx<StoredCredentialRow[]>`
+      select access_token_encrypted, access_token_expires_at, logistics_id,
+             refresh_token_encrypted, refresh_token_expires_at, status,
+             updated_at, user_id, warehouse_code
+      from jifeng_connections
       where connection_key = ${PRIMARY_KEY}
       for update
     `;
-    if (!before) return;
+    if (!before || !hasSameCredentialRevision(before, source)) {
+      return false;
+    }
     await tx`
       update jifeng_connections
       set status = 'ERROR',
@@ -699,6 +742,7 @@ async function markCredentialFailure(
         '极风授权凭据无法安全读取，已阻止新的履约写入'
       )
     `;
+    return true;
   });
 }
 
@@ -706,14 +750,18 @@ async function markRefreshFailure(
   connection: Awaited<ReturnType<typeof refreshDatabase.reserve>>,
   now: Date,
   category: string,
+  source: StoredCredentialRow,
 ) {
-  await withReservedTransaction(connection, async (tx) => {
-    const [before] = await tx<{ status: JifengConnectionStatus }[]>`
-      select status from jifeng_connections
+  return withReservedTransaction(connection, async (tx) => {
+    const [before] = await tx<StoredCredentialRow[]>`
+      select access_token_encrypted, access_token_expires_at, logistics_id,
+             refresh_token_encrypted, refresh_token_expires_at, status,
+             updated_at, user_id, warehouse_code
+      from jifeng_connections
       where connection_key = ${PRIMARY_KEY}
       for update
     `;
-    if (!before) return;
+    if (!before || !hasSameCredentialRevision(before, source)) return false;
     await tx`
       update jifeng_connections
       set status = 'REFRESH_REQUIRED',
@@ -734,6 +782,7 @@ async function markRefreshFailure(
         '极风令牌刷新失败，已阻止新的履约写入'
       )
     `;
+    return true;
   });
 }
 
@@ -963,6 +1012,7 @@ export async function setJifengFulfillmentEnabled(
     if (!row) connectionError("AUTHORIZATION_REQUIRED", "极风连接尚未完成授权");
     const auditReason = sanitizeAuditReason(reason, row);
 
+    let targetStatus: JifengConnectionStatus;
     if (input.enabled) {
       if (!row.warehouseCode || row.logisticsId === null) {
         connectionError("RESOURCE_SELECTION_REQUIRED", "必须先确认仓库和物流渠道");
@@ -978,19 +1028,21 @@ export async function setJifengFulfillmentEnabled(
           status: "ENABLED",
         })
         .where(eq(jifengConnections.connectionKey, PRIMARY_KEY));
+      targetStatus = "ENABLED";
     } else {
       if (row.status === "DISCONNECTED") return;
+      targetStatus =
+        row.status === "REFRESH_REQUIRED"
+          ? "REFRESH_REQUIRED"
+          : row.warehouseCode && row.logisticsId !== null
+            ? "READY_DISABLED"
+            : "RESOURCE_SELECTION_REQUIRED";
       await tx
         .update(jifengConnections)
         .set({
           fulfillmentEnabledAt: null,
           fulfillmentEnabledByAdminUserId: null,
-          status:
-            row.status === "REFRESH_REQUIRED"
-              ? "REFRESH_REQUIRED"
-              : row.warehouseCode && row.logisticsId !== null
-                ? "READY_DISABLED"
-                : "RESOURCE_SELECTION_REQUIRED",
+          status: targetStatus,
         })
         .where(eq(jifengConnections.connectionKey, PRIMARY_KEY));
     }
@@ -1000,7 +1052,7 @@ export async function setJifengFulfillmentEnabled(
         : "JIFENG_FULFILLMENT_DISABLED",
       actorId: input.actor.userId,
       actorType: "ADMIN",
-      afterJson: { status: input.enabled ? "ENABLED" : "READY_DISABLED" },
+      afterJson: { status: targetStatus },
       beforeJson: { status: row.status },
       entityId: PRIMARY_KEY,
       entityType: "JIFENG_CONNECTION",

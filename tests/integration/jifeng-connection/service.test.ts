@@ -569,6 +569,54 @@ describe("Jifeng connection lifecycle", () => {
     );
   });
 
+  test("uses a fixed safe audit reason when disconnect cannot decrypt stored credentials", async () => {
+    const admin = await createAdmin("disconnect-corrupted-key");
+    await authorizeFixture(admin.id);
+    process.env.JIFENG_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 74).toString("base64url");
+    const rawReason = "bare access-one must not survive this operator reason";
+
+    await disconnectJifengConnection({
+      actor: actor(admin.id),
+      now: new Date(startedAt.getTime() + 1_000),
+      reason: rawReason,
+    });
+
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_DISCONNECTED"));
+    expect(audit.reason).toBe("操作原因已提供，但因凭据不可读取而未保存原文");
+    expect(JSON.stringify(audit)).not.toMatch(/access-one|must not survive/i);
+  });
+
+  test("audits the exact persisted status when disabling a refresh-required connection", async () => {
+    const admin = await createAdmin("disable-refresh-required");
+    await authorizeFixture(admin.id, {
+      tokens: { ...tokenSet("old"), expireIn: 1 },
+    });
+    await expect(
+      refreshJifengConnection({
+        now: new Date(startedAt.getTime() + 2_000),
+        port: { async refresh() { throw new Error("safe refresh failure"); } },
+      }),
+    ).rejects.toMatchObject({ code: "REFRESH_FAILED" });
+
+    await setJifengFulfillmentEnabled({
+      actor: actor(admin.id),
+      enabled: false,
+      now: new Date(startedAt.getTime() + 3_000),
+      reason: "keep fulfillment blocked after refresh failure",
+    });
+
+    const [stored] = await db.select().from(jifengConnections);
+    const [audit] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_DISABLED"));
+    expect(stored.status).toBe("REFRESH_REQUIRED");
+    expect(audit.afterJson).toEqual({ status: "REFRESH_REQUIRED" });
+  });
+
   test("returns role-appropriate redacted admin and public projections", async () => {
     const admin = await createAdmin("queries");
     await authorizeFixture(admin.id);
@@ -677,6 +725,103 @@ describe("Jifeng token refresh single-flight", () => {
       status: "REFRESH_REQUIRED",
     });
     expect(after.lastErrorSummary).not.toMatch(/refresh-old|secret leak/i);
+  });
+
+  test("does not let a failed refresh overwrite a concurrent disconnect", async () => {
+    const admin = await createAdmin("refresh-disconnect-race");
+    await authorizeFixture(admin.id, {
+      tokens: { ...tokenSet("old"), expireIn: 1 },
+    });
+    let releaseRefresh!: () => void;
+    let refreshStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const refresh = refreshJifengConnection({
+      now: new Date(startedAt.getTime() + 2_000),
+      port: {
+        async refresh() {
+          refreshStarted();
+          await gate;
+          throw new Error("safe refresh failure");
+        },
+      },
+    });
+    await started;
+    try {
+      await disconnectJifengConnection({
+        actor: actor(admin.id),
+        now: new Date(startedAt.getTime() + 3_000),
+        reason: "disconnect wins over stale refresh failure",
+      });
+    } finally {
+      releaseRefresh();
+    }
+
+    await expect(refresh).rejects.toMatchObject({ code: "CONNECTION_CHANGED" });
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored).toMatchObject({
+      accessTokenEncrypted: null,
+      refreshTokenEncrypted: null,
+      status: "DISCONNECTED",
+      userId: null,
+    });
+    expect(
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "JIFENG_TOKEN_REFRESH_FAILED")),
+    ).toEqual([]);
+  });
+
+  test("does not let a failed refresh overwrite concurrent reauthorization", async () => {
+    const admin = await createAdmin("refresh-reauthorize-race");
+    await authorizeFixture(admin.id, {
+      tokens: { ...tokenSet("old"), expireIn: 1 },
+    });
+    let releaseRefresh!: () => void;
+    let refreshStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const refresh = refreshJifengConnection({
+      now: new Date(startedAt.getTime() + 2_000),
+      port: {
+        async refresh() {
+          refreshStarted();
+          await gate;
+          throw new Error("safe refresh failure");
+        },
+      },
+    });
+    await started;
+    try {
+      await authorizeFixture(admin.id, { tokens: tokenSet("replacement") });
+    } finally {
+      releaseRefresh();
+    }
+
+    await expect(refresh).rejects.toMatchObject({ code: "CONNECTION_CHANGED" });
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored).toMatchObject({ status: "READY_DISABLED", userId: "user-replacement" });
+    expect(
+      decryptJifengSecret(stored.accessTokenEncrypted!, encryptionKey),
+    ).toBe("access-replacement");
+    expect(
+      decryptJifengSecret(stored.refreshTokenEncrypted!, encryptionKey),
+    ).toBe("refresh-replacement");
+    expect(
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "JIFENG_TOKEN_REFRESH_FAILED")),
+    ).toEqual([]);
   });
 
   test("moves an undecryptable credential to ERROR while preserving ciphertext", async () => {
