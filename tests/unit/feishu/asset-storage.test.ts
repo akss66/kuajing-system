@@ -55,6 +55,12 @@ function stagedRunDirectory(manifest: TemporaryAssetManifest) {
   return join(assetRoot, dirname(manifest.temporaryKey));
 }
 
+function unsupportedLinkError() {
+  const error = new Error("hard links are not supported on this volume") as NodeJS.ErrnoException;
+  error.code = "ENOTSUP";
+  return error;
+}
+
 async function sumDirectoryBytes(directoryPath: string): Promise<number> {
   let total = 0;
   for (const entry of await readdir(directoryPath, { withFileTypes: true })) {
@@ -379,6 +385,155 @@ describe("catalog asset storage", () => {
     expect(await sumDirectoryBytes(stagedRunDirectory(first))).toBeLessThanOrEqual(maxRunBytes);
   });
 
+  test("keeps a live run lock across stale-ttl heartbeats", async () => {
+    let releaseFirstLock: (() => void) | null = null;
+    let firstLockHeld = false;
+    let secondFinished = false;
+    const sharedOptions = {
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 40,
+      lockTimeoutMs: 400,
+    } as const;
+    const storageHoldingLock = createCatalogAssetStorage({
+      ...sharedOptions,
+      onStageWriteReady() {
+        firstLockHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseFirstLock = resolve;
+        });
+      },
+    });
+    const storageWaitingForLock = createCatalogAssetStorage(sharedOptions);
+
+    const firstPromise = storageHoldingLock.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { b: 15 }),
+      contentType: "image/png",
+      originalFileName: "heartbeat-first.png",
+      runId: "heartbeat-run",
+      skuCode: "TZX-001",
+    });
+
+    while (!firstLockHeld) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const secondPromise = storageWaitingForLock
+      .stageCatalogAsset({
+        bytes: await createImageBuffer("png", { g: 25 }),
+        contentType: "image/png",
+        originalFileName: "heartbeat-second.png",
+        runId: "heartbeat-run",
+        skuCode: "TZX-002",
+      })
+      .then(() => {
+        secondFinished = true;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(secondFinished).toBe(false);
+
+    const finishFirstLock = releaseFirstLock as (() => void) | null;
+    if (finishFirstLock) {
+      finishFirstLock();
+    }
+
+    await firstPromise;
+    await secondPromise;
+  });
+
+  test("reclaims a stale run lock after heartbeat stops without letting the old owner delete the new lock", async () => {
+    let releaseFirstLock: (() => void) | null = null;
+    let releaseSecondLock: (() => void) | null = null;
+    let firstControl: { stopHeartbeat(): void } | null = null;
+    let firstLockHeld = false;
+    let secondLockHeld = false;
+    let thirdFinished = false;
+    const sharedOptions = {
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 40,
+      lockTimeoutMs: 500,
+    } as const;
+    const firstStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onRunLockAcquired(control) {
+        firstControl = control;
+      },
+      onStageWriteReady() {
+        firstLockHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseFirstLock = resolve;
+        });
+      },
+    });
+    const secondStorage = createCatalogAssetStorage({
+      ...sharedOptions,
+      onStageWriteReady() {
+        secondLockHeld = true;
+        return new Promise<void>((resolve) => {
+          releaseSecondLock = resolve;
+        });
+      },
+    });
+    const thirdStorage = createCatalogAssetStorage(sharedOptions);
+
+    const firstPromise = firstStorage.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { b: 55 }),
+      contentType: "image/png",
+      originalFileName: "stale-first.png",
+      runId: "stale-run",
+      skuCode: "TZX-001",
+    });
+
+    while (!firstLockHeld || !firstControl) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const staleOwnerControl = firstControl as { stopHeartbeat(): void } | null;
+    staleOwnerControl?.stopHeartbeat();
+    const secondPromise = secondStorage.stageCatalogAsset({
+      bytes: await createImageBuffer("png", { g: 65 }),
+      contentType: "image/png",
+      originalFileName: "stale-second.png",
+      runId: "stale-run",
+      skuCode: "TZX-002",
+    });
+
+    while (!secondLockHeld) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const thirdPromise = thirdStorage
+      .stageCatalogAsset({
+        bytes: await createImageBuffer("png", { r: 75 }),
+        contentType: "image/png",
+        originalFileName: "stale-third.png",
+        runId: "stale-run",
+        skuCode: "TZX-003",
+      })
+      .then(() => {
+        thirdFinished = true;
+      });
+
+    const finishFirstLock = releaseFirstLock as (() => void) | null;
+    if (finishFirstLock) {
+      finishFirstLock();
+    }
+    await firstPromise;
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(thirdFinished).toBe(false);
+
+    const finishSecondLock = releaseSecondLock as (() => void) | null;
+    if (finishSecondLock) {
+      finishSecondLock();
+    }
+
+    await secondPromise;
+    await thirdPromise;
+  });
+
   test("commits the same digest concurrently without leaving partial publishes behind", async () => {
     const bytes = await createImageBuffer("png");
     const first = await stageCatalogAsset({
@@ -441,6 +596,105 @@ describe("catalog asset storage", () => {
     }
     expect(await commitPromise).toBe(expectedStorageKey);
     expect(Buffer.compare(Buffer.from((await storage.openCatalogAsset(expectedStorageKey)).bytes), bytes)).toBe(0);
+  });
+
+  test("falls back to claim-and-rename publish when hard links are unsupported", async () => {
+    let releasePublish: (() => void) | null = null;
+    let publishPaused = false;
+    const storage = createCatalogAssetStorage({
+      onFinalPublishReady() {
+        publishPaused = true;
+        return new Promise<void>((resolve) => {
+          releasePublish = resolve;
+        });
+      },
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    });
+    const bytes = await createImageBuffer("png");
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "fallback.png",
+      runId: "fallback-run",
+      skuCode: "TZX-001",
+    });
+    const expectedStorageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.png`;
+
+    const commitPromise = storage.commitCatalogAsset(manifest);
+    while (!publishPaused) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    await expect(storage.openCatalogAsset(expectedStorageKey)).rejects.toThrow();
+    const finishPublish = releasePublish as (() => void) | null;
+    if (finishPublish) {
+      finishPublish();
+    }
+
+    expect(await commitPromise).toBe(expectedStorageKey);
+    const finalDirectory = join(assetRoot, dirname(expectedStorageKey));
+    expect((await readdir(finalDirectory)).filter((entry) => entry.includes(".claim"))).toEqual([]);
+    expect((await readdir(finalDirectory)).filter((entry) => entry.startsWith(".catalog-asset-"))).toEqual([]);
+  });
+
+  test("commits the same digest concurrently when hard links are unsupported", async () => {
+    const storage = createCatalogAssetStorage({
+      onStorageLink() {
+        throw unsupportedLinkError();
+      },
+    });
+    const bytes = await createImageBuffer("png");
+    const first = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "fallback-first.png",
+      runId: "fallback-commit-a",
+      skuCode: "TZX-001",
+    });
+    const second = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "fallback-second.png",
+      runId: "fallback-commit-b",
+      skuCode: "TZX-002",
+    });
+
+    const [firstKey, secondKey] = await Promise.all([
+      storage.commitCatalogAsset(first),
+      storage.commitCatalogAsset(second),
+    ]);
+
+    expect(firstKey).toBe(secondKey);
+    const finalDirectory = join(assetRoot, dirname(firstKey));
+    expect((await readdir(finalDirectory)).filter((entry) => entry.includes(".claim"))).toEqual([]);
+  });
+
+  test("syncs the final directory after publish and cleanup", async () => {
+    const syncEvents: Array<{ path: string; reason: string }> = [];
+    const storage = createCatalogAssetStorage({
+      onDirectorySync(path, reason) {
+        syncEvents.push({ path, reason });
+      },
+    });
+    const bytes = await createImageBuffer("png");
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "sync-directory.png",
+      runId: "sync-directory-run",
+      skuCode: "TZX-001",
+    });
+
+    const storageKey = await storage.commitCatalogAsset(manifest);
+    const finalDirectory = join(assetRoot, dirname(storageKey));
+    expect(syncEvents).toEqual(
+      expect.arrayContaining([
+        { path: finalDirectory, reason: "publish" },
+        { path: finalDirectory, reason: "cleanup" },
+      ]),
+    );
   });
 
   test("rejects symlink escapes for staging and final asset reads", async () => {
