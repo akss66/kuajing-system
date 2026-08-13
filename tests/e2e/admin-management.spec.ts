@@ -33,6 +33,11 @@ async function openAdminNavigationIfNeeded(page: Page) {
   if ((page.viewportSize()?.width ?? 1440) < 1024) {
     await page.getByRole("button", { name: "打开导航" }).click();
   }
+
+  const systemSection = page.getByRole("button", { name: "系统管理" });
+  if ((await systemSection.getAttribute("aria-expanded")) === "false") {
+    await systemSection.click();
+  }
 }
 
 async function signOutThroughShell(page: Page) {
@@ -40,28 +45,39 @@ async function signOutThroughShell(page: Page) {
   await page.getByRole("button", { name: "退出登录" }).click();
 }
 
-function accountCreationForm(page: Page) {
-  return page
+function accountCreationForm(scope: Locator) {
+  return scope
     .locator('form:has(input[name="displayName"]):has(input[name="password"]):not(:has(input[name="userId"]))')
     .first();
 }
 
-function accountUpdateForm(userId: string, page: Page) {
-  return page
+function accountUpdateForm(userId: string, scope: Locator) {
+  return scope
     .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="displayName"])`)
     .first();
 }
 
-function accountResetPasswordForm(userId: string, page: Page) {
-  return page
+function accountResetPasswordForm(userId: string, scope: Locator) {
+  return scope
     .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="newPassword"])`)
     .first();
 }
 
-function accountStatusForm(userId: string, page: Page) {
-  return page
+function accountStatusForm(userId: string, scope: Locator) {
+  return scope
     .locator(`form:visible:has(input[name="userId"][value="${userId}"]):has(input[name="status"])`)
     .first();
+}
+
+async function openAccountDrawer(page: Page, displayName: string) {
+  await page.getByRole("button", { name: `查看 ${displayName}` }).click();
+  await expect(page.getByRole("dialog", { name: displayName })).toBeVisible();
+  return page.getByRole("dialog");
+}
+
+async function closeAccountDrawer(dialog: Locator) {
+  await dialog.getByRole("button", { name: "关闭" }).click();
+  await expect(dialog).toHaveCount(0);
 }
 
 function customerProfileForm(customerId: string, page: Page) {
@@ -152,26 +168,55 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
 
   await expect(page).toHaveURL(/\/admin\/accounts$/);
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
-  await expect(page.getByText("只允许创建普通管理员")).toBeVisible();
+  await expect(page.getByRole("button", { name: "新建管理员" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /管理员账号 \d+/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /客户账号 \d+/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /已停用 \d+/ })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "搜索账号" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "角色筛选" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "状态筛选" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存资料" })).toHaveCount(0);
+  await expect(page.locator('form:has(input[name="userId"])')).toHaveCount(0);
+  await expect(page.locator('form:has(input[name="password"])')).toHaveCount(0);
   await expect(page.locator('input[name="role"],select[name="role"]')).toHaveCount(0);
-  await expect(
-    page.locator(
-      `form:has(input[name="userId"][value="${seededSuperAdmin.userId}"]):has(input[name="newPassword"])`,
-    ),
-  ).toHaveCount(0);
-  await expect(
-    page.locator(
-      `form:has(input[name="userId"][value="${seededSuperAdmin.userId}"]):has(input[name="status"])`,
-    ),
-  ).toHaveCount(0);
 
-  const createForm = accountCreationForm(page);
+  if ((page.viewportSize()?.width ?? 1440) < 1024) {
+    await expect(page.locator("[data-account-card]").first()).toBeVisible();
+    await expect(page.locator("[data-account-table]")).not.toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    ).toBeLessThanOrEqual(1);
+  } else {
+    await expect(page.locator("[data-account-table]")).toBeVisible();
+  }
+
+  const protectedDrawer = await openAccountDrawer(page, "本地演示管理员");
+  await expect(protectedDrawer.getByText("受保护")).toBeVisible();
+  await expect(protectedDrawer.locator('input[name="newPassword"]')).toHaveCount(0);
+  await expect(protectedDrawer.locator('input[name="status"]')).toHaveCount(0);
+  await closeAccountDrawer(protectedDrawer);
+
+  await page.getByRole("tab", { name: /客户账号 \d+/ }).click();
+  const customerDrawer = await openAccountDrawer(page, "渥太华演示客户");
+  await expect(customerDrawer.getByText("1 家店铺")).toBeVisible();
+  await expect(customerDrawer.getByRole("link", { name: "查看客户详情" })).toBeVisible();
+  await closeAccountDrawer(customerDrawer);
+  await page.getByRole("tab", { name: /管理员账号 \d+/ }).click();
+
+  await page.getByRole("button", { name: "新建管理员" }).click();
+  const createDrawer = page.getByRole("dialog", { name: "新建管理员" });
+  await expect(createDrawer).toBeVisible();
+  await expect(
+    createDrawer.getByText("只允许创建普通管理员，不提供创建或晋升超级管理员的入口。"),
+  ).toBeVisible();
+  const createForm = accountCreationForm(createDrawer);
   await createForm.locator('input[name="displayName"]').fill("E2E 值班管理员");
   await createForm.locator('input[name="email"]').fill(createdEmail);
   await createForm.locator('input[name="password"]').fill(initialPassword);
   await createForm.locator('input[name="reason"]').fill("E2E 创建普通管理员");
   await createForm.getByRole("button", { name: "创建管理员账号" }).click();
   await expect(page.getByText("普通管理员账号已创建。")).toBeVisible();
+  await closeAccountDrawer(createDrawer);
 
   await expect.poll(async () => {
     const [user] = await db
@@ -212,7 +257,8 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
     status: "ACTIVE",
   });
 
-  const updateForm = accountUpdateForm(createdUserId, page);
+  const accountDrawer = await openAccountDrawer(page, "E2E 值班管理员");
+  const updateForm = accountUpdateForm(createdUserId, accountDrawer);
   await updateForm.locator('input[name="displayName"]').fill("E2E 运营管理员");
   await updateForm.locator('input[name="email"]').fill(updatedEmail);
   await updateForm.locator('input[name="reason"]').fill("E2E 修改管理员资料");
@@ -233,11 +279,12 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
     name: "E2E 运营管理员",
   });
 
-  const resetForm = accountResetPasswordForm(createdUserId, page);
+  const resetForm = accountResetPasswordForm(createdUserId, accountDrawer);
   await resetForm.locator('input[name="newPassword"]').fill(resetPassword);
   await resetForm.locator('input[name="reason"]').fill("E2E 重置密码");
-  await resetForm.getByRole("button", { name: "重置密码" }).click();
+  await confirmDialog(resetForm, page, "重置密码");
   await expect(page.getByText("登录密码已重置。")).toBeVisible();
+  await closeAccountDrawer(accountDrawer);
 
   await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);
@@ -262,10 +309,12 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await page.goto("/admin/accounts");
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
 
-  const disableForm = accountStatusForm(createdUserId, page);
+  const disableDrawer = await openAccountDrawer(page, "E2E 运营管理员");
+  const disableForm = accountStatusForm(createdUserId, disableDrawer);
   await disableForm.locator('input[name="reason"]').fill("E2E 停用管理员");
   await confirmDialog(disableForm, page, "停用账号");
   await expect(page.getByText("账号已停用。")).toBeVisible();
+  await closeAccountDrawer(disableDrawer);
 
   await expect.poll(async () => {
     const [user] = await db.select({ banned: authUsers.banned }).from(authUsers).where(eq(authUsers.id, createdUserId));
@@ -287,10 +336,12 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   await page.goto("/admin/accounts");
   await expect(page.getByRole("heading", { name: "账号管理" })).toBeVisible();
 
-  const restoreForm = accountStatusForm(createdUserId, page);
+  const restoreDrawer = await openAccountDrawer(page, "E2E 运营管理员");
+  const restoreForm = accountStatusForm(createdUserId, restoreDrawer);
   await restoreForm.locator('input[name="reason"]').fill("E2E 恢复管理员");
   await confirmDialog(restoreForm, page, "恢复账号");
   await expect(page.getByText("账号已恢复。")).toBeVisible();
+  await closeAccountDrawer(restoreDrawer);
 
   await expect.poll(async () => {
     const [user] = await db.select({ banned: authUsers.banned }).from(authUsers).where(eq(authUsers.id, createdUserId));
