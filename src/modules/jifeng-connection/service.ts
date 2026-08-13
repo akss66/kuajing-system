@@ -21,6 +21,7 @@ import type {
   JifengTokenSet,
   JifengWarehouse,
 } from "@/integrations/jifeng/types";
+import { resolveAdminUserId } from "@/modules/identity/admin-profile";
 import type { SuperAdminPrincipal } from "@/modules/identity/principal";
 import { redactSensitiveText } from "@/shared/privacy";
 
@@ -156,6 +157,23 @@ function assertSuperAdmin(actor: SuperAdminPrincipal) {
   }
 }
 
+async function resolveActorAdminUserId(authUserId: string) {
+  try {
+    return await resolveAdminUserId(authUserId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "ADMIN_PROFILE_NOT_FOUND"
+    ) {
+      connectionError(
+        "ADMIN_PROFILE_NOT_FOUND",
+        "Active administrator profile is required",
+      );
+    }
+    throw error;
+  }
+}
+
 function requireReason(reason: string) {
   const normalized = reason.trim();
   if (!normalized) connectionError("REASON_REQUIRED", "必须填写操作原因");
@@ -272,20 +290,24 @@ function selectAutomaticResources(discovery: JifengResourceDiscovery) {
   };
 }
 
-async function reserveAuthorizationAttempt(actorId: string, now: Date) {
+async function reserveAuthorizationAttempt(input: {
+  actorId: string;
+  adminUserId: string;
+  now: Date;
+}) {
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(1466381946, hashtext(${actorId}))`,
+      sql`select pg_advisory_xact_lock(1466381946, hashtext(${input.adminUserId}))`,
     );
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(jifengAuthorizationAttempts)
       .where(
         and(
-          eq(jifengAuthorizationAttempts.adminUserId, actorId),
+          eq(jifengAuthorizationAttempts.adminUserId, input.adminUserId),
           gte(
             jifengAuthorizationAttempts.attemptedAt,
-            new Date(now.getTime() - AUTHORIZATION_WINDOW_MS),
+            new Date(input.now.getTime() - AUTHORIZATION_WINDOW_MS),
           ),
         ),
       );
@@ -298,15 +320,15 @@ async function reserveAuthorizationAttempt(actorId: string, now: Date) {
     const [attempt] = await tx
       .insert(jifengAuthorizationAttempts)
       .values({
-        adminUserId: actorId,
-        attemptedAt: now,
+        adminUserId: input.adminUserId,
+        attemptedAt: input.now,
         errorCategory: "IN_PROGRESS",
         result: "FAILED",
       })
       .returning({ id: jifengAuthorizationAttempts.id });
     await tx.insert(auditLogs).values({
       action: "JIFENG_OAUTH_STARTED",
-      actorId,
+      actorId: input.actorId,
       actorType: "ADMIN",
       afterJson: { status: "STARTED" },
       beforeJson: {},
@@ -349,8 +371,13 @@ export async function authorizeJifengConnection(input: {
   port?: JifengAuthorizationPort;
 }): Promise<JifengConnectionAdminView> {
   assertSuperAdmin(input.actor);
+  const adminUserId = await resolveActorAdminUserId(input.actor.userId);
   const now = input.now ?? new Date();
-  const attemptId = await reserveAuthorizationAttempt(input.actor.userId, now);
+  const attemptId = await reserveAuthorizationAttempt({
+    actorId: input.actor.userId,
+    adminUserId,
+    now,
+  });
   let developer: ReturnType<typeof readDeveloperConfiguration>;
   try {
     developer = readDeveloperConfiguration();
@@ -431,7 +458,7 @@ export async function authorizeJifengConnection(input: {
         accessTokenEncrypted,
         accessTokenExpiresAt: expiry(now, tokenSet.expireIn),
         authorizedAt: now,
-        authorizedByAdminUserId: input.actor.userId,
+        authorizedByAdminUserId: adminUserId,
         fulfillmentEnabledAt: null,
         fulfillmentEnabledByAdminUserId: null,
         lastDiagnosticAt: null,
@@ -1001,7 +1028,11 @@ export async function setJifengFulfillmentEnabled(
   assertSuperAdmin(input.actor);
   const reason = requireReason(input.reason);
   const now = input.now ?? new Date();
-  if (input.enabled) await refreshJifengConnection({ now });
+  let enabledByAdminUserId: string | null = null;
+  if (input.enabled) {
+    enabledByAdminUserId = await resolveActorAdminUserId(input.actor.userId);
+    await refreshJifengConnection({ now });
+  }
 
   await db.transaction(async (tx) => {
     const [row] = await tx
@@ -1014,6 +1045,12 @@ export async function setJifengFulfillmentEnabled(
 
     let targetStatus: JifengConnectionStatus;
     if (input.enabled) {
+      if (!enabledByAdminUserId) {
+        connectionError(
+          "ADMIN_PROFILE_NOT_FOUND",
+          "Active administrator profile is required",
+        );
+      }
       if (!row.warehouseCode || row.logisticsId === null) {
         connectionError("RESOURCE_SELECTION_REQUIRED", "必须先确认仓库和物流渠道");
       }
@@ -1024,7 +1061,7 @@ export async function setJifengFulfillmentEnabled(
         .update(jifengConnections)
         .set({
           fulfillmentEnabledAt: now,
-          fulfillmentEnabledByAdminUserId: input.actor.userId,
+          fulfillmentEnabledByAdminUserId: enabledByAdminUserId,
           status: "ENABLED",
         })
         .where(eq(jifengConnections.connectionKey, PRIMARY_KEY));

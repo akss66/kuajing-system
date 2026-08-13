@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import {
   adminUsers,
   auditLogs,
+  authUsers,
   jifengAuthorizationAttempts,
   jifengConnections,
 } from "@/db/schema";
@@ -41,15 +42,32 @@ const actor = (userId: string): SuperAdminPrincipal => ({
   userId,
 });
 
-async function createAdmin(label: string) {
+async function createAuthUser(label: string) {
+  const loginIdentifier = `jifeng-service-${label}-${crypto.randomUUID()}@example.test`;
+  const authUserId = `auth-${crypto.randomUUID()}`;
+  await db.insert(authUsers).values({
+    email: loginIdentifier,
+    id: authUserId,
+    name: `Jifeng auth ${label}`,
+    role: "super_admin",
+  });
+  return { authUserId, loginIdentifier };
+}
+
+async function createAdmin(
+  label: string,
+  status: "ACTIVE" | "DISABLED" = "ACTIVE",
+) {
+  const { authUserId, loginIdentifier } = await createAuthUser(label);
   const [admin] = await db
     .insert(adminUsers)
     .values({
       displayName: `Jifeng service ${label}`,
-      loginIdentifier: `jifeng-service-${label}-${crypto.randomUUID()}@example.test`,
+      loginIdentifier,
+      status,
     })
     .returning({ id: adminUsers.id });
-  return admin;
+  return { adminUserId: admin.id, authUserId };
 }
 
 function tokenSet(suffix = "one"): JifengTokenSet {
@@ -106,12 +124,12 @@ function authorizationPort(input?: {
 }
 
 async function authorizeFixture(
-  adminId: string,
+  authUserId: string,
   input?: Parameters<typeof authorizationPort>[0],
 ) {
   const fake = authorizationPort(input);
   const view = await authorizeJifengConnection({
-    actor: actor(adminId),
+    actor: actor(authUserId),
     email: "owner@example.test",
     now: startedAt,
     oneTimeToken: "one-time-token-secret",
@@ -134,14 +152,15 @@ describe("Jifeng connection lifecycle", () => {
         jifeng_authorization_attempts,
         jifeng_connections,
         audit_logs,
-        admin_users
+        admin_users,
+        auth_users
       restart identity cascade
     `));
   });
 
   test("rejects every mutation when the runtime actor is not SUPER_ADMIN", async () => {
     const admin = await createAdmin("role");
-    const invalidActor = { kind: "ADMIN", userId: admin.id } as never;
+    const invalidActor = { kind: "ADMIN", userId: admin.authUserId } as never;
 
     await expect(
       authorizeJifengConnection({
@@ -163,7 +182,7 @@ describe("Jifeng connection lifecycle", () => {
 
   test("encrypts OAuth tokens and auto-selects exactly one warehouse and Canada Post candidate", async () => {
     const admin = await createAdmin("authorize");
-    const { calls, view } = await authorizeFixture(admin.id);
+    const { calls, view } = await authorizeFixture(admin.authUserId);
 
     expect(calls).toEqual(["authorize", "exchange", "discover"]);
     expect(view).toMatchObject({
@@ -177,6 +196,7 @@ describe("Jifeng connection lifecycle", () => {
     );
 
     const [stored] = await db.select().from(jifengConnections);
+    expect(stored.authorizedByAdminUserId).toBe(admin.adminUserId);
     expect(stored.accessTokenEncrypted).not.toBeNull();
     expect(stored.refreshTokenEncrypted).not.toBeNull();
     expect(
@@ -186,18 +206,49 @@ describe("Jifeng connection lifecycle", () => {
       decryptJifengSecret(stored.refreshTokenEncrypted!, encryptionKey),
     ).toBe("refresh-one");
 
-    const databaseDump = JSON.stringify({
-      attempts: await db.select().from(jifengAuthorizationAttempts),
-      audits: await db.select().from(auditLogs),
-    });
+    const attempts = await db.select().from(jifengAuthorizationAttempts);
+    const audits = await db.select().from(auditLogs);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].adminUserId).toBe(admin.adminUserId);
+    expect(audits).toHaveLength(2);
+    expect(audits.every(({ actorId }) => actorId === admin.authUserId)).toBe(
+      true,
+    );
+    const databaseDump = JSON.stringify({ attempts, audits });
     expect(databaseDump).not.toMatch(
       /owner@example|one-time-token|authorization-code|access-one|refresh-one/i,
     );
   });
 
+  test.each(["missing", "inactive"] as const)(
+    "rejects a %s admin profile before authorization leaves the service boundary",
+    async (profileState) => {
+      const identity =
+        profileState === "missing"
+          ? await createAuthUser("missing-profile")
+          : await createAdmin("inactive-profile", "DISABLED");
+      const fake = authorizationPort();
+
+      const failure = await authorizeJifengConnection({
+        actor: actor(identity.authUserId),
+        email: "profile-owner@example.test",
+        oneTimeToken: "profile-token-secret",
+        port: fake.port,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ code: "ADMIN_PROFILE_NOT_FOUND" });
+      expect(JSON.stringify(failure)).not.toMatch(
+        /profile-owner|profile-token-secret/i,
+      );
+      expect(fake.calls).toEqual([]);
+      expect(await db.select().from(jifengAuthorizationAttempts)).toEqual([]);
+      expect(await db.select().from(auditLogs)).toEqual([]);
+    },
+  );
+
   test("requires explicit resource selection when discovery is ambiguous", async () => {
     const admin = await createAdmin("ambiguous");
-    const { view } = await authorizeFixture(admin.id, {
+    const { view } = await authorizeFixture(admin.authUserId, {
       discovery: {
         logistics: [logistics(7), logistics(8)],
         warehouses: [warehouse("CA-1"), warehouse("CA-2")],
@@ -217,7 +268,7 @@ describe("Jifeng connection lifecycle", () => {
 
     await expect(
       selectJifengResources({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         logistics: logistics(7),
         warehouse: warehouse("CA-1"),
       }),
@@ -230,14 +281,14 @@ describe("Jifeng connection lifecycle", () => {
 
   test("keeps the old encrypted connection unchanged when reauthorization fails", async () => {
     const admin = await createAdmin("reauthorize");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     const [before] = await db.select().from(jifengConnections);
     const failure = new Error(
       "provider leaked owner@example.test one-time-token-secret access-two",
     );
 
     await expect(
-      authorizeFixture(admin.id, { exchangeError: failure }),
+      authorizeFixture(admin.authUserId, { exchangeError: failure }),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
 
     const [after] = await db.select().from(jifengConnections);
@@ -263,7 +314,7 @@ describe("Jifeng connection lifecycle", () => {
 
     await expect(
       authorizeJifengConnection({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         email: "config-owner@example.test",
         oneTimeToken: "config-token-secret",
         port: authorizationPort().port,
@@ -294,7 +345,7 @@ describe("Jifeng connection lifecycle", () => {
 
     const attempts = Array.from({ length: 6 }, () =>
       authorizeJifengConnection({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         email: "limit@example.test",
         now: startedAt,
         oneTimeToken: "rate-limit-secret",
@@ -308,7 +359,7 @@ describe("Jifeng connection lifecycle", () => {
         .from(jifengAuthorizationAttempts)
         .where(
           and(
-            eq(jifengAuthorizationAttempts.adminUserId, admin.id),
+            eq(jifengAuthorizationAttempts.adminUserId, admin.adminUserId),
             gte(
               jifengAuthorizationAttempts.attemptedAt,
               new Date(startedAt.getTime() - 10 * 60_000),
@@ -332,12 +383,12 @@ describe("Jifeng connection lifecycle", () => {
 
   test("requires a diagnostic newer than resource changes before enablement", async () => {
     const admin = await createAdmin("enable");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     const reason = "business owner explicitly approved production fulfillment";
 
     await expect(
       setJifengFulfillmentEnabled({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         enabled: true,
         now: new Date(startedAt.getTime() + 1_000),
         reason,
@@ -345,12 +396,12 @@ describe("Jifeng connection lifecycle", () => {
     ).rejects.toMatchObject({ code: "DIAGNOSTIC_REQUIRED" });
 
     await runStoredJifengDiagnostic({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 2_000),
       port: { async run() { return { ok: true as const }; } },
     });
     await setJifengFulfillmentEnabled({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       enabled: true,
       now: new Date(startedAt.getTime() + 3_000),
       reason,
@@ -359,16 +410,23 @@ describe("Jifeng connection lifecycle", () => {
       fulfillmentEnabled: true,
       status: "ENABLED",
     });
+    const [enabled] = await db.select().from(jifengConnections);
+    expect(enabled.fulfillmentEnabledByAdminUserId).toBe(admin.adminUserId);
+    const [enableAudit] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_ENABLED"));
+    expect(enableAudit.actorId).toBe(admin.authUserId);
 
     await selectJifengResources({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       logistics: logistics(9),
       now: new Date(startedAt.getTime() + 4_000),
       warehouse: warehouse("CA-2"),
     });
     await expect(
       setJifengFulfillmentEnabled({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         enabled: true,
         now: new Date(startedAt.getTime() + 5_000),
         reason,
@@ -376,9 +434,60 @@ describe("Jifeng connection lifecycle", () => {
     ).rejects.toMatchObject({ code: "DIAGNOSTIC_REQUIRED" });
   });
 
+  test("rejects an inactive admin profile before enablement can refresh remotely", async () => {
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      requests.push(request.url ?? "");
+      response.writeHead(500, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ code: "must-not-run" }));
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("no port");
+      process.env.JIFENG_BASE_URL = `http://127.0.0.1:${address.port}`;
+      const admin = await createAdmin("inactive-enable");
+      await authorizeFixture(admin.authUserId, {
+        tokens: { ...tokenSet("inactive-enable"), expireIn: 120 },
+      });
+      await runStoredJifengDiagnostic({
+        actor: actor(admin.authUserId),
+        now: new Date(startedAt.getTime() + 1_000),
+        port: { async run() { return { ok: true as const }; } },
+      });
+      await db
+        .update(adminUsers)
+        .set({ status: "DISABLED" })
+        .where(eq(adminUsers.id, admin.adminUserId));
+      const auditCountBefore = (await db.select().from(auditLogs)).length;
+
+      await expect(
+        setJifengFulfillmentEnabled({
+          actor: actor(admin.authUserId),
+          enabled: true,
+          now: new Date(startedAt.getTime() + 121_000),
+          reason: "must reject inactive profile before refresh",
+        }),
+      ).rejects.toMatchObject({ code: "ADMIN_PROFILE_NOT_FOUND" });
+
+      expect(requests).toEqual([]);
+      expect(await db.select().from(auditLogs)).toHaveLength(auditCountBefore);
+      expect(await getJifengConnectionAdminView()).toMatchObject({
+        fulfillmentEnabled: false,
+        status: "READY_DISABLED",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   test("does not store a stale diagnostic when resources change during the remote probe", async () => {
     const admin = await createAdmin("diagnostic-race");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     let releaseProbe!: () => void;
     let probeStarted!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -388,7 +497,7 @@ describe("Jifeng connection lifecycle", () => {
       releaseProbe = resolve;
     });
     const diagnostic = runStoredJifengDiagnostic({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 1_000),
       port: {
         async run() {
@@ -400,7 +509,7 @@ describe("Jifeng connection lifecycle", () => {
     });
     await started;
     await selectJifengResources({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       logistics: logistics(9),
       now: new Date(startedAt.getTime() + 2_000),
       warehouse: warehouse("CA-2"),
@@ -417,7 +526,7 @@ describe("Jifeng connection lifecycle", () => {
 
   test("does not let an in-flight diagnostic mask a concurrent refresh failure", async () => {
     const admin = await createAdmin("diagnostic-refresh-race");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 120 },
     });
     let releaseProbe!: () => void;
@@ -429,7 +538,7 @@ describe("Jifeng connection lifecycle", () => {
       releaseProbe = resolve;
     });
     const diagnostic = runStoredJifengDiagnostic({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 1_000),
       port: {
         async run() {
@@ -458,7 +567,7 @@ describe("Jifeng connection lifecycle", () => {
 
   test("does not reapply discovery after a concurrent disconnect", async () => {
     const admin = await createAdmin("discovery-disconnect-race");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     let releaseDiscovery!: () => void;
     let discoveryStarted!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -468,7 +577,7 @@ describe("Jifeng connection lifecycle", () => {
       releaseDiscovery = resolve;
     });
     const discovery = discoverJifengResources({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 1_000),
       port: {
         async discoverResources() {
@@ -480,7 +589,7 @@ describe("Jifeng connection lifecycle", () => {
     });
     await started;
     await disconnectJifengConnection({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 2_000),
       reason: "disconnect while discovery is in flight",
     });
@@ -508,10 +617,10 @@ describe("Jifeng connection lifecycle", () => {
       if (!address || typeof address === "string") throw new Error("no port");
       process.env.JIFENG_BASE_URL = `http://127.0.0.1:${address.port}`;
       const admin = await createAdmin("default-diagnostic");
-      await authorizeFixture(admin.id);
+      await authorizeFixture(admin.authUserId);
 
       const result = await runStoredJifengDiagnostic({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         now: new Date(startedAt.getTime() + 1_000),
       });
 
@@ -526,24 +635,27 @@ describe("Jifeng connection lifecycle", () => {
 
   test("disconnect requires a reason, disables first, clears credentials and keeps audits redacted", async () => {
     const admin = await createAdmin("disconnect");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     await runStoredJifengDiagnostic({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 1_000),
       port: { async run() { return { ok: true as const }; } },
     });
     await setJifengFulfillmentEnabled({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       enabled: true,
       now: new Date(startedAt.getTime() + 2_000),
       reason: "approved before disconnect fixture",
     });
 
     await expect(
-      disconnectJifengConnection({ actor: actor(admin.id), reason: " " }),
+      disconnectJifengConnection({
+        actor: actor(admin.authUserId),
+        reason: " ",
+      }),
     ).rejects.toMatchObject({ code: "REASON_REQUIRED" });
     await disconnectJifengConnection({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 3_000),
       reason: "rotating ownership safely; credential access-one",
     });
@@ -571,12 +683,12 @@ describe("Jifeng connection lifecycle", () => {
 
   test("uses a fixed safe audit reason when disconnect cannot decrypt stored credentials", async () => {
     const admin = await createAdmin("disconnect-corrupted-key");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     process.env.JIFENG_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 74).toString("base64url");
     const rawReason = "bare access-one must not survive this operator reason";
 
     await disconnectJifengConnection({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       now: new Date(startedAt.getTime() + 1_000),
       reason: rawReason,
     });
@@ -591,7 +703,7 @@ describe("Jifeng connection lifecycle", () => {
 
   test("audits the exact persisted status when disabling a refresh-required connection", async () => {
     const admin = await createAdmin("disable-refresh-required");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
     await expect(
@@ -602,7 +714,7 @@ describe("Jifeng connection lifecycle", () => {
     ).rejects.toMatchObject({ code: "REFRESH_FAILED" });
 
     await setJifengFulfillmentEnabled({
-      actor: actor(admin.id),
+      actor: actor(admin.authUserId),
       enabled: false,
       now: new Date(startedAt.getTime() + 3_000),
       reason: "keep fulfillment blocked after refresh failure",
@@ -619,13 +731,13 @@ describe("Jifeng connection lifecycle", () => {
 
   test("returns role-appropriate redacted admin and public projections", async () => {
     const admin = await createAdmin("queries");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
 
     const adminView = await getJifengConnectionAdminView();
     const publicStatus = await getJifengConnectionPublicStatus();
     expect(adminView).toMatchObject({
       authorizedAt: startedAt,
-      authorizedByAdminUserId: admin.id,
+      authorizedByAdminUserId: admin.adminUserId,
       status: "READY_DISABLED",
     });
     expect(publicStatus).toEqual({
@@ -667,14 +779,15 @@ describe("Jifeng token refresh single-flight", () => {
         jifeng_authorization_attempts,
         jifeng_connections,
         audit_logs,
-        admin_users
+        admin_users,
+        auth_users
       restart identity cascade
     `));
   });
 
   test("allows only one remote refresh and makes the waiter reuse committed credentials", async () => {
     const admin = await createAdmin("refresh-single-flight");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
     let remoteCalls = 0;
@@ -706,7 +819,7 @@ describe("Jifeng token refresh single-flight", () => {
 
   test("marks refresh required without clearing encrypted token material", async () => {
     const admin = await createAdmin("refresh-failure");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
     const [before] = await db.select().from(jifengConnections);
@@ -729,7 +842,7 @@ describe("Jifeng token refresh single-flight", () => {
 
   test("does not let a failed refresh overwrite a concurrent disconnect", async () => {
     const admin = await createAdmin("refresh-disconnect-race");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
     let releaseRefresh!: () => void;
@@ -753,7 +866,7 @@ describe("Jifeng token refresh single-flight", () => {
     await started;
     try {
       await disconnectJifengConnection({
-        actor: actor(admin.id),
+        actor: actor(admin.authUserId),
         now: new Date(startedAt.getTime() + 3_000),
         reason: "disconnect wins over stale refresh failure",
       });
@@ -779,7 +892,7 @@ describe("Jifeng token refresh single-flight", () => {
 
   test("does not let a failed refresh overwrite concurrent reauthorization", async () => {
     const admin = await createAdmin("refresh-reauthorize-race");
-    await authorizeFixture(admin.id, {
+    await authorizeFixture(admin.authUserId, {
       tokens: { ...tokenSet("old"), expireIn: 1 },
     });
     let releaseRefresh!: () => void;
@@ -802,7 +915,9 @@ describe("Jifeng token refresh single-flight", () => {
     });
     await started;
     try {
-      await authorizeFixture(admin.id, { tokens: tokenSet("replacement") });
+      await authorizeFixture(admin.authUserId, {
+        tokens: tokenSet("replacement"),
+      });
     } finally {
       releaseRefresh();
     }
@@ -826,7 +941,7 @@ describe("Jifeng token refresh single-flight", () => {
 
   test("moves an undecryptable credential to ERROR while preserving ciphertext", async () => {
     const admin = await createAdmin("corrupted-credential");
-    await authorizeFixture(admin.id);
+    await authorizeFixture(admin.authUserId);
     const [before] = await db.select().from(jifengConnections);
     await db
       .update(jifengConnections)
