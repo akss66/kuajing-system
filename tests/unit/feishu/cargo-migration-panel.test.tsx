@@ -165,6 +165,42 @@ describe("CargoMigrationPanel", () => {
     ).toBeEnabled();
   });
 
+  it("prioritizes migration setup ahead of connection diagnostics for super admins before import", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          latestMigrationRun: null,
+          sourceSheetOptions: [
+            { index: 0, sheetId: "sheet-source-a", title: "货盘 A" },
+            { index: 1, sheetId: "sheet-source-b", title: "货盘 B" },
+          ],
+        })}
+      />,
+    );
+
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+    const summaryIndex = headings.indexOf("迁移状态总览");
+    const setupIndex = headings.indexOf("首批迁移控制");
+    const connectionIndex = headings.indexOf("连接与目标同步");
+    const detailIndex = headings.indexOf("只读预检明细");
+
+    expect(summaryIndex).toBeGreaterThanOrEqual(0);
+    expect(setupIndex).toBeGreaterThan(summaryIndex);
+    expect(connectionIndex).toBeGreaterThan(setupIndex);
+    expect(detailIndex).toBeGreaterThan(connectionIndex);
+
+    const setupPanel = screen
+      .getByRole("heading", { name: "首批迁移控制", level: 2 })
+      .closest("section");
+    expect(setupPanel).not.toBeNull();
+    expect(within(setupPanel!).getByRole("combobox", { name: "源工作表" })).toBeVisible();
+    expect(
+      within(setupPanel!).getByRole("button", {
+        name: "选择源工作表后开始只读预检",
+      }),
+    ).toBeVisible();
+  });
+
   it("uses retry wording only when a failed target sync exists", () => {
     render(
       <CargoMigrationPanel

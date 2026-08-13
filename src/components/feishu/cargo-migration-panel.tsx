@@ -63,7 +63,7 @@ function badgeToneClass(tone: "danger" | "default" | "success" | "warning") {
     case "warning":
       return "bg-warning/10 text-warning";
     default:
-      return "bg-muted text-foreground";
+      return "border border-border bg-background text-foreground";
   }
 }
 
@@ -163,6 +163,140 @@ export function CargoMigrationPanel({
         : requiresSourceSelection
           ? "选择源工作表后开始只读预检"
           : "开始只读预检";
+  const showMetricSummary = Boolean(latestMigrationRun);
+  const showExpandedSourceFields = Boolean(latestMigrationRun);
+  const sourceStatusSummary = (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field
+        label="预检状态"
+        value={latestMigrationRun?.statusLabel ?? "尚未执行只读预检"}
+      />
+      <Field
+        label="目标同步状态"
+        value={targetSyncState.statusLabel}
+      />
+      <Field
+        label="源工作表"
+        value={latestMigrationRun?.sourceSheetId ?? "等待选择"}
+      />
+      {showExpandedSourceFields ? (
+        <>
+          <Field
+            label="源修订号"
+            value={latestMigrationRun ? String(latestMigrationRun.sourceRevision) : "—"}
+          />
+          <Field
+            label="源工作表哈希"
+            value={latestMigrationRun?.hashSafeSourceSpreadsheet ?? "—"}
+          />
+          <Field
+            label="源快照摘要"
+            value={latestMigrationRun?.hashSafeSourceDigest ?? "—"}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+  const migrationSetupPanel =
+    actorKind === "SUPER_ADMIN" && !imported ? (
+      <WorkspacePanel>
+        <WorkspacePanelHeader
+          description="先完成只读预检，再用精确语句确认首批导入。"
+          title="首批迁移控制"
+        />
+        <div className="space-y-3 px-4 py-4 sm:px-5">
+          <form action={preflightFormAction} className="space-y-3">
+            {availableSourceSheets.length > 0 ? (
+              <label className="grid gap-2 text-sm font-medium text-foreground">
+                源工作表
+                <select
+                  className="min-h-11 rounded-[var(--radius-control)] border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18"
+                  name="sourceSheetId"
+                  onChange={(event) => setSelectedSheetId(event.target.value)}
+                  value={effectiveSelectedSheetId}
+                >
+                  <option disabled={hasMultipleSourceSheets} value="">
+                    {hasMultipleSourceSheets ? "请选择源工作表" : "使用唯一源工作表"}
+                  </option>
+                  {availableSourceSheets.map((sheet) => (
+                    <option key={sheet.sheetId} value={sheet.sheetId}>
+                      {sheet.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : effectiveSelectedSheetId ? (
+              <input
+                name="sourceSheetId"
+                type="hidden"
+                value={effectiveSelectedSheetId}
+              />
+            ) : null}
+
+            {sourceSheetDiscoveryStatus === "error" && sourceSheetDiscoveryMessage ? (
+              <div
+                className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-foreground"
+                role="status"
+              >
+                {sourceSheetDiscoveryMessage}
+              </div>
+            ) : null}
+
+            {preflightState.message ? (
+              <div
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-sm",
+                  actionStateMessageClass(preflightState.status),
+                )}
+                role={preflightState.status === "error" ? "alert" : "status"}
+              >
+                {preflightState.message}
+              </div>
+            ) : null}
+
+            <button
+              className="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-control)] border border-border px-4 text-sm font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
+              disabled={!canCreatePreflight || preflightPending}
+              type="submit"
+            >
+              {preflightSubmitLabel}
+            </button>
+          </form>
+
+          {latestMigrationRun ? (
+            <ConfirmedActionForm
+              action={confirmAction}
+              className="space-y-4"
+              confirmDescription="确认后会把预检通过的首批商品、SKU 和图片正式写入系统。"
+              confirmLabel={`确认导入 ${skuCount} 个SKU`}
+              confirmTitle={`确认导入 ${skuCount} 个SKU`}
+              disabled={!canConfirm || confirmationPhrase !== expectedPhrase}
+              onErrorFocus={() => confirmInputRef.current?.focus()}
+              submitLabel={`确认迁移 ${skuCount} 个SKU`}
+              variant="destructive"
+            >
+              <input name="runId" type="hidden" value={latestMigrationRun.id} />
+              <label className="grid gap-2 text-sm font-medium text-foreground">
+                确认语句
+                <input
+                  aria-label="确认语句"
+                  className="min-h-11 w-full min-w-0 rounded-[var(--radius-control)] border border-input bg-background px-3 py-2 text-sm shadow-[0_1px_1px_oklch(0.23_0.015_185/0.03)] outline-none transition-[border-color,box-shadow,background-color] duration-[var(--duration-fast)] placeholder:text-muted-foreground/90 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18"
+                  name="confirmationPhrase"
+                  onChange={(event) => setConfirmationPhrase(event.target.value)}
+                  placeholder={expectedPhrase}
+                  ref={confirmInputRef}
+                  type="text"
+                  value={confirmationPhrase}
+                />
+              </label>
+              <p className="text-sm text-muted-foreground">
+                请输入精确语句 {expectedPhrase}，系统才会开放最终确认。
+              </p>
+            </ConfirmedActionForm>
+          ) : null}
+        </div>
+      </WorkspacePanel>
+    ) : null;
 
   return (
     <div className="space-y-4">
@@ -171,58 +305,33 @@ export function CargoMigrationPanel({
           description="源业务货盘始终只读，迁移确认和目标同步是两条独立链路。"
           title="迁移状态总览"
         />
-        <div className="space-y-4 px-4 py-4 sm:px-5">
+        <div className="space-y-3 px-4 py-4 sm:px-5">
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
             原业务货盘受保护，系统不会写入。
           </div>
-          <MetricStrip
-            items={[
-              {
-                label: "商品数",
-                value: String(latestMigrationRun?.summary.productCount ?? 0),
-              },
-              {
-                label: "SKU 数",
-                value: String(skuCount),
-              },
-              {
-                label: "图片数",
-                value: String(latestMigrationRun?.summary.imageCount ?? 0),
-              },
-              {
-                label: "库存总量",
-                value: String(latestMigrationRun?.summary.totalQuantity ?? 0),
-              },
-            ]}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="预检状态"
-              value={latestMigrationRun?.statusLabel ?? "尚未执行只读预检"}
+          {showMetricSummary ? (
+            <MetricStrip
+              items={[
+                {
+                  label: "商品数",
+                  value: String(latestMigrationRun?.summary.productCount ?? 0),
+                },
+                {
+                  label: "SKU 数",
+                  value: String(skuCount),
+                },
+                {
+                  label: "图片数",
+                  value: String(latestMigrationRun?.summary.imageCount ?? 0),
+                },
+                {
+                  label: "库存总量",
+                  value: String(latestMigrationRun?.summary.totalQuantity ?? 0),
+                },
+              ]}
             />
-            <Field
-              label="目标同步状态"
-              value={targetSyncState.statusLabel}
-            />
-            <Field
-              label="源工作表"
-              value={latestMigrationRun?.sourceSheetId ?? "等待选择"}
-            />
-            <Field
-              label="源修订号"
-              value={
-                latestMigrationRun ? String(latestMigrationRun.sourceRevision) : "—"
-              }
-            />
-            <Field
-              label="源工作表哈希"
-              value={latestMigrationRun?.hashSafeSourceSpreadsheet ?? "—"}
-            />
-            <Field
-              label="源快照摘要"
-              value={latestMigrationRun?.hashSafeSourceDigest ?? "—"}
-            />
-          </div>
+          ) : null}
+          {sourceStatusSummary}
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               className={badgeToneClass(latestMigrationRun?.statusTone ?? "default")}
@@ -249,6 +358,8 @@ export function CargoMigrationPanel({
           </div>
         </div>
       </WorkspacePanel>
+
+      {migrationSetupPanel}
 
       <WorkspacePanel>
         <WorkspacePanelHeader
@@ -308,106 +419,6 @@ export function CargoMigrationPanel({
           </ActionForm>
         </div>
       </WorkspacePanel>
-
-      {actorKind === "SUPER_ADMIN" && !imported ? (
-        <WorkspacePanel>
-          <WorkspacePanelHeader
-            description="先完成只读预检，再用精确语句确认首批导入。"
-            title="首批迁移控制"
-          />
-          <div className="space-y-4 px-4 py-4 sm:px-5">
-            <form action={preflightFormAction} className="space-y-4">
-              {availableSourceSheets.length > 0 ? (
-                <label className="grid gap-2 text-sm font-medium text-foreground">
-                  源工作表
-                  <select
-                    className="min-h-11 rounded-[var(--radius-control)] border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18"
-                    name="sourceSheetId"
-                    onChange={(event) => setSelectedSheetId(event.target.value)}
-                    value={effectiveSelectedSheetId}
-                  >
-                    <option disabled={hasMultipleSourceSheets} value="">
-                      {hasMultipleSourceSheets ? "请选择源工作表" : "使用唯一源工作表"}
-                    </option>
-                    {availableSourceSheets.map((sheet) => (
-                      <option key={sheet.sheetId} value={sheet.sheetId}>
-                        {sheet.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : effectiveSelectedSheetId ? (
-                <input
-                  name="sourceSheetId"
-                  type="hidden"
-                  value={effectiveSelectedSheetId}
-                />
-              ) : null}
-
-              {sourceSheetDiscoveryStatus === "error" && sourceSheetDiscoveryMessage ? (
-                <div
-                  className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-foreground"
-                  role="status"
-                >
-                  {sourceSheetDiscoveryMessage}
-                </div>
-              ) : null}
-
-              {preflightState.message ? (
-                <div
-                  className={cn(
-                    "rounded-lg border px-3 py-2 text-sm",
-                    actionStateMessageClass(preflightState.status),
-                  )}
-                  role={preflightState.status === "error" ? "alert" : "status"}
-                >
-                  {preflightState.message}
-                </div>
-              ) : null}
-
-              <button
-                className="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-control)] border border-border px-4 text-sm font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
-                disabled={!canCreatePreflight || preflightPending}
-                type="submit"
-              >
-                {preflightSubmitLabel}
-              </button>
-            </form>
-
-            {latestMigrationRun ? (
-              <ConfirmedActionForm
-                action={confirmAction}
-                className="space-y-4"
-                confirmDescription="确认后会把预检通过的首批商品、SKU 和图片正式写入系统。"
-                confirmLabel={`确认导入 ${skuCount} 个SKU`}
-                confirmTitle={`确认导入 ${skuCount} 个SKU`}
-                disabled={!canConfirm || confirmationPhrase !== expectedPhrase}
-                onErrorFocus={() => confirmInputRef.current?.focus()}
-                submitLabel={`确认迁移 ${skuCount} 个SKU`}
-                variant="destructive"
-              >
-                <input name="runId" type="hidden" value={latestMigrationRun.id} />
-                <label className="grid gap-2 text-sm font-medium text-foreground">
-                  确认语句
-                  <input
-                    aria-label="确认语句"
-                    className="min-h-11 w-full min-w-0 rounded-[var(--radius-control)] border border-input bg-background px-3 py-2 text-sm shadow-[0_1px_1px_oklch(0.23_0.015_185/0.03)] outline-none transition-[border-color,box-shadow,background-color] duration-[var(--duration-fast)] placeholder:text-muted-foreground/90 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18"
-                    name="confirmationPhrase"
-                    onChange={(event) => setConfirmationPhrase(event.target.value)}
-                    placeholder={expectedPhrase}
-                    ref={confirmInputRef}
-                    type="text"
-                    value={confirmationPhrase}
-                  />
-                </label>
-                <p className="text-sm text-muted-foreground">
-                  请输入精确语句 {expectedPhrase}，系统才会开放最终确认。
-                </p>
-              </ConfirmedActionForm>
-            ) : null}
-          </div>
-        </WorkspacePanel>
-      ) : null}
 
       <WorkspacePanel>
         <WorkspacePanelHeader

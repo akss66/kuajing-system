@@ -343,6 +343,20 @@ async function openFeishuDrawer(page: import("@playwright/test").Page) {
   return drawer;
 }
 
+async function expectVisibleWithoutScroll(
+  element: import("@playwright/test").Locator,
+  page: import("@playwright/test").Page,
+) {
+  await expect(element).toBeVisible();
+  const box = await element.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+}
+
 async function createOrdinaryAdmin() {
   const credentials = await createManagedUser({ role: "admin" });
   const [user] = await db
@@ -397,22 +411,27 @@ test.describe.serial("Feishu cargo migration", () => {
     }
   });
 
-  test("super admin preflights 74 SKU, confirms import, and syncs only the target sheet", async ({ page }) => {
+  test("super admin preflights 74 SKU, confirms import, and syncs only the target sheet", async ({ page }, testInfo) => {
     await resetMigrationBaseline(assetDir);
     fakeServer = new FakeFeishuServer(await buildValidSourceDataset());
     await fakeServer.listen();
+
+    if (testInfo.project.name === "mobile-chromium") {
+      await page.setViewportSize({ width: 390, height: 844 });
+    } else {
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
 
     await loginThroughUi(page, seededSuperAdmin);
     await expect(page).toHaveURL(/\/admin/);
 
     let drawer = await openFeishuDrawer(page);
-    await expect(
-      drawer.getByRole("combobox", { name: "源工作表" }),
-    ).toBeVisible();
-    await expect(
-      drawer.getByRole("button", { name: "选择源工作表后开始只读预检" }),
-    ).toHaveJSProperty("disabled", true);
-    await drawer.getByRole("combobox", { name: "源工作表" }).selectOption("sheet-source-a");
+    const sourcePicker = drawer.getByRole("combobox", { name: "源工作表" });
+    const setupButton = drawer.getByRole("button", { name: "选择源工作表后开始只读预检" });
+    await expectVisibleWithoutScroll(sourcePicker, page);
+    await expectVisibleWithoutScroll(setupButton, page);
+    await expect(setupButton).toHaveJSProperty("disabled", true);
+    await sourcePicker.selectOption("sheet-source-a");
     await expect(
       drawer.getByRole("button", { name: "开始只读预检" }),
     ).toHaveJSProperty("disabled", false);
