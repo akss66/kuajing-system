@@ -48,7 +48,8 @@ CREATE TABLE "feishu_cargo_migration_runs" (
   !exists(@.weightGrams) || !( @.weightGrams.type() == "null" || ( @.weightGrams.type() == "number" && @.weightGrams >= 0 && @.weightGrams.floor() == @.weightGrams && @.weightGrams <= 9007199254740991 ) ) ||
   !exists(@.saleStatus) ||
   !(@.saleStatus == "SELLABLE" || @.saleStatus == "NOT_SELLABLE") ||
-  exists(@.fileToken)
+  exists(@.**.fileToken) ||
+  exists(@.**.imageFileToken)
 )'::jsonpath)),
 	CONSTRAINT "feishu_cargo_migration_runs_temporary_assets_json_valid" CHECK (jsonb_typeof("feishu_cargo_migration_runs"."temporary_assets_json") = 'array' and not jsonb_path_exists("feishu_cargo_migration_runs"."temporary_assets_json", '$[*] ? (
   @.type() != "object" ||

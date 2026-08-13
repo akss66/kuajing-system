@@ -69,6 +69,63 @@ async function insertMigrationRunUnchecked(input: {
   `);
 }
 
+async function refreshNormalizedRowsConstraint() {
+  await db.execute(sql.raw(`
+    alter table feishu_cargo_migration_runs
+    drop constraint if exists feishu_cargo_migration_runs_normalized_rows_json_valid;
+
+    alter table feishu_cargo_migration_runs
+    add constraint feishu_cargo_migration_runs_normalized_rows_json_valid
+    check (
+      jsonb_typeof(normalized_rows_json) = 'array'
+      and not jsonb_path_exists(
+        normalized_rows_json,
+        '$[*] ? (
+          @.type() != "object" ||
+          !exists(@.sourceRowNumber) || @.sourceRowNumber.type() != "number" || @.sourceRowNumber < 1 || @.sourceRowNumber.floor() != @.sourceRowNumber || @.sourceRowNumber > 9007199254740991 ||
+          !exists(@.defaultUnitPriceFen) || @.defaultUnitPriceFen.type() != "number" || @.defaultUnitPriceFen < 0 || @.defaultUnitPriceFen.floor() != @.defaultUnitPriceFen || @.defaultUnitPriceFen > 9007199254740991 ||
+          !exists(@.totalQuantity) || @.totalQuantity.type() != "number" || @.totalQuantity < 0 || @.totalQuantity.floor() != @.totalQuantity || @.totalQuantity > 9007199254740991 ||
+          !exists(@.weightGrams) || !(
+            @.weightGrams.type() == "null" ||
+            (
+              @.weightGrams.type() == "number" &&
+              @.weightGrams >= 0 &&
+              @.weightGrams.floor() == @.weightGrams &&
+              @.weightGrams <= 9007199254740991
+            )
+          ) ||
+          !exists(@.saleStatus) ||
+          !(@.saleStatus == "SELLABLE" || @.saleStatus == "NOT_SELLABLE") ||
+          exists(@.**.fileToken) ||
+          exists(@.**.imageFileToken)
+        )'::jsonpath
+      )
+    );
+  `));
+}
+
+function validNormalizedRow() {
+  return {
+    color: null,
+    combination: null,
+    defaultUnitPriceFen: 299,
+    imageContentSha256: "1".repeat(64),
+    imageTemporaryKey: "temp-assets/tzx-001.png",
+    inheritedFrom: {},
+    linkText: "Cargo Product",
+    productGroupKey: "group-1",
+    productName: "Cargo Product",
+    productUrl: "https://example.test/products/tzx-001",
+    saleStatus: "SELLABLE" as const,
+    skuCode: "TZX-001",
+    skuName: "Cargo SKU",
+    sourceRowNumber: 1,
+    specification: null,
+    totalQuantity: 1,
+    weightGrams: 1200,
+  };
+}
+
 describe("Feishu cargo migration schema", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
@@ -418,6 +475,70 @@ describe("Feishu cargo migration schema", () => {
       {
         code: "23514",
         constraintName: "feishu_cargo_migration_runs_issues_json_valid",
+      },
+    );
+  });
+
+  test("rejects normalized rows that persist file tokens under either legacy or ephemeral keys", async () => {
+    await refreshNormalizedRowsConstraint();
+
+    const [admin] = await db
+      .insert(adminUsers)
+      .values({
+        displayName: "Forbidden Token Admin",
+        loginIdentifier: "forbidden-token-admin@test.local",
+      })
+      .returning();
+
+    const baseValues = {
+      createdByAdminUserId: admin.id,
+      sourceDigest: "c".repeat(64),
+      sourceRevision: 99,
+      sourceSheetId: "cargo-sheet",
+      sourceSpreadsheetHash: "d".repeat(64),
+      status: "PREFLIGHT_READY" as const,
+      summaryJson: {
+        imageCount: 1,
+        productCount: 1,
+        skuCount: 1,
+        totalQuantity: 1,
+      },
+      temporaryAssetsJson: [],
+    };
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [],
+        normalizedRowsJson: [
+          {
+            ...validNormalizedRow(),
+            imageFileToken: "should-not-persist",
+          },
+        ],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_normalized_rows_json_valid",
+      },
+    );
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [],
+        normalizedRowsJson: [
+          {
+            ...validNormalizedRow(),
+            nested: {
+              fileToken: "still-forbidden",
+            },
+          },
+        ],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_normalized_rows_json_valid",
       },
     );
   });

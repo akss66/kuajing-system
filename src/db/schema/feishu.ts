@@ -81,7 +81,8 @@ const normalizedRowsJsonInvalidPath = `$[*] ? (
   ${invalidRequiredNonNegativeSafeIntegerOrNull("@.weightGrams")} ||
   !exists(@.saleStatus) ||
   !(@.saleStatus == "SELLABLE" || @.saleStatus == "NOT_SELLABLE") ||
-  exists(@.fileToken)
+  exists(@.**.fileToken) ||
+  exists(@.**.imageFileToken)
 )`;
 
 const temporaryAssetsJsonInvalidPath = `$[*] ? (

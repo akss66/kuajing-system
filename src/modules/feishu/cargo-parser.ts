@@ -36,6 +36,11 @@ type LinkValue = {
   url: string;
 };
 
+type LinkResolution =
+  | { kind: "invalid" }
+  | { kind: "missing" }
+  | { kind: "valid"; value: LinkValue };
+
 type GroupFieldState = {
   rowNumber: number;
   value: string | number | null;
@@ -79,10 +84,10 @@ function extractDisplayText(value: unknown): string {
   return "";
 }
 
-function collectLinks(value: unknown): string[] {
+function collectLinkTargets(value: unknown): string[] {
   if (value === null || value === undefined) return [];
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectLinks(entry));
+    return value.flatMap((entry) => collectLinkTargets(entry));
   }
   if (typeof value === "object") {
     const nested = value as { children?: unknown; link?: unknown };
@@ -91,12 +96,11 @@ function collectLinks(value: unknown): string[] {
         ? [nested.link.trim()]
         : [];
     if ("children" in nested) {
-      return [...links, ...collectLinks(nested.children)];
+      return [...links, ...collectLinkTargets(nested.children)];
     }
     return links;
   }
-  const text = extractDisplayText(value);
-  return isAbsoluteHttpUrl(text) ? [text] : [];
+  return [];
 }
 
 function collectFileTokens(value: unknown): string[] {
@@ -119,7 +123,15 @@ function collectFileTokens(value: unknown): string[] {
 }
 
 function isAbsoluteHttpUrl(value: string) {
-  return /^https?:\/\//i.test(value);
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function buildIssue(input: {
@@ -202,16 +214,22 @@ function parseSaleStatus(value: unknown) {
   return { kind: "invalid" } as const;
 }
 
-function resolveLink(value: unknown): LinkValue | null {
+function resolveLink(value: unknown): LinkResolution {
   const text = extractDisplayText(value);
-  const urls = [...new Set(collectLinks(value))];
+  const urls = [...new Set(collectLinkTargets(value))];
   if (urls.length === 1) {
-    return { text: text || urls[0], url: urls[0] };
+    if (isAbsoluteHttpUrl(urls[0])) {
+      return { kind: "valid", value: { text: text || urls[0], url: urls[0] } };
+    }
+    return { kind: "invalid" };
   }
-  if (urls.length === 0 && isAbsoluteHttpUrl(text)) {
-    return { text, url: text };
+  if (urls.length > 1) {
+    return { kind: "invalid" };
   }
-  return null;
+  if (isAbsoluteHttpUrl(text)) {
+    return { kind: "valid", value: { text, url: text } };
+  }
+  return { kind: "missing" };
 }
 
 function resolveImageToken(value: unknown) {
@@ -270,6 +288,64 @@ function buildSkuName(input: {
   return parts.length > 0 ? parts.join(" / ") : input.productName;
 }
 
+function collectDuplicateSkuIssues(input: {
+  headerMap: HeaderMap;
+  headerRowIndex: number;
+  values: unknown[][];
+}) {
+  const occurrences = new Map<string, number[]>();
+
+  for (let offset = input.headerRowIndex + 1; offset < input.values.length; offset += 1) {
+    const row = input.values[offset] ?? [];
+    if (isBlankRow(row)) continue;
+
+    const skuCode = extractDisplayText(row[input.headerMap.sku]);
+    if (skuCode.length === 0) continue;
+
+    const rows = occurrences.get(skuCode) ?? [];
+    rows.push(offset + 1);
+    occurrences.set(skuCode, rows);
+  }
+
+  const issues: MigrationIssue[] = [];
+  for (const [skuCode, rowNumbers] of occurrences) {
+    for (const sourceRowNumber of rowNumbers.slice(1)) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_DUPLICATE_SKU",
+          message: `SKU 重复：${skuCode}`,
+          sourceRowNumber,
+        }),
+      );
+    }
+  }
+
+  return issues;
+}
+
+function buildSummary(rows: ParsedCargoRow[]) {
+  let totalQuantity = 0;
+  let overflowed = false;
+
+  for (const row of rows) {
+    if (row.totalQuantity > MAX_SAFE_INTEGER - totalQuantity) {
+      overflowed = true;
+      break;
+    }
+    totalQuantity += row.totalQuantity;
+  }
+
+  return {
+    overflowed,
+    summary: {
+      imageCount: rows.length,
+      productCount: new Set(rows.map((row) => row.productGroupKey)).size,
+      skuCount: rows.length,
+      totalQuantity: overflowed ? 0 : totalQuantity,
+    },
+  };
+}
+
 export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
   const headerRowIndex = findHeaderRow(values);
   if (headerRowIndex === -1) {
@@ -294,12 +370,27 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
 
   const headerMap = createHeaderMap(values[headerRowIndex] ?? []);
   const rows: ParsedCargoRow[] = [];
-  const issues: MigrationIssue[] = [];
+  const issues: MigrationIssue[] = collectDuplicateSkuIssues({
+    headerMap,
+    headerRowIndex,
+    values,
+  });
   const context = createEmptyContext();
 
   for (let offset = headerRowIndex + 1; offset < values.length; offset += 1) {
     const row = values[offset] ?? [];
-    if (isBlankRow(row)) continue;
+    if (isBlankRow(row)) {
+      const reset = createEmptyContext();
+      context.combination = reset.combination;
+      context.image = reset.image;
+      context.price = reset.price;
+      context.productGroupKey = reset.productGroupKey;
+      context.productName = reset.productName;
+      context.productUrl = reset.productUrl;
+      context.specification = reset.specification;
+      context.weight = reset.weight;
+      continue;
+    }
 
     const sourceRowNumber = offset + 1;
     const inheritedFrom: Partial<Record<CargoInheritedField, number>> = {};
@@ -411,14 +502,24 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
 
     const explicitLink = resolveLink(row[headerMap.link]);
     const resolvedLink =
-      explicitLink ||
+      explicitLink.kind === "valid"
+        ? explicitLink.value
+        :
       (context.productUrl
         ? { text: context.productUrl.text, url: context.productUrl.url }
         : null);
-    if (explicitLink) {
-      context.productUrl = { ...explicitLink, rowNumber: sourceRowNumber };
+    if (explicitLink.kind === "valid") {
+      context.productUrl = { ...explicitLink.value, rowNumber: sourceRowNumber };
     } else if (context.productUrl) {
       inheritedFrom.productUrl = context.productUrl.rowNumber;
+    } else if (explicitLink.kind === "invalid") {
+      issues.push({
+        code: "CARGO_INVALID_PRODUCT_URL",
+        message: "链接文字必须包含合法的绝对 http/https URL",
+        severity: "BLOCKING",
+        sourceRowNumber,
+      });
+      continue;
     } else {
       issues.push(
         buildIssue({
@@ -524,30 +625,19 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     });
   }
 
-  const seenSkus = new Map<string, number>();
-  for (const row of rows) {
-    if (seenSkus.has(row.skuCode)) {
-      issues.push(
-        buildIssue({
-          code: "CARGO_DUPLICATE_SKU",
-          message: `SKU \u91cd\u590d\uff1a${row.skuCode}`,
-          sourceRowNumber: row.sourceRowNumber,
-        }),
-      );
-      continue;
-    }
-    seenSkus.set(row.skuCode, row.sourceRowNumber);
+  const { overflowed, summary } = buildSummary(rows);
+  if (overflowed) {
+    issues.push({
+      code: "CARGO_SUMMARY_TOTAL_QUANTITY_OVERFLOW",
+      message: "汇总总库存超过安全整数上限",
+      severity: "BLOCKING",
+    });
   }
 
   return {
     headerRowNumber: headerRowIndex + 1,
     issues,
     rows,
-    summary: {
-      imageCount: rows.length,
-      productCount: new Set(rows.map((row) => row.productGroupKey)).size,
-      skuCount: rows.length,
-      totalQuantity: rows.reduce((total, row) => total + row.totalQuantity, 0),
-    },
+    summary,
   };
 }
