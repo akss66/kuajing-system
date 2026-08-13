@@ -1,8 +1,14 @@
 import { desc, eq } from "drizzle-orm";
-import { CheckCircle2, CircleDashed, ExternalLink, PlugZap, RefreshCcw } from "lucide-react";
+import {
+  CheckCircle2,
+  CircleDashed,
+  ExternalLink,
+  PlugZap,
+  RefreshCcw,
+} from "lucide-react";
 import Link from "next/link";
 
-import { ActionForm } from "@/components/forms/action-form";
+import { CargoMigrationPanel } from "@/components/feishu/cargo-migration-panel";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { EntityDrawer } from "@/components/management/entity-drawer";
@@ -11,15 +17,25 @@ import { Button } from "@/components/ui/button";
 import { db } from "@/db/client";
 import { integrationOutbox } from "@/db/schema";
 import {
-  manualFeishuCargoSyncAction,
+  confirmCargoMigrationAction,
+  createCargoPreflightAction,
+  retryFeishuCargoSyncAction,
   testFeishuConnectionAction,
 } from "@/modules/feishu/actions";
+import {
+  getLatestCargoMigrationRun,
+  getLatestCargoTargetSyncState,
+} from "@/modules/feishu/queries";
+import { canWriteFeishuCargo, readFeishuConfig } from "@/integrations/feishu/config";
+import { requireAdmin } from "@/modules/identity/guards";
 
 function configured(names: string[]) {
   return names.every((name) => Boolean(process.env[name]));
 }
 
-function integrationTargetLabel(target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT") {
+function integrationTargetLabel(
+  target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT",
+) {
   if (target === "JIFENG") return "极风仓储";
   if (target === "FEISHU_SHEET") return "飞书货盘";
   return "飞书机器人";
@@ -35,10 +51,12 @@ function integrationEventLabel(eventType: string) {
 function safeErrorLabel(errorCode: string | null) {
   if (errorCode === "REMOTE_TIMEOUT") return "第三方响应超时";
   if (errorCode === "AUTH_FAILED") return "授权校验失败";
-  return "任务执行未完成，请按原业务路径重试";
+  return "任务执行未完成，请按原业务路径重试。";
 }
 
 export default async function IntegrationsPage() {
+  const principal = await requireAdmin();
+
   const jifengConfigured = configured([
     "JIFENG_ACCESS_TOKEN",
     "JIFENG_BASE_URL",
@@ -54,18 +72,25 @@ export default async function IntegrationsPage() {
     "FEISHU_CARGO_SOURCE_WIKI_TOKEN",
   ]);
 
-  const recent = await db
-    .select({
-      eventType: integrationOutbox.eventType,
-      lastErrorCode: integrationOutbox.lastErrorCode,
-      status: integrationOutbox.status,
-      target: integrationOutbox.target,
-      updatedAt: integrationOutbox.updatedAt,
-    })
-    .from(integrationOutbox)
-    .where(eq(integrationOutbox.status, "FAILED"))
-    .orderBy(desc(integrationOutbox.updatedAt))
-    .limit(10);
+  const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
+  const targetConfigured = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
+  const [recent, latestMigrationRun, targetSyncState] = await Promise.all([
+    db
+      .select({
+        eventType: integrationOutbox.eventType,
+        lastErrorCode: integrationOutbox.lastErrorCode,
+        status: integrationOutbox.status,
+        target: integrationOutbox.target,
+        updatedAt: integrationOutbox.updatedAt,
+      })
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.status, "FAILED"))
+      .orderBy(desc(integrationOutbox.updatedAt))
+      .limit(10),
+    getLatestCargoMigrationRun(),
+    getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
+  ]);
+
   const jifengDegraded = recent.some((item) => item.target === "JIFENG");
   const feishuDegraded = recent.some((item) => item.target !== "JIFENG");
   const integrationStatus = (isConfigured: boolean, degraded: boolean) =>
@@ -85,17 +110,20 @@ export default async function IntegrationsPage() {
           { href: "/admin/system/health", label: "系统健康" },
           { label: "外部集成" },
         ]}
-        description="只显示配置状态和脱敏错误摘要，不会回显任何密钥、令牌或第三方账号凭证。"
+        description="仅展示配置状态和脱敏错误摘要，不回显任何密钥、令牌或第三方账号凭据。"
         title="外部集成"
       />
 
       <section aria-labelledby="integration-status-title" className="space-y-4">
         <div className="border-b border-border pb-3">
-          <h2 className="text-base font-semibold text-foreground" id="integration-status-title">
+          <h2
+            className="text-base font-semibold text-foreground"
+            id="integration-status-title"
+          >
             集成运行状态
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            配置完整性与最近任务结果分开表达，不回显密钥或授权内容。
+            配置完整性与最近任务结果分开展示，不回显密钥或授权内容。
           </p>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -163,7 +191,8 @@ export default async function IntegrationsPage() {
             </div>
             <div className="mt-5">
               <EntityDrawer
-                description="测试连接只读校验源货盘；手动同步只会向目标测试表写入，操作结果沿用现有审计与后台队列。"
+                description="连接验证只做只读校验；目标测试表重试与首批迁移确认分离执行。"
+                size="lg"
                 title="管理飞书集成"
                 trigger={
                   <Button size="sm" variant="outline">
@@ -171,26 +200,20 @@ export default async function IntegrationsPage() {
                   </Button>
                 }
               >
-                <div className="grid gap-5">
-                  <ActionForm
-                    action={testFeishuConnectionAction}
-                    className="space-y-2"
-                    submitLabel="测试飞书连接"
-                  >
-                    <p className="text-sm text-muted">
-                      预检源 wiki 与解析出的源电子表格访问权限，源业务表始终只读。
-                    </p>
-                  </ActionForm>
-                  <ActionForm
-                    action={manualFeishuCargoSyncAction}
-                    className="space-y-2"
-                    submitLabel="重新同步货盘"
-                  >
-                    <p className="text-sm text-muted">
-                      仅当目标测试表完整配置后才允许手动写入，不会回写源业务表。
-                    </p>
-                  </ActionForm>
-                </div>
+                <CargoMigrationPanel
+                  actorKind={principal.kind}
+                  confirmCargoMigrationAction={confirmCargoMigrationAction}
+                  createCargoPreflightAction={createCargoPreflightAction}
+                  latestMigrationRun={latestMigrationRun}
+                  readOnlyConnectionMessage="源货盘和目标测试表的连接验证全程只读，系统不会向原业务表写入。"
+                  retryFeishuCargoSyncAction={retryFeishuCargoSyncAction}
+                  selectedSourceSheetId={feishuConfig?.sourceSheetId ?? null}
+                  sourceConfigured={feishuConfigured}
+                  sourceSheetOptions={[]}
+                  targetConfigured={targetConfigured}
+                  targetSyncState={targetSyncState}
+                  testFeishuConnectionAction={testFeishuConnectionAction}
+                />
               </EntityDrawer>
             </div>
           </article>
@@ -200,14 +223,19 @@ export default async function IntegrationsPage() {
       <section aria-labelledby="failed-integration-title" className="space-y-3">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
           <div>
-            <h2 className="text-base font-semibold text-foreground" id="failed-integration-title">
+            <h2
+              className="text-base font-semibold text-foreground"
+              id="failed-integration-title"
+            >
               最近失败任务
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               错误已转为安全运营摘要；请进入原订单或同步路径继续处理。
             </p>
           </div>
-          <span className="text-sm tabular-nums text-muted-foreground">{recent.length} 项</span>
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {recent.length} 项
+          </span>
         </div>
         {recent.length ? (
           <ul className="divide-y divide-border border-b border-border">
@@ -216,7 +244,9 @@ export default async function IntegrationsPage() {
                 className="grid gap-2 py-4 text-sm sm:grid-cols-[0.9fr_1.2fr_auto_1.4fr] sm:items-center"
                 key={`${item.eventType}-${index}`}
               >
-                <span className="font-medium text-ink">{integrationTargetLabel(item.target)}</span>
+                <span className="font-medium text-ink">
+                  {integrationTargetLabel(item.target)}
+                </span>
                 <span>{integrationEventLabel(item.eventType)}</span>
                 <Badge className="w-fit bg-danger/10 text-danger" variant="secondary">
                   执行失败

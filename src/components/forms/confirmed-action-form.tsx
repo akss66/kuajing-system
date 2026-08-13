@@ -29,6 +29,7 @@ export function ConfirmedActionForm({
   confirmDescription,
   confirmLabel,
   confirmTitle,
+  disabled = false,
   onErrorFocus,
   submitLabel,
   variant = "destructive",
@@ -39,6 +40,7 @@ export function ConfirmedActionForm({
   confirmDescription: string;
   confirmLabel: string;
   confirmTitle: string;
+  disabled?: boolean;
   onErrorFocus?: () => void;
   submitLabel: string;
   variant?: ComponentProps<typeof Button>["variant"];
@@ -88,7 +90,7 @@ export function ConfirmedActionForm({
         <AlertDialogTrigger asChild>
           <Button
             className="min-h-11 px-4"
-            disabled={pending}
+            disabled={disabled || pending}
             type="button"
             variant={variant}
           >
@@ -106,7 +108,12 @@ export function ConfirmedActionForm({
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-11">返回检查</AlertDialogCancel>
             <AlertDialogAction
-              className="min-h-11"
+              className={cn(
+                "min-h-11",
+                variant === "destructive"
+                  ? "!bg-[rgb(123_20_25)] !text-white hover:!bg-[rgb(102_17_21)]"
+                  : undefined,
+              )}
               form={formId}
               type="submit"
               variant={variant}

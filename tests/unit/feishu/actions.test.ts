@@ -1,0 +1,258 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const cacheMocks = vi.hoisted(() => ({
+  revalidatePath: vi.fn(),
+}));
+
+const dbMocks = vi.hoisted(() => ({
+  transaction: vi.fn(async (callback: (tx: object) => Promise<unknown>) =>
+    callback({}),
+  ),
+}));
+
+const guardMocks = vi.hoisted(() => ({
+  requireAdmin: vi.fn(),
+  requireSuperAdmin: vi.fn(),
+}));
+
+const configMocks = vi.hoisted(() => ({
+  canWriteFeishuCargo: vi.fn(),
+  readFeishuApiBaseUrl: vi.fn(),
+  readFeishuConfig: vi.fn(),
+}));
+
+const serviceMocks = vi.hoisted(() => ({
+  confirmCargoMigration: vi.fn(),
+  createCargoPreflight: vi.fn(),
+  createFeishuCargoMigrationService: vi.fn(),
+}));
+
+const outboxMocks = vi.hoisted(() => ({
+  enqueueCargoSyncEvent: vi.fn(),
+}));
+
+const clientMocks = vi.hoisted(() => ({
+  createFilter: vi.fn(),
+  downloadMedia: vi.fn(),
+  listSheets: vi.fn(),
+  readRangeDetails: vi.fn(),
+  resolveWikiSpreadsheet: vi.fn(),
+  setRangeStyle: vi.fn(),
+  updateDimension: vi.fn(),
+  updateSheetProperties: vi.fn(),
+  writeImage: vi.fn(),
+  writeRange: vi.fn(),
+}));
+
+const constructorMocks = vi.hoisted(() => ({
+  FeishuClient: vi.fn(function FeishuClient() {
+    return clientMocks;
+  }),
+}));
+
+vi.mock("next/cache", () => cacheMocks);
+vi.mock("@/db/client", () => ({
+  db: dbMocks,
+}));
+vi.mock("@/modules/identity/guards", () => guardMocks);
+vi.mock("@/integrations/feishu/config", () => configMocks);
+vi.mock("@/modules/feishu/migration-service", () => ({
+  createFeishuCargoMigrationService:
+    serviceMocks.createFeishuCargoMigrationService,
+}));
+vi.mock("@/modules/feishu/outbox", () => ({
+  enqueueCargoSyncEvent: outboxMocks.enqueueCargoSyncEvent,
+}));
+vi.mock("@/integrations/feishu/client", () => constructorMocks);
+
+import {
+  confirmCargoMigrationAction,
+  createCargoPreflightAction,
+  retryFeishuCargoSyncAction,
+  testFeishuConnectionAction,
+} from "@/modules/feishu/actions";
+
+describe("feishu admin actions", () => {
+  beforeEach(() => {
+    cacheMocks.revalidatePath.mockReset();
+    dbMocks.transaction.mockClear();
+    guardMocks.requireAdmin.mockReset();
+    guardMocks.requireSuperAdmin.mockReset();
+    configMocks.canWriteFeishuCargo.mockReset();
+    configMocks.readFeishuApiBaseUrl.mockReset();
+    configMocks.readFeishuConfig.mockReset();
+    serviceMocks.confirmCargoMigration.mockReset();
+    serviceMocks.createCargoPreflight.mockReset();
+    serviceMocks.createFeishuCargoMigrationService.mockReset();
+    outboxMocks.enqueueCargoSyncEvent.mockReset();
+    constructorMocks.FeishuClient.mockClear();
+    Object.values(clientMocks).forEach((mock) => mock.mockReset());
+
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "ADMIN",
+      userId: "admin-user-1",
+    });
+    guardMocks.requireSuperAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-user-1",
+    });
+    configMocks.canWriteFeishuCargo.mockReturnValue(true);
+    configMocks.readFeishuApiBaseUrl.mockReturnValue("http://127.0.0.1:4010");
+    configMocks.readFeishuConfig.mockReturnValue({
+      appId: "app-id",
+      appSecret: "app-secret",
+      sourceSheetId: undefined,
+      sourceWikiToken: "wiki-source-token",
+      targetSheetId: "target-sheet-id",
+      targetSpreadsheetToken: "target-spreadsheet-token",
+    });
+    serviceMocks.createFeishuCargoMigrationService.mockReturnValue({
+      confirmCargoMigration: serviceMocks.confirmCargoMigration,
+      createCargoPreflight: serviceMocks.createCargoPreflight,
+    });
+    clientMocks.resolveWikiSpreadsheet.mockResolvedValue({
+      spreadsheetToken: "source-spreadsheet-token",
+    });
+    clientMocks.listSheets.mockResolvedValue([
+      { index: 0, sheetId: "sheet-1", title: "工作表一" },
+    ]);
+  });
+
+  it("returns source-sheet options when the first preflight requires an explicit selection", async () => {
+    serviceMocks.createCargoPreflight.mockResolvedValue({
+      sheetOptions: [
+        { index: 0, sheetId: "sheet-a", title: "货盘 A" },
+        { index: 1, sheetId: "sheet-b", title: "货盘 B" },
+      ],
+      status: "SOURCE_SHEET_SELECTION_REQUIRED",
+    });
+
+    const result = await createCargoPreflightAction({ status: "idle" }, new FormData());
+
+    expect(result).toMatchObject({
+      availableSourceSheets: [
+        { index: 0, sheetId: "sheet-a", title: "货盘 A" },
+        { index: 1, sheetId: "sheet-b", title: "货盘 B" },
+      ],
+      message: "源货盘包含多个工作表，请先选择本次预检的源工作表。",
+      status: "error",
+    });
+    expect(serviceMocks.createCargoPreflight).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { kind: "SUPER_ADMIN", userId: "super-admin-user-1" },
+        config: expect.objectContaining({
+          sourceSheetId: undefined,
+          sourceWikiToken: "wiki-source-token",
+        }),
+      }),
+    );
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched confirmation phrase before calling the migration service", async () => {
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移73个SKU");
+    formData.set("expectedSkuCount", "74");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      fieldErrors: {
+        confirmationPhrase: ["请输入准确的确认语句：确认迁移74个SKU"],
+      },
+      status: "error",
+    });
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the integrations page after a successful super-admin confirmation", async () => {
+    serviceMocks.confirmCargoMigration.mockResolvedValue({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("expectedSkuCount", "74");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({
+      message: "迁移已提交：50 个商品、74 个 SKU、74 张图片已经导入系统。",
+      status: "success",
+    });
+    expect(guardMocks.requireSuperAdmin).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.confirmCargoMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { kind: "SUPER_ADMIN", userId: "super-admin-user-1" },
+        runId: "run-74",
+      }),
+    );
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
+      "/admin/system/integrations",
+    );
+  });
+
+  it("keeps manual target sync unavailable when the target sheet is not configured", async () => {
+    configMocks.canWriteFeishuCargo.mockReturnValue(false);
+
+    const result = await retryFeishuCargoSyncAction({ status: "idle" }, new FormData());
+
+    expect(result).toEqual({
+      message: "目标测试表未配置，当前只能做只读预检。",
+      status: "error",
+    });
+    expect(outboxMocks.enqueueCargoSyncEvent).not.toHaveBeenCalled();
+  });
+
+  it("tests the source and target connection through read-only calls only", async () => {
+    clientMocks.listSheets
+      .mockResolvedValueOnce([
+        { index: 0, sheetId: "sheet-source", title: "源工作表" },
+      ])
+      .mockResolvedValueOnce([
+        { index: 0, sheetId: "sheet-target", title: "目标工作表" },
+      ]);
+
+    const result = await testFeishuConnectionAction({ status: "idle" }, new FormData());
+
+    expect(result).toEqual({
+      message: "只读连接验证成功：源货盘可访问，目标测试表也可读取。",
+      status: "success",
+    });
+    expect(clientMocks.resolveWikiSpreadsheet).toHaveBeenCalledWith(
+      "wiki-source-token",
+    );
+    expect(clientMocks.listSheets).toHaveBeenNthCalledWith(
+      1,
+      "source-spreadsheet-token",
+    );
+    expect(clientMocks.listSheets).toHaveBeenNthCalledWith(
+      2,
+      "target-spreadsheet-token",
+    );
+    expect(clientMocks.writeRange).not.toHaveBeenCalled();
+    expect(clientMocks.writeImage).not.toHaveBeenCalled();
+    expect(clientMocks.setRangeStyle).not.toHaveBeenCalled();
+    expect(clientMocks.updateDimension).not.toHaveBeenCalled();
+    expect(clientMocks.createFilter).not.toHaveBeenCalled();
+  });
+
+  it("stops at the super-admin guard when an ordinary admin tries to confirm a migration", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("expectedSkuCount", "74");
+    formData.set("runId", "run-74");
+
+    await expect(
+      confirmCargoMigrationAction({ status: "idle" }, formData),
+    ).rejects.toThrow("FORBIDDEN_ADMIN");
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+});

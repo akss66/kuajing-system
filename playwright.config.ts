@@ -13,6 +13,7 @@ const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 const e2eDatabaseUrl = configureE2ETestDatabaseEnvironment(process.env);
 process.env.BETTER_AUTH_SECRET ??= "e2e-only-secret-with-at-least-32-characters";
 process.env.BETTER_AUTH_URL = e2eBaseUrl;
+process.env.CATALOG_ASSET_DIR ??= ".e2e-catalog-assets";
 process.env.PII_ENCRYPTION_KEY ??=
   "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
@@ -48,8 +49,22 @@ export default defineConfig({
     env: {
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+      CATALOG_ASSET_DIR:
+        process.env.CATALOG_ASSET_DIR ?? ".e2e-catalog-assets",
       DATABASE_URL: e2eDatabaseUrl,
       E2E_PORT: e2ePortValue,
+      FEISHU_API_BASE_URL:
+        process.env.FEISHU_API_BASE_URL ?? "http://127.0.0.1:4010",
+      FEISHU_APP_ID: process.env.FEISHU_APP_ID ?? "e2e-feishu-app-id",
+      FEISHU_APP_SECRET:
+        process.env.FEISHU_APP_SECRET ?? "e2e-feishu-app-secret",
+      FEISHU_CARGO_SOURCE_WIKI_TOKEN:
+        process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN ?? "wiki-source-token",
+      FEISHU_CARGO_TARGET_SHEET_ID:
+        process.env.FEISHU_CARGO_TARGET_SHEET_ID ?? "target-sheet-id",
+      FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN:
+        process.env.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN ??
+        "target-spreadsheet-token",
       PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY,
       TEST_DATABASE_URL: e2eDatabaseUrl,
     },

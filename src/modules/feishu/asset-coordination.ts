@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,8 +15,6 @@ function toFileUrlInput(fileUrl: FileUrlLike) {
 export function resolveModuleRelativePath(relativePath: string, moduleUrl: FileUrlLike) {
   return resolve(dirname(fileURLToPath(toFileUrlInput(moduleUrl))), relativePath);
 }
-
-const require = createRequire(resolveModuleRelativePath("./asset-coordination.ts", import.meta.url));
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 50;
 const COORDINATION_TIMEOUT_CODES = new Set(["55P03", "57014"]);
@@ -36,6 +33,15 @@ type TransactionDatabase = {
   transaction<T>(
     callback: (tx: { execute: (statement: ReturnType<typeof sql>) => Promise<unknown> }) => Promise<T>,
   ): Promise<T>;
+};
+
+const defaultDatabase: TransactionDatabase = {
+  async transaction<T>(
+    callback: (tx: { execute: (statement: ReturnType<typeof sql>) => Promise<unknown> }) => Promise<T>,
+  ) {
+    const dbModule = (await import("../../db/client")) as { db: TransactionDatabase };
+    return await dbModule.db.transaction(callback);
+  },
 };
 
 export type CatalogAssetLockGuard = {
@@ -126,11 +132,7 @@ function createLockLostError() {
 export function createPostgresCatalogAssetCoordinator(
   options: PostgresCoordinatorOptions = {},
 ): CatalogAssetCoordinator {
-  const database =
-    options.db ??
-    (require("../../db/client.ts") as {
-      db: TransactionDatabase;
-    }).db;
+  const database = options.db ?? defaultDatabase;
   const heartbeatIntervalMs = Math.max(10, options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
 

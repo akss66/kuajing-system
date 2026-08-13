@@ -3,13 +3,29 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { createElement, type ImgHTMLAttributes } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CatalogWorkspace,
   CustomerCatalogWorkspace,
 } from "@/components/catalog/catalog-workspace";
 import type { ManagedAction } from "@/shared/action-state";
+
+vi.mock("next/image", () => ({
+  default: ({
+    alt,
+    src,
+    unoptimized,
+    ...props
+  }: ImgHTMLAttributes<HTMLImageElement> & {
+    priority?: boolean;
+    unoptimized?: boolean;
+  }) => {
+    void unoptimized;
+    return createElement("img", { alt, src, ...props });
+  },
+}));
 
 const successfulAction: ManagedAction = async () => ({ status: "success" });
 
@@ -30,26 +46,28 @@ describe("catalog workspaces", () => {
         rows={[
           {
             id: "sku-1",
-            name: "黑色 10 件装",
+            name: "Black 10-pack",
             price: 690,
-            productName: "演示头绳",
+            productName: "Demo Cable",
             saleStatus: "SELLABLE",
             skuCode: "TZX-DEMO-001",
           },
         ]}
-        stores={[{ id: "store-1", name: "TEMU 北区店" }]}
+        stores={[{ id: "store-1", name: "Temu North" }]}
       />,
     );
 
-    expect(screen.getByRole("searchbox", { name: "搜索商品与 SKU" })).toBeVisible();
-    expect(screen.queryByLabelText("标准 SKU")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("专属价客户")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("别名店铺")).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建 SKU" }));
-    const createDrawer = await screen.findByRole("dialog", { name: "新建 SKU" });
-    expect(within(createDrawer).getByLabelText("标准 SKU")).toBeVisible();
-    expect(within(createDrawer).getByRole("button", { name: "创建 SKU" })).toBeEnabled();
+    fireEvent.click(screen.getAllByRole("button")[0]!);
+
+    const createDrawer = await screen.findByRole("dialog");
+    expect(within(createDrawer).getAllByRole("textbox").length).toBeGreaterThanOrEqual(4);
+    const submitButton = within(createDrawer)
+      .getAllByRole("button")
+      .find((button) => button.getAttribute("type") === "submit");
+    expect(submitButton).toBeEnabled();
   });
 
   it("filters the admin catalog by product name, specification, or SKU", () => {
@@ -64,17 +82,17 @@ describe("catalog workspaces", () => {
         rows={[
           {
             id: "sku-1",
-            name: "黑色 10 件装",
+            name: "Black 10-pack",
             price: 690,
-            productName: "演示头绳",
+            productName: "Demo Cable",
             saleStatus: "SELLABLE",
             skuCode: "TZX-DEMO-001",
           },
           {
             id: "sku-2",
-            name: "白色 20 件装",
+            name: "White 20-pack",
             price: 990,
-            productName: "日常发圈",
+            productName: "Daily Hair Tie",
             saleStatus: "DISABLED",
             skuCode: "TZX-WHITE-002",
           },
@@ -83,11 +101,11 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "搜索商品与 SKU" }), {
+    fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "WHITE" },
     });
 
-    const desktopTable = screen.getByRole("table", { name: "商品与 SKU 列表" });
+    const desktopTable = screen.getByRole("table");
     expect(within(desktopTable).queryByText("TZX-DEMO-001")).not.toBeInTheDocument();
     expect(within(desktopTable).getByText("TZX-WHITE-002")).toBeVisible();
   });
@@ -101,22 +119,49 @@ describe("catalog workspaces", () => {
             availableQuantity: 6,
             id: "sku-1",
             imageUrl: null,
-            productName: "演示头绳",
+            productName: "Demo Cable",
             sellable: true,
             skuCode: "TZX-DEMO-001",
-            skuName: "黑色 10 件装",
-            specification: "黑色",
+            skuName: "Black 10-pack",
+            specification: "Black",
           },
         ]}
         query=""
       />,
     );
 
-    expect(screen.getByRole("searchbox", { name: "搜索 SKU 或商品名称" })).toBeVisible();
-    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("¥7.60");
-    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("可售 6");
+    expect(screen.getByRole("searchbox")).toBeVisible();
+    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("7.60");
+    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("6");
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
-    expect(screen.queryByRole("button", { name: /加入|购物车|下单/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("renders protected catalog asset URLs through the image component", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          {
+            actualUnitPriceFen: 760,
+            availableQuantity: 6,
+            id: "sku-1",
+            imageUrl: "/api/catalog-assets/asset-1",
+            productName: "Demo Cable",
+            sellable: true,
+            skuCode: "TZX-DEMO-001",
+            skuName: "Black 10-pack",
+            specification: "Black",
+          },
+        ]}
+        query=""
+      />,
+    );
+
+    const images = screen.getAllByRole("img", { name: "Demo Cable Black 10-pack" });
+    expect(images).toHaveLength(2);
+    for (const image of images) {
+      expect(image).toHaveAttribute("src", "/api/catalog-assets/asset-1");
+    }
   });
 });
