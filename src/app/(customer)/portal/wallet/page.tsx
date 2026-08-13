@@ -1,9 +1,8 @@
 import { ArrowDownLeft, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
 import Link from "next/link";
 
-import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import { getCustomerWalletView } from "@/modules/wallet/queries";
@@ -32,25 +31,32 @@ export default async function CustomerWalletPage() {
         title="余额与流水"
       />
 
-      <MetricStrip
-        items={[
-          { hint: "客户账户账面余额", label: "账面余额", value: money(wallet.balanceFen) },
-          { hint: "统一结算暂时冻结的金额", label: "已冻结", tone: wallet.activeHoldFen ? "warning" : "default", value: money(wallet.activeHoldFen) },
-          { hint: "当前可直接用于下单", label: "可用余额", tone: wallet.availableFen > 0 ? "success" : "default", value: money(wallet.availableFen) },
-          { hint: "最近冻结批次与流水都在下方", label: "流水条数", value: String(wallet.transactions.length) },
-        ]}
-      />
+      <SettlementWorkspace>
+        <SettlementRegion
+          contentClassName="grid grid-cols-2 divide-x divide-y divide-border md:grid-cols-4 md:divide-y-0"
+          description="先确认可用余额，再查看冻结批次与每一笔资金变化。"
+          kind="balances"
+        >
+          {[
+            { hint: "客户账户账面余额", label: "账面余额", value: money(wallet.balanceFen) },
+            { hint: "统一结算暂时冻结的金额", label: "已冻结", value: money(wallet.activeHoldFen) },
+            { hint: "当前可直接用于下单", label: "可用余额", value: money(wallet.availableFen) },
+            { hint: "最近冻结批次与流水都在下方", label: "流水条数", value: String(wallet.transactions.length) },
+          ].map((item) => (
+            <div className="min-w-0 px-4 py-4 sm:px-5" key={item.label}>
+              <p className="text-xs font-medium text-muted">{item.label}</p>
+              <p className="mt-1 truncate text-lg font-semibold tabular-nums text-ink">{item.value}</p>
+              <p className="mt-1 text-xs leading-5 text-muted">{item.hint}</p>
+            </div>
+          ))}
+        </SettlementRegion>
 
-      <WorkspacePanel className="overflow-hidden">
-        <WorkspacePanelHeader
+        <SettlementRegion
+          action={<LockKeyhole aria-hidden="true" className="size-5 text-primary" />}
           description="统一付款时会先冻结钱包抵扣金额，结算完成或关闭后自动释放或消耗。"
-          title={
-            <span className="inline-flex items-center gap-2">
-              <LockKeyhole className="size-4 text-primary" />
-              冻结历史
-            </span>
-          }
-        />
+          kind="batches"
+          title="冻结批次"
+        >
 
         {wallet.holds.length ? (
           <div className="divide-y divide-border">
@@ -82,18 +88,13 @@ export default async function CustomerWalletPage() {
             <p className="mt-1 text-sm text-muted">提交统一付款后会在这里记录冻结历史。</p>
           </div>
         )}
-      </WorkspacePanel>
+        </SettlementRegion>
 
-      <WorkspacePanel className="overflow-hidden">
-        <WorkspacePanelHeader
+        <SettlementRegion
+          action={<WalletCards aria-hidden="true" className="size-5 text-primary" />}
           description="每笔资金变化均不可修改，并关联对应拿货单。"
-          title={
-            <span className="inline-flex items-center gap-2">
-              <WalletCards className="size-4 text-primary" />
-              账户流水
-            </span>
-          }
-        />
+          kind="transactions"
+        >
 
         {wallet.transactions.length ? (
           <div className="divide-y divide-border">
@@ -131,7 +132,8 @@ export default async function CustomerWalletPage() {
             <p className="mt-1 text-sm text-muted">管理员充值或订单扣款后会显示在这里。</p>
           </div>
         )}
-      </WorkspacePanel>
+        </SettlementRegion>
+      </SettlementWorkspace>
     </div>
   );
 }

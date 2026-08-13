@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const guardMocks = vi.hoisted(() => ({
@@ -40,6 +40,44 @@ vi.mock("@/modules/accounts/queries", () => queryMocks);
 
 import AccountsPage from "@/app/(admin)/admin/accounts/page";
 
+const customerId = "11111111-1111-4111-8111-111111111111";
+
+const accountsFixture = [
+  {
+    customerId: null,
+    customerName: null,
+    displayName: "Bootstrap Super Admin",
+    email: "super-admin@test.local",
+    kind: "SUPER_ADMIN",
+    lastLoginAt: "2026-08-12T08:15:00.000Z",
+    status: "ACTIVE",
+    storeCount: 0,
+    userId: "super-admin-auth-user",
+  },
+  {
+    customerId: null,
+    customerName: null,
+    displayName: "Operations Admin",
+    email: "ops-admin@test.local",
+    kind: "ADMIN",
+    lastLoginAt: null,
+    status: "ACTIVE",
+    storeCount: 0,
+    userId: "admin-user-1",
+  },
+  {
+    customerId,
+    customerName: "华北客户",
+    displayName: "Customer Owner",
+    email: "customer-owner@test.local",
+    kind: "CUSTOMER",
+    lastLoginAt: "2026-08-11T19:20:00.000Z",
+    status: "DISABLED",
+    storeCount: 3,
+    userId: "customer-user-1",
+  },
+] as const;
+
 describe("AccountsPage", () => {
   beforeEach(() => {
     guardMocks.requireAdmin.mockReset();
@@ -50,71 +88,216 @@ describe("AccountsPage", () => {
     cleanup();
   });
 
-  it("shows segmented account management for the super admin and protects the bootstrap super admin row", async () => {
+  it("keeps account forms out of the compact workspace until their drawer is opened", async () => {
     guardMocks.requireAdmin.mockResolvedValue({
       kind: "SUPER_ADMIN",
       userId: "super-admin-auth-user",
     });
-    queryMocks.listManagedAccounts.mockResolvedValue([
-      {
-        customerId: null,
-        customerName: null,
-        displayName: "Bootstrap Super Admin",
-        email: "super-admin@test.local",
-        kind: "SUPER_ADMIN",
-        lastLoginAt: "2026-08-12T08:15:00.000Z",
-        status: "ACTIVE",
-        storeCount: 0,
-        userId: "super-admin-auth-user",
-      },
-      {
-        customerId: null,
-        customerName: null,
-        displayName: "Operations Admin",
-        email: "ops-admin@test.local",
-        kind: "ADMIN",
-        lastLoginAt: null,
-        status: "ACTIVE",
-        storeCount: 0,
-        userId: "admin-user-1",
-      },
-      {
-        customerId: "customer-1",
-        customerName: "华北客户",
-        displayName: "Customer Owner",
-        email: "customer-owner@test.local",
-        kind: "CUSTOMER",
-        lastLoginAt: "2026-08-11T19:20:00.000Z",
-        status: "DISABLED",
-        storeCount: 3,
-        userId: "customer-user-1",
-      },
-    ]);
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
 
     render(await AccountsPage());
 
     expect(screen.getByRole("heading", { name: "账号管理" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "管理员账号" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "客户账号" })).toBeVisible();
-    expect(screen.getByLabelText("管理员姓名")).toBeRequired();
-    expect(screen.getByLabelText("登录邮箱")).toHaveAttribute("type", "email");
-    expect(screen.getByRole("button", { name: "创建管理员账号" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "新建管理员" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "管理员账号 2" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "客户账号 1" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "已停用 1" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "搜索账号" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "角色筛选" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "状态筛选" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "保存资料" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("管理员姓名")).not.toBeInTheDocument();
 
-    const protectedRow = screen.getByRole("row", { name: /Bootstrap Super Admin/ });
-    expect(within(protectedRow).getByText("受保护超级管理员")).toBeVisible();
-    expect(
-      within(protectedRow).queryByRole("button", { name: "停用账号" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(protectedRow).queryByRole("button", { name: "重置密码" }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
 
-    expect(screen.getAllByText("客户账号").length).toBeGreaterThan(0);
-    const storeCountMetric = document.querySelectorAll("[data-workspace-panel]")[3];
-    expect(storeCountMetric).toBeInstanceOf(HTMLElement);
-    expect(within(storeCountMetric as HTMLElement).getByText("3")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "Operations Admin" });
+    expect(within(dialog).getByRole("region", { name: "基本资料" })).toBeVisible();
+    expect(within(dialog).getByRole("region", { name: "登录安全" })).toBeVisible();
+    expect(within(dialog).getByRole("region", { name: "危险操作" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "保存资料" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "重置密码" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "停用账号" })).toBeVisible();
     expect(screen.queryByText("SUPER_ADMIN")).not.toBeInTheDocument();
     expect(screen.queryByText("CUSTOMER")).not.toBeInTheDocument();
+  });
+
+  it("filters account summaries by searchable identity, role, and status", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(await AccountsPage());
+
+    const search = screen.getByRole("searchbox", { name: "搜索账号" });
+    fireEvent.change(search, { target: { value: "ops-admin@test.local" } });
+    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "角色筛选" }), {
+      target: { value: "SUPER_ADMIN" },
+    });
+    expect(screen.getByText("没有符合条件的账号")).toBeVisible();
+
+    fireEvent.change(search, { target: { value: "华北客户" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "角色筛选" }), {
+      target: { value: "ALL" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "状态筛选" }), {
+      target: { value: "DISABLED" },
+    });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "客户账号 1" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    expect(await screen.findByRole("button", { name: "查看 Customer Owner" })).toBeVisible();
+  });
+
+  it("scopes a customer-detail deep link to the matching customer account with a removable filter", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(
+      await AccountsPage({
+        searchParams: Promise.resolve({ customerId }),
+      }),
+    );
+
+    expect(screen.getByRole("tab", { name: "客户账号 1" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const activeFilters = screen.getByLabelText("已启用筛选");
+    expect(within(activeFilters).getByText("客户：华北客户", { exact: true })).toBeVisible();
+    expect(
+      within(activeFilters).getByRole("link", { name: "移除筛选：客户 华北客户" }),
+    ).toHaveAttribute("href", "/admin/accounts");
+    expect(screen.getByRole("button", { name: "查看 Customer Owner" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看 Operations Admin" })).not.toBeInTheDocument();
+  });
+
+  it("ignores an ambiguous customerId query instead of applying an unsafe partial match", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(
+      await AccountsPage({
+        searchParams: Promise.resolve({ customerId: ["customer-1", "customer-2"] }),
+      }),
+    );
+
+    expect(screen.queryByLabelText("已启用筛选")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
+  });
+
+  it("keeps a valid but unmatched customerId scoped to an empty result until the filter is removed", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+    const unmatchedCustomerId = "22222222-2222-4222-8222-222222222222";
+
+    render(
+      await AccountsPage({
+        searchParams: Promise.resolve({ customerId: unmatchedCustomerId }),
+      }),
+    );
+
+    expect(screen.getByRole("tab", { name: "客户账号 0" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const activeFilters = screen.getByLabelText("已启用筛选");
+    expect(within(activeFilters).getByText("指定客户", { exact: true })).toBeVisible();
+    expect(screen.getByText("没有符合条件的账号")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看 Operations Admin" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a malformed customerId query and preserves the normal full account view", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(
+      await AccountsPage({
+        searchParams: Promise.resolve({ customerId: "not-a-customer-id" }),
+      }),
+    );
+
+    expect(screen.queryByLabelText("已启用筛选")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
+  });
+
+  it("exposes account summaries as a labelled table with associated row cells", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(await AccountsPage());
+
+    const table = screen.getByRole("table", { name: "账号列表" });
+    for (const header of ["姓名", "邮箱", "角色", "所属客户", "店铺数", "状态", "最近登录", "操作"]) {
+      expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
+    }
+
+    const operationsRow = within(table).getByRole("row", { name: /Operations Admin/ });
+    const cells = within(operationsRow).getAllByRole("cell");
+    expect(cells).toHaveLength(8);
+    expect(cells[0]).toHaveTextContent("Operations Admin");
+    expect(cells[1]).toHaveTextContent("ops-admin@test.local");
+    expect(cells[2]).toHaveTextContent("普通管理员");
+    expect(cells[5]).toHaveTextContent("启用中");
+  });
+
+  it("keeps the bootstrap super admin protected and links customer accounts to business details", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(
+      accountsFixture.filter((account) => account.kind !== "ADMIN"),
+    );
+
+    render(await AccountsPage());
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" }));
+    const protectedDialog = await screen.findByRole("dialog", { name: "Bootstrap Super Admin" });
+    expect(within(protectedDialog).getByText("受保护")).toBeVisible();
+    expect(within(protectedDialog).getByText(/系统初始化的超级管理员/)).toBeVisible();
+    expect(within(protectedDialog).queryByRole("button", { name: "重置密码" })).not.toBeInTheDocument();
+    expect(within(protectedDialog).queryByRole("button", { name: "停用账号" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(protectedDialog).getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(protectedDialog).not.toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "客户账号 1" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "查看 Customer Owner" }));
+
+    const customerDialog = await screen.findByRole("dialog", { name: "Customer Owner" });
+    expect(within(customerDialog).getByText("3 家店铺")).toBeVisible();
+    expect(within(customerDialog).getByRole("link", { name: "查看客户详情" })).toHaveAttribute(
+      "href",
+      `/admin/customers/${customerId}`,
+    );
+    expect(within(customerDialog).queryByLabelText("客户名称")).not.toBeInTheDocument();
   });
 
   it("safely denies the route to an ordinary admin without loading governed accounts", async () => {
@@ -123,7 +306,11 @@ describe("AccountsPage", () => {
       userId: "ops-admin-auth-user",
     });
 
-    render(await AccountsPage());
+    render(
+      await AccountsPage({
+        searchParams: Promise.resolve({ customerId }),
+      }),
+    );
 
     expect(screen.getByRole("heading", { name: "账号管理受限" })).toBeVisible();
     expect(
@@ -153,12 +340,47 @@ describe("AccountsPage", () => {
 
     render(await AccountsPage());
 
-    fireEvent.click(screen.getAllByRole("button", { name: "停用账号" })[0]!);
+    expect(screen.queryByRole("button", { name: "停用账号" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    const accountDialog = await screen.findByRole("dialog", { name: "Operations Admin" });
+    fireEvent.click(within(accountDialog).getByRole("button", { name: "停用账号" }));
 
     expect(screen.getByRole("alertdialog")).toBeVisible();
     expect(screen.getByText("确认停用这个账号？")).toBeVisible();
     expect(
       screen.getByText("停用后该账号的现有会话会立即失效，但历史订单、客户关系和审计日志不会删除。"),
     ).toBeVisible();
+  });
+
+  it("keeps password reset neutral while account status confirmation remains destructive", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue([accountsFixture[1]]);
+
+    render(await AccountsPage());
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    const accountDialog = await screen.findByRole("dialog", { name: "Operations Admin" });
+    const resetTrigger = within(accountDialog).getByRole("button", { name: "重置密码" });
+    const statusTrigger = within(accountDialog).getByRole("button", { name: "停用账号" });
+
+    expect(resetTrigger).toHaveAttribute("data-variant", "outline");
+    expect(statusTrigger).toHaveAttribute("data-variant", "destructive");
+
+    fireEvent.click(resetTrigger);
+    const resetDialog = screen.getByRole("alertdialog");
+    expect(within(resetDialog).getByRole("button", { name: "重置密码" })).toHaveAttribute(
+      "data-variant",
+      "outline",
+    );
+
+    fireEvent.click(within(resetDialog).getByRole("button", { name: "返回检查" }));
+    await waitFor(() => expect(resetDialog).not.toBeInTheDocument());
+    fireEvent.click(statusTrigger);
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "停用账号" }),
+    ).toHaveAttribute("data-variant", "destructive");
   });
 });

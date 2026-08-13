@@ -6,6 +6,11 @@ import type { ComponentProps } from "react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { authClient } from "@/modules/identity/auth-client";
 
 type SignOutButtonProps = {
@@ -16,11 +21,7 @@ type SignOutButtonProps = {
 
 const signOutErrorMessage = "退出登录失败，请稍后再试。";
 
-export function SignOutButton({
-  className,
-  size = "default",
-  variant = "outline",
-}: SignOutButtonProps) {
+function useSignOutFlow() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +46,16 @@ export function SignOutButton({
     }
   }
 
+  return { error, handleSignOut, pending };
+}
+
+export function SignOutButton({
+  className,
+  size = "default",
+  variant = "outline",
+}: SignOutButtonProps) {
+  const { error, handleSignOut, pending } = useSignOutFlow();
+
   return (
     <div className="grid gap-2">
       {error ? (
@@ -65,5 +76,37 @@ export function SignOutButton({
         {pending ? "正在退出登录" : "退出登录"}
       </Button>
     </div>
+  );
+}
+
+export function SignOutMenuItem({ className }: { className?: string }) {
+  const { error, handleSignOut, pending } = useSignOutFlow();
+
+  return (
+    <DropdownMenuGroup>
+      {error ? (
+        <DropdownMenuLabel className="px-2 py-1 font-normal">
+          <span className="text-xs text-danger" role="alert">
+            {error}
+          </span>
+        </DropdownMenuLabel>
+      ) : null}
+      <DropdownMenuItem
+        aria-label={pending ? "正在退出登录" : "退出登录"}
+        className={className}
+        disabled={pending}
+        onSelect={(event) => {
+          event.preventDefault();
+          void handleSignOut();
+        }}
+      >
+        {pending ? (
+          <LoaderCircle aria-hidden="true" className="animate-spin" />
+        ) : (
+          <LogOut aria-hidden="true" />
+        )}
+        {pending ? "正在退出登录" : "退出登录"}
+      </DropdownMenuItem>
+    </DropdownMenuGroup>
   );
 }

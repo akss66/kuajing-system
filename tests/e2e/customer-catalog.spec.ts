@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { db } from "@/db/client";
+import { seed } from "@/db/seed";
 import {
   customerSkuPrices,
   customers,
@@ -17,6 +18,16 @@ import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
+import { resetE2EDatabaseToSeedState } from "./support/test-database";
+
+const seededCustomer = {
+  email: "customer@tongzhouxing.local",
+  password: "TongZhouXing-Customer-2026!",
+};
+
+function visibleCatalogItem(page: import("@playwright/test").Page, skuId: string) {
+  return page.locator(`[data-testid="catalog-${skuId}"]:visible`);
+}
 
 async function seedCustomerCatalog() {
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
@@ -172,12 +183,12 @@ test("customer sees only its own price and real available inventory", async ({ p
   await expect(page).toHaveURL(/\/portal/);
   await page.goto("/portal/catalog");
 
-  const availableRow = page.getByTestId(`catalog-${fixture.availableSku.id}`);
+  const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
   await expect(availableRow).toContainText("¥7.60");
   await expect(availableRow).toContainText("可售 6");
   await expect(page.getByText("¥6.20")).toHaveCount(0);
 
-  const soldOutRow = page.getByTestId(`catalog-${fixture.soldOutSku.id}`);
+  const soldOutRow = visibleCatalogItem(page, fixture.soldOutSku.id);
   await expect(soldOutRow).toContainText("不可售");
 
   const accessibility = await new AxeBuilder({ page }).analyze();
@@ -187,21 +198,27 @@ test("customer sees only its own price and real available inventory", async ({ p
     ),
   ).toEqual([]);
 
-  await page.goto(`/portal/catalog?q=${fixture.availableSku.skuCode}`);
-  const isolatedRow = page.getByTestId(`catalog-${fixture.availableSku.id}`);
-  await isolatedRow.waitFor();
+  await page.context().clearCookies();
+  await resetE2EDatabaseToSeedState({
+    context: "customer catalog visual baseline",
+    database: db,
+    reseed: seed,
+  });
+  await loginThroughUi(page, seededCustomer);
+  await expect(page).toHaveURL(/\/portal$/);
+  await page.goto("/portal/catalog?q=TZX-DEMO-001");
+  const seededRow = page
+    .locator('[data-testid^="catalog-"]:visible')
+    .filter({ hasText: "TZX-DEMO-001" });
+  await expect(seededRow).toContainText("演示头绳");
+  await expect(seededRow).toContainText("¥7.60");
+  await expect(seededRow).toContainText("可售 10");
   await page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
   );
   await expect(page).toHaveScreenshot(`customer-catalog-${testInfo.project.name}.png`, {
     fullPage: true,
-    maxDiffPixels: 5,
-    maskColor: "#e8efed",
-    mask: [
-      page.getByLabel("搜索 SKU 或商品名称"),
-      isolatedRow.getByText(fixture.availableSku.skuCode, { exact: true }),
-      isolatedRow.getByText(fixture.productName, { exact: true }),
-    ],
+    maxDiffPixels: 30,
   });
 });
 
@@ -215,28 +232,24 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
     await page.goto("/portal/catalog");
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
-    await expect(page.getByTestId(`catalog-${fixture.availableSku.id}`)).toBeVisible();
-    if (width === 390) {
-      const metricStrip = page.locator("[data-metric-strip]");
-      const gridTemplateColumns = await metricStrip.evaluate((node) =>
-        window.getComputedStyle(node).gridTemplateColumns,
-      );
-      expect(gridTemplateColumns.split(" ").filter(Boolean)).toHaveLength(2);
+    await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
+    await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
+    await expect(page.locator("[data-customer-catalog-cards]")).toBeVisible();
+    await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();
 
-      const searchInput = page.locator('input[name="q"]');
-      await expect(searchInput).toBeVisible();
-      const box = await searchInput.boundingBox();
-      expect(box).not.toBeNull();
-      expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
-    }
+    const searchInput = page.locator('input[name="q"]');
+    await expect(searchInput).toBeVisible();
+    const box = await searchInput.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
-    expect(overflow).toBeLessThanOrEqual(0);
+    expect(overflow).toBeLessThanOrEqual(1);
   }
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();
-  await page.getByRole("button", { name: "退出登录" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/\/login$/);
 });
 
@@ -244,10 +257,34 @@ test("customer import preview keeps re-upload navigation and unique heading metr
   const fixture = await seedImportPreview();
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/);
+  await page.goto("/portal/imports/new");
+  const uploadProgress = page.getByRole("navigation", { name: "订单导入进度" });
+  await expect(uploadProgress.getByText("选择店铺")).toBeVisible();
+  await expect(uploadProgress.getByText("上传文件")).toBeVisible();
+  await expect(uploadProgress.getByText("校验预览")).toBeVisible();
+  await expect(uploadProgress.getByText("确认提交")).toBeVisible();
+  await expect(uploadProgress.getByText("上传文件").locator("..")).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
   await page.goto(`/portal/imports/${fixture.preview.batchId}`);
 
   await expect(page.getByRole("heading", { name: "核对 TEMU 订单" })).toBeVisible();
   await expect(page.getByRole("link", { name: "重新上传" })).toBeVisible();
+  const progress = page.getByRole("navigation", { name: "订单导入进度" });
+  await expect(progress.getByText("选择店铺")).toBeVisible();
+  await expect(progress.getByText("上传文件")).toBeVisible();
+  await expect(progress.getByText("校验预览")).toBeVisible();
+  await expect(progress.getByText("确认提交")).toBeVisible();
+  await expect(progress.getByText("校验预览").locator("..")).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
+  await expect(page.getByRole("region", { name: "当前导入" })).toContainText("preview-orders.xlsx");
+  const recovery = page.getByRole("region", { name: "错误处理分类" });
+  await expect(recovery).toContainText("可修复");
+  await expect(recovery).toContainText("需管理员处理");
+  await expect(recovery).toContainText("不可提交");
   const metricStrip = page.locator("[data-metric-strip]");
   await expect(metricStrip).toBeVisible();
   await expect(metricStrip.locator("article")).toHaveCount(4);

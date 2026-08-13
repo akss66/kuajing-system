@@ -106,6 +106,8 @@ describe("CustomerSettlementDetailPage", () => {
     );
 
     expect(screen.getByRole("heading", { name: "统一付款结算" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "付款任务" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "结算批次" })).toBeVisible();
     const skipLink = screen.getByRole("link", { name: "跳到付款声明" });
     expect(skipLink).toHaveAttribute("href", "#settlement-payment-form");
     fireEvent.click(skipLink);

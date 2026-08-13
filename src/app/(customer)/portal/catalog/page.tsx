@@ -1,9 +1,4 @@
-import { ImageIcon, Search } from "lucide-react";
-
-import { MetricStrip } from "@/components/data-workspace/metric-strip";
-import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel } from "@/components/layout/workspace-panel";
-import { Input } from "@/components/ui/input";
+import { CustomerCatalogWorkspace } from "@/components/catalog/catalog-workspace";
 import { listCustomerCatalog } from "@/modules/catalog/customer-catalog";
 import { getCurrentPrincipal } from "@/modules/identity/principal";
 
@@ -11,85 +6,14 @@ export default async function CustomerCatalogPage({ searchParams }: { searchPara
   const principal = await getCurrentPrincipal();
   if (!principal || principal.kind !== "CUSTOMER") return null;
 
-  const query = (await searchParams).q?.trim().toLowerCase() ?? "";
+  const query = (await searchParams).q?.trim().toLocaleLowerCase("zh-CN") ?? "";
   const items = (await listCustomerCatalog(principal.customerId)).filter(
-    (item) => !query || item.skuCode.toLowerCase().includes(query) || item.productName.toLowerCase().includes(query),
+    (item) =>
+      !query ||
+      item.skuCode.toLocaleLowerCase("zh-CN").includes(query) ||
+      item.productName.toLocaleLowerCase("zh-CN").includes(query) ||
+      item.skuName.toLocaleLowerCase("zh-CN").includes(query),
   );
-  const sellableCount = items.filter((item) => item.sellable).length;
-  const unavailableCount = items.length - sellableCount;
-  const availableQuantity = items.reduce((sum, item) => sum + (item.sellable ? item.availableQuantity : 0), 0);
 
-  return (
-    <div className="space-y-5">
-      <PageHeading
-        description="价格为你的实际拿货价；可售库存已扣除其他订单锁定数量。"
-        title="货盘选品"
-      />
-
-      <MetricStrip
-        items={[
-          { hint: query ? "当前搜索结果内的 SKU 数" : "当前客户可见的 SKU 数", label: "SKU", value: String(items.length) },
-          { hint: "可直接下单的 SKU", label: "可售", tone: sellableCount ? "success" : "default", value: String(sellableCount) },
-          { hint: "需联系管理员确认状态", label: "不可售", tone: unavailableCount ? "warning" : "default", value: String(unavailableCount) },
-          { hint: "所有可售 SKU 的库存汇总", label: "可售件数", value: String(availableQuantity) },
-        ]}
-      />
-
-      <WorkspacePanel className="p-4 sm:p-5">
-        <form className="relative max-w-xl" method="get">
-          <Search aria-hidden="true" className="absolute left-3 top-3.5 size-4 text-muted" />
-          <Input
-            aria-label="搜索 SKU 或商品名称"
-            className="min-h-11 pl-10"
-            defaultValue={query}
-            name="q"
-            placeholder="搜索 SKU 或商品名称"
-          />
-        </form>
-      </WorkspacePanel>
-
-      <WorkspacePanel className="overflow-hidden">
-        <div className="hidden grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.4fr)_120px_110px_110px] gap-4 border-b border-border bg-surface px-5 py-3 text-xs font-semibold text-muted md:grid">
-          <span>SKU</span>
-          <span>商品</span>
-          <span>规格</span>
-          <span className="text-right">拿货价</span>
-          <span className="text-right">库存</span>
-        </div>
-
-        {items.length ? (
-          <div className="divide-y divide-border">
-            {items.map((item) => (
-              <article
-                className="grid gap-3 p-4 md:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.4fr)_120px_110px_110px] md:items-center md:gap-4 md:px-5 md:py-3"
-                data-testid={`catalog-${item.id}`}
-                key={item.id}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-surface text-muted md:hidden">
-                    <ImageIcon className="size-4" />
-                  </span>
-                  <span className="font-semibold text-ink">{item.skuCode}</span>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-ink">{item.productName}</p>
-                  <p className="mt-0.5 text-xs text-muted md:hidden">{item.skuName}</p>
-                </div>
-                <span className="hidden text-sm text-muted md:block">{item.skuName}</span>
-                <span className="text-lg font-semibold tabular-nums text-ink md:text-right md:text-sm">¥{(item.actualUnitPriceFen / 100).toFixed(2)}</span>
-                <span className={item.sellable ? "text-sm font-semibold text-success md:text-right" : "text-sm font-semibold text-danger md:text-right"}>
-                  {item.sellable ? `可售 ${item.availableQuantity}` : "不可售"}
-                </span>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="px-5 py-16 text-center">
-            <p className="font-medium text-ink">没有找到符合条件的 SKU</p>
-            <p className="mt-1 text-sm text-muted">请调整搜索条件，或联系管理员确认货盘状态。</p>
-          </div>
-        )}
-      </WorkspacePanel>
-    </div>
-  );
+  return <CustomerCatalogWorkspace items={items} query={query} />;
 }

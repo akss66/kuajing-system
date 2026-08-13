@@ -9,8 +9,11 @@ import {
   fulfillmentOrders,
   inventoryBalances,
   inventoryReservations,
+  orderShipments,
   paymentClaims,
   products,
+  replacementRequests,
+  shipmentFulfillments,
   skus,
   stores,
   walletAccounts,
@@ -367,6 +370,11 @@ describe("offline payment and order lifecycle", () => {
       deltaFen: 500,
       orderId: order.id,
     });
+    await expect(getCustomerOrderDetail(customer.id, order.id)).resolves.toMatchObject({
+      paidAt: initialNow,
+      refundedAt: refunds[0].createdAt,
+      status: "CANCELLED",
+    });
   });
 
   test("customer cannot cancel another customer's order", async () => {
@@ -405,6 +413,81 @@ describe("offline payment and order lifecycle", () => {
     await expect(getCustomerOrderDetail(customer.id, order.id)).resolves.toMatchObject({
       id: order.id,
       orderNumber: order.orderNumber,
+    });
+  });
+
+  test("customer order detail returns real shipment and replacement statuses", async () => {
+    const { customer, order, store } = await createOrder({
+      paymentMode: "WALLET",
+      status: "PAID_PENDING_FULFILLMENT",
+    });
+    await db
+      .update(fulfillmentOrders)
+      .set({ status: "SHIPPED" })
+      .where(eq(fulfillmentOrders.id, order.id));
+    const [admin] = await db
+      .insert(adminUsers)
+      .values({
+        displayName: "Customer detail fulfillment admin",
+        loginIdentifier: `customer-detail-${crypto.randomUUID()}@example.test`,
+      })
+      .returning();
+    const [normalShipment, replacementShipment] = await db
+      .insert(orderShipments)
+      .values([
+        {
+          createdAt: new Date("2026-08-12T10:10:00.000Z"),
+          externalOrderNo: `NORMAL-${crypto.randomUUID()}`,
+          orderId: order.id,
+          recipientPayloadEncrypted: "encrypted-test-recipient",
+          storeId: store.id,
+        },
+        {
+          createdAt: new Date("2026-08-12T10:20:00.000Z"),
+          externalOrderNo: `REPLACEMENT-${crypto.randomUUID()}`,
+          kind: "REPLACEMENT",
+          orderId: order.id,
+          recipientPayloadEncrypted: "encrypted-test-recipient",
+          storeId: store.id,
+        },
+      ])
+      .returning();
+    await db.insert(shipmentFulfillments).values([
+      {
+        erpNo: `ERP-NORMAL-${crypto.randomUUID()}`,
+        shipmentId: normalShipment.id,
+        status: "SHIPPED",
+      },
+      {
+        erpNo: `ERP-REPLACEMENT-${crypto.randomUUID()}`,
+        shipmentId: replacementShipment.id,
+        status: "FULFILLING",
+      },
+    ]);
+    await db.insert(replacementRequests).values({
+      createdByAdminUserId: admin.id,
+      orderId: order.id,
+      originalShipmentId: normalShipment.id,
+      reason: "Damaged during shipping",
+      replacementShipmentId: replacementShipment.id,
+      status: "FULFILLING",
+    });
+
+    await expect(getCustomerOrderDetail(customer.id, order.id)).resolves.toMatchObject({
+      shipments: [
+        {
+          fulfillmentStatus: "SHIPPED",
+          id: normalShipment.id,
+          kind: "NORMAL",
+          replacementStatus: null,
+        },
+        {
+          fulfillmentStatus: "FULFILLING",
+          id: replacementShipment.id,
+          kind: "REPLACEMENT",
+          replacementStatus: "FULFILLING",
+        },
+      ],
     });
   });
 

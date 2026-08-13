@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
+import { DateTime } from "luxon";
 
 import { db } from "@/db/client";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import type {
   FundsReport,
@@ -17,7 +19,7 @@ function number(value: number | string | null | undefined) {
 }
 
 export async function getOperationsReport(window: ReportWindow): Promise<OperationsReport> {
-  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, receivableRows] =
+  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, receivableRows, trendRows] =
     await Promise.all([
       db.execute<{
         quantity: number | string;
@@ -111,6 +113,23 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
           and submitted_at >= ${window.fromUtc.toISOString()}::timestamptz
           and submitted_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
+      db.execute<{
+        date: string | Date;
+        orderCount: number | string;
+        revenueFen: number | string;
+      }>(sql`
+        select
+          (os.shipped_at at time zone 'America/Toronto')::date as date,
+          count(distinct ol.order_id) as "orderCount",
+          sum(ol.line_amount_fen) as "revenueFen"
+        from order_lines ol
+        join order_shipments os on os.id = ol.shipment_id
+        where os.kind = 'NORMAL'
+          and os.shipped_at >= ${window.fromUtc.toISOString()}::timestamptz
+          and os.shipped_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
+        group by date
+        order by date
+      `),
     ]);
 
   const skuSales: SkuSalesReportRow[] = skuRows.map((row) => ({
@@ -142,12 +161,43 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
     orderRefundsFen: number(wallet?.orderRefundsFen),
     pendingReceivableFen: number(receivableRows[0]?.pendingReceivableFen),
   };
+  const trendByDate = new Map(
+    trendRows.map((row) => [
+      row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date),
+      {
+        orderCount: number(row.orderCount),
+        revenueFen: number(row.revenueFen),
+      },
+    ]),
+  );
+  const firstTrendDate = DateTime.fromJSDate(window.fromUtc, { zone: "utc" })
+    .setZone(BUSINESS_TIME_ZONE)
+    .startOf("day");
+  const lastTrendDate = DateTime.fromJSDate(window.toExclusiveUtc, { zone: "utc" })
+    .minus({ milliseconds: 1 })
+    .setZone(BUSINESS_TIME_ZONE)
+    .startOf("day");
+  const trend: OperationsReport["trend"] = [];
+  for (
+    let cursor = firstTrendDate;
+    cursor.toMillis() <= lastTrendDate.toMillis();
+    cursor = cursor.plus({ days: 1 })
+  ) {
+    const date = cursor.toISODate()!;
+    const activity = trendByDate.get(date);
+    trend.push({
+      date,
+      orderCount: activity?.orderCount ?? 0,
+      revenueFen: activity?.revenueFen ?? 0,
+    });
+  }
 
   return {
     funds,
     replacements,
     skuSales,
     stores,
+    trend,
     summary: {
       orderCount: stores.reduce((sum, row) => sum + row.orderCount, 0),
       packageCount: stores.reduce((sum, row) => sum + row.packageCount, 0),

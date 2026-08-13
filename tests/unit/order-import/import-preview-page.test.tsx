@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authMocks = vi.hoisted(() => ({
@@ -73,7 +73,7 @@ describe("ImportPreviewPage", () => {
     cleanup();
   });
 
-  it("keeps a visible re-upload link and renders each preview metric only once", async () => {
+  it("keeps the selected store in a continuous import flow and separates recovery paths", async () => {
     authMocks.requireCustomer.mockResolvedValue({
       customerId: "customer-1",
       userId: "user-1",
@@ -112,7 +112,24 @@ describe("ImportPreviewPage", () => {
     );
 
     const metricStrip = document.querySelector("[data-metric-strip]");
+    const progress = screen.getByRole("navigation", { name: "订单导入进度" });
+    const importContext = screen.getByRole("region", { name: "当前导入" });
+    const recovery = screen.getByRole("region", { name: "错误处理分类" });
+
     expect(screen.getByRole("link", { name: "重新上传" })).toBeVisible();
+    expect(within(progress).getByText("选择店铺")).toBeVisible();
+    expect(within(progress).getByText("上传文件")).toBeVisible();
+    expect(within(progress).getByText("校验预览")).toBeVisible();
+    expect(within(progress).getByText("确认提交")).toBeVisible();
+    expect(within(progress).getByText("校验预览").closest("li")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(importContext).toHaveTextContent("TEMU 店铺");
+    expect(importContext).toHaveTextContent("orders.xlsx");
+    expect(recovery).toHaveTextContent("可修复");
+    expect(recovery).toHaveTextContent("需管理员处理");
+    expect(recovery).toHaveTextContent("不可提交");
     expect(metricStrip?.textContent).toContain("可提交");
     expect(metricStrip?.textContent).toContain("重复订单");
     expect(metricStrip?.textContent).toContain("未知 SKU");

@@ -35,6 +35,11 @@ export type OperationsReport = {
   replacements: ReplacementReportRow[];
   skuSales: SkuSalesReportRow[];
   stores: StoreSalesReportRow[];
+  trend: Array<{
+    date: string;
+    orderCount: number;
+    revenueFen: number;
+  }>;
   summary: {
     orderCount: number;
     packageCount: number;

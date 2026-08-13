@@ -68,7 +68,7 @@ describe("AdminOrderDetailPage", () => {
           fulfillmentStatus: "SHIPPED",
           id: "shipment-1",
           jifengStatus: 7,
-          kind: "NORMAL",
+          kind: "REPLACEMENT",
           lastErrorCode: null,
           lastErrorMessage: null,
           lines: [
@@ -87,7 +87,7 @@ describe("AdminOrderDetailPage", () => {
           logisticsFeeMinor: 899,
           nextRetryAt: null,
           replacementReason: null,
-          replacementStatus: null,
+          replacementStatus: "FULFILLING",
           shippedAt: new Date("2026-08-12T11:00:00.000Z"),
           trackingNumber: "TRACK-1",
         },
@@ -110,5 +110,8 @@ describe("AdminOrderDetailPage", () => {
     expect(screen.getAllByText("商品件数")).toHaveLength(1);
     expect(screen.getAllByText("实际成交额")).toHaveLength(1);
     expect(screen.getAllByText("创建时间")).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "订单状态时间线" })).toBeVisible();
+    expect(screen.getByText("补发履约中")).toBeVisible();
+    expect(screen.queryByText("FULFILLING")).not.toBeInTheDocument();
   });
 });

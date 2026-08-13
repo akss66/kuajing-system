@@ -191,4 +191,91 @@ describe("operations reports", () => {
       pendingReceivableFen: 1_200,
     });
   });
+
+  test("groups a complete daily trend by Toronto-local shipment date", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const [customerA, customerB] = await db
+      .insert(customers)
+      .values([
+        { code: `TREND-A-${suffix}`, name: "趋势客户 A" },
+        { code: `TREND-B-${suffix}`, name: "趋势客户 B" },
+      ])
+      .returning();
+    const [storeA, storeB] = await db
+      .insert(stores)
+      .values([
+        { customerId: customerA.id, name: `趋势店铺 A ${suffix}` },
+        { customerId: customerB.id, name: `趋势店铺 B ${suffix}` },
+      ])
+      .returning();
+    const [product] = await db.insert(products).values({ name: "趋势商品" }).returning();
+    const [sku] = await db
+      .insert(skus)
+      .values({
+        defaultUnitPriceFen: 100,
+        name: "边界款",
+        productId: product.id,
+        skuCode: `TREND-${suffix}`,
+      })
+      .returning();
+    const shipmentFacts = [
+      { amountFen: 100, customerId: customerA.id, shippedAt: new Date("2026-08-10T03:59:59.999Z"), storeId: storeA.id },
+      { amountFen: 200, customerId: customerA.id, shippedAt: new Date("2026-08-10T04:00:00.000Z"), storeId: storeA.id },
+      { amountFen: 300, customerId: customerB.id, shippedAt: new Date("2026-08-11T03:59:59.999Z"), storeId: storeB.id },
+      { amountFen: 400, customerId: customerA.id, shippedAt: new Date("2026-08-11T04:00:00.000Z"), storeId: storeA.id },
+      { amountFen: 500, customerId: customerB.id, shippedAt: new Date("2026-08-14T03:59:59.999Z"), storeId: storeB.id },
+      { amountFen: 600, customerId: customerB.id, shippedAt: new Date("2026-08-14T04:00:00.000Z"), storeId: storeB.id },
+    ];
+
+    for (const [index, fact] of shipmentFacts.entries()) {
+      const [order] = await db
+        .insert(fulfillmentOrders)
+        .values({
+          customerId: fact.customerId,
+          orderNumber: `TREND-${suffix}-${index}`,
+          paidAt: fact.shippedAt,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "SHIPPED",
+          storeId: fact.storeId,
+          submittedAt: fact.shippedAt,
+          totalAmountFen: fact.amountFen,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        })
+        .returning();
+      const [shipment] = await db
+        .insert(orderShipments)
+        .values({
+          externalOrderNo: `TREND-EXT-${suffix}-${index}`,
+          orderId: order.id,
+          recipientPayloadEncrypted: "encrypted",
+          shippedAt: fact.shippedAt,
+          storeId: fact.storeId,
+        })
+        .returning();
+      await db.insert(orderLines).values({
+        lineAmountFen: fact.amountFen,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipment.id,
+        skuCodeSnapshot: sku.skuCode,
+        skuId: sku.id,
+        skuNameSnapshot: `${product.name} · ${sku.name}`,
+        storeId: fact.storeId,
+        unitPriceFen: fact.amountFen,
+      });
+    }
+
+    const report = await getOperationsReport({
+      fromUtc: new Date("2026-08-10T04:00:00.000Z"),
+      toExclusiveUtc: new Date("2026-08-14T04:00:00.000Z"),
+    });
+
+    expect(report.trend).toEqual([
+      { date: "2026-08-10", orderCount: 2, revenueFen: 500 },
+      { date: "2026-08-11", orderCount: 1, revenueFen: 400 },
+      { date: "2026-08-12", orderCount: 0, revenueFen: 0 },
+      { date: "2026-08-13", orderCount: 1, revenueFen: 500 },
+    ]);
+  });
 });

@@ -1,4 +1,4 @@
-import { ArrowRight, Plus, Store } from "lucide-react";
+import { ArrowRight, Clock3, Plus, Store } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -32,6 +32,14 @@ function draftStatusLabel(status: string) {
   }
 }
 
+function isWritableDraftStatus(status: string) {
+  return status === "DRAFT" || status === "PARTIALLY_SUBMITTED";
+}
+
+function effectiveDraftStatus(status: string, expiresAt: Date, now: Date) {
+  return isWritableDraftStatus(status) && expiresAt <= now ? "EXPIRED" : status;
+}
+
 export default async function CustomerBulkOrdersPage() {
   const principal = await requireCustomer();
   const [stores, drafts] = await Promise.all([
@@ -46,28 +54,61 @@ export default async function CustomerBulkOrdersPage() {
     redirect(`/portal/bulk-orders/${draft.id}`);
   }
 
-  const resumableDrafts = drafts.filter((draft) => draft.status !== "COMPLETED").length;
+  const now = new Date();
+  const displayedDrafts = drafts.map((draft) => ({
+    draft,
+    status: effectiveDraftStatus(draft.status, draft.expiresAt, now),
+  }));
+  const writableDrafts = displayedDrafts.filter(({ status }) => isWritableDraftStatus(status));
+  const latestDraft = writableDrafts[0]?.draft;
 
   return (
     <div className="space-y-5">
       <PageHeading
-        action={
-          <form action={createDraft}>
-            <Button className="min-h-11 px-4" disabled={!stores.length} type="submit">
-              <Plus aria-hidden="true" />
-              新建批量草稿
-            </Button>
-          </form>
-        }
         description="按店铺分组上传多个 TEMU 原始 Excel，系统会跨文件去重并合并成每店一张拿货单后统一付款。"
         title="多店铺批量拿货"
       />
+
+      <section
+        aria-label="批量拿货下一步"
+        className="grid gap-3 border-y border-border bg-background px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+      >
+        {latestDraft ? (
+          <div className="flex min-w-0 items-start gap-3">
+            <Clock3 aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="font-semibold text-ink">继续最近一次批量拿货</p>
+              <p className="mt-1 text-sm text-muted">
+                {latestDraft.groupCount} 个店铺 · {latestDraft.fileCount} 个文件 · 更新于 {dateTime(latestDraft.updatedAt)}
+              </p>
+              <Link
+                className="mt-3 inline-flex min-h-11 items-center gap-2 font-medium text-primary-hover"
+                href={`/portal/bulk-orders/${latestDraft.id}`}
+              >
+                继续上次草稿
+                <ArrowRight aria-hidden="true" className="size-4" />
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <p className="font-semibold text-ink">开始一次新的批量拿货</p>
+            <p className="mt-1 text-sm text-muted">暂无可继续的草稿，新建后即可按店铺上传文件。</p>
+          </div>
+        )}
+        <form action={createDraft}>
+          <Button className="min-h-11 w-full px-4 sm:w-auto" disabled={!stores.length} type="submit" variant={latestDraft ? "outline" : "default"}>
+            <Plus aria-hidden="true" />
+            新建批量草稿
+          </Button>
+        </form>
+      </section>
 
       <MetricStrip
         items={[
           { hint: "当前客户可提交的店铺", label: "可用店铺", value: String(stores.length) },
           { hint: "最近创建或更新的批量草稿", label: "最近草稿", value: String(drafts.length) },
-          { hint: "仍可继续编辑或提交", label: "可继续提交", tone: resumableDrafts ? "warning" : "default", value: String(resumableDrafts) },
+          { hint: "仍可继续编辑或提交", label: "可继续提交", tone: writableDrafts.length ? "warning" : "default", value: String(writableDrafts.length) },
           { hint: "统一结算的高频入口", label: "多店流程", value: "已开启" },
         ]}
       />
@@ -91,13 +132,13 @@ export default async function CustomerBulkOrdersPage() {
 
         {drafts.length ? (
           <div className="divide-y divide-border">
-            {drafts.map((draft) => (
+            {displayedDrafts.map(({ draft, status }) => (
               <article
                 className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 key={draft.id}
               >
                 <div className="space-y-1">
-                  <p className="font-medium text-ink">{draftStatusLabel(draft.status)}</p>
+                  <p className="font-medium text-ink">{draftStatusLabel(status)}</p>
                   <p className="text-sm text-muted">
                     {draft.groupCount} 个店铺 · {draft.fileCount} 个文件 · 更新于 {dateTime(draft.updatedAt)}
                   </p>
@@ -109,7 +150,7 @@ export default async function CustomerBulkOrdersPage() {
                   className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
                   href={`/portal/bulk-orders/${draft.id}`}
                 >
-                  进入草稿
+                  {isWritableDraftStatus(status) ? "继续草稿" : "查看草稿"}
                   <ArrowRight className="size-4" />
                 </Link>
               </article>

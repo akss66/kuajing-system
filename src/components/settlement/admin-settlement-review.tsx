@@ -5,7 +5,7 @@ import { useRef } from "react";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { reviewSettlementPaymentAction } from "@/modules/settlement/actions";
@@ -91,12 +91,16 @@ export function AdminSettlementReview({
         ]}
       />
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-        <WorkspacePanel className="overflow-hidden">
-          <WorkspacePanelHeader
-            description="这里只读展示每张拿货单的总额、余额抵扣和微信待付，不允许改单店分摊或部分确认。"
-            title="逐店分摊"
-          />
+      <SettlementWorkspace className="grid gap-6 space-y-0 xl:grid-cols-[minmax(0,1.2fr)_360px]">
+        <SettlementRegion
+          description={
+            <>
+              <span>逐店分摊</span>只读展示，不允许改单店分摊或部分确认。
+            </>
+          }
+          kind="batches"
+          title="结算批次明细"
+        >
           <div className="divide-y divide-border">
             {orders.map((order) => (
               <article
@@ -119,10 +123,15 @@ export function AdminSettlementReview({
               </article>
             ))}
           </div>
-        </WorkspacePanel>
+        </SettlementRegion>
 
-        <div className="space-y-4">
-          <WorkspacePanel className="p-4 sm:p-5">
+        <SettlementRegion
+          contentClassName="divide-y divide-border"
+          description="核对付款声明与审计记录后，只能整批确认或整批拒绝。"
+          kind="review"
+          title="付款审核"
+        >
+          <section className="p-4 sm:p-5">
             <h2 className="font-semibold text-ink">付款声明</h2>
             <div className="mt-3 space-y-2 text-sm text-muted">
               <p>{`状态：${claim?.statusLabel ?? "未声明"}`}</p>
@@ -130,9 +139,9 @@ export function AdminSettlementReview({
               <p>{`申报金额：${money(claim?.amountFen ?? batch.offlineAmountFen)}`}</p>
               {claim?.note ? <p>{`备注：${claim.note}`}</p> : null}
             </div>
-          </WorkspacePanel>
+          </section>
 
-          <WorkspacePanel className="p-4 sm:p-5">
+          <section className="p-4 sm:p-5">
             <h2 className="font-semibold text-ink">审计</h2>
             <div className="mt-3 space-y-3">
               {auditEntries.map((entry) => (
@@ -145,9 +154,9 @@ export function AdminSettlementReview({
                 </article>
               ))}
             </div>
-          </WorkspacePanel>
+          </section>
 
-          <WorkspacePanel className="space-y-3 p-4 sm:p-5">
+          <section className="space-y-3 p-4 sm:p-5">
             {batch.reviewable ? (
               <>
                 <ConfirmedActionForm
@@ -190,9 +199,9 @@ export function AdminSettlementReview({
                 {`该结算批次当前为 ${batch.statusLabel}，审核操作已结束。`}
               </p>
             )}
-          </WorkspacePanel>
-        </div>
-      </section>
+          </section>
+        </SettlementRegion>
+      </SettlementWorkspace>
     </div>
   );
 }

@@ -1,14 +1,14 @@
-import { Filter, PackageSearch } from "lucide-react";
+import { PackageSearch } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { AdminOrderCancel } from "@/components/orders/admin-order-cancel";
+import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   listAdminOrderFilterOptions,
@@ -94,62 +94,15 @@ export default async function AdminOrdersPage({
         ]}
       />
 
-      <WorkspacePanel className="p-4 sm:p-5">
-        <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.1fr_1fr_1fr_1fr_0.8fr_0.8fr_auto_auto] xl:items-end">
-          <label className="space-y-2 text-sm font-medium text-ink">
-            拿货单号
-            <Input className="min-h-11" defaultValue={filters.orderNumber} name="orderNumber" placeholder="输入完整或部分单号" />
-          </label>
-          <label className="space-y-2 text-sm font-medium text-ink">
-            状态
-            <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" defaultValue={filters.status ?? ""} name="status">
-              <option value="">全部状态</option>
-              {statuses.map((status) => (
-                <option key={status.value} value={status.value}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm font-medium text-ink">
-            客户
-            <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" defaultValue={filters.customerId ?? ""} name="customerId">
-              <option value="">全部客户</option>
-              {options.customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.code} · {customer.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm font-medium text-ink">
-            店铺
-            <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" defaultValue={filters.storeId ?? ""} name="storeId">
-              <option value="">全部店铺</option>
-              {options.stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm font-medium text-ink">
-            开始日期
-            <Input className="min-h-11" defaultValue={filters.dateFrom} name="dateFrom" type="date" />
-          </label>
-          <label className="space-y-2 text-sm font-medium text-ink">
-            结束日期
-            <Input className="min-h-11" defaultValue={filters.dateTo} name="dateTo" type="date" />
-          </label>
-          <Button className="min-h-11 px-4" type="submit">
-            <Filter />
-            筛选
-          </Button>
-          <Button asChild className="min-h-11 px-4" variant="outline">
-            <Link href="/admin/orders">清空</Link>
-          </Button>
-        </form>
-      </WorkspacePanel>
+      <OrderFilterBar
+        customerOptions={options.customers.map((customer) => ({
+          label: `${customer.code} · ${customer.name}`,
+          value: customer.id,
+        }))}
+        statusOptions={statuses}
+        storeOptions={options.stores.map((store) => ({ label: store.name, value: store.id }))}
+        values={filters}
+      />
 
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
@@ -221,7 +174,13 @@ export default async function AdminOrdersPage({
         <div className="divide-y divide-border md:hidden">
           {orders.length ? (
             orders.map((order) => (
-              <article className="space-y-3 p-4" data-workspace-panel key={order.id}>
+              <article
+                aria-label={`订单 ${order.orderNumber}`}
+                className="space-y-3 p-4"
+                data-mobile-order-card
+                data-workspace-panel
+                key={order.id}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <Link className="font-semibold text-primary" href={`/admin/orders/${order.id}`}>
@@ -249,7 +208,7 @@ export default async function AdminOrdersPage({
                 </div>
                 {order.lockExpiresAt ? <p className="text-xs text-muted">库存锁定至 {dateTime(order.lockExpiresAt)}</p> : null}
                 <div className="flex flex-wrap gap-2">
-                  <Button asChild size="sm" variant="outline">
+                  <Button asChild className="min-h-11" size="sm" variant="outline">
                     <Link href={`/admin/orders/${order.id}`}>查看履约详情</Link>
                   </Button>
                   {canCancel(order.status) ? <AdminOrderCancel orderId={order.id} /> : null}
