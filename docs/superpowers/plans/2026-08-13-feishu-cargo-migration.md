@@ -501,6 +501,8 @@ git commit -m "feat: parse legacy Feishu cargo sheets"
 
 ### Task 5: Add Safe Image Storage and Authenticated Asset Delivery
 
+> Approved amendment on 2026-08-13: replace all filesystem lease / heartbeat / claim coordination inside `src/modules/feishu/asset-storage.ts` with an injectable coordination port backed by PostgreSQL advisory transaction locks on pinned transaction connections. Task 5 execution is limited to `src/modules/feishu/asset-storage.ts`, new `src/modules/feishu/asset-coordination.ts`, `tests/unit/feishu/asset-storage.test.ts`, and new `tests/integration/feishu/asset-coordination.test.ts`; existing route, Docker, env, and package changes stay intact.
+
 **Files:**
 - Create: `src/modules/feishu/asset-storage.ts`
 - Create: `src/app/api/catalog-assets/[assetId]/route.ts`

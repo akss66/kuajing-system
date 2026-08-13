@@ -13,21 +13,25 @@ import {
   stat,
   unlink,
 } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import sharp from "sharp";
 
 import type { TemporaryAssetManifest } from "./cargo-types";
+import {
+  createPostgresCatalogAssetCoordinator,
+  type CatalogAssetCoordinator,
+} from "./asset-coordination";
 
 const DEFAULT_CATALOG_ASSET_DIR = "/app/data/catalog-assets";
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_PIXEL_COUNT = 25_000_000;
 const DEFAULT_MAX_RUN_BYTES = 1024 * 1024 * 1024;
-const DEFAULT_LOCK_RETRY_DELAY_MS = 50;
-const DEFAULT_LOCK_STALE_MS = 60_000;
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const DEFAULT_TARGET_WRITE_CHUNK_SIZE = 64 * 1024;
+const DEFAULT_TEMPORARY_FILE_STALE_MS = 60_000;
 const STAGING_TEMP_FILE_PATTERN = /^\.catalog-asset-stage-(\d+)-([0-9a-f-]{36})\.tmp$/;
+const FINAL_TEMP_FILE_PATTERN = /^\.catalog-asset-digest-(\d+)-([0-9a-f-]{36})\.tmp$/;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const TEMPORARY_KEY_PATTERN =
@@ -35,9 +39,6 @@ const TEMPORARY_KEY_PATTERN =
 const STORAGE_KEY_PATTERN = /^sha256\/([0-9a-f]{2})\/([0-9a-f]{64})\.(jpg|png|webp)$/;
 const READ_NOFOLLOW_FLAGS =
   constants.O_RDONLY | (typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0);
-const LEASE_WRITE_NOFOLLOW_FLAGS =
-  constants.O_RDWR |
-  (typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0);
 const WRITE_NOFOLLOW_FLAGS =
   constants.O_CREAT |
   constants.O_EXCL |
@@ -48,27 +49,9 @@ const HARD_LINK_UNSUPPORTED_CODES = new Set(["ENOTSUP", "EOPNOTSUPP", "EXDEV", "
 type ImageMimeType = TemporaryAssetManifest["mimeType"];
 type ImageExtension = "jpg" | "png" | "webp";
 type DirectorySyncReason = "cleanup" | "publish";
-type LeaseKind = "claim" | "run";
 type AssetRootState = {
   absoluteRoot: string;
   realRoot: string;
-};
-type RunLockControl = {
-  assertHeld(): void;
-  ownerToken: string;
-  stopHeartbeat(): void;
-};
-type ClaimLeaseControl = RunLockControl & {
-  targetPath: string;
-};
-type LeaseWriteContext = {
-  kind: LeaseKind;
-  ownerToken: string;
-  path: string;
-};
-type ClaimAcquiredContext = {
-  ownerToken: string;
-  targetPath: string;
 };
 type TargetWriteProgress = {
   bytesWritten: number;
@@ -88,36 +71,29 @@ type FileIdentity = {
 };
 type CatalogAssetStorageOptions = {
   assetDir?: string;
-  claimHeartbeatIntervalMs?: number;
-  claimStaleMs?: number;
-  heartbeatIntervalMs?: number;
-  lockRetryDelayMs?: number;
-  lockStaleMs?: number;
+  coordinator?: CatalogAssetCoordinator;
   lockTimeoutMs?: number;
   maxFileBytes?: number;
   maxPixelCount?: number;
   maxRunBytes?: number;
-  onClaimAcquired?: ((context: ClaimAcquiredContext) => Promise<void> | void) | undefined;
-  onClaimLeaseAcquired?: ((control: ClaimLeaseControl) => Promise<void> | void) | undefined;
   onDirectorySync?: ((path: string, reason: DirectorySyncReason) => Promise<void> | void) | undefined;
   onFinalPublishReady?: (() => Promise<void> | void) | undefined;
-  onLeaseWrite?: ((context: LeaseWriteContext) => Promise<void> | void) | undefined;
-  onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
   onTargetCleanup?: ((context: TargetCleanupContext) => Promise<void> | void) | undefined;
   onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   onTemporaryWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   targetWriteChunkSize?: number;
+  temporaryFileStaleMs?: number;
 };
 type PublishBytesOptions = {
   assertCanContinue?: (() => void) | undefined;
   bytes: Uint8Array;
   expectedDigest?: string;
   expectedMimeType?: ImageMimeType;
-  onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   onReady?: (() => Promise<void> | void) | undefined;
-  tempFileName?: string | undefined;
+  onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  tempFileName: string;
   targetPath: string;
 };
 type PublishBytesResult = {
@@ -127,47 +103,21 @@ type ManagedFile = {
   handle: FileHandle;
   path: string;
 };
-type LockLeasePayload = {
-  heartbeatAt: string;
-  ownerToken: string;
-  pid: number;
-  runId: string;
-};
-type LockLease = LockLeasePayload & {
-  heartbeatAtMs: number;
-};
-type HeartbeatController = {
-  assertHeld(): void;
-  awaitStopped(): Promise<void>;
-  stop(): void;
-};
-type StorageDependencies = Required<
-  Pick<
-    CatalogAssetStorageOptions,
-    | "assetDir"
-    | "claimHeartbeatIntervalMs"
-    | "claimStaleMs"
-    | "heartbeatIntervalMs"
-    | "lockRetryDelayMs"
-    | "lockStaleMs"
-    | "lockTimeoutMs"
-    | "maxFileBytes"
-    | "maxPixelCount"
-    | "maxRunBytes"
-    | "targetWriteChunkSize"
-  >
-> & {
-  onClaimAcquired?: ((context: ClaimAcquiredContext) => Promise<void> | void) | undefined;
-  onClaimLeaseAcquired?: ((control: ClaimLeaseControl) => Promise<void> | void) | undefined;
+type StorageDependencies = {
+  assetDir: string;
+  coordinator: CatalogAssetCoordinator;
+  maxFileBytes: number;
+  maxPixelCount: number;
+  maxRunBytes: number;
   onDirectorySync?: ((path: string, reason: DirectorySyncReason) => Promise<void> | void) | undefined;
   onFinalPublishReady?: (() => Promise<void> | void) | undefined;
-  onLeaseWrite?: ((context: LeaseWriteContext) => Promise<void> | void) | undefined;
-  onRunLockAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
   onStageWriteReady?: (() => Promise<void> | void) | undefined;
   onStorageLink?: ((temporaryPath: string, targetPath: string) => Promise<void> | void) | undefined;
   onTargetCleanup?: ((context: TargetCleanupContext) => Promise<void> | void) | undefined;
   onTargetWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   onTemporaryWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
+  targetWriteChunkSize: number;
+  temporaryFileStaleMs: number;
 };
 
 class CatalogAssetError extends Error {
@@ -184,19 +134,12 @@ class CatalogAssetConflictError extends CatalogAssetError {
   }
 }
 
-class CatalogAssetLeaseLostError extends CatalogAssetError {
-  constructor(message: string) {
-    super(message);
-    this.name = "CatalogAssetLeaseLostError";
-  }
+function createStagingTempFileName(createdAtMs: number) {
+  return `.catalog-asset-stage-${createdAtMs}-${crypto.randomUUID()}.tmp`;
 }
 
-function wait(delayMs: number) {
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
-}
-
-function createStagingTempFileName(ownerToken: string, createdAtMs: number) {
-  return `.catalog-asset-stage-${createdAtMs}-${ownerToken}.tmp`;
+function createFinalTempFileName(createdAtMs: number) {
+  return `.catalog-asset-digest-${createdAtMs}-${crypto.randomUUID()}.tmp`;
 }
 
 function toComparablePath(input: string) {
@@ -356,16 +299,6 @@ async function ensureManagedDirectory(
   assertInsideRealRoot(state.realRoot, realDirectoryPath, label);
 }
 
-async function assertRegularFileAtPath(absolutePath: string, label: string) {
-  const fileStats = await lstat(absolutePath);
-  if (fileStats.isSymbolicLink()) {
-    throw new CatalogAssetError(`${label} resolves outside CATALOG_ASSET_DIR`);
-  }
-  if (!fileStats.isFile()) {
-    throw new CatalogAssetError(`${label} is not a file`);
-  }
-}
-
 async function resolveManagedFilePath(
   state: AssetRootState,
   relativeKey: string,
@@ -418,7 +351,6 @@ async function safeClose(handle: FileHandle | null | undefined) {
   if (!handle) {
     return;
   }
-
   await handle.close().catch(() => undefined);
 }
 
@@ -454,18 +386,8 @@ function fileIdentityMatches(expected: FileIdentity, actual: FileIdentity) {
   return false;
 }
 
-async function safeUnlinkOwnedPath(
-  path: string,
-  expectedIdentity: FileIdentity | null,
-  assertHeld: () => void,
-): Promise<boolean> {
+async function safeUnlinkOwnedPath(path: string, expectedIdentity: FileIdentity | null): Promise<boolean> {
   if (!expectedIdentity) {
-    return false;
-  }
-
-  try {
-    assertHeld();
-  } catch {
     return false;
   }
 
@@ -484,37 +406,6 @@ async function safeUnlinkOwnedPath(
 
   await safeUnlink(path);
   return true;
-}
-
-function serializeLease(payload: LockLeasePayload) {
-  return JSON.stringify(payload);
-}
-
-function parseLease(bytes: Uint8Array): LockLease | null {
-  try {
-    const parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as Partial<LockLeasePayload>;
-    if (
-      typeof parsed.heartbeatAt !== "string" ||
-      typeof parsed.ownerToken !== "string" ||
-      typeof parsed.pid !== "number" ||
-      typeof parsed.runId !== "string"
-    ) {
-      return null;
-    }
-    const heartbeatAtMs = Date.parse(parsed.heartbeatAt);
-    if (!Number.isFinite(heartbeatAtMs)) {
-      return null;
-    }
-    return {
-      heartbeatAt: parsed.heartbeatAt,
-      heartbeatAtMs,
-      ownerToken: parsed.ownerToken,
-      pid: parsed.pid,
-      runId: parsed.runId,
-    };
-  } catch {
-    return null;
-  }
 }
 
 async function validateImageBytes(
@@ -581,71 +472,6 @@ async function sumDirectoryBytes(directoryPath: string): Promise<number> {
   return total;
 }
 
-async function reclaimStaleStagingTemps(
-  state: AssetRootState,
-  dependencies: StorageDependencies,
-  runDirectoryPath: string,
-  currentOwnerToken: string,
-  assertCanContinue: () => void,
-) {
-  const entries = await readdir(runDirectoryPath, { withFileTypes: true }).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    },
-  );
-
-  let cleanedAny = false;
-  for (const entry of entries) {
-    assertCanContinue();
-
-    const match = STAGING_TEMP_FILE_PATTERN.exec(entry.name);
-    if (!match) {
-      continue;
-    }
-
-    const createdAtMs = Number(match[1]);
-    const ownerToken = match[2];
-    if (!Number.isFinite(createdAtMs) || ownerToken === currentOwnerToken) {
-      continue;
-    }
-    if (Date.now() - createdAtMs <= dependencies.lockStaleMs) {
-      continue;
-    }
-
-    const absolutePath = join(runDirectoryPath, entry.name);
-    assertContainedPath(state.absoluteRoot, absolutePath, "temporary asset path");
-    const entryStats = await lstat(absolutePath).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        return null;
-      }
-      throw error;
-    });
-    if (!entryStats || entryStats.isSymbolicLink() || !entryStats.isFile()) {
-      continue;
-    }
-
-    const quarantinePath = join(
-      runDirectoryPath,
-      `.catalog-asset-quarantine-${crypto.randomUUID()}.tmp`,
-    );
-    const moved = await renameWithinRoot(state, absolutePath, quarantinePath, "temporary asset path");
-    if (!moved) {
-      continue;
-    }
-
-    await safeUnlink(quarantinePath);
-    cleanedAny = true;
-  }
-
-  if (cleanedAny) {
-    assertCanContinue();
-    await syncDirectory(runDirectoryPath, dependencies, "cleanup");
-  }
-}
-
 async function writeExclusiveFile(
   path: string,
   bytes: Uint8Array,
@@ -700,17 +526,37 @@ async function syncDirectory(
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (
-      process.platform !== "linux" &&
-      (nodeError.code === "EINVAL" ||
-        nodeError.code === "ENOTSUP" ||
-        nodeError.code === "EPERM" ||
-        nodeError.code === "EISDIR")
+      !(
+        process.platform !== "linux" &&
+        ["EINVAL", "ENOTSUP", "EPERM", "EISDIR"].includes(nodeError.code ?? "")
+      )
     ) {
-      return;
+      throw error;
     }
-    throw error;
   } finally {
     await safeClose(handle);
+  }
+}
+
+async function renameWithinRoot(
+  state: AssetRootState,
+  fromPath: string,
+  toPath: string,
+  label: string,
+): Promise<boolean> {
+  assertContainedPath(state.absoluteRoot, fromPath, label);
+  assertContainedPath(state.absoluteRoot, toPath, label);
+  await ensureManagedDirectory(state, dirname(toPath), { create: true, label });
+
+  try {
+    await rename(fromPath, toPath);
+    return true;
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -719,23 +565,27 @@ async function openManagedFile(
   relativeKey: string,
   label: string,
 ): Promise<ManagedFile> {
-  const absolutePath = await resolveManagedFilePath(state, relativeKey, label, {
-    createParent: false,
-  });
-  await assertRegularFileAtPath(absolutePath, label);
+  const absolutePath = resolve(state.absoluteRoot, relativeKey);
+  assertContainedPath(state.absoluteRoot, absolutePath, label);
+  await assertExistingAncestorInsideRoot(state, dirname(absolutePath), label);
 
-  let handle: FileHandle | null = null;
+  const handle = await open(absolutePath, READ_NOFOLLOW_FLAGS);
   try {
-    handle = await open(absolutePath, READ_NOFOLLOW_FLAGS);
     const fileStats = await handle.stat();
     if (!fileStats.isFile()) {
       throw new CatalogAssetError(`${label} is not a file`);
     }
-    return { handle, path: absolutePath };
+    const realFilePath = await realpath(absolutePath);
+    assertInsideRealRoot(state.realRoot, realFilePath, label);
   } catch (error) {
     await safeClose(handle);
     throw error;
   }
+
+  return {
+    handle,
+    path: absolutePath,
+  };
 }
 
 async function readManagedFile(
@@ -751,19 +601,65 @@ async function readManagedFile(
   }
 }
 
-async function readLockLeaseFromPath(leasePath: string): Promise<LockLease | null> {
-  let handle: FileHandle | null = null;
-  try {
-    handle = await open(leasePath, READ_NOFOLLOW_FLAGS);
-    return parseLease(new Uint8Array(await handle.readFile()));
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      return null;
+async function reclaimStaleTemporaryFiles(
+  state: AssetRootState,
+  dependencies: StorageDependencies,
+  directoryPath: string,
+  pattern: RegExp,
+  label: string,
+  assertCanContinue: () => void,
+) {
+  const entries = await readdir(directoryPath, { withFileTypes: true }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    },
+  );
+
+  let cleanedAny = false;
+  for (const entry of entries) {
+    assertCanContinue();
+
+    const match = pattern.exec(entry.name);
+    if (!match) {
+      continue;
     }
-    throw error;
-  } finally {
-    await safeClose(handle);
+
+    const createdAtMs = Number(match[1]);
+    if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs <= dependencies.temporaryFileStaleMs) {
+      continue;
+    }
+
+    const absolutePath = join(directoryPath, entry.name);
+    assertContainedPath(state.absoluteRoot, absolutePath, label);
+    const entryStats = await lstat(absolutePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    });
+    if (!entryStats || entryStats.isSymbolicLink() || !entryStats.isFile()) {
+      continue;
+    }
+
+    const quarantinePath = join(
+      directoryPath,
+      `.catalog-asset-quarantine-${createdAtMs}-${crypto.randomUUID()}.tmp`,
+    );
+    const moved = await renameWithinRoot(state, absolutePath, quarantinePath, label);
+    if (!moved) {
+      continue;
+    }
+
+    await safeUnlink(quarantinePath);
+    cleanedAny = true;
+  }
+
+  if (cleanedAny) {
+    assertCanContinue();
+    await syncDirectory(directoryPath, dependencies, "cleanup");
   }
 }
 
@@ -771,150 +667,17 @@ async function verifyExistingPublishedTarget(
   state: AssetRootState,
   dependencies: StorageDependencies,
   options: Pick<PublishBytesOptions, "expectedDigest" | "expectedMimeType" | "targetPath">,
-) {
-  const existingKey = relative(state.absoluteRoot, options.targetPath).replaceAll("\\", "/");
-  const existingBytes = await readManagedFile(state, existingKey, "storage key");
-  if (options.expectedDigest && options.expectedMimeType) {
-    const validation = await validateImageBytes(existingBytes, dependencies, options.expectedMimeType);
-    if (validation.contentSha256 !== options.expectedDigest) {
-      throw new CatalogAssetConflictError("existing catalog asset conflicts with the requested digest");
-    }
-  }
-}
-
-async function renameWithinRoot(
-  state: AssetRootState,
-  sourcePath: string,
-  targetPath: string,
-  label: string,
-) {
-  assertContainedPath(state.absoluteRoot, targetPath, label);
-  await ensureManagedDirectory(state, dirname(targetPath), { create: true, label });
-
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await rename(sourcePath, targetPath);
-      return true;
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code === "ENOENT") {
-        return false;
-      }
-      if ((nodeError.code === "EPERM" || nodeError.code === "EBUSY") && attempt < 4) {
-        await wait(10);
-        continue;
-      }
-      throw error;
-    }
+): Promise<void> {
+  if (!options.expectedDigest || !options.expectedMimeType) {
+    return;
   }
 
-  return false;
-}
-
-async function fallbackPublishByClaim(
-  state: AssetRootState,
-  dependencies: StorageDependencies,
-  options: PublishBytesOptions,
-): Promise<PublishBytesResult> {
-  const finalDirectory = dirname(options.targetPath);
-  const claimPath = `${options.targetPath}.claim`;
-
-  const publishResult = await withLeasedDirectory(
-    state,
-    dependencies,
-    {
-      heartbeatIntervalMs: dependencies.claimHeartbeatIntervalMs,
-      kind: "claim",
-      lockPath: claimPath,
-      onAcquired: async (control) => {
-        await dependencies.onClaimLeaseAcquired?.({
-          ...control,
-          targetPath: options.targetPath,
-        });
-      },
-      resourceId: options.targetPath,
-      staleMs: dependencies.claimStaleMs,
-    },
-    async (claimControl) => {
-      await dependencies.onClaimAcquired?.({
-        ownerToken: claimControl.ownerToken,
-        targetPath: options.targetPath,
-      });
-      claimControl.assertHeld();
-
-      try {
-        await verifyExistingPublishedTarget(state, dependencies, options);
-        return { published: false } satisfies PublishBytesResult;
-      } catch (error) {
-        const nodeError = error as NodeJS.ErrnoException;
-        if (nodeError.code !== "ENOENT") {
-          throw error;
-        }
-      }
-
-      claimControl.assertHeld();
-
-      let targetHandle: FileHandle | null = null;
-      let targetCreated = false;
-      let targetIdentity: FileIdentity | null = null;
-      try {
-        claimControl.assertHeld();
-        targetHandle = await open(options.targetPath, WRITE_NOFOLLOW_FLAGS, 0o600);
-        targetCreated = true;
-        targetIdentity = toFileIdentity(await targetHandle.stat());
-
-        let bytesWritten = 0;
-        const chunkSize = Math.max(1, dependencies.targetWriteChunkSize);
-        while (bytesWritten < options.bytes.byteLength) {
-          claimControl.assertHeld();
-
-          const nextBytesWritten = Math.min(bytesWritten + chunkSize, options.bytes.byteLength);
-          const chunk = Buffer.from(options.bytes.subarray(bytesWritten, nextBytesWritten));
-          await targetHandle.write(chunk, 0, chunk.byteLength, bytesWritten);
-          bytesWritten = nextBytesWritten;
-
-          await dependencies.onTargetWriteProgress?.({
-            bytesWritten,
-            targetPath: options.targetPath,
-            totalBytes: options.bytes.byteLength,
-          });
-          claimControl.assertHeld();
-        }
-
-        await targetHandle.sync();
-        claimControl.assertHeld();
-        await safeClose(targetHandle);
-        targetHandle = null;
-        claimControl.assertHeld();
-        await syncDirectory(finalDirectory, dependencies, "publish");
-        claimControl.assertHeld();
-        return { published: true } satisfies PublishBytesResult;
-      } catch (error) {
-        await safeClose(targetHandle);
-        const nodeError = error as NodeJS.ErrnoException;
-        if (!targetCreated && nodeError.code === "EEXIST") {
-          await verifyExistingPublishedTarget(state, dependencies, options);
-          return { published: false } satisfies PublishBytesResult;
-        }
-
-        if (targetCreated) {
-          await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
-          const removedOwnedTarget = await safeUnlinkOwnedPath(
-            options.targetPath,
-            targetIdentity,
-            () => claimControl.assertHeld(),
-          );
-          if (removedOwnedTarget) {
-            await syncDirectory(finalDirectory, dependencies, "cleanup");
-          }
-        }
-        throw error;
-      }
-    },
-  );
-
-  await syncDirectory(finalDirectory, dependencies, "cleanup");
-  return publishResult;
+  const relativeKey = relative(state.absoluteRoot, options.targetPath).replaceAll("\\", "/");
+  const existingBytes = await readManagedFile(state, relativeKey, "storage key");
+  const validation = await validateImageBytes(existingBytes, dependencies, options.expectedMimeType);
+  if (validation.contentSha256 !== options.expectedDigest) {
+    throw new CatalogAssetConflictError("catalog asset digest target conflicts with different bytes");
+  }
 }
 
 async function publishBytesAtomically(
@@ -922,16 +685,18 @@ async function publishBytesAtomically(
   dependencies: StorageDependencies,
   options: PublishBytesOptions,
 ): Promise<PublishBytesResult> {
-  const isFinalPublish = Boolean(options.expectedDigest && options.expectedMimeType);
   const finalDirectory = dirname(options.targetPath);
   await ensureManagedDirectory(state, finalDirectory, {
     create: true,
-    label: "storage key",
+    label: options.expectedDigest ? "storage key" : "temporary asset path",
   });
 
-  const tempName = options.tempFileName ?? `.catalog-asset-${crypto.randomUUID()}.tmp`;
-  const tempPath = join(finalDirectory, tempName);
-  assertContainedPath(state.absoluteRoot, tempPath, "storage key");
+  const tempPath = join(finalDirectory, options.tempFileName);
+  assertContainedPath(
+    state.absoluteRoot,
+    tempPath,
+    options.expectedDigest ? "storage key" : "temporary asset path",
+  );
 
   try {
     options.assertCanContinue?.();
@@ -945,38 +710,67 @@ async function publishBytesAtomically(
     options.assertCanContinue?.();
 
     try {
-      options.assertCanContinue?.();
-      if (isFinalPublish && dependencies.onStorageLink) {
+      if (options.expectedDigest && dependencies.onStorageLink) {
         await dependencies.onStorageLink(tempPath, options.targetPath);
+      } else if (options.expectedDigest) {
+        await link(tempPath, options.targetPath);
       } else {
-        if (isFinalPublish) {
-          await link(tempPath, options.targetPath);
-        } else {
-          const moved = await renameWithinRoot(state, tempPath, options.targetPath, "temporary asset path");
-          if (!moved) {
-            throw new CatalogAssetError("temporary asset publish source disappeared before rename");
-          }
+        const moved = await renameWithinRoot(state, tempPath, options.targetPath, "temporary asset path");
+        if (!moved) {
+          throw new CatalogAssetError("temporary asset publish source disappeared before rename");
         }
-      options.assertCanContinue?.();
       }
-      await syncDirectory(finalDirectory, dependencies, "publish");
-      options.assertCanContinue?.();
-      return { published: true };
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
-      if (isFinalPublish && HARD_LINK_UNSUPPORTED_CODES.has(nodeError.code ?? "")) {
-        return await fallbackPublishByClaim(state, dependencies, options);
-      }
-      if (nodeError.code !== "EEXIST") {
-        throw error;
+      if (options.expectedDigest && HARD_LINK_UNSUPPORTED_CODES.has(nodeError.code ?? "")) {
+        let targetIdentity: FileIdentity | null = null;
+        try {
+          await writeExclusiveFile(options.targetPath, options.bytes, {
+            assertCanContinue: options.assertCanContinue,
+            chunkSize: dependencies.targetWriteChunkSize,
+            onWriteProgress: options.onWriteProgress,
+          });
+          targetIdentity = toFileIdentity(await stat(options.targetPath));
+        } catch (fallbackError) {
+          const fallbackNodeError = fallbackError as NodeJS.ErrnoException;
+          if (fallbackNodeError.code === "EEXIST") {
+            await verifyExistingPublishedTarget(state, dependencies, options);
+            return { published: false };
+          }
+
+          if (targetIdentity) {
+            await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
+            const removedOwnedTarget = await safeUnlinkOwnedPath(options.targetPath, targetIdentity);
+            if (removedOwnedTarget) {
+              await syncDirectory(finalDirectory, dependencies, "cleanup");
+            }
+          }
+          throw fallbackError;
+        }
+
+        try {
+          await syncDirectory(finalDirectory, dependencies, "publish");
+        } catch (syncError) {
+          await dependencies.onTargetCleanup?.({ targetPath: options.targetPath });
+          const removedOwnedTarget = await safeUnlinkOwnedPath(options.targetPath, targetIdentity);
+          if (removedOwnedTarget) {
+            await syncDirectory(finalDirectory, dependencies, "cleanup");
+          }
+          throw syncError;
+        }
+        return { published: true };
       }
 
-      if (isFinalPublish) {
+      if (nodeError.code === "EEXIST" && options.expectedDigest) {
         await verifyExistingPublishedTarget(state, dependencies, options);
+        return { published: false };
       }
-      options.assertCanContinue?.();
-      return { published: false };
+
+      throw error;
     }
+
+    await syncDirectory(finalDirectory, dependencies, "publish");
+    return { published: true };
   } finally {
     const tempRemoved = await unlink(tempPath)
       .then(() => true)
@@ -992,352 +786,26 @@ async function publishBytesAtomically(
   }
 }
 
-async function writeLockLease(
-  leasePath: string,
-  ownerToken: string,
-  runId: string,
-  kind: LeaseKind,
-  dependencies: StorageDependencies,
-) {
-  const currentLease = await readLockLeaseFromPath(leasePath);
-  if (currentLease && currentLease.ownerToken !== ownerToken) {
-    throw new CatalogAssetLeaseLostError(`${kind} lease owner token no longer matches the current lease`);
-  }
-
-  let handle: FileHandle | null = null;
-  try {
-    await dependencies.onLeaseWrite?.({
-      kind,
-      ownerToken,
-      path: leasePath,
-    });
-    handle = await open(leasePath, LEASE_WRITE_NOFOLLOW_FLAGS);
-    await handle.truncate(0);
-    await handle.writeFile(
-      Buffer.from(
-        serializeLease({
-          heartbeatAt: new Date().toISOString(),
-          ownerToken,
-          pid: process.pid,
-          runId,
-        }),
-        "utf8",
-      ),
-    );
-    await handle.sync();
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      throw new CatalogAssetLeaseLostError(`lost the ${kind} lease while renewing the heartbeat`);
-    }
-    throw error;
-  } finally {
-    await safeClose(handle);
-  }
-}
-
-function startLockHeartbeat(
-  leasePath: string,
-  dependencies: StorageDependencies,
-  ownerToken: string,
-  runId: string,
-  kind: LeaseKind,
-  heartbeatIntervalMs: number,
-): HeartbeatController {
-  let stopped = false;
-  let lostError: Error | null = null;
-  let timer: NodeJS.Timeout | null = null;
-  let resolveStopped: (() => void) | null = null;
-  let tickInFlight = 0;
-  const stoppedPromise = new Promise<void>((resolve) => {
-    resolveStopped = resolve;
-  });
-
-  const maybeResolveStopped = () => {
-    if (!stopped || tickInFlight > 0) {
-      return;
-    }
-    resolveStopped?.();
-  };
-
-  const finish = () => {
-    if (stopped) {
-      return;
-    }
-    stopped = true;
-    if (timer) {
-      clearTimeout(timer);
-    }
-    maybeResolveStopped();
-  };
-
-  const tick = async () => {
-    if (stopped) {
-      return;
-    }
-
-    tickInFlight += 1;
-    try {
-      await writeLockLease(leasePath, ownerToken, runId, kind, dependencies);
-    } catch (error) {
-      lostError =
-        error instanceof Error
-          ? error
-          : new CatalogAssetLeaseLostError(`lost the ${kind} lease while renewing the heartbeat`);
-      tickInFlight -= 1;
-      finish();
-      return;
-    }
-    tickInFlight -= 1;
-
-    if (stopped) {
-      maybeResolveStopped();
-      return;
-    }
-
-    timer = setTimeout(() => {
-      void tick();
-    }, heartbeatIntervalMs);
-    timer.unref?.();
-  };
-
-  timer = setTimeout(() => {
-    void tick();
-  }, heartbeatIntervalMs);
-  timer.unref?.();
-
-  return {
-    assertHeld() {
-      if (lostError) {
-        throw lostError;
-      }
-    },
-    async awaitStopped() {
-      await stoppedPromise;
-    },
-    stop() {
-      finish();
-    },
-  };
-}
-
-async function tryReclaimStaleLock(
-  state: AssetRootState,
-  lockPath: string,
-  leasePath: string,
-  staleMs: number,
-) {
-  const lockStats = await lstat(lockPath).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  });
-  if (!lockStats) {
-    return true;
-  }
-  if (lockStats.isSymbolicLink()) {
-    throw new CatalogAssetError("lock path resolves outside CATALOG_ASSET_DIR");
-  }
-
-  const lease = await readLockLeaseFromPath(leasePath);
-  const lastHeartbeatAtMs = lease?.heartbeatAtMs ?? lockStats.mtimeMs;
-  if (Date.now() - lastHeartbeatAtMs <= staleMs) {
-    return false;
-  }
-
-  const reclaimedPath = join(
-    dirname(lockPath),
-    `${basename(lockPath)}.stale-${crypto.randomUUID()}`,
-  );
-  const moved = await renameWithinRoot(state, lockPath, reclaimedPath, "lock path");
-  if (!moved) {
-    return true;
-  }
-
-  await rm(reclaimedPath, { force: true, recursive: true });
-  return true;
-}
-
-async function releaseRunLock(
-  state: AssetRootState,
-  lockPath: string,
-  ownerToken: string,
-) {
-  const leasePath = join(lockPath, "lease.json");
-  const lease = await readLockLeaseFromPath(leasePath);
-  if (!lease || lease.ownerToken !== ownerToken) {
-    return;
-  }
-
-  const releasedPath = join(
-    dirname(lockPath),
-    `${basename(lockPath)}.release-${ownerToken}-${crypto.randomUUID()}`,
-  );
-  const moved = await renameWithinRoot(state, lockPath, releasedPath, "lock path");
-  if (!moved) {
-    return;
-  }
-
-  await rm(releasedPath, { force: true, recursive: true });
-}
-
-async function withLeasedDirectory<T>(
-  state: AssetRootState,
-  dependencies: StorageDependencies,
-  input: {
-    heartbeatIntervalMs: number;
-    kind: LeaseKind;
-    lockPath: string;
-    onAcquired?: ((control: RunLockControl) => Promise<void> | void) | undefined;
-    resourceId: string;
-    staleMs: number;
-  },
-  action: (control: RunLockControl) => Promise<T>,
-) {
-  const lockParent = dirname(input.lockPath);
-  const lockPath = input.lockPath;
-  const leasePath = join(lockPath, "lease.json");
-  const startedAt = Date.now();
-
-  await ensureManagedDirectory(state, lockParent, {
-    create: true,
-    label: input.kind === "run" ? "lock path" : "claim path",
-  });
-
-  while (true) {
-    const ownerToken = crypto.randomUUID();
-    try {
-      await mkdir(lockPath);
-      await ensureManagedDirectory(state, lockPath, {
-        create: false,
-        label: input.kind === "run" ? "lock path" : "claim path",
-      });
-
-      try {
-        await writeExclusiveFile(
-          leasePath,
-          Buffer.from(
-            serializeLease({
-              heartbeatAt: new Date().toISOString(),
-              ownerToken,
-              pid: process.pid,
-              runId: input.resourceId,
-            }),
-            "utf8",
-          ),
-        );
-        const heartbeat = startLockHeartbeat(
-          leasePath,
-          dependencies,
-          ownerToken,
-          input.resourceId,
-          input.kind,
-          input.heartbeatIntervalMs,
-        );
-        const control: RunLockControl = {
-          assertHeld() {
-            heartbeat.assertHeld();
-          },
-          ownerToken,
-          stopHeartbeat() {
-            heartbeat.stop();
-          },
-        };
-        await input.onAcquired?.(control);
-        control.assertHeld();
-
-        try {
-          return await action(control);
-        } finally {
-          heartbeat.stop();
-          await heartbeat.awaitStopped();
-          await releaseRunLock(state, lockPath, ownerToken);
-        }
-      } catch (error) {
-        await releaseRunLock(state, lockPath, ownerToken);
-        throw error;
-      }
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code !== "EEXIST") {
-        throw error;
-      }
-
-      const reclaimed = await tryReclaimStaleLock(state, lockPath, leasePath, input.staleMs);
-      if (reclaimed) {
-        continue;
-      }
-
-      if (Date.now() - startedAt > dependencies.lockTimeoutMs) {
-        throw new CatalogAssetError("timed out waiting for the catalog asset run lock");
-      }
-
-      await wait(dependencies.lockRetryDelayMs);
-    }
-  }
-}
-
-async function withRunLock<T>(
-  state: AssetRootState,
-  dependencies: StorageDependencies,
-  runId: string,
-  action: (control: RunLockControl) => Promise<T>,
-) {
-  return await withLeasedDirectory(
-    state,
-    dependencies,
-    {
-      heartbeatIntervalMs: dependencies.heartbeatIntervalMs,
-      kind: "run",
-      lockPath: join(resolve(state.absoluteRoot, ".locks", "runs"), `${runId}.lock`),
-      onAcquired: dependencies.onRunLockAcquired,
-      resourceId: runId,
-      staleMs: dependencies.lockStaleMs,
-    },
-    action,
-  );
-}
-
 export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = {}) {
-  const lockStaleMs = options.lockStaleMs ?? DEFAULT_LOCK_STALE_MS;
-  const heartbeatIntervalMs =
-    options.heartbeatIntervalMs ??
-    Math.min(DEFAULT_HEARTBEAT_INTERVAL_MS, Math.max(10, Math.floor(lockStaleMs / 3)));
-  if (heartbeatIntervalMs >= lockStaleMs) {
-    throw new CatalogAssetError("heartbeat interval must be smaller than the run lock stale timeout");
-  }
-  const claimStaleMs = options.claimStaleMs ?? lockStaleMs;
-  const claimHeartbeatIntervalMs =
-    options.claimHeartbeatIntervalMs ??
-    Math.min(DEFAULT_HEARTBEAT_INTERVAL_MS, Math.max(10, Math.floor(claimStaleMs / 3)));
-  if (claimHeartbeatIntervalMs >= claimStaleMs) {
-    throw new CatalogAssetError("heartbeat interval must be smaller than the claim stale timeout");
-  }
-
   const dependencies: StorageDependencies = {
     assetDir: options.assetDir?.trim() || process.env.CATALOG_ASSET_DIR?.trim() || DEFAULT_CATALOG_ASSET_DIR,
-    claimHeartbeatIntervalMs,
-    claimStaleMs,
-    heartbeatIntervalMs,
-    lockRetryDelayMs: options.lockRetryDelayMs ?? DEFAULT_LOCK_RETRY_DELAY_MS,
-    lockStaleMs,
-    lockTimeoutMs: options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS,
+    coordinator:
+      options.coordinator ??
+      createPostgresCatalogAssetCoordinator({
+        lockTimeoutMs: options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS,
+      }),
     maxFileBytes: options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
     maxPixelCount: options.maxPixelCount ?? DEFAULT_MAX_PIXEL_COUNT,
     maxRunBytes: options.maxRunBytes ?? DEFAULT_MAX_RUN_BYTES,
-    onClaimAcquired: options.onClaimAcquired,
-    onClaimLeaseAcquired: options.onClaimLeaseAcquired,
     onDirectorySync: options.onDirectorySync,
     onFinalPublishReady: options.onFinalPublishReady,
-    onLeaseWrite: options.onLeaseWrite,
-    onRunLockAcquired: options.onRunLockAcquired,
     onStageWriteReady: options.onStageWriteReady,
     onStorageLink: options.onStorageLink,
     onTargetCleanup: options.onTargetCleanup,
     onTargetWriteProgress: options.onTargetWriteProgress,
     onTemporaryWriteProgress: options.onTemporaryWriteProgress,
-    targetWriteChunkSize: options.targetWriteChunkSize ?? 64 * 1024,
+    targetWriteChunkSize: options.targetWriteChunkSize ?? DEFAULT_TARGET_WRITE_CHUNK_SIZE,
+    temporaryFileStaleMs: options.temporaryFileStaleMs ?? DEFAULT_TEMPORARY_FILE_STALE_MS,
   };
 
   async function stageCatalogAsset(input: {
@@ -1359,13 +827,14 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     const runDirectoryPath = resolve(state.absoluteRoot, "temporary", input.runId);
     const temporaryPath = await resolveManagedFilePath(state, temporaryKey, "temporary asset path");
 
-    await withRunLock(state, dependencies, input.runId, async (runLock) => {
-      await reclaimStaleStagingTemps(
+    await dependencies.coordinator.withRunLock(input.runId, async () => {
+      await reclaimStaleTemporaryFiles(
         state,
         dependencies,
         runDirectoryPath,
-        runLock.ownerToken,
-        () => runLock.assertHeld(),
+        STAGING_TEMP_FILE_PATTERN,
+        "temporary asset path",
+        () => undefined,
       );
 
       try {
@@ -1389,23 +858,19 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
         }
       }
 
-      runLock.assertHeld();
       const currentRunBytes = await sumDirectoryBytes(runDirectoryPath);
       if (currentRunBytes + input.bytes.byteLength > dependencies.maxRunBytes) {
         throw new CatalogAssetError("catalog migration assets must stay within the 1 GiB per-run limit");
       }
 
       await dependencies.onStageWriteReady?.();
-      runLock.assertHeld();
 
       await publishBytesAtomically(state, dependencies, {
-        assertCanContinue: () => runLock.assertHeld(),
         bytes: input.bytes,
         onWriteProgress: dependencies.onTemporaryWriteProgress,
-        tempFileName: createStagingTempFileName(runLock.ownerToken, Date.now()),
+        tempFileName: createStagingTempFileName(Date.now()),
         targetPath: temporaryPath,
       });
-      runLock.assertHeld();
     });
 
     return {
@@ -1433,29 +898,55 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     }
 
     const state = await getAssetRootState(dependencies.assetDir);
-    const stagedBytes = await readManagedFile(state, manifest.temporaryKey, "temporary asset path");
-    if (stagedBytes.byteLength !== manifest.byteSize) {
-      throw new CatalogAssetError("temporary asset size does not match the manifest");
-    }
-
-    const validation = await validateImageBytes(stagedBytes, dependencies, manifest.mimeType);
-    if (validation.contentSha256 !== manifest.contentSha256) {
-      throw new CatalogAssetError("temporary asset digest does not match the manifest");
-    }
-
     const storageKey = `sha256/${manifest.contentSha256.slice(0, 2)}/${manifest.contentSha256}.${expectedExtension}`;
     const finalPath = await resolveManagedFilePath(state, storageKey, "storage key");
+    const finalDirectory = dirname(finalPath);
 
-    await publishBytesAtomically(state, dependencies, {
-      bytes: stagedBytes,
-      expectedDigest: manifest.contentSha256,
-      expectedMimeType: manifest.mimeType,
-      onReady: dependencies.onFinalPublishReady,
-      targetPath: finalPath,
+    return await dependencies.coordinator.withDigestLock(manifest.contentSha256, async () => {
+      await reclaimStaleTemporaryFiles(
+        state,
+        dependencies,
+        finalDirectory,
+        FINAL_TEMP_FILE_PATTERN,
+        "storage key",
+        () => undefined,
+      );
+
+      const stagedBytes = await readManagedFile(state, manifest.temporaryKey, "temporary asset path");
+      if (stagedBytes.byteLength !== manifest.byteSize) {
+        throw new CatalogAssetError("temporary asset size does not match the manifest");
+      }
+
+      const validation = await validateImageBytes(stagedBytes, dependencies, manifest.mimeType);
+      if (validation.contentSha256 !== manifest.contentSha256) {
+        throw new CatalogAssetError("temporary asset digest does not match the manifest");
+      }
+
+      await publishBytesAtomically(state, dependencies, {
+        bytes: stagedBytes,
+        expectedDigest: manifest.contentSha256,
+        expectedMimeType: manifest.mimeType,
+        onReady: dependencies.onFinalPublishReady,
+        onWriteProgress: dependencies.onTargetWriteProgress,
+        tempFileName: createFinalTempFileName(Date.now()),
+        targetPath: finalPath,
+      });
+
+      const temporaryPath = resolve(state.absoluteRoot, manifest.temporaryKey);
+      const temporaryRemoved = await unlink(temporaryPath)
+        .then(() => true)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") {
+            return false;
+          }
+          throw error;
+        });
+      if (temporaryRemoved) {
+        await syncDirectory(dirname(temporaryPath), dependencies, "cleanup");
+      }
+
+      return storageKey;
     });
-    await safeUnlink(resolve(state.absoluteRoot, manifest.temporaryKey));
-
-    return storageKey;
   }
 
   async function discardStagedAssets(runId: string): Promise<void> {
@@ -1465,20 +956,23 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     const runDirectoryPath = resolve(state.absoluteRoot, "temporary", runId);
     assertContainedPath(state.absoluteRoot, runDirectoryPath, "run directory");
 
-    const runDirectory = await lstat(runDirectoryPath).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        return null;
+    await dependencies.coordinator.withRunLock(runId, async () => {
+      const runDirectory = await lstat(runDirectoryPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          return null;
+        }
+        throw error;
+      });
+      if (!runDirectory) {
+        return;
       }
-      throw error;
-    });
-    if (!runDirectory) {
-      return;
-    }
-    if (runDirectory.isSymbolicLink()) {
-      throw new CatalogAssetError("run directory resolves outside CATALOG_ASSET_DIR");
-    }
+      if (runDirectory.isSymbolicLink()) {
+        throw new CatalogAssetError("run directory resolves outside CATALOG_ASSET_DIR");
+      }
 
-    await rm(runDirectoryPath, { force: true, recursive: true });
+      await rm(runDirectoryPath, { force: true, recursive: true });
+      await syncDirectory(dirname(runDirectoryPath), dependencies, "cleanup");
+    });
   }
 
   async function openCatalogAsset(
