@@ -262,6 +262,7 @@ export class JifengClient {
 
     this.credentials.accessToken = tokens.accessToken;
     this.credentials.refreshToken = tokens.refreshToken;
+    this.credentials.userId = tokens.userId;
     await this.onTokensRefreshed?.({
       accessToken: this.credentials.accessToken,
       refreshToken: this.credentials.refreshToken,

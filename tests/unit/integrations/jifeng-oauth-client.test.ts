@@ -118,6 +118,69 @@ describe("Jifeng official authorization client", () => {
     ]);
   });
 
+  test("omits a success requestId that contains the returned authorization code", async () => {
+    const authorizationCode = "response-authorization-code";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          code: 0,
+          data: authorizationCode,
+          requestId: authorizationCode,
+        }),
+      ),
+    );
+
+    const result = await authorizeJifengUser({
+      baseUrl: "https://api.example.test",
+      clientId: "client-id-value",
+      domain: "merchant.example.test",
+      email: "operator@example.test",
+      oneTimeToken: "one-time-token-value",
+    });
+
+    expect(result).toEqual({
+      authorizationCode,
+      requestId: undefined,
+    });
+    expect(JSON.stringify(result)).not.toContain('"requestId"');
+  });
+
+  test.each([
+    ["access token", "response-access-token", "request-response-access-token"],
+    ["refresh token", "response-refresh-token", "response-refresh-token"],
+  ])(
+    "omits a success requestId that equals or contains the returned %s",
+    async (_label, exposedToken, requestId) => {
+      const data = {
+        ...tokenData,
+        accessToken: "response-access-token",
+        refreshToken: "response-refresh-token",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          Response.json({
+            code: 0,
+            data,
+            requestId,
+          }),
+        ),
+      );
+
+      const result = await exchangeJifengAuthorizationCode({
+        authorizationCode: "authorization-code-value",
+        baseUrl: "https://api.example.test",
+        clientId: "client-id-value",
+        clientSecret: "client-secret-value",
+      });
+
+      expect(result.requestId).toBeUndefined();
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toContain('"requestId"');
+    },
+  );
+
   test("refresh sends only the four project-approved official query parameters", async () => {
     const fetchMock = vi.fn<FetchLike>(async (input, init) => {
       void input;
@@ -214,6 +277,62 @@ describe("Jifeng official authorization client", () => {
       expect(`${(error as Error).message} ${serialized}`).not.toContain(secret);
     }
     expect(`${(error as Error).message} ${serialized}`).not.toContain("?");
+  });
+
+  test("classifies malformed JSON in an HTTP 200 response as an invalid response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("not-json", {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(
+      authorizeJifengUser({
+        baseUrl: "https://api.example.test",
+        clientId: "client-id-value",
+        domain: "merchant.example.test",
+        email: "operator@example.test",
+        oneTimeToken: "one-time-token-value",
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      message: "Jifeng authorization response is invalid",
+      retryable: false,
+    });
+  });
+
+  test("keeps response body transport failures classified as network errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("response stream failed"));
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      authorizeJifengUser({
+        baseUrl: "https://api.example.test",
+        clientId: "client-id-value",
+        domain: "merchant.example.test",
+        email: "operator@example.test",
+        oneTimeToken: "one-time-token-value",
+      }),
+    ).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      message: "Jifeng authorization network request failed",
+      retryable: true,
+    });
   });
 
   test("aborts an authorization request after ten seconds with a sanitized timeout", async () => {

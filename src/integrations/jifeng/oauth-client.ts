@@ -100,7 +100,12 @@ async function fetchAuthorizationJson(
         retryable: response.status === 429 || response.status >= 500,
       });
     }
-    return await response.json();
+    try {
+      return await response.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) throwInvalidResponse();
+      throw error;
+    }
   } catch (error) {
     if (error instanceof JifengAuthorizationError) throw error;
     throw new JifengAuthorizationError({
@@ -174,7 +179,10 @@ export async function authorizeJifengUser(input: {
   if (!parsed.success) throwInvalidResponse();
   return {
     authorizationCode: parsed.data.data,
-    requestId: sanitizeRequestId(parsed.data.requestId, sensitiveValues),
+    requestId: sanitizeRequestId(parsed.data.requestId, [
+      ...sensitiveValues,
+      parsed.data.data,
+    ]),
   };
 }
 
@@ -226,6 +234,10 @@ async function requestTokenSet(
   if (!parsed.success) throwInvalidResponse();
   return {
     ...parsed.data.data,
-    requestId: sanitizeRequestId(parsed.data.requestId, sensitiveValues),
+    requestId: sanitizeRequestId(parsed.data.requestId, [
+      ...sensitiveValues,
+      parsed.data.data.accessToken,
+      parsed.data.data.refreshToken,
+    ]),
   };
 }

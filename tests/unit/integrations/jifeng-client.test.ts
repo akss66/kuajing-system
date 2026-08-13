@@ -242,6 +242,59 @@ describe("Jifeng API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test("signs and replays with the userId returned by token refresh", async () => {
+    const seenUserIds: Array<string | null> = [];
+    const seenSignatures: Array<string | null> = [];
+    const fetchMock = vi.fn(
+      async (url: RequestInfo | URL, request?: RequestInit) => {
+        if (String(url).includes("/api/oauth/refreshToken")) {
+          return Response.json({
+            code: 0,
+            data: {
+              accessToken: "fresh-access-token",
+              expireIn: 86_400,
+              refreshExpireIn: 31_536_000,
+              refreshToken: "fresh-refresh-token",
+              userId: 99,
+            },
+          });
+        }
+
+        const headers = new Headers(request?.headers);
+        seenUserIds.push(headers.get("userId"));
+        seenSignatures.push(headers.get("sign"));
+        if (seenUserIds.length === 1) {
+          return Response.json({ code: 10002, data: null });
+        }
+        return Response.json({
+          code: 0,
+          data: { erpNo: "TZX-JF-NEW-USER", status: 6 },
+        });
+      },
+    );
+    const client = new JifengClient({
+      credentials: { ...credentials },
+      fetch: fetchMock,
+      nonce: () => "refresh-user-nonce",
+      now: () => 1_692_889_556_000,
+    });
+
+    await client.getOrder({ erpNo: "TZX-JF-NEW-USER" });
+
+    expect(seenUserIds).toEqual(["8", "99"]);
+    expect(seenSignatures[1]).toBe(
+      signJifengRequest(credentials.clientSecret, {
+        accessToken: "fresh-access-token",
+        clientId: credentials.clientId,
+        method: "post",
+        nonce: "refresh-user-nonce",
+        timestamp: "1692889556000",
+        url: "/api/order/get",
+        userId: "99",
+      }),
+    );
+  });
+
   test("turns an aborted request into a retryable timeout without exposing credentials", async () => {
     const client = new JifengClient({
       credentials,
