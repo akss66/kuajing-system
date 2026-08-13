@@ -8,6 +8,7 @@ import { db } from "@/db/client";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canWriteFeishuCargo,
+  hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
   readFeishuConfig,
 } from "@/integrations/feishu/config";
@@ -20,6 +21,13 @@ import { findCargoMigrationRunConfirmationSummary } from "./queries";
 import type { FeishuSourceSheet } from "./source-reader";
 
 const INTEGRATIONS_PATH = "/admin/system/integrations";
+
+const READ_ONLY_CONFIRM_MESSAGE =
+  "当前仍处于只读发布阶段，需显式设置 FEISHU_CARGO_WRITES_ENABLED=true 后才允许确认首批导入。";
+const READ_ONLY_SYNC_MESSAGE =
+  "当前仍处于只读发布阶段，目标测试表写入已禁用。需显式设置 FEISHU_CARGO_WRITES_ENABLED=true 后再执行目标同步。";
+const TARGET_NOT_CONFIGURED_MESSAGE =
+  "目标测试表尚未配置，当前只能执行只读预检。";
 
 export type CargoMigrationActionState = ActionState & {
   availableSourceSheets?: FeishuSourceSheet[];
@@ -37,23 +45,6 @@ function createFeishuClient() {
   };
 }
 
-function mapMigrationErrorMessage(error: KnownMigrationError) {
-  switch (error.code) {
-    case "ALREADY_IMPORTED":
-      return "当前迁移已经导入系统，不能再次确认。";
-    case "CATALOG_NOT_EMPTY":
-      return "系统已经存在 SKU，不能执行首批迁移。";
-    case "MIGRATION_NOT_CONFIRMABLE":
-      return "当前预检结果未就绪，请先完成只读预检并解决阻断问题。";
-    case "MIGRATION_NOT_FOUND":
-      return "未找到预检记录，请重新执行只读预检。";
-    case "SOURCE_STALE":
-      return "源货盘已经变化，请重新执行只读预检。";
-    default:
-      return error.message;
-  }
-}
-
 type KnownMigrationError = Error & {
   code?:
     | "ACTOR_NOT_FOUND"
@@ -62,8 +53,28 @@ type KnownMigrationError = Error & {
     | "FORBIDDEN_SUPER_ADMIN"
     | "MIGRATION_NOT_CONFIRMABLE"
     | "MIGRATION_NOT_FOUND"
+    | "ROLLOUT_READ_ONLY"
     | "SOURCE_STALE";
 };
+
+function mapMigrationErrorMessage(error: KnownMigrationError) {
+  switch (error.code) {
+    case "ALREADY_IMPORTED":
+      return "当前迁移已经导入系统，不能再次确认。";
+    case "CATALOG_NOT_EMPTY":
+      return "系统中已经存在 SKU，不能执行首批迁移。";
+    case "MIGRATION_NOT_CONFIRMABLE":
+      return "当前预检结果未就绪，请先完成只读预检并解决阻塞问题。";
+    case "MIGRATION_NOT_FOUND":
+      return "未找到预检记录，请重新执行只读预检。";
+    case "ROLLOUT_READ_ONLY":
+      return READ_ONLY_CONFIRM_MESSAGE;
+    case "SOURCE_STALE":
+      return "源货盘已经变化，请重新执行只读预检。";
+    default:
+      return error.message;
+  }
+}
 
 function isKnownMigrationError(error: unknown): error is KnownMigrationError {
   return error instanceof Error && "code" in error;
@@ -80,7 +91,9 @@ export async function retryFeishuCargoSyncAction(
   const config = readFeishuConfig();
   if (!canWriteFeishuCargo(config)) {
     return {
-      message: "目标测试表未配置，当前只能做只读预检。",
+      message: hasFeishuCargoTargetConfig(config)
+        ? READ_ONLY_SYNC_MESSAGE
+        : TARGET_NOT_CONFIGURED_MESSAGE,
       status: "error",
     };
   }
@@ -118,7 +131,7 @@ export async function testFeishuConnectionAction(
       throw new Error("源货盘不可访问，未找到任何工作表。");
     }
 
-    if (!canWriteFeishuCargo(config)) {
+    if (!hasFeishuCargoTargetConfig(config)) {
       return {
         message: "只读连接验证成功：源货盘可访问，目标测试表尚未配置。",
         status: "success",
@@ -127,15 +140,15 @@ export async function testFeishuConnectionAction(
 
     await client.listSheets(config.targetSpreadsheetToken!);
     return {
-      message: "只读连接验证成功：源货盘可访问，目标测试表也可读取。",
+      message: canWriteFeishuCargo(config)
+        ? "只读连接验证成功：源货盘可访问，目标测试表也可读取。"
+        : "只读连接验证成功：源货盘和目标测试表都可读取，当前仍为只读发布阶段。",
       status: "success",
     };
   } catch (error) {
     return {
       message:
-        error instanceof Error
-          ? error.message
-          : "飞书连接验证失败，请稍后重试。",
+        error instanceof Error ? error.message : "飞书连接验证失败，请稍后重试。",
       status: "error",
     };
   }
@@ -173,7 +186,7 @@ export async function createCargoPreflightAction(
     if (result.status === "PREFLIGHT_BLOCKED") {
       return {
         availableSourceSheets: [],
-        message: "只读预检已完成，但仍有阻断问题需要处理。",
+        message: "只读预检已完成，但仍有阻塞问题需要处理。",
         status: "error",
       };
     }
@@ -207,6 +220,16 @@ export async function confirmCargoMigrationAction(
 ): Promise<ActionState> {
   void _previousState;
   const actor = await requireSuperAdmin();
+  const config = readFeishuConfig();
+
+  if (!canWriteFeishuCargo(config)) {
+    return {
+      message: hasFeishuCargoTargetConfig(config)
+        ? READ_ONLY_CONFIRM_MESSAGE
+        : TARGET_NOT_CONFIGURED_MESSAGE,
+      status: "error",
+    };
+  }
 
   const runId = String(formData.get("runId") ?? "").trim();
   const runSummary = runId
@@ -237,12 +260,13 @@ export async function confirmCargoMigrationAction(
   }
 
   try {
-    const { client, config } = createFeishuClient();
+    const { client } = createFeishuClient();
     const service = createFeishuCargoMigrationService();
     const result = await service.confirmCargoMigration({
       actor,
       client,
       config: {
+        cargoWritesEnabled: config.cargoWritesEnabled,
         sourceSheetId: config.sourceSheetId,
         sourceWikiToken: config.sourceWikiToken,
       },

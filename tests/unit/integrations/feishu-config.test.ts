@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   assertSafeCargoTarget,
   canProcessFeishuBot,
+  hasFeishuCargoTargetConfig,
   canWriteFeishuCargo,
   hasFeishuRuntimeConfiguration,
   readFeishuApiBaseUrl,
@@ -22,13 +23,15 @@ describe("Feishu integration config", () => {
     expect(config).toEqual({
       appId: "app",
       appSecret: "secret",
+      cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source",
       targetSheetId: "sheet-target",
       targetSpreadsheetToken: "spreadsheet-target",
     });
-    expect(canWriteFeishuCargo(config)).toBe(true);
+    expect(hasFeishuCargoTargetConfig(config)).toBe(true);
+    expect(canWriteFeishuCargo(config)).toBe(false);
     expect(canProcessFeishuBot(config)).toBe(false);
   });
 
@@ -42,14 +45,46 @@ describe("Feishu integration config", () => {
     expect(config).toEqual({
       appId: "app",
       appSecret: "secret",
+      cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source",
       targetSheetId: undefined,
       targetSpreadsheetToken: undefined,
     });
+    expect(hasFeishuCargoTargetConfig(config)).toBe(false);
     expect(canWriteFeishuCargo(config)).toBe(false);
     expect(canProcessFeishuBot(config)).toBe(false);
+  });
+
+  test("enables cargo writes only for the exact true flag", () => {
+    const targetConfig = {
+      FEISHU_APP_ID: "app",
+      FEISHU_APP_SECRET: "secret",
+      FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-source",
+      FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: "spreadsheet-target",
+      FEISHU_CARGO_TARGET_SHEET_ID: "sheet-target",
+    };
+
+    expect(
+      canWriteFeishuCargo(
+        readFeishuConfig({
+          ...targetConfig,
+          FEISHU_CARGO_WRITES_ENABLED: "true",
+        }),
+      ),
+    ).toBe(true);
+
+    for (const malformed of [undefined, "", "TRUE", " true ", "1", "false"]) {
+      expect(
+        canWriteFeishuCargo(
+          readFeishuConfig({
+            ...targetConfig,
+            FEISHU_CARGO_WRITES_ENABLED: malformed,
+          }),
+        ),
+      ).toBe(false);
+    }
   });
 
   test("rejects partial target configuration", () => {
@@ -126,6 +161,7 @@ describe("Feishu integration config", () => {
       FEISHU_APP_ID: "app",
       FEISHU_APP_SECRET: "secret",
       FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-source",
+      FEISHU_CARGO_WRITES_ENABLED: "true",
       FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: "same-token",
       FEISHU_CARGO_TARGET_SHEET_ID: "target-sheet",
     });

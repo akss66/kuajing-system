@@ -17,6 +17,7 @@ const guardMocks = vi.hoisted(() => ({
 
 const configMocks = vi.hoisted(() => ({
   canWriteFeishuCargo: vi.fn(),
+  hasFeishuCargoTargetConfig: vi.fn(),
   readFeishuApiBaseUrl: vi.fn(),
   readFeishuConfig: vi.fn(),
 }));
@@ -87,6 +88,7 @@ describe("feishu admin actions", () => {
     guardMocks.requireAdmin.mockReset();
     guardMocks.requireSuperAdmin.mockReset();
     configMocks.canWriteFeishuCargo.mockReset();
+    configMocks.hasFeishuCargoTargetConfig.mockReset();
     configMocks.readFeishuApiBaseUrl.mockReset();
     configMocks.readFeishuConfig.mockReset();
     serviceMocks.confirmCargoMigration.mockReset();
@@ -106,10 +108,12 @@ describe("feishu admin actions", () => {
       userId: "super-admin-user-1",
     });
     configMocks.canWriteFeishuCargo.mockReturnValue(true);
+    configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuApiBaseUrl.mockReturnValue("http://127.0.0.1:4010");
     configMocks.readFeishuConfig.mockReturnValue({
       appId: "app-id",
       appSecret: "app-secret",
+      cargoWritesEnabled: true,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source-token",
       targetSheetId: "target-sheet-id",
@@ -225,8 +229,64 @@ describe("feishu admin actions", () => {
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
   });
 
+  it("keeps confirmation read-only while the rollout gate is off even when the phrase is correct", async () => {
+    configMocks.canWriteFeishuCargo.mockReturnValue(false);
+    configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
+    configMocks.readFeishuConfig.mockReturnValue({
+      appId: "app-id",
+      appSecret: "app-secret",
+      cargoWritesEnabled: false,
+      sourceSheetId: undefined,
+      sourceWikiToken: "wiki-source-token",
+      targetSheetId: "target-sheet-id",
+      targetSpreadsheetToken: "target-spreadsheet-token",
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "纭杩佺Щ74涓猄KU");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toMatchObject({
+      status: "error",
+    });
+    expect(result.message).toContain("只读");
+    expect(queryMocks.findCargoMigrationRunConfirmationSummary).not.toHaveBeenCalled();
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+
+  it("keeps confirmation read-only while the rollout gate is off even when the phrase is tampered", async () => {
+    configMocks.canWriteFeishuCargo.mockReturnValue(false);
+    configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
+    configMocks.readFeishuConfig.mockReturnValue({
+      appId: "app-id",
+      appSecret: "app-secret",
+      cargoWritesEnabled: false,
+      sourceSheetId: undefined,
+      sourceWikiToken: "wiki-source-token",
+      targetSheetId: "target-sheet-id",
+      targetSpreadsheetToken: "target-spreadsheet-token",
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "纭杩佺Щ1涓猄KU");
+    formData.set("expectedSkuCount", "1");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toMatchObject({
+      status: "error",
+    });
+    expect(result.message).toContain("只读");
+    expect(queryMocks.findCargoMigrationRunConfirmationSummary).not.toHaveBeenCalled();
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+
   it("keeps manual target sync unavailable when the target sheet is not configured", async () => {
     configMocks.canWriteFeishuCargo.mockReturnValue(false);
+    configMocks.hasFeishuCargoTargetConfig.mockReturnValue(false);
 
     const result = await retryFeishuCargoSyncAction({ status: "idle" }, new FormData());
 

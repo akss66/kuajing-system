@@ -39,6 +39,7 @@ type SourceSheetOption = {
 
 export type CargoMigrationPanelProps = {
   actorKind: ActorKind;
+  cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
   latestMigrationRun: CargoMigrationPanelRun | null;
@@ -90,6 +91,7 @@ function Field({
 
 export function CargoMigrationPanel({
   actorKind,
+  cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
   latestMigrationRun,
@@ -145,6 +147,7 @@ export function CargoMigrationPanel({
     !requiresSourceSelection &&
     Boolean(effectiveSelectedSheetId);
   const canConfirm =
+    cargoWritesEnabled &&
     actorKind === "SUPER_ADMIN" &&
     latestMigrationRun?.status === "PREFLIGHT_READY" &&
     latestMigrationRun.blockingIssueCount === 0;
@@ -154,6 +157,7 @@ export function CargoMigrationPanel({
   const syncSubmitLabel = targetSyncState.canRetry
     ? "重试目标同步"
     : "重新同步目标测试表";
+  const targetWriteControlsDisabled = targetConfigured && !cargoWritesEnabled;
   const preflightSubmitLabel = preflightPending
     ? "正在执行只读预检"
     : !sourceConfigured
@@ -263,7 +267,7 @@ export function CargoMigrationPanel({
             </button>
           </form>
 
-          {latestMigrationRun ? (
+          {latestMigrationRun && cargoWritesEnabled ? (
             <ConfirmedActionForm
               action={confirmAction}
               className="space-y-4"
@@ -306,6 +310,11 @@ export function CargoMigrationPanel({
           title="迁移状态总览"
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
+          {targetWriteControlsDisabled ? (
+            <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
+              只读发布：已配置目标测试表，但 FEISHU_CARGO_WRITES_ENABLED 未显式设为 true。当前只允许连接验证和源货盘只读预检。
+            </div>
+          ) : null}
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
             原业务货盘受保护，系统不会写入。
           </div>
@@ -392,6 +401,7 @@ export function CargoMigrationPanel({
           <ActionForm
             action={retryFeishuCargoSyncAction}
             className="space-y-3"
+            submitDisabled={targetWriteControlsDisabled || !targetConfigured}
             submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
             submitLabel={syncSubmitLabel}
           >

@@ -34,6 +34,19 @@ function setFeishuWriterEnv() {
     FEISHU_APP_ID: "app",
     FEISHU_APP_SECRET: "secret",
     FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-1",
+    FEISHU_CARGO_WRITES_ENABLED: "true",
+    FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: "spreadsheet-target",
+    FEISHU_CARGO_TARGET_SHEET_ID: "sheet-1",
+  });
+}
+
+function setFeishuTargetConfiguredReadOnlyEnv() {
+  replaceProcessEnv({
+    ...originalEnv,
+    FEISHU_APP_ID: "app",
+    FEISHU_APP_SECRET: "secret",
+    FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-1",
+    FEISHU_CARGO_WRITES_ENABLED: "false",
     FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: "spreadsheet-target",
     FEISHU_CARGO_TARGET_SHEET_ID: "sheet-1",
   });
@@ -167,6 +180,7 @@ describe("Feishu integration outbox", () => {
         },
       },
       config: {
+        cargoWritesEnabled: true,
         sourceWikiToken: "wiki-1",
         internalChatId: "chat-1",
         targetSheetId: "sheet-1",
@@ -265,6 +279,7 @@ describe("Feishu integration outbox", () => {
         async writeRange() {},
       },
       config: {
+        cargoWritesEnabled: true,
         sourceWikiToken: "wiki-1",
         internalChatId: "chat-1",
         targetSheetId: "sheet-1",
@@ -332,6 +347,7 @@ describe("Feishu integration outbox", () => {
         },
       },
       config: {
+        cargoWritesEnabled: true,
         sourceWikiToken: "wiki-1",
         internalChatId: "chat-1",
         targetSheetId: "sheet-1",
@@ -375,6 +391,7 @@ describe("Feishu integration outbox", () => {
         async writeRange() {},
       },
       config: {
+        cargoWritesEnabled: true,
         sourceWikiToken: "wiki-1",
         internalChatId: "chat-1",
         targetSheetId: "sheet-1",
@@ -433,6 +450,91 @@ describe("Feishu integration outbox", () => {
     ).resolves.toBe(false);
 
     expect(await db.select().from(integrationOutbox)).toHaveLength(0);
+    expect(await db.select().from(integrationAttempts)).toHaveLength(0);
+  });
+
+  test("does not enqueue cargo events when the target is configured but the rollout gate stays read-only", async () => {
+    setFeishuTargetConfiguredReadOnlyEnv();
+    const now = new Date("2026-08-12T07:02:00.000Z");
+    await db.transaction((tx) =>
+      enqueueCargoSyncEvent(tx, {
+        idempotencyKey: "read-only-transaction",
+        now,
+        reason: "rollout-read-only",
+      }),
+    );
+
+    await expect(
+      enqueueFeishuCargoSync({ now, reason: "rollout-read-only" }),
+    ).resolves.toBe(false);
+
+    expect(await db.select().from(integrationOutbox)).toHaveLength(0);
+    expect(await db.select().from(integrationAttempts)).toHaveLength(0);
+  });
+
+  test("leaves queued cargo events untouched while the rollout gate is off", async () => {
+    setFeishuWriterEnv();
+    const now = new Date("2026-08-12T07:03:00.000Z");
+    await db.transaction((tx) =>
+      enqueueCargoSyncEvent(tx, {
+        idempotencyKey: "queued-before-freeze",
+        now,
+        reason: "queued-before-freeze",
+      }),
+    );
+    setFeishuTargetConfiguredReadOnlyEnv();
+
+    const result = await processFeishuOutbox({
+      botClient: {
+        async sendTextMessage() {
+          throw new Error("bot should not run");
+        },
+      },
+      cargoClient: {
+        async createFilter() {
+          throw new Error("write should not run");
+        },
+        async readRange() {
+          throw new Error("read should not run");
+        },
+        async setRangeStyle() {
+          throw new Error("style should not run");
+        },
+        async updateDimension() {
+          throw new Error("dimension should not run");
+        },
+        async updateSheetProperties() {
+          throw new Error("sheet property should not run");
+        },
+        async writeImage() {
+          throw new Error("image should not run");
+        },
+        async writeRange() {
+          throw new Error("range should not run");
+        },
+      },
+      config: {
+        cargoWritesEnabled: false,
+        sourceWikiToken: "wiki-1",
+        internalChatId: undefined,
+        targetSheetId: "sheet-1",
+        targetSpreadsheetToken: "spreadsheet-target",
+      },
+      now: new Date("2026-08-12T07:04:00.000Z"),
+      sourceClient: {
+        async resolveWikiSpreadsheet() {
+          throw new Error("source resolution should not run");
+        },
+      },
+    });
+
+    expect(result).toEqual({ botCompleted: 0, cargoCompleted: 0, failed: 0 });
+    expect(await db.select().from(integrationOutbox)).toEqual([
+      expect.objectContaining({
+        attemptCount: 0,
+        status: "PENDING",
+      }),
+    ]);
     expect(await db.select().from(integrationAttempts)).toHaveLength(0);
   });
 

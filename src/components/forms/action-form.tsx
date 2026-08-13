@@ -15,12 +15,14 @@ export function ActionForm({
   action,
   children,
   className,
+  submitDisabled,
   submitClassName,
   submitLabel,
 }: {
   action: ManagedAction;
   children: ReactNode;
   className?: string;
+  submitDisabled?: boolean;
   submitClassName?: string;
   submitLabel: string;
 }) {
@@ -55,7 +57,11 @@ export function ActionForm({
           {state.message ? <p>{state.message}</p> : null}
         </div>
       ) : null}
-      <Button className={cn("min-h-11 px-4", submitClassName)} disabled={pending} type="submit">
+      <Button
+        className={cn("min-h-11 px-4", submitClassName)}
+        disabled={pending || submitDisabled}
+        type="submit"
+      >
         {pending ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : null}
         {pending ? "正在保存" : submitLabel}
       </Button>

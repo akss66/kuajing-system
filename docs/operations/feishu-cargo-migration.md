@@ -41,15 +41,18 @@ FEISHU_APP_ID=
 FEISHU_APP_SECRET=
 FEISHU_CARGO_SOURCE_WIKI_TOKEN=
 FEISHU_CARGO_SOURCE_SHEET_ID=
+FEISHU_CARGO_WRITES_ENABLED=false
 FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN=
 FEISHU_CARGO_TARGET_SHEET_ID=
 CATALOG_ASSET_DIR=/app/data/catalog-assets
 ```
 
+Phase A 要求 `FEISHU_CARGO_WRITES_ENABLED` 保持缺失或显式为 `false`。只有精确值 `true` 才会放开首批确认导入、手工目标同步、定时入队和 worker 写测试表。
+
 保存后只做最小校验：
 
 ```bash
-grep -E '^(FEISHU_APP_ID|FEISHU_CARGO_SOURCE_WIKI_TOKEN|FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN|CATALOG_ASSET_DIR)=' /home/admin/tongzhouxing-shop/.env.production
+grep -E '^(FEISHU_APP_ID|FEISHU_CARGO_SOURCE_WIKI_TOKEN|FEISHU_CARGO_WRITES_ENABLED|FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN|CATALOG_ASSET_DIR)=' /home/admin/tongzhouxing-shop/.env.production
 ```
 
 注意：上面的校验只确认键存在，不应回显真实 secret。
@@ -90,6 +93,8 @@ docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web w
 curl -fsS http://127.0.0.1:3000/api/health
 docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
 ```
+
+部署当下不要把 `FEISHU_CARGO_WRITES_ENABLED` 改成 `true`。`compose.production.yaml` 会在变量缺失时把 web/worker 默认钉到 `false`，这样 Thursday, August 13, 2026 的 Phase A 首次上线仍然保持只读。
 
 通过标准：
 
@@ -164,6 +169,19 @@ Phase A 验证标准：
 
 后续是否进入确认导入和目标表写入，必须在新的明确审批消息中单独授权。
 
+如果后续收到单独审批，放开写入的最小步骤只有：
+
+```bash
+cd /home/admin/tongzhouxing-shop
+export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
+nano "$APP_ENV_FILE"   # 把 FEISHU_CARGO_WRITES_ENABLED 改成 true
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker
+curl -fsS http://127.0.0.1:3000/api/health
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
+```
+
+只改这一项并重启 `web`、`worker`；不要同时混入其他配置变更。
+
 ## 10. 回滚与恢复
 
 Phase A 内如果部署后发现问题，但尚未确认迁移：
@@ -171,6 +189,7 @@ Phase A 内如果部署后发现问题，但尚未确认迁移：
 ```bash
 cd /home/admin/tongzhouxing-shop
 export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
+nano "$APP_ENV_FILE"   # 先把 FEISHU_CARGO_WRITES_ENABLED 改回 false（或删掉）
 docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" down
 docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d postgres
 docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker

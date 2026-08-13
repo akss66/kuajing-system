@@ -8,6 +8,11 @@ const optionalString = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const optionalExactString = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const configSchema = z
   .object({
     FEISHU_API_BASE_URL: optionalString,
@@ -15,6 +20,7 @@ const configSchema = z
     FEISHU_APP_SECRET: z.string().trim().min(1),
     FEISHU_CARGO_SOURCE_SHEET_ID: optionalString,
     FEISHU_CARGO_SOURCE_WIKI_TOKEN: z.string().trim().min(1),
+    FEISHU_CARGO_WRITES_ENABLED: optionalExactString,
     FEISHU_CARGO_TARGET_SHEET_ID: optionalString,
     FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: optionalString,
     FEISHU_INTERNAL_CHAT_ID: optionalString,
@@ -46,6 +52,7 @@ const FEISHU_API_BASE_OVERRIDE_ERROR = "生产环境必须使用官方飞书 API
 export type FeishuIntegrationConfig = {
   appId: string;
   appSecret: string;
+  cargoWritesEnabled: boolean;
   sourceWikiToken: string;
   sourceSheetId?: string;
   targetSpreadsheetToken?: string;
@@ -53,10 +60,11 @@ export type FeishuIntegrationConfig = {
   internalChatId?: string;
 };
 
-type FeishuCargoTargetConfig = Pick<
-  FeishuIntegrationConfig,
-  "targetSheetId" | "targetSpreadsheetToken"
->;
+type FeishuCargoTargetConfig = {
+  cargoWritesEnabled?: boolean;
+  targetSheetId?: string;
+  targetSpreadsheetToken?: string;
+};
 
 type FeishuBotConfig = Pick<FeishuIntegrationConfig, "internalChatId">;
 
@@ -65,6 +73,7 @@ const feishuRuntimeVariables = [
   "FEISHU_APP_SECRET",
   "FEISHU_CARGO_SOURCE_WIKI_TOKEN",
   "FEISHU_CARGO_SOURCE_SHEET_ID",
+  "FEISHU_CARGO_WRITES_ENABLED",
   "FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN",
   "FEISHU_CARGO_TARGET_SHEET_ID",
   "FEISHU_INTERNAL_CHAT_ID",
@@ -103,6 +112,7 @@ export function readFeishuConfig(
   return {
     appId: parsed.data.FEISHU_APP_ID,
     appSecret: parsed.data.FEISHU_APP_SECRET,
+    cargoWritesEnabled: parsed.data.FEISHU_CARGO_WRITES_ENABLED === "true",
     internalChatId: parsed.data.FEISHU_INTERNAL_CHAT_ID,
     sourceSheetId: parsed.data.FEISHU_CARGO_SOURCE_SHEET_ID,
     sourceWikiToken: parsed.data.FEISHU_CARGO_SOURCE_WIKI_TOKEN,
@@ -111,8 +121,16 @@ export function readFeishuConfig(
   };
 }
 
-export function canWriteFeishuCargo(config: FeishuCargoTargetConfig) {
+export function hasFeishuCargoTargetConfig(config: FeishuCargoTargetConfig) {
   return Boolean(config.targetSpreadsheetToken && config.targetSheetId);
+}
+
+export function canWriteFeishuCargo(config: FeishuCargoTargetConfig) {
+  return (
+    hasFeishuCargoTargetConfig(config) &&
+    "cargoWritesEnabled" in config &&
+    config.cargoWritesEnabled === true
+  );
 }
 
 export function canProcessFeishuBot(config: FeishuBotConfig) {

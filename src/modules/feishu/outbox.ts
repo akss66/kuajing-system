@@ -24,6 +24,7 @@ export type FeishuBotPort = {
 
 type FeishuWorkerConfig = Pick<
   FeishuIntegrationConfig,
+  | "cargoWritesEnabled"
   | "internalChatId"
   | "sourceWikiToken"
   | "targetSheetId"

@@ -19,6 +19,7 @@ import { integrationOutbox } from "@/db/schema";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canWriteFeishuCargo,
+  hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
   readFeishuConfig,
 } from "@/integrations/feishu/config";
@@ -119,7 +120,10 @@ export default async function IntegrationsPage() {
   ]);
 
   const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
-  const targetConfigured = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
+  const targetConfigured = feishuConfig
+    ? hasFeishuCargoTargetConfig(feishuConfig)
+    : false;
+  const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
   const [recent, latestMigrationRun, sourceSheetDiscovery, targetSyncState] =
     await Promise.all([
       db
@@ -250,6 +254,7 @@ export default async function IntegrationsPage() {
               >
                 <CargoMigrationPanel
                   actorKind={principal.kind}
+                  cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}
                   latestMigrationRun={latestMigrationRun}

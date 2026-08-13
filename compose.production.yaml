@@ -7,6 +7,8 @@ x-app: &app
     dockerfile: Dockerfile
   env_file:
     - ${APP_ENV_FILE:-.env.production}
+  environment:
+    FEISHU_CARGO_WRITES_ENABLED: ${FEISHU_CARGO_WRITES_ENABLED:-false}
   init: true
   restart: unless-stopped
   security_opt:

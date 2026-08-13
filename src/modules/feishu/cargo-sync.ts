@@ -257,6 +257,7 @@ function assertWritableCargoTarget(config: FeishuCargoSyncConfig) {
       {
         appId: "unused",
         appSecret: "unused",
+        cargoWritesEnabled: true,
         sourceWikiToken: "unused",
         targetSheetId: config.targetSheetId,
         targetSpreadsheetToken: config.targetSpreadsheetToken,

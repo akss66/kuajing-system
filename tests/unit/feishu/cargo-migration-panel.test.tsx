@@ -85,6 +85,7 @@ function createProps(
     },
     readOnlyConnectionMessage:
       "已验证源货盘和目标测试表配置，所有写入仍只会发送到目标测试表。",
+    cargoWritesEnabled: true,
     retryFeishuCargoSyncAction: idleAction,
     selectedSourceSheetId: null,
     sourceConfigured: true,
@@ -272,5 +273,29 @@ describe("CargoMigrationPanel", () => {
     expect(
       await screen.findByRole("alertdialog", { name: "确认导入 74 个SKU" }),
     ).toBeVisible();
+  });
+
+  it("shows a read-only rollout message and disables write controls while the gate is off", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          cargoWritesEnabled: false,
+          selectedSourceSheetId: "sheet-source-a",
+          targetConfigured: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/只读发布/i)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "确认迁移 74 个SKU" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "重新同步目标测试表" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "开始只读预检" }),
+    ).toBeEnabled();
+    expect(screen.getByText(/FEISHU_CARGO_WRITES_ENABLED/)).toBeVisible();
   });
 });

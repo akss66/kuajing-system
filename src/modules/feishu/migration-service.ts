@@ -112,6 +112,7 @@ export class FeishuCargoMigrationError extends Error {
       | "FORBIDDEN_SUPER_ADMIN"
       | "MIGRATION_NOT_CONFIRMABLE"
       | "MIGRATION_NOT_FOUND"
+      | "ROLLOUT_READ_ONLY"
       | "SOURCE_STALE",
     message: string,
   ) {
@@ -571,9 +572,18 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
   async function confirmCargoMigration(input: {
     actor: SuperAdminPrincipal;
     client: FeishuSourcePort;
-    config: Pick<FeishuIntegrationConfig, "sourceSheetId" | "sourceWikiToken">;
+    config: Pick<
+      FeishuIntegrationConfig,
+      "cargoWritesEnabled" | "sourceSheetId" | "sourceWikiToken"
+    >;
     runId: string;
   }): Promise<ConfirmResult> {
+    if (!("cargoWritesEnabled" in input.config) || input.config.cargoWritesEnabled !== true) {
+      throw new FeishuCargoMigrationError(
+        "ROLLOUT_READ_ONLY",
+        "Feishu cargo import stays read-only until FEISHU_CARGO_WRITES_ENABLED=true",
+      );
+    }
     const confirmedByAdminUserId = await resolveSuperAdminMirrorId(input.actor);
     try {
       const currentRun = await findMigrationRun(db, input.runId);
