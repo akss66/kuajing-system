@@ -156,6 +156,19 @@ describe("Feishu integration config", () => {
     ).toBe(false);
   });
 
+  test("does not treat the rollout gate by itself as runtime Feishu configuration", () => {
+    expect(
+      hasFeishuRuntimeConfiguration({
+        FEISHU_CARGO_WRITES_ENABLED: "false",
+      }),
+    ).toBe(false);
+    expect(
+      hasFeishuRuntimeConfiguration({
+        FEISHU_CARGO_WRITES_ENABLED: "true",
+      }),
+    ).toBe(false);
+  });
+
   test("rejects using the resolved source spreadsheet as the cargo target", () => {
     const config = readFeishuConfig({
       FEISHU_APP_ID: "app",

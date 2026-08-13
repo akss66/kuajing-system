@@ -72,17 +72,12 @@ const feishuRuntimeVariables = [
   "FEISHU_APP_ID",
   "FEISHU_APP_SECRET",
   "FEISHU_CARGO_SOURCE_WIKI_TOKEN",
-  "FEISHU_CARGO_SOURCE_SHEET_ID",
-  "FEISHU_CARGO_WRITES_ENABLED",
-  "FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN",
-  "FEISHU_CARGO_TARGET_SHEET_ID",
-  "FEISHU_INTERNAL_CHAT_ID",
 ] as const;
 
 export function hasFeishuRuntimeConfiguration(
   environment: Record<string, string | undefined> = process.env,
 ) {
-  return feishuRuntimeVariables.some((name) => Boolean(environment[name]));
+  return feishuRuntimeVariables.every((name) => Boolean(environment[name]));
 }
 
 export function readFeishuApiBaseUrl(

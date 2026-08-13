@@ -160,3 +160,38 @@ Conclusion:
   - PASS with local-only overrides for `APP_VERSION`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
 - `git diff --check`
   - PASS
+
+## 2026-08-13 Addendum 2: Worker Optionality With Gate-Only Env
+
+- Tightened `hasFeishuRuntimeConfiguration()` so the Feishu worker bootstrap only treats the integration as configured when the current required core variables are present:
+  - `FEISHU_APP_ID`
+  - `FEISHU_APP_SECRET`
+  - `FEISHU_CARGO_SOURCE_WIKI_TOKEN`
+- `FEISHU_CARGO_WRITES_ENABLED` no longer makes runtime configuration appear present by itself.
+- Result:
+  - gate-only env (`FEISHU_CARGO_WRITES_ENABLED=false`) keeps Feishu jobs disabled
+  - gate-only env (`FEISHU_CARGO_WRITES_ENABLED=true`) also keeps Feishu jobs disabled
+  - worker bootstrap no longer calls `readFeishuConfig()` or throws in either case
+- Added unit coverage in `tests/unit/jobs/worker.test.ts` for both gate-only states and extended `tests/unit/integrations/feishu-config.test.ts`.
+
+### Worker Optionality Verification
+
+- `npm.cmd run test -- tests/unit/integrations/feishu-config.test.ts tests/unit/jobs/worker.test.ts`
+  - PASS
+  - `2/2` files, `10/10` tests
+- `npm.cmd run test -- tests/unit/integrations/feishu-config.test.ts tests/unit/jobs/worker.test.ts tests/unit/feishu/actions.test.ts tests/unit/feishu/cargo-migration-panel.test.tsx`
+  - PASS
+  - `4/4` files, `26/26` tests
+- `npm.cmd run test:integration -- tests/integration/feishu/outbox.test.ts tests/integration/feishu/migration-service.test.ts`
+  - PASS
+  - `2/2` files, `27/27` tests
+- `npm.cmd run typecheck`
+  - PASS
+- `npm.cmd run lint`
+  - PASS
+- `npm.cmd run build`
+  - PASS
+- `docker compose -f compose.production.yaml --env-file .env.example config --quiet`
+  - PASS
+- `git diff --check`
+  - PASS
