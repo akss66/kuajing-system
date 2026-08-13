@@ -5,37 +5,86 @@ import { customerUsers, customers, stores } from "@/db/schema";
 
 export type CustomerManagementListRow = {
   accountDisplayName: string | null;
+  accountEmail: string | null;
   accountStatus: "ACTIVE" | "DISABLED" | null;
+  balanceFen: number;
   code: string;
   contactName: string | null;
   customerId: string;
+  exceptionOrderCount: number;
   name: string;
+  pendingPaymentFen: number;
+  recentOrderCount: number;
   status: "ACTIVE" | "DISABLED";
   storeCount: number;
 };
 
 export async function listCustomerManagementRows(): Promise<CustomerManagementListRow[]> {
   const rows = await db.execute<CustomerManagementListRow>(sql`
+    with account_summary as (
+      select distinct on (customer_id)
+        customer_id,
+        display_name,
+        login_identifier,
+        status
+      from customer_users
+      order by customer_id, created_at, id
+    ),
+    store_summary as (
+      select
+        customer_id,
+        count(*)::int as store_count
+      from stores
+      group by customer_id
+    ),
+    order_summary as (
+      select
+        customer_id,
+        coalesce(
+          sum(total_amount_fen) filter (where status = 'PENDING_PAYMENT'),
+          0
+        )::int as pending_payment_fen,
+        count(*) filter (
+          where submitted_at >= now() - interval '30 days'
+        )::int as recent_order_count,
+        count(*) filter (
+          where status = 'FULFILLMENT_EXCEPTION'
+        )::int as exception_order_count
+      from fulfillment_orders
+      group by customer_id
+    )
     select
       c.id as "customerId",
       c.code as "code",
       c.name as "name",
       c.contact_name as "contactName",
       c.status as "status",
-      cu.display_name as "accountDisplayName",
-      cu.status as "accountStatus",
-      coalesce(count(distinct s.id), 0)::int as "storeCount"
+      a.display_name as "accountDisplayName",
+      a.login_identifier as "accountEmail",
+      a.status as "accountStatus",
+      coalesce(s.store_count, 0)::int as "storeCount",
+      coalesce(w.balance_fen, 0)::int as "balanceFen",
+      coalesce(o.pending_payment_fen, 0)::int as "pendingPaymentFen",
+      coalesce(o.recent_order_count, 0)::int as "recentOrderCount",
+      coalesce(o.exception_order_count, 0)::int as "exceptionOrderCount"
     from customers c
-    left join customer_users cu
-      on cu.customer_id = c.id
-    left join stores s
+    left join account_summary a
+      on a.customer_id = c.id
+    left join store_summary s
       on s.customer_id = c.id
-    group by c.id, cu.id
+    left join wallet_accounts w
+      on w.customer_id = c.id
+    left join order_summary o
+      on o.customer_id = c.id
     order by lower(c.code), lower(c.name)
   `);
 
   return rows.map((row) => ({
     ...row,
+    balanceFen: Number(row.balanceFen),
+    exceptionOrderCount: Number(row.exceptionOrderCount),
+    pendingPaymentFen: Number(row.pendingPaymentFen),
+    recentOrderCount: Number(row.recentOrderCount),
     storeCount: Number(row.storeCount),
   }));
 }

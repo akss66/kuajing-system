@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { eq } from "drizzle-orm";
 
@@ -373,13 +374,18 @@ test("ordinary admins can manage customer details and multi-store operations", a
 
   await page.goto("/admin/customers");
   await expect(page.getByRole("heading", { name: "客户与店铺" })).toBeVisible();
-  await page.getByLabel("客户编号").fill(customerCode);
-  await page.getByLabel("客户名称").fill(`多店客户 ${suffix}`);
-  await page.getByLabel("店铺名称").fill(firstStoreName);
-  await page.getByLabel("登录邮箱").fill(customerEmail);
-  await page.getByLabel("初始密码").fill(customerPassword);
-  await page.getByLabel("创建原因").fill("E2E 创建客户和首店");
-  await page.getByRole("button", { name: "创建客户与店铺" }).click();
+  await expect(page.getByLabel("客户编号")).toHaveCount(0);
+  await expect(page.getByLabel("登录邮箱")).toHaveCount(0);
+  await page.getByRole("button", { name: "新建客户", exact: true }).click();
+  const createCustomerDrawer = page.getByRole("dialog", { name: "新建客户" });
+  await expect(createCustomerDrawer).toBeVisible();
+  await createCustomerDrawer.getByLabel("客户编号").fill(customerCode);
+  await createCustomerDrawer.getByLabel("客户名称").fill(`多店客户 ${suffix}`);
+  await createCustomerDrawer.getByLabel("店铺名称").fill(firstStoreName);
+  await createCustomerDrawer.getByLabel("登录邮箱").fill(customerEmail);
+  await createCustomerDrawer.getByLabel("初始密码").fill(customerPassword);
+  await createCustomerDrawer.getByLabel("创建原因").fill("E2E 创建客户和首店");
+  await createCustomerDrawer.getByRole("button", { name: "创建客户与店铺" }).click();
   await expect(page.getByText("客户与首家店铺已创建。")).toBeVisible();
 
   await expect.poll(async () => {
@@ -419,10 +425,45 @@ test("ordinary admins can manage customer details and multi-store operations", a
     email: customerEmail,
   });
 
-  const row = page.getByRole("row", { name: new RegExp(customerCode) });
-  await expect(row.getByText("账号正常")).toBeVisible();
-  await expect(row.getByText("1 家店铺")).toBeVisible();
-  await row.getByRole("link", { name: "查看详情" }).click();
+  await closeAccountDrawer(createCustomerDrawer);
+
+  const customerDetailsLink = page.getByRole("link", {
+    name: `查看 多店客户 ${suffix} 详情`,
+  });
+  if ((page.viewportSize()?.width ?? 1440) < 1024) {
+    await expect(page.locator("[data-customer-cards]")).toBeVisible();
+    await expect(page.locator("[data-customer-table]")).not.toBeVisible();
+    await expect(customerDetailsLink).toContainText(customerCode);
+    await expect(customerDetailsLink).toContainText(customerEmail);
+    await expect(customerDetailsLink).toContainText("1 家");
+
+    for (const width of [360, 390, 430]) {
+      await page.setViewportSize({ height: 844, width });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(1);
+    }
+    await page.setViewportSize({ height: 844, width: 390 });
+  } else {
+    const row = page.getByRole("row", { name: new RegExp(customerCode) });
+    await expect(page.locator("[data-customer-table]")).toBeVisible();
+    await expect(row).toContainText(customerEmail);
+    await expect(row).toContainText("1 家");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+  await customerDetailsLink.click();
 
   await expect(page).toHaveURL(new RegExp(`/admin/customers/${customerId}$`));
   await expect(page.getByRole("heading", { name: "客户详情" })).toBeVisible();
