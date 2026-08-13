@@ -21,6 +21,16 @@ export type TemporaryAssetManifest = {
   temporaryKey: string;
 };
 
+export type CargoInheritedField =
+  | "productGroupKey"
+  | "productName"
+  | "image"
+  | "price"
+  | "productUrl"
+  | "specification"
+  | "combination"
+  | "weight";
+
 export type NormalizedCargoRow = {
   sourceRowNumber: number;
   productGroupKey: string;
@@ -38,15 +48,17 @@ export type NormalizedCargoRow = {
   combination: string | null;
   weightGrams: number | null;
   saleStatus: "SELLABLE" | "NOT_SELLABLE";
-  inheritedFrom: Partial<Record<
-    | "productGroupKey"
-    | "productName"
-    | "image"
-    | "price"
-    | "productUrl"
-    | "specification"
-    | "combination"
-    | "weight",
-    number
-  >>;
+  inheritedFrom: Partial<Record<CargoInheritedField, number>>;
+};
+
+export type ParsedCargoRow = Omit<
+  NormalizedCargoRow,
+  "imageContentSha256" | "imageTemporaryKey"
+> & { imageFileToken: string };
+
+export type CargoParseResult = {
+  headerRowNumber: number;
+  rows: ParsedCargoRow[];
+  issues: MigrationIssue[];
+  summary: MigrationSummary;
 };
