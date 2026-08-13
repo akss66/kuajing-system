@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,6 +19,25 @@ import {
 const ONE_MEBIBYTE = 1024 * 1024;
 const MAX_FILE_BYTES = 8 * ONE_MEBIBYTE;
 let assetRoot: string;
+
+function createStagingTempFileName(input: { createdAtMs: number; ownerToken: string }) {
+  return `.catalog-asset-stage-${input.createdAtMs}-${input.ownerToken}.tmp`;
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  input?: { intervalMs?: number; timeoutMs?: number },
+) {
+  const startedAt = Date.now();
+  const intervalMs = input?.intervalMs ?? 5;
+  const timeoutMs = input?.timeoutMs ?? 1_000;
+  while (!condition()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("timed out waiting for test condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
 
 async function createImageBuffer(
   format: "jpeg" | "png" | "webp",
@@ -385,10 +404,182 @@ describe("catalog asset storage", () => {
     expect(await sumDirectoryBytes(stagedRunDirectory(first))).toBeLessThanOrEqual(maxRunBytes);
   });
 
+  test("reclaims stale staging temp files after a new run-lock owner takes over", async () => {
+    const bytes = await createImageBuffer("png", { b: 140 });
+    const maxRunBytes = bytes.byteLength + 32;
+    const runId = "stale-stage-temp-run";
+    const runDirectory = join(assetRoot, "temporary", runId);
+    await mkdir(runDirectory, { recursive: true });
+    await writeFile(
+      join(
+        runDirectory,
+        createStagingTempFileName({
+          createdAtMs: Date.now() - 5_000,
+          ownerToken: "11111111-1111-1111-1111-111111111111",
+        }),
+      ),
+      Buffer.alloc(maxRunBytes),
+    );
+    const storage = createCatalogAssetStorage({
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 40,
+      lockTimeoutMs: 400,
+      maxRunBytes,
+    });
+
+    const manifest = await storage.stageCatalogAsset({
+      bytes,
+      contentType: "image/png",
+      originalFileName: "stale-stage.png",
+      runId,
+      skuCode: "TZX-001",
+    });
+
+    const runEntries = await readdir(runDirectory);
+    expect(runEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+    expect(await sumDirectoryBytes(runDirectory)).toBeLessThanOrEqual(maxRunBytes);
+    await expect(readFile(join(assetRoot, manifest.temporaryKey))).resolves.toBeDefined();
+  });
+
+  test("does not reclaim fresh staging temp files from another owner", async () => {
+    const bytes = await createImageBuffer("png", { g: 145 });
+    const maxRunBytes = bytes.byteLength + 32;
+    const runId = "fresh-stage-temp-run";
+    const runDirectory = join(assetRoot, "temporary", runId);
+    const freshTempPath = join(
+      runDirectory,
+      createStagingTempFileName({
+        createdAtMs: Date.now(),
+        ownerToken: "22222222-2222-2222-2222-222222222222",
+      }),
+    );
+    await mkdir(runDirectory, { recursive: true });
+    await writeFile(freshTempPath, Buffer.alloc(maxRunBytes));
+    const storage = createCatalogAssetStorage({
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 40,
+      lockTimeoutMs: 400,
+      maxRunBytes,
+    });
+
+    await expect(
+      storage.stageCatalogAsset({
+        bytes,
+        contentType: "image/png",
+        originalFileName: "fresh-stage.png",
+        runId,
+        skuCode: "TZX-001",
+      }),
+    ).rejects.toThrow(/1\s*GiB|limit/i);
+    await expect(readFile(freshTempPath)).resolves.toBeDefined();
+  });
+
+  test("does not reclaim stale staging temp files that belong to the current run-lock owner", async () => {
+    const bytes = await createImageBuffer("png", { r: 146 });
+    const maxRunBytes = bytes.byteLength + 32;
+    const runId = "current-owner-stage-temp-run";
+    const runDirectory = join(assetRoot, "temporary", runId);
+    let ownerTokenForTemp: string | null = null;
+    const storage = createCatalogAssetStorage({
+      heartbeatIntervalMs: 10,
+      lockRetryDelayMs: 5,
+      lockStaleMs: 40,
+      lockTimeoutMs: 400,
+      maxRunBytes,
+      async onRunLockAcquired(control) {
+        ownerTokenForTemp = control.ownerToken;
+        await mkdir(runDirectory, { recursive: true });
+        await writeFile(
+          join(
+            runDirectory,
+            createStagingTempFileName({
+              createdAtMs: Date.now() - 5_000,
+              ownerToken: control.ownerToken,
+            }),
+          ),
+          Buffer.alloc(maxRunBytes),
+        );
+      },
+    });
+
+    await expect(
+      storage.stageCatalogAsset({
+        bytes,
+        contentType: "image/png",
+        originalFileName: "current-owner-stage.png",
+        runId,
+        skuCode: "TZX-001",
+      }),
+    ).rejects.toThrow(/1\s*GiB|limit/i);
+
+    const runEntries = await readdir(runDirectory);
+    expect(runEntries.some((entry) => entry.includes(ownerTokenForTemp as string))).toBe(true);
+  });
+
+  test("never follows staging temp symlinks during stale-temp reclaim", async () => {
+    const bytes = await createImageBuffer("png", { b: 147 });
+    const maxRunBytes = bytes.byteLength + 32;
+    const runId = "symlink-stage-temp-run";
+    const runDirectory = join(assetRoot, "temporary", runId);
+    const outsideDirectory = await mkdtemp(join(tmpdir(), "catalog-assets-stage-symlink-"));
+    const outsideTarget = join(outsideDirectory, "outside.bin");
+    const staleRegularTemp = join(
+      runDirectory,
+      createStagingTempFileName({
+        createdAtMs: Date.now() - 5_000,
+        ownerToken: "33333333-3333-3333-3333-333333333333",
+      }),
+    );
+    const staleSymlinkPath = join(
+      runDirectory,
+      createStagingTempFileName({
+        createdAtMs: Date.now() - 5_000,
+        ownerToken: "44444444-4444-4444-4444-444444444444",
+      }),
+    );
+
+    try {
+      await mkdir(runDirectory, { recursive: true });
+      await writeFile(staleRegularTemp, Buffer.alloc(maxRunBytes));
+      await writeFile(outsideTarget, Buffer.from("outside"));
+      await symlink(outsideDirectory, staleSymlinkPath, "junction");
+      const storage = createCatalogAssetStorage({
+        heartbeatIntervalMs: 10,
+        lockRetryDelayMs: 5,
+        lockStaleMs: 40,
+        lockTimeoutMs: 400,
+        maxRunBytes,
+      });
+
+      await expect(
+        storage.stageCatalogAsset({
+          bytes,
+          contentType: "image/png",
+          originalFileName: "symlink-stage.png",
+          runId,
+          skuCode: "TZX-001",
+        }),
+      ).rejects.toThrow(/outside/i);
+
+      await expect(readFile(outsideTarget, "utf8")).resolves.toBe("outside");
+      await expect(readFile(staleRegularTemp)).rejects.toThrow();
+      expect((await lstat(staleSymlinkPath)).isSymbolicLink()).toBe(true);
+    } finally {
+      await rm(outsideDirectory, { force: true, recursive: true });
+    }
+  });
+
   test("keeps a live run lock across stale-ttl heartbeats", async () => {
     let releaseFirstLock: (() => void) | null = null;
+    let firstLockHeartbeatRenewed: (() => void) | null = null;
+    let firstLockOwnerToken: string | null = null;
     let firstLockHeld = false;
     let secondFinished = false;
+    const firstHeartbeatObserved = new Promise<void>((resolve) => {
+      firstLockHeartbeatRenewed = resolve;
+    });
     const sharedOptions = {
       heartbeatIntervalMs: 10,
       lockRetryDelayMs: 5,
@@ -397,6 +588,15 @@ describe("catalog asset storage", () => {
     } as const;
     const storageHoldingLock = createCatalogAssetStorage({
       ...sharedOptions,
+      onLeaseWrite({ kind, ownerToken }) {
+        if (kind === "run" && ownerToken === firstLockOwnerToken) {
+          firstLockHeartbeatRenewed?.();
+          firstLockHeartbeatRenewed = null;
+        }
+      },
+      onRunLockAcquired(control) {
+        firstLockOwnerToken = control.ownerToken;
+      },
       onStageWriteReady() {
         firstLockHeld = true;
         return new Promise<void>((resolve) => {
@@ -430,7 +630,12 @@ describe("catalog asset storage", () => {
         secondFinished = true;
       });
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await expect(
+      Promise.race([
+        firstHeartbeatObserved.then(() => "heartbeat"),
+        secondPromise.then(() => "finished"),
+      ]),
+    ).resolves.toBe("heartbeat");
     expect(secondFinished).toBe(false);
 
     const finishFirstLock = releaseFirstLock as (() => void) | null;
@@ -446,9 +651,14 @@ describe("catalog asset storage", () => {
     let releaseFirstLock: (() => void) | null = null;
     let releaseSecondLock: (() => void) | null = null;
     let firstControl: { stopHeartbeat(): void } | null = null;
+    let secondLockHeartbeatRenewed: (() => void) | null = null;
+    let secondLockOwnerToken: string | null = null;
     let firstLockHeld = false;
     let secondLockHeld = false;
     let thirdFinished = false;
+    const secondHeartbeatObserved = new Promise<void>((resolve) => {
+      secondLockHeartbeatRenewed = resolve;
+    });
     const sharedOptions = {
       heartbeatIntervalMs: 10,
       lockRetryDelayMs: 5,
@@ -469,11 +679,20 @@ describe("catalog asset storage", () => {
     });
     const secondStorage = createCatalogAssetStorage({
       ...sharedOptions,
+      onLeaseWrite({ kind, ownerToken }) {
+        if (kind === "run" && ownerToken === secondLockOwnerToken) {
+          secondLockHeartbeatRenewed?.();
+          secondLockHeartbeatRenewed = null;
+        }
+      },
       onStageWriteReady() {
         secondLockHeld = true;
         return new Promise<void>((resolve) => {
           releaseSecondLock = resolve;
         });
+      },
+      onRunLockAcquired(control) {
+        secondLockOwnerToken = control.ownerToken;
       },
     });
     const thirdStorage = createCatalogAssetStorage(sharedOptions);
@@ -522,7 +741,12 @@ describe("catalog asset storage", () => {
     }
     await firstPromise;
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await expect(
+      Promise.race([
+        secondHeartbeatObserved.then(() => "heartbeat"),
+        thirdPromise.then(() => "finished"),
+      ]),
+    ).resolves.toBe("heartbeat");
     expect(thirdFinished).toBe(false);
 
     const finishSecondLock = releaseSecondLock as (() => void) | null;
@@ -536,8 +760,13 @@ describe("catalog asset storage", () => {
 
   test("keeps a live publish claim across stale-ttl heartbeats", async () => {
     let releaseFirstClaim: (() => void) | null = null;
+    let firstClaimHeartbeatRenewed: (() => void) | null = null;
+    let firstClaimOwnerToken: string | null = null;
     let firstClaimHeld = false;
     let secondFinished = false;
+    const firstHeartbeatObserved = new Promise<void>((resolve) => {
+      firstClaimHeartbeatRenewed = resolve;
+    });
     const sharedOptions = {
       claimHeartbeatIntervalMs: 10,
       claimStaleMs: 40,
@@ -550,6 +779,15 @@ describe("catalog asset storage", () => {
     const bytes = await createImageBuffer("png", { b: 31 });
     const firstStorage = createCatalogAssetStorage({
       ...sharedOptions,
+      onClaimLeaseAcquired(control) {
+        firstClaimOwnerToken = control.ownerToken;
+      },
+      onLeaseWrite({ kind, ownerToken }) {
+        if (kind === "claim" && ownerToken === firstClaimOwnerToken) {
+          firstClaimHeartbeatRenewed?.();
+          firstClaimHeartbeatRenewed = null;
+        }
+      },
       onClaimAcquired() {
         firstClaimHeld = true;
         return new Promise<void>((resolve) => {
@@ -582,7 +820,12 @@ describe("catalog asset storage", () => {
       secondFinished = true;
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await expect(
+      Promise.race([
+        firstHeartbeatObserved.then(() => "heartbeat"),
+        secondCommit.then(() => "finished"),
+      ]),
+    ).resolves.toBe("heartbeat");
     expect(secondFinished).toBe(false);
 
     const finishFirstClaim = releaseFirstClaim as (() => void) | null;
@@ -596,9 +839,14 @@ describe("catalog asset storage", () => {
     let releaseFirstClaim: (() => void) | null = null;
     let releaseSecondClaim: (() => void) | null = null;
     let firstClaimControl: { stopHeartbeat(): void } | null = null;
+    let secondClaimHeartbeatRenewed: (() => void) | null = null;
+    let secondClaimOwnerToken: string | null = null;
     let firstClaimHeld = false;
     let secondClaimHeld = false;
     let thirdFinished = false;
+    const secondHeartbeatObserved = new Promise<void>((resolve) => {
+      secondClaimHeartbeatRenewed = resolve;
+    });
     const sharedOptions = {
       claimHeartbeatIntervalMs: 10,
       claimStaleMs: 40,
@@ -623,11 +871,18 @@ describe("catalog asset storage", () => {
     });
     const secondStorage = createCatalogAssetStorage({
       ...sharedOptions,
-      onClaimAcquired() {
+      onClaimAcquired({ ownerToken }) {
+        secondClaimOwnerToken = ownerToken;
         secondClaimHeld = true;
         return new Promise<void>((resolve) => {
           releaseSecondClaim = resolve;
         });
+      },
+      onLeaseWrite({ kind, ownerToken }) {
+        if (kind === "claim" && ownerToken === secondClaimOwnerToken) {
+          secondClaimHeartbeatRenewed?.();
+          secondClaimHeartbeatRenewed = null;
+        }
       },
     });
     const thirdStorage = createCatalogAssetStorage(sharedOptions);
@@ -655,15 +910,11 @@ describe("catalog asset storage", () => {
     });
 
     const firstCommit = firstStorage.commitCatalogAsset(firstManifest);
-    while (!firstClaimHeld || !firstClaimControl) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForCondition(() => firstClaimHeld && firstClaimControl !== null);
 
     (firstClaimControl as { stopHeartbeat(): void } | null)?.stopHeartbeat();
     const secondCommit = secondStorage.commitCatalogAsset(secondManifest);
-    while (!secondClaimHeld) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await waitForCondition(() => secondClaimHeld);
 
     const thirdCommit = thirdStorage.commitCatalogAsset(thirdManifest).then(() => {
       thirdFinished = true;
@@ -673,7 +924,12 @@ describe("catalog asset storage", () => {
     finishFirstClaim?.();
     await firstCommit;
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await expect(
+      Promise.race([
+        secondHeartbeatObserved.then(() => "heartbeat"),
+        thirdCommit.then(() => "finished"),
+      ]),
+    ).resolves.toBe("heartbeat");
     expect(thirdFinished).toBe(false);
 
     const finishSecondClaim = releaseSecondClaim as (() => void) | null;

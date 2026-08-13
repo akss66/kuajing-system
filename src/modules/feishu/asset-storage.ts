@@ -27,6 +27,7 @@ const DEFAULT_LOCK_RETRY_DELAY_MS = 50;
 const DEFAULT_LOCK_STALE_MS = 60_000;
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const STAGING_TEMP_FILE_PATTERN = /^\.catalog-asset-stage-(\d+)-([0-9a-f-]{36})\.tmp$/;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const TEMPORARY_KEY_PATTERN =
@@ -34,6 +35,9 @@ const TEMPORARY_KEY_PATTERN =
 const STORAGE_KEY_PATTERN = /^sha256\/([0-9a-f]{2})\/([0-9a-f]{64})\.(jpg|png|webp)$/;
 const READ_NOFOLLOW_FLAGS =
   constants.O_RDONLY | (typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0);
+const LEASE_WRITE_NOFOLLOW_FLAGS =
+  constants.O_RDWR |
+  (typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0);
 const WRITE_NOFOLLOW_FLAGS =
   constants.O_CREAT |
   constants.O_EXCL |
@@ -113,6 +117,7 @@ type PublishBytesOptions = {
   expectedMimeType?: ImageMimeType;
   onWriteProgress?: ((progress: TargetWriteProgress) => Promise<void> | void) | undefined;
   onReady?: (() => Promise<void> | void) | undefined;
+  tempFileName?: string | undefined;
   targetPath: string;
 };
 type PublishBytesResult = {
@@ -188,6 +193,10 @@ class CatalogAssetLeaseLostError extends CatalogAssetError {
 
 function wait(delayMs: number) {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function createStagingTempFileName(ownerToken: string, createdAtMs: number) {
+  return `.catalog-asset-stage-${createdAtMs}-${ownerToken}.tmp`;
 }
 
 function toComparablePath(input: string) {
@@ -572,6 +581,71 @@ async function sumDirectoryBytes(directoryPath: string): Promise<number> {
   return total;
 }
 
+async function reclaimStaleStagingTemps(
+  state: AssetRootState,
+  dependencies: StorageDependencies,
+  runDirectoryPath: string,
+  currentOwnerToken: string,
+  assertCanContinue: () => void,
+) {
+  const entries = await readdir(runDirectoryPath, { withFileTypes: true }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    },
+  );
+
+  let cleanedAny = false;
+  for (const entry of entries) {
+    assertCanContinue();
+
+    const match = STAGING_TEMP_FILE_PATTERN.exec(entry.name);
+    if (!match) {
+      continue;
+    }
+
+    const createdAtMs = Number(match[1]);
+    const ownerToken = match[2];
+    if (!Number.isFinite(createdAtMs) || ownerToken === currentOwnerToken) {
+      continue;
+    }
+    if (Date.now() - createdAtMs <= dependencies.lockStaleMs) {
+      continue;
+    }
+
+    const absolutePath = join(runDirectoryPath, entry.name);
+    assertContainedPath(state.absoluteRoot, absolutePath, "temporary asset path");
+    const entryStats = await lstat(absolutePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    });
+    if (!entryStats || entryStats.isSymbolicLink() || !entryStats.isFile()) {
+      continue;
+    }
+
+    const quarantinePath = join(
+      runDirectoryPath,
+      `.catalog-asset-quarantine-${crypto.randomUUID()}.tmp`,
+    );
+    const moved = await renameWithinRoot(state, absolutePath, quarantinePath, "temporary asset path");
+    if (!moved) {
+      continue;
+    }
+
+    await safeUnlink(quarantinePath);
+    cleanedAny = true;
+  }
+
+  if (cleanedAny) {
+    assertCanContinue();
+    await syncDirectory(runDirectoryPath, dependencies, "cleanup");
+  }
+}
+
 async function writeExclusiveFile(
   path: string,
   bytes: Uint8Array,
@@ -717,16 +791,24 @@ async function renameWithinRoot(
   assertContainedPath(state.absoluteRoot, targetPath, label);
   await ensureManagedDirectory(state, dirname(targetPath), { create: true, label });
 
-  try {
-    await rename(sourcePath, targetPath);
-    return true;
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === "ENOENT") {
-      return false;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rename(sourcePath, targetPath);
+      return true;
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        return false;
+      }
+      if ((nodeError.code === "EPERM" || nodeError.code === "EBUSY") && attempt < 4) {
+        await wait(10);
+        continue;
+      }
+      throw error;
     }
-    throw error;
   }
+
+  return false;
 }
 
 async function fallbackPublishByClaim(
@@ -847,7 +929,7 @@ async function publishBytesAtomically(
     label: "storage key",
   });
 
-  const tempName = `.catalog-asset-${crypto.randomUUID()}.tmp`;
+  const tempName = options.tempFileName ?? `.catalog-asset-${crypto.randomUUID()}.tmp`;
   const tempPath = join(finalDirectory, tempName);
   assertContainedPath(state.absoluteRoot, tempPath, "storage key");
 
@@ -922,15 +1004,16 @@ async function writeLockLease(
     throw new CatalogAssetLeaseLostError(`${kind} lease owner token no longer matches the current lease`);
   }
 
-  const tempLeasePath = `${leasePath}.${ownerToken}.next`;
+  let handle: FileHandle | null = null;
   try {
     await dependencies.onLeaseWrite?.({
       kind,
       ownerToken,
       path: leasePath,
     });
-    await writeExclusiveFile(
-      tempLeasePath,
+    handle = await open(leasePath, LEASE_WRITE_NOFOLLOW_FLAGS);
+    await handle.truncate(0);
+    await handle.writeFile(
       Buffer.from(
         serializeLease({
           heartbeatAt: new Date().toISOString(),
@@ -941,9 +1024,15 @@ async function writeLockLease(
         "utf8",
       ),
     );
-    await rename(tempLeasePath, leasePath);
+    await handle.sync();
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      throw new CatalogAssetLeaseLostError(`lost the ${kind} lease while renewing the heartbeat`);
+    }
+    throw error;
   } finally {
-    await safeUnlink(tempLeasePath);
+    await safeClose(handle);
   }
 }
 
@@ -1271,6 +1360,14 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
     const temporaryPath = await resolveManagedFilePath(state, temporaryKey, "temporary asset path");
 
     await withRunLock(state, dependencies, input.runId, async (runLock) => {
+      await reclaimStaleStagingTemps(
+        state,
+        dependencies,
+        runDirectoryPath,
+        runLock.ownerToken,
+        () => runLock.assertHeld(),
+      );
+
       try {
         const existingBytes = await readManagedFile(state, temporaryKey, "temporary asset path");
         const existingValidation = await validateImageBytes(
@@ -1305,6 +1402,7 @@ export function createCatalogAssetStorage(options: CatalogAssetStorageOptions = 
         assertCanContinue: () => runLock.assertHeld(),
         bytes: input.bytes,
         onWriteProgress: dependencies.onTemporaryWriteProgress,
+        tempFileName: createStagingTempFileName(runLock.ownerToken, Date.now()),
         targetPath: temporaryPath,
       });
       runLock.assertHeld();
