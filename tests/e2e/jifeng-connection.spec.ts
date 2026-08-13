@@ -15,7 +15,7 @@ import { seed } from "@/db/seed";
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
 import { resetE2EDatabaseToSeedState } from "./support/test-database";
 
-const mockBaseUrl = process.env.JIFENG_BASE_URL ?? "";
+const mockBaseUrl = process.env.E2E_JIFENG_MOCK_URL ?? "";
 const mockUrl = new URL(mockBaseUrl);
 const happyToken = "e2e-happy-one-time-token-2026";
 const invalidToken = "e2e-invalid-one-time-token-2026";
