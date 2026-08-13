@@ -2,11 +2,28 @@ import { describe, expect, test } from "vitest";
 
 import { FeishuApiError, FeishuClient } from "@/integrations/feishu/client";
 
+const FEISHU_NON_SHEET_MESSAGE =
+  "\u98de\u4e66\u77e5\u8bc6\u5e93\u8282\u70b9\u4e0d\u662f\u7535\u5b50\u8868\u683c";
+const FEISHU_INVALID_RESPONSE_MESSAGE =
+  "\u98de\u4e66\u63a5\u53e3\u54cd\u5e94\u683c\u5f0f\u65e0\u6548";
+const FEISHU_TOKEN_FAILURE_MESSAGE =
+  "\u98de\u4e66\u5e94\u7528\u8bbf\u95ee\u51ed\u8bc1\u83b7\u53d6\u5931\u8d25";
+const FEISHU_TIMEOUT_MESSAGE =
+  "\u98de\u4e66\u63a5\u53e3\u8bf7\u6c42\u8d85\u65f6";
+
+function feishuHttpMessage(status: number) {
+  return `\u98de\u4e66\u63a5\u53e3\u7f51\u7edc\u54cd\u5e94\u5f02\u5e38\uff08${status}\uff09`;
+}
+
+function tokenResponse() {
+  return { code: 0, expire: 7200, tenant_access_token: "tenant-token" };
+}
+
 describe("Feishu API client", () => {
   test("gets a tenant token, resolves a wiki sheet, writes values and sends a group message", async () => {
     const calls: Array<{ body: unknown; headers: Headers; method: string; url: string }> = [];
     const responses = [
-      { code: 0, expire: 7200, tenant_access_token: "tenant-token" },
+      tokenResponse(),
       {
         code: 0,
         data: { node: { obj_token: "spreadsheet-token", obj_type: "sheet" } },
@@ -74,7 +91,7 @@ describe("Feishu API client", () => {
     });
   });
 
-  test("rejects non-sheet wiki nodes and sanitizes Feishu API errors", async () => {
+  test("rejects non-sheet wiki nodes with the stable caller-facing message", async () => {
     const client = new FeishuClient({
       appId: "cli-app",
       appSecret: "app-secret",
@@ -82,7 +99,7 @@ describe("Feishu API client", () => {
         new Response(
           JSON.stringify(
             String(url).includes("tenant_access_token")
-              ? { code: 0, expire: 7200, tenant_access_token: "tenant-token" }
+              ? tokenResponse()
               : {
                   code: 0,
                   data: { node: { obj_token: "doc-token", obj_type: "docx" } },
@@ -95,6 +112,7 @@ describe("Feishu API client", () => {
 
     await expect(client.resolveWikiSpreadsheet("wiki-doc")).rejects.toMatchObject({
       code: "WIKI_NODE_NOT_SHEET",
+      message: FEISHU_NON_SHEET_MESSAGE,
       retryable: false,
     } satisfies Partial<FeishuApiError>);
   });
@@ -102,7 +120,7 @@ describe("Feishu API client", () => {
   test("reads detailed ranges with revision metadata and raw rich values", async () => {
     const calls: Array<{ headers: Headers; url: string }> = [];
     const responses = [
-      { code: 0, expire: 7200, tenant_access_token: "tenant-token" },
+      tokenResponse(),
       {
         code: 0,
         data: {
@@ -172,6 +190,90 @@ describe("Feishu API client", () => {
     expect(calls[1].headers.get("Authorization")).toBe("Bearer tenant-token");
   });
 
+  test("rejects detailed range responses that omit range or revision instead of fabricating values", async () => {
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      fetch: async (url) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes("tenant_access_token")
+              ? tokenResponse()
+              : {
+                  code: 0,
+                  data: {
+                    valueRange: {
+                      values: [["SKU-001"]],
+                    },
+                  },
+                  msg: "success",
+                },
+          ),
+          { headers: { "Content-Type": "application/json" }, status: 200 },
+        ),
+    });
+
+    await expect(
+      client.readRangeDetails({
+        range: "sheet-1!A1:A1",
+        spreadsheetToken: "source-token",
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      message: FEISHU_INVALID_RESPONSE_MESSAGE,
+      retryable: true,
+    } satisfies Partial<FeishuApiError>);
+  });
+
+  test("rejects non-json API bodies with a stable invalid-response error", async () => {
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      fetch: async (url) => {
+        if (String(url).includes("tenant_access_token")) {
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
+        }
+
+        return new Response("<html>not json</html>", {
+          headers: { "Content-Type": "text/html" },
+          status: 200,
+        });
+      },
+    });
+
+    await expect(
+      client.readRangeDetails({
+        range: "sheet-1!A1:A1",
+        spreadsheetToken: "source-token",
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      message: FEISHU_INVALID_RESPONSE_MESSAGE,
+      retryable: true,
+    } satisfies Partial<FeishuApiError>);
+  });
+
+  test("returns the stable token acquisition failure when the auth response is not json", async () => {
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      fetch: async () =>
+        new Response("nope", {
+          headers: { "Content-Type": "text/plain" },
+          status: 200,
+        }),
+    });
+
+    await expect(client.listSheets("spreadsheet-token")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      message: FEISHU_TOKEN_FAILURE_MESSAGE,
+      retryable: true,
+    } satisfies Partial<FeishuApiError>);
+  });
+
   test("downloads media bytes without json parsing and returns a safe suggested file name", async () => {
     const binary = Uint8Array.from([137, 80, 78, 71]);
     const client = new FeishuClient({
@@ -179,17 +281,10 @@ describe("Feishu API client", () => {
       appSecret: "app-secret",
       fetch: async (url) => {
         if (String(url).includes("tenant_access_token")) {
-          return new Response(
-            JSON.stringify({
-              code: 0,
-              expire: 7200,
-              tenant_access_token: "tenant-token",
-            }),
-            {
-              headers: { "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
         }
 
         return new Response(binary, {
@@ -209,23 +304,16 @@ describe("Feishu API client", () => {
     });
   });
 
-  test("treats media download permission failures as permanent and sanitized", async () => {
+  test("treats media download permission failures as permanent, sanitized, and caller-stable", async () => {
     const client = new FeishuClient({
       appId: "cli-app",
       appSecret: "app-secret",
       fetch: async (url) => {
         if (String(url).includes("tenant_access_token")) {
-          return new Response(
-            JSON.stringify({
-              code: 0,
-              expire: 7200,
-              tenant_access_token: "tenant-token",
-            }),
-            {
-              headers: { "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
         }
 
         return new Response("forbidden", { status: 403 });
@@ -234,6 +322,7 @@ describe("Feishu API client", () => {
 
     await expect(client.downloadMedia("img-secret-token")).rejects.toMatchObject({
       code: "HTTP_403",
+      message: feishuHttpMessage(403),
       retryable: false,
     } satisfies Partial<FeishuApiError>);
     await client.downloadMedia("img-secret-token").catch((error: unknown) => {
@@ -243,32 +332,59 @@ describe("Feishu API client", () => {
     });
   });
 
-  test("rejects media responses that declare a body larger than eight mebibytes", async () => {
+  test("treats media unauthorized responses as permanent and caller-stable", async () => {
     const client = new FeishuClient({
       appId: "cli-app",
       appSecret: "app-secret",
       fetch: async (url) => {
         if (String(url).includes("tenant_access_token")) {
-          return new Response(
-            JSON.stringify({
-              code: 0,
-              expire: 7200,
-              tenant_access_token: "tenant-token",
-            }),
-            {
-              headers: { "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
         }
 
-        return new Response(Uint8Array.from([1, 2, 3]), {
-          headers: {
-            "Content-Length": String(8 * 1024 * 1024 + 1),
-            "Content-Type": "image/jpeg",
+        return new Response("unauthorized", { status: 401 });
+      },
+    });
+
+    await expect(client.downloadMedia("img-secret-token")).rejects.toMatchObject({
+      code: "HTTP_401",
+      message: feishuHttpMessage(401),
+      retryable: false,
+    } satisfies Partial<FeishuApiError>);
+  });
+
+  test("rejects media responses that declare a body larger than eight mebibytes and cancels the body", async () => {
+    let canceled = false;
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      fetch: async (url) => {
+        if (String(url).includes("tenant_access_token")) {
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
+        }
+
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(Uint8Array.from([1, 2, 3]));
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+          {
+            headers: {
+              "Content-Length": String(8 * 1024 * 1024 + 1),
+              "Content-Type": "image/jpeg",
+            },
+            status: 200,
           },
-          status: 200,
-        });
+        );
       },
     });
 
@@ -276,6 +392,7 @@ describe("Feishu API client", () => {
       code: "MEDIA_TOO_LARGE",
       retryable: false,
     } satisfies Partial<FeishuApiError>);
+    expect(canceled).toBe(true);
   });
 
   test("rejects streamed media once the buffered size exceeds eight mebibytes", async () => {
@@ -284,17 +401,10 @@ describe("Feishu API client", () => {
       appSecret: "app-secret",
       fetch: async (url) => {
         if (String(url).includes("tenant_access_token")) {
-          return new Response(
-            JSON.stringify({
-              code: 0,
-              expire: 7200,
-              tenant_access_token: "tenant-token",
-            }),
-            {
-              headers: { "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
         }
 
         return new Response(
@@ -319,10 +429,69 @@ describe("Feishu API client", () => {
     } satisfies Partial<FeishuApiError>);
   });
 
+  test("times out stalled media bodies after headers using the shared request timeout", async () => {
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      timeoutMs: 20,
+      fetch: async (url, init) => {
+        if (String(url).includes("tenant_access_token")) {
+          return new Response(JSON.stringify(tokenResponse()), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          });
+        }
+
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const signal = init?.signal;
+              if (!(signal instanceof AbortSignal)) return;
+              if (signal.aborted) {
+                controller.error(new DOMException("Aborted", "AbortError"));
+                return;
+              }
+              signal.addEventListener(
+                "abort",
+                () => controller.error(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
+            },
+          }),
+          {
+            headers: { "Content-Type": "image/jpeg" },
+            status: 200,
+          },
+        );
+      },
+    });
+
+    await expect(client.downloadMedia("stalling-file")).rejects.toMatchObject({
+      code: "TIMEOUT",
+      message: FEISHU_TIMEOUT_MESSAGE,
+      retryable: true,
+    } satisfies Partial<FeishuApiError>);
+  });
+
+  test("times out auth or json transport requests with the stable timeout code", async () => {
+    const client = new FeishuClient({
+      appId: "cli-app",
+      appSecret: "app-secret",
+      timeoutMs: 20,
+      fetch: async () => await new Promise<Response>(() => {}),
+    });
+
+    await expect(client.listSheets("spreadsheet-token")).rejects.toMatchObject({
+      code: "TIMEOUT",
+      message: FEISHU_TIMEOUT_MESSAGE,
+      retryable: true,
+    } satisfies Partial<FeishuApiError>);
+  });
+
   test("writes images, styles, dimensions, and filters using the documented payload shapes", async () => {
     const calls: Array<{ body: unknown; method: string; url: string }> = [];
     const responses = [
-      { code: 0, expire: 7200, tenant_access_token: "tenant-token" },
+      tokenResponse(),
       {
         code: 0,
         data: {

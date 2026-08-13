@@ -5,7 +5,29 @@ type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type RequestState = {
+  abortReason: null | "size-limit" | "timeout";
+  controller: AbortController;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+  timeoutPromise: Promise<never>;
+};
+
 export const MAX_SOURCE_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const FEISHU_PERMISSION_MESSAGE =
+  "\u98de\u4e66\u6587\u6863\u6743\u9650\u4e0d\u8db3\uff0c\u8bf7\u5c06\u5e94\u7528\u6dfb\u52a0\u4e3a\u77e5\u8bc6\u5e93\u6216\u7535\u5b50\u8868\u683c\u534f\u4f5c\u8005";
+const FEISHU_NON_SHEET_MESSAGE =
+  "\u98de\u4e66\u77e5\u8bc6\u5e93\u8282\u70b9\u4e0d\u662f\u7535\u5b50\u8868\u683c";
+const FEISHU_INVALID_RESPONSE_MESSAGE =
+  "\u98de\u4e66\u63a5\u53e3\u54cd\u5e94\u683c\u5f0f\u65e0\u6548";
+const FEISHU_TOKEN_FAILURE_MESSAGE =
+  "\u98de\u4e66\u5e94\u7528\u8bbf\u95ee\u51ed\u8bc1\u83b7\u53d6\u5931\u8d25";
+const FEISHU_TIMEOUT_MESSAGE =
+  "\u98de\u4e66\u63a5\u53e3\u8bf7\u6c42\u8d85\u65f6";
+const FEISHU_NETWORK_ERROR_MESSAGE =
+  "\u98de\u4e66\u63a5\u53e3\u7f51\u7edc\u8bf7\u6c42\u5931\u8d25";
+const FEISHU_MEDIA_TOO_LARGE_MESSAGE =
+  "\u98de\u4e66\u7d20\u6750\u8d85\u8fc7 8 MiB \u4e0a\u9650";
 
 const baseResponseSchema = z.object({
   code: z.coerce.number().int(),
@@ -99,11 +121,35 @@ export class FeishuApiError extends Error {
   }
 }
 
-function errorMessage(code: number) {
+function feishuHttpMessage(status: number) {
+  return `\u98de\u4e66\u63a5\u53e3\u7f51\u7edc\u54cd\u5e94\u5f02\u5e38\uff08${status}\uff09`;
+}
+
+function feishuCodeMessage(code: number) {
   if (code === 1310213 || code === 131006) {
-    return "Feishu document permission is missing";
+    return FEISHU_PERMISSION_MESSAGE;
   }
-  return `Feishu API returned error code ${code}`;
+  return `\u98de\u4e66\u63a5\u53e3\u8c03\u7528\u5931\u8d25\uff08${code}\uff09`;
+}
+
+function invalidResponseError() {
+  return new FeishuApiError(
+    "INVALID_RESPONSE",
+    FEISHU_INVALID_RESPONSE_MESSAGE,
+    true,
+  );
+}
+
+function mediaTooLargeError() {
+  return new FeishuApiError(
+    "MEDIA_TOO_LARGE",
+    FEISHU_MEDIA_TOO_LARGE_MESSAGE,
+    false,
+  );
+}
+
+function timeoutError() {
+  return new FeishuApiError("TIMEOUT", FEISHU_TIMEOUT_MESSAGE, true);
 }
 
 function sanitizeSuggestedFileName(fileName: string | null) {
@@ -169,7 +215,7 @@ export class FeishuClient {
     if (response.data.data.node.obj_type !== "sheet") {
       throw new FeishuApiError(
         "WIKI_NODE_NOT_SHEET",
-        "Feishu wiki node is not a sheet",
+        FEISHU_NON_SHEET_MESSAGE,
         false,
       );
     }
@@ -224,10 +270,14 @@ export class FeishuClient {
     }
 
     const valueRange = response.data.data.valueRange;
+    if (!valueRange?.range || valueRange.revision === undefined) {
+      throw invalidResponseError();
+    }
+
     return {
-      range: valueRange?.range ?? input.range,
-      revision: valueRange?.revision ?? response.data.data.revision ?? 0,
-      values: valueRange?.values ?? [],
+      range: valueRange.range,
+      revision: valueRange.revision,
+      values: valueRange.values ?? [],
     };
   }
 
@@ -240,28 +290,32 @@ export class FeishuClient {
     contentType: string;
     fileName: string | null;
   }> {
-    const response = await this.authorizedResponse(
+    return this.authorizedRequest(
       `/open-apis/drive/v1/medias/${encodeURIComponent(fileToken)}/download`,
-    );
-    const declaredLength = Number.parseInt(
-      response.headers.get("Content-Length") ?? "",
-      10,
-    );
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_IMAGE_BYTES) {
-      throw new FeishuApiError(
-        "MEDIA_TOO_LARGE",
-        "Feishu media exceeds the 8 MiB download limit",
-        false,
-      );
-    }
+      {},
+      async (response, state) => {
+        const declaredLength = Number.parseInt(
+          response.headers.get("Content-Length") ?? "",
+          10,
+        );
+        if (
+          Number.isFinite(declaredLength) &&
+          declaredLength > MAX_SOURCE_IMAGE_BYTES
+        ) {
+          await this.abortForSizeLimit(response, state);
+          throw mediaTooLargeError();
+        }
 
-    return {
-      bytes: await this.readBinaryBody(response),
-      contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
-      fileName: parseSuggestedFileName(
-        response.headers.get("Content-Disposition"),
-      ),
-    };
+        return {
+          bytes: await this.readBinaryBody(response, state),
+          contentType:
+            response.headers.get("Content-Type") ?? "application/octet-stream",
+          fileName: parseSuggestedFileName(
+            response.headers.get("Content-Disposition"),
+          ),
+        };
+      },
+    );
   }
 
   async writeImage(input: {
@@ -371,62 +425,88 @@ export class FeishuClient {
       | { success: true; data: { code: number; msg?: string } },
   ): never {
     if (!response.success) {
-      throw new FeishuApiError(
-        "INVALID_RESPONSE",
-        "Feishu API returned an invalid response",
-        true,
-      );
+      throw invalidResponseError();
     }
     const code = response.data.code;
     throw new FeishuApiError(
       String(code),
-      errorMessage(code),
+      feishuCodeMessage(code),
       code >= 99990000 || code === 1315201 || code === 1315203,
     );
   }
 
   private async authorizedJson(path: string | URL, init: RequestInit = {}) {
-    const response = await this.authorizedResponse(path, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        ...init.headers,
+    return this.authorizedRequest(
+      path,
+      {
+        ...init,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...init.headers,
+        },
       },
-    });
-    return this.parseJson(response);
+      async (response, state) => this.parseJson(response, state),
+    );
   }
 
-  private async authorizedResponse(path: string | URL, init: RequestInit = {}) {
+  private async authorizedRequest<T>(
+    path: string | URL,
+    init: RequestInit,
+    reader: (response: Response, state: RequestState) => Promise<T>,
+  ) {
     const token = await this.tenantToken();
-    return this.fetchResponse(path, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...init.headers,
+    return this.withRequest(
+      path,
+      {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...init.headers,
+        },
       },
-    });
+      reader,
+    );
   }
 
   private async tenantToken() {
     if (this.token && this.token.expiresAt - 5 * 60_000 > this.now()) {
       return this.token.value;
     }
-    const response = tokenResponseSchema.safeParse(
-      await this.parseJson(
-        await this.fetchResponse("/open-apis/auth/v3/tenant_access_token/internal", {
-          body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
+
+    let payload: unknown;
+    try {
+      payload = await this.withRequest(
+        "/open-apis/auth/v3/tenant_access_token/internal",
+        {
+          body: JSON.stringify({
+            app_id: this.appId,
+            app_secret: this.appSecret,
+          }),
           headers: { "Content-Type": "application/json; charset=utf-8" },
           method: "POST",
-        }),
-      ),
-    );
+        },
+        async (response, state) => this.parseJson(response, state),
+      );
+    } catch (error) {
+      if (error instanceof FeishuApiError && error.code === "INVALID_RESPONSE") {
+        throw new FeishuApiError(
+          "INVALID_RESPONSE",
+          FEISHU_TOKEN_FAILURE_MESSAGE,
+          true,
+        );
+      }
+      throw error;
+    }
+
+    const response = tokenResponseSchema.safeParse(payload);
     if (!response.success || response.data.code !== 0) {
       throw new FeishuApiError(
         response.success ? String(response.data.code) : "INVALID_RESPONSE",
-        "Failed to obtain Feishu tenant access token",
+        FEISHU_TOKEN_FAILURE_MESSAGE,
         true,
       );
     }
+
     this.token = {
       expiresAt: this.now() + response.data.expire * 1000,
       value: response.data.tenant_access_token,
@@ -434,50 +514,91 @@ export class FeishuClient {
     return this.token.value;
   }
 
-  private async fetchResponse(path: string | URL, init: RequestInit) {
+  private async withRequest<T>(
+    path: string | URL,
+    init: RequestInit,
+    reader: (response: Response, state: RequestState) => Promise<T>,
+  ) {
+    const state = this.createRequestState();
+    try {
+      const response = await this.fetchResponse(path, init, state);
+      return await reader(response, state);
+    } catch (error) {
+      if (error instanceof FeishuApiError) {
+        throw error;
+      }
+      if (state.abortReason === "timeout") {
+        throw timeoutError();
+      }
+      throw new FeishuApiError(
+        "NETWORK_ERROR",
+        FEISHU_NETWORK_ERROR_MESSAGE,
+        true,
+      );
+    } finally {
+      clearTimeout(state.timeoutHandle);
+    }
+  }
+
+  private createRequestState(): RequestState {
+    const controller = new AbortController();
+    let rejectTimeout: (error: FeishuApiError) => void = () => {};
+    const state: RequestState = {
+      abortReason: null,
+      controller,
+      timeoutHandle: setTimeout(() => {
+        state.abortReason = "timeout";
+        controller.abort();
+        rejectTimeout(timeoutError());
+      }, this.timeoutMs),
+      timeoutPromise: new Promise<never>((_, reject) => {
+        rejectTimeout = reject;
+      }),
+    };
+    return state;
+  }
+
+  private async fetchResponse(
+    path: string | URL,
+    init: RequestInit,
+    state: RequestState,
+  ) {
     const url =
       path instanceof URL
         ? path
         : new URL(path, `${this.baseUrl}/`);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      const response = await this.fetcher(url, { ...init, signal: controller.signal });
-      if (!response.ok) {
-        throw new FeishuApiError(
-          `HTTP_${response.status}`,
-          `Feishu API request failed with HTTP ${response.status}`,
-          response.status === 429 || response.status >= 500,
-        );
-      }
-      return response;
-    } catch (error) {
-      if (error instanceof FeishuApiError) throw error;
+    const response = await Promise.race([
+      this.fetcher(url, { ...init, signal: state.controller.signal }),
+      state.timeoutPromise,
+    ]);
+    if (!response.ok) {
       throw new FeishuApiError(
-        controller.signal.aborted ? "TIMEOUT" : "NETWORK_ERROR",
-        controller.signal.aborted
-          ? "Feishu API request timed out"
-          : "Feishu API network request failed",
-        true,
+        `HTTP_${response.status}`,
+        feishuHttpMessage(response.status),
+        response.status === 429 || response.status >= 500,
       );
-    } finally {
-      clearTimeout(timeout);
     }
+    return response;
   }
 
-  private async parseJson(response: Response) {
+  private async parseJson(response: Response, state: RequestState) {
+    const text = await Promise.race([response.text(), state.timeoutPromise]);
     try {
-      return await response.json();
+      return JSON.parse(text);
     } catch {
-      throw new FeishuApiError(
-        "INVALID_RESPONSE",
-        "Feishu API returned invalid JSON",
-        true,
-      );
+      throw invalidResponseError();
     }
   }
 
-  private async readBinaryBody(response: Response) {
+  private async abortForSizeLimit(response: Response, state: RequestState) {
+    state.abortReason = "size-limit";
+    try {
+      await response.body?.cancel();
+    } catch {}
+    state.controller.abort();
+  }
+
+  private async readBinaryBody(response: Response, state: RequestState) {
     if (!response.body) return new Uint8Array();
 
     const reader = response.body.getReader();
@@ -485,21 +606,19 @@ export class FeishuClient {
     let total = 0;
 
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
+      const result = await Promise.race([reader.read(), state.timeoutPromise]);
+      if (result.done) break;
+      if (!result.value) continue;
 
-      total += value.byteLength;
+      total += result.value.byteLength;
       if (total > MAX_SOURCE_IMAGE_BYTES) {
+        state.abortReason = "size-limit";
         await reader.cancel();
-        throw new FeishuApiError(
-          "MEDIA_TOO_LARGE",
-          "Feishu media exceeds the 8 MiB download limit",
-          false,
-        );
+        state.controller.abort();
+        throw mediaTooLargeError();
       }
 
-      chunks.push(value);
+      chunks.push(result.value);
     }
 
     const merged = new Uint8Array(total);
