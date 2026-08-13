@@ -1,5 +1,5 @@
 {
-  "id": "dbb92016-1597-4ec0-82ee-46abb08d4683",
+  "id": "201e4d29-3ec6-4451-ae50-d9cfc336bd7f",
   "prevId": "e8d23d67-2bd6-49b3-8833-cd5eeabfd2d2",
   "version": "7",
   "dialect": "postgresql",
@@ -2527,6 +2527,22 @@
         "jifeng_connections_primary_key_check": {
           "name": "jifeng_connections_primary_key_check",
           "value": "\"jifeng_connections\".\"connection_key\" = 'PRIMARY'"
+        },
+        "jifeng_connections_authorization_provenance_pair_check": {
+          "name": "jifeng_connections_authorization_provenance_pair_check",
+          "value": "(\"jifeng_connections\".\"authorized_at\" is null) = (\"jifeng_connections\".\"authorized_by_admin_user_id\" is null)"
+        },
+        "jifeng_connections_enablement_provenance_pair_check": {
+          "name": "jifeng_connections_enablement_provenance_pair_check",
+          "value": "(\"jifeng_connections\".\"fulfillment_enabled_at\" is null) = (\"jifeng_connections\".\"fulfillment_enabled_by_admin_user_id\" is null)"
+        },
+        "jifeng_connections_authorized_status_provenance_check": {
+          "name": "jifeng_connections_authorized_status_provenance_check",
+          "value": "\"jifeng_connections\".\"status\" not in ('AUTHORIZED', 'RESOURCE_SELECTION_REQUIRED', 'READY_DISABLED', 'ENABLED', 'REFRESH_REQUIRED') or (\"jifeng_connections\".\"authorized_at\" is not null and \"jifeng_connections\".\"authorized_by_admin_user_id\" is not null)"
+        },
+        "jifeng_connections_enabled_status_provenance_check": {
+          "name": "jifeng_connections_enabled_status_provenance_check",
+          "value": "\"jifeng_connections\".\"status\" <> 'ENABLED' or (\"jifeng_connections\".\"authorized_at\" is not null and \"jifeng_connections\".\"authorized_by_admin_user_id\" is not null and \"jifeng_connections\".\"fulfillment_enabled_at\" is not null and \"jifeng_connections\".\"fulfillment_enabled_by_admin_user_id\" is not null)"
         }
       },
       "isRLSEnabled": false

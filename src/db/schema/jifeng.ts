@@ -92,6 +92,22 @@ export const jifengConnections = pgTable(
       "jifeng_connections_primary_key_check",
       sql`${table.connectionKey} = 'PRIMARY'`,
     ),
+    check(
+      "jifeng_connections_authorization_provenance_pair_check",
+      sql`(${table.authorizedAt} is null) = (${table.authorizedByAdminUserId} is null)`,
+    ),
+    check(
+      "jifeng_connections_enablement_provenance_pair_check",
+      sql`(${table.fulfillmentEnabledAt} is null) = (${table.fulfillmentEnabledByAdminUserId} is null)`,
+    ),
+    check(
+      "jifeng_connections_authorized_status_provenance_check",
+      sql`${table.status} not in ('AUTHORIZED', 'RESOURCE_SELECTION_REQUIRED', 'READY_DISABLED', 'ENABLED', 'REFRESH_REQUIRED') or (${table.authorizedAt} is not null and ${table.authorizedByAdminUserId} is not null)`,
+    ),
+    check(
+      "jifeng_connections_enabled_status_provenance_check",
+      sql`${table.status} <> 'ENABLED' or (${table.authorizedAt} is not null and ${table.authorizedByAdminUserId} is not null and ${table.fulfillmentEnabledAt} is not null and ${table.fulfillmentEnabledByAdminUserId} is not null)`,
+    ),
   ],
 );
 
