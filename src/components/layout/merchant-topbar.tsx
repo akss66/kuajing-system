@@ -101,7 +101,7 @@ export function MerchantTopbar({
           <DropdownMenuTrigger asChild>
             <Button
               aria-label="打开账号菜单"
-              className="min-h-11 gap-2 rounded-md border-white/12 bg-white/5 px-3 text-[var(--merchant-topbar-foreground)] hover:bg-white/10 hover:text-white"
+              className="min-h-11 min-w-11 gap-2 rounded-md border-white/12 bg-white/5 px-3 text-[var(--merchant-topbar-foreground)] hover:bg-white/10 hover:text-white"
               variant="outline"
             >
               <UserCircle2 aria-hidden="true" className="size-4" />

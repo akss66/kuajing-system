@@ -114,7 +114,7 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
   await expect(drawer.getByText("库存已调整并记录流水。")).toBeVisible();
   await page.goto("/admin/system/audit?action=INVENTORY_ADJUSTED");
   await expect(page.getByRole("heading", { name: "审计日志" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "INVENTORY_ADJUSTED" }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "库存调整" }).first()).toBeVisible();
   await expect(page.getByText("首批测试库存").first()).toBeVisible();
 
   await page.context().clearCookies();

@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { db } from "@/db/client";
+import { seed } from "@/db/seed";
 import {
   customerSkuPrices,
   customers,
@@ -17,6 +18,12 @@ import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
+import { resetE2EDatabaseToSeedState } from "./support/test-database";
+
+const seededCustomer = {
+  email: "customer@tongzhouxing.local",
+  password: "TongZhouXing-Customer-2026!",
+};
 
 function visibleCatalogItem(page: import("@playwright/test").Page, skuId: string) {
   return page.locator(`[data-testid="catalog-${skuId}"]:visible`);
@@ -191,21 +198,27 @@ test("customer sees only its own price and real available inventory", async ({ p
     ),
   ).toEqual([]);
 
-  await page.goto(`/portal/catalog?q=${fixture.availableSku.skuCode}`);
-  const isolatedRow = visibleCatalogItem(page, fixture.availableSku.id);
-  await isolatedRow.waitFor();
+  await page.context().clearCookies();
+  await resetE2EDatabaseToSeedState({
+    context: "customer catalog visual baseline",
+    database: db,
+    reseed: seed,
+  });
+  await loginThroughUi(page, seededCustomer);
+  await expect(page).toHaveURL(/\/portal$/);
+  await page.goto("/portal/catalog?q=TZX-DEMO-001");
+  const seededRow = page
+    .locator('[data-testid^="catalog-"]:visible')
+    .filter({ hasText: "TZX-DEMO-001" });
+  await expect(seededRow).toContainText("演示头绳");
+  await expect(seededRow).toContainText("¥7.60");
+  await expect(seededRow).toContainText("可售 10");
   await page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
   );
   await expect(page).toHaveScreenshot(`customer-catalog-${testInfo.project.name}.png`, {
     fullPage: true,
     maxDiffPixels: 30,
-    maskColor: "#e8efed",
-    mask: [
-      page.getByLabel("搜索 SKU 或商品名称"),
-      isolatedRow.getByText(fixture.availableSku.skuCode, { exact: true }),
-      isolatedRow.getByText(fixture.productName, { exact: true }),
-    ],
   });
 });
 

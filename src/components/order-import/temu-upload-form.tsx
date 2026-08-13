@@ -37,8 +37,8 @@ export function TemuUploadForm({
 
   return (
     <form action={formAction} className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="space-y-2 text-sm font-medium text-ink">
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+        <label className="min-w-0 space-y-2 text-sm font-medium text-ink">
           选择店铺
           <select
             className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
@@ -54,9 +54,9 @@ export function TemuUploadForm({
           </select>
         </label>
 
-        <label className="space-y-2 text-sm font-medium text-ink">
+        <label className="min-w-0 space-y-2 text-sm font-medium text-ink">
           TEMU 订单 Excel
-          <span className="flex min-h-11 items-center gap-3 rounded-lg border border-dashed border-primary/35 bg-primary-soft/40 px-3">
+          <span className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg border border-dashed border-primary/35 bg-primary-soft/40 px-3">
             <FileSpreadsheet aria-hidden="true" className="size-5 text-primary" />
             <input
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

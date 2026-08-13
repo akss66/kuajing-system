@@ -750,6 +750,7 @@ test("catalog and inventory keep mutations in drawers and fit approved mobile wi
   const inventoryDrawer = page.getByRole("dialog", { name: "调整库存" });
   await expect(inventoryDrawer.getByLabel("调整数量")).toBeVisible();
   await expect(inventoryDrawer.getByLabel("调整原因")).toBeVisible();
+  await expect(inventoryDrawer).toHaveCSS("opacity", "1");
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(

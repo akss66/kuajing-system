@@ -87,7 +87,7 @@ function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] })
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground">{account.displayName}</p>
                 {account.kind === "SUPER_ADMIN" ? (
-                  <Badge className="gap-1 bg-primary/10 text-primary" variant="secondary">
+                  <Badge className="gap-1 bg-primary-soft text-primary-hover" variant="secondary">
                     <LockKeyhole aria-hidden="true" />
                     受保护
                   </Badge>

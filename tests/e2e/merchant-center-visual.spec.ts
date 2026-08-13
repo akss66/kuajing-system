@@ -1,8 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { eq } from "drizzle-orm";
 
 import { seed } from "@/db/seed";
 import { db } from "@/db/client";
+import { customers } from "@/db/schema";
 
 import { loginThroughUi } from "./support/managed-user";
 import { resetE2EDatabaseToSeedState } from "./support/test-database";
@@ -85,6 +87,23 @@ const workspaceRoutes = [
     screenshot: "customer-bulk-orders",
     shouldShowMetricStrip: true,
   },
+  {
+    audience: "admin" as const,
+    heading: "审计日志",
+    expectedTexts: ["操作主体", "审计记录", "暂无审计记录"],
+    path: "/admin/system/audit",
+    screenshot: "admin-audit",
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-workspace-panel]",
+  },
+  {
+    audience: "customer" as const,
+    heading: "上传 TEMU 订单",
+    expectedTexts: ["选择店铺", "上传文件", "校验预览", "确认提交"],
+    path: "/portal/imports/new",
+    screenshot: "customer-import-flow",
+    shouldShowMetricStrip: true,
+  },
 ];
 
 async function loginAsAudience(
@@ -97,6 +116,7 @@ async function loginAsAudience(
 }
 
 async function waitForVisualStability(page: import("@playwright/test").Page) {
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>
@@ -128,6 +148,22 @@ async function resetVisualBaseline() {
     database: db,
     reseed: seed,
   });
+}
+
+async function seededCustomerDetailRoute() {
+  const [customer] = await db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.code, "DEMO-CUSTOMER"))
+    .limit(1);
+  if (!customer) throw new Error("Visual baseline seed customer is missing");
+
+  return {
+    heading: customer.name,
+    expectedTexts: ["可用余额", "店铺数量", "概览", "店铺", "订单与补发", "资金记录"],
+    path: `/admin/customers/${customer.id}`,
+    screenshot: "admin-customer-detail",
+  };
 }
 
 test.describe.configure({ mode: "serial" });
@@ -188,6 +224,45 @@ for (const route of workspaceRoutes) {
     });
   });
 }
+
+test("admin business-detail visual uses the read-only customer workspace", async ({
+  page,
+}, testInfo) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await loginAsAudience("admin", page);
+  const route = await seededCustomerDetailRoute();
+  await page.goto(route.path);
+
+  await expect(page.getByRole("heading", { level: 1, name: route.heading })).toBeVisible();
+  await expect(page.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { exact: true, name: "保存客户资料" })).toHaveCount(0);
+  await expect(page.getByRole("button", { exact: true, name: "保存店铺资料" })).toHaveCount(0);
+  for (const text of route.expectedTexts) await expectAnyVisibleText(page, text);
+  await expect(page.locator("[data-workspace-panel]").first()).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+
+  await waitForVisualStability(page);
+  await expect(page).toHaveScreenshot(`${route.screenshot}-${testInfo.project.name}.png`, {
+    animations: "disabled",
+    fullPage: false,
+  });
+});
 
 for (const dashboard of [
   {
