@@ -17,16 +17,37 @@ function resolveE2EPort(rawPort: string | undefined) {
 const e2eDatabaseUrl = configureE2ETestDatabaseEnvironment(process.env);
 const e2ePort = resolveE2EPort(process.env.E2E_PORT);
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
-const e2eJifengEnvironment = Object.fromEntries(
-  [
-    "JIFENG_BASE_URL",
-    "JIFENG_CLIENT_ID",
-    "JIFENG_CLIENT_SECRET",
-    "JIFENG_TOKEN_ENCRYPTION_KEY",
-  ].flatMap((name) =>
-    process.env[name] === undefined ? [] : [[name, process.env[name]]],
-  ),
-);
+const e2eJifengMockPort = e2ePort <= 55_535 ? e2ePort + 10_000 : e2ePort - 10_000;
+const runsJifengConnectionSpec = process.argv.some((argument) => {
+  const normalized = argument.replaceAll("\\", "/").toLowerCase();
+  return (
+    normalized === "jifeng-connection.spec.ts" ||
+    normalized.endsWith("/jifeng-connection.spec.ts")
+  );
+});
+const e2eJifengEnvironment: Record<string, string> = runsJifengConnectionSpec
+  ? {
+      JIFENG_BASE_URL: `http://127.0.0.1:${e2eJifengMockPort}`,
+      JIFENG_CLIENT_ID: "e2e-only-client-id",
+      JIFENG_CLIENT_SECRET: "e2e-client-secret-private",
+      JIFENG_TOKEN_ENCRYPTION_KEY:
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    }
+  : {};
+if (runsJifengConnectionSpec) {
+  Object.assign(process.env, e2eJifengEnvironment);
+  for (const legacyName of [
+    "JIFENG_ACCESS_TOKEN",
+    "JIFENG_REFRESH_TOKEN",
+    "JIFENG_USER_ID",
+    "JIFENG_WAREHOUSE_CODE",
+    "JIFENG_LOGISTICS_ID",
+    "JIFENG_LEGACY_FULFILLMENT_ENABLED",
+    "JIFENG_LEGACY_WRITE_ENABLED",
+  ]) {
+    delete process.env[legacyName];
+  }
+}
 process.env.BETTER_AUTH_SECRET ??= "e2e-only-secret-with-at-least-32-characters";
 process.env.BETTER_AUTH_URL = e2eBaseUrl;
 process.env.PII_ENCRYPTION_KEY ??=

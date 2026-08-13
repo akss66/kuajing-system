@@ -43,7 +43,7 @@ type CapturedActionRequest = {
   url: string;
 };
 
-let mockServer: Server;
+let mockServer: Server | undefined;
 let consumedTokens = new Set<string>();
 let mockRequests: Array<{ method: string; path: string }> = [];
 let unexpectedMockRequests: string[] = [];
@@ -91,7 +91,8 @@ function discoveryPayload(mode: DiscoveryMode) {
 }
 
 function startMockJifengServer() {
-  mockServer = createServer((request, response) => {
+  if (mockServer?.listening) return Promise.resolve();
+  const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", mockBaseUrl);
     const method = request.method ?? "GET";
     mockRequests.push({ method, path: url.pathname });
@@ -163,17 +164,23 @@ function startMockJifengServer() {
     response.writeHead(404, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ code: 404, data: null }));
   });
+  mockServer = server;
 
   return new Promise<void>((resolve, reject) => {
-    mockServer.once("error", reject);
-    mockServer.listen(Number(mockUrl.port), "127.0.0.1", () => resolve());
+    server.once("error", (error) => {
+      if (mockServer === server) mockServer = undefined;
+      reject(error);
+    });
+    server.listen(Number(mockUrl.port), "127.0.0.1", () => resolve());
   });
 }
 
 function stopMockJifengServer() {
-  if (!mockServer?.listening) return Promise.resolve();
+  const server = mockServer;
+  mockServer = undefined;
+  if (!server?.listening) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
-    mockServer.close((error) => (error ? reject(error) : resolve()));
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
