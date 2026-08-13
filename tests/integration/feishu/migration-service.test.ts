@@ -247,11 +247,16 @@ async function createDisabledMirrorSuperAdminActor(): Promise<SuperAdminPrincipa
 function createMutableSourceClient(input: {
   initialDataset: SourceDataset;
   revision?: number;
+  sheets?: Array<{ index: number; sheetId: string; title: string }>;
   spreadsheetToken?: string;
 }) {
   const state = {
     dataset: cloneDataset(input.initialDataset),
     revision: input.revision ?? 11,
+    sheets:
+      input.sheets ?? [
+        { index: 0, sheetId: "sheet-primary", title: "Primary source sheet" },
+      ],
     spreadsheetToken: input.spreadsheetToken ?? "source-spreadsheet-token",
   };
   const calls = {
@@ -272,7 +277,7 @@ function createMutableSourceClient(input: {
     },
     async listSheets() {
       calls.listSheets += 1;
-      return [{ index: 0, sheetId: "sheet-primary", title: "Primary source sheet" }];
+      return state.sheets;
     },
     async readRangeDetails(readInput) {
       calls.readRangeDetails.push(readInput);
@@ -317,6 +322,11 @@ function createMutableSourceClient(input: {
     },
     setRevision(nextRevision: number) {
       state.revision = nextRevision;
+    },
+    setSheets(
+      nextSheets: Array<{ index: number; sheetId: string; title: string }>,
+    ) {
+      state.sheets = nextSheets;
     },
     state,
   };
@@ -739,6 +749,40 @@ describe("Feishu cargo migration service", () => {
     ).rejects.toMatchObject({ code: "SOURCE_STALE" satisfies FeishuCargoMigrationError["code"] });
 
     expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
+  });
+
+  test("confirms a ready run against the preflight-selected sheet when env sourceSheetId is unset", async () => {
+    const actor = await createSuperAdminActor();
+    const fakeSource = createMutableSourceClient({
+      initialDataset: baseDataset,
+      sheets: [
+        { index: 0, sheetId: "sheet-primary", title: "Primary source sheet" },
+        { index: 1, sheetId: "sheet-secondary", title: "Secondary source sheet" },
+      ],
+    });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(
+      await service.createCargoPreflight({
+        actor,
+        client: fakeSource.client,
+        config: {
+          ...createConfig(),
+          sourceSheetId: "sheet-primary",
+        },
+      }),
+    );
+
+    await expect(
+      service.confirmCargoMigration({
+        actor,
+        client: fakeSource.client,
+        config: {
+          ...createConfig(),
+          sourceSheetId: undefined,
+        },
+        runId: readyRun.runId,
+      }),
+    ).resolves.toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
   });
 
   test("blocks confirmation when catalog SKUs already exist", async () => {

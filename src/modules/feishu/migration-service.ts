@@ -601,7 +601,10 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
         revalidated = await revalidateRunSource({
           assetDir: options.assetDir,
           client: input.client,
-          config: input.config,
+          config: {
+            ...input.config,
+            sourceSheetId: currentRun.sourceSheetId,
+          },
           run: currentRun,
         });
       } catch (error) {
