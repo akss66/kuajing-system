@@ -4,6 +4,11 @@ import { Badge } from "@/components/ui/badge";
 
 import type { InventoryAlertLevel, InventoryWorkspaceRow } from "./inventory-workspace";
 
+const riskPriority: Record<"CRITICAL" | "WARNING", number> = {
+  CRITICAL: 0,
+  WARNING: 1,
+};
+
 export function alertLabel(alert: InventoryAlertLevel) {
   if (alert === "CRITICAL") return "不足 30 天";
   if (alert === "WARNING") return "不足 40 天";
@@ -39,7 +44,13 @@ export function InventoryHealthSummary({ rows }: { rows: InventoryWorkspaceRow[]
 }
 
 export function LowStockQueue({ rows }: { rows: InventoryWorkspaceRow[] }) {
-  const risks = rows.filter((row) => row.alertLevel === "CRITICAL" || row.alertLevel === "WARNING");
+  const risks = rows
+    .filter((row): row is InventoryWorkspaceRow & { alertLevel: "CRITICAL" | "WARNING" } =>
+      row.alertLevel === "CRITICAL" || row.alertLevel === "WARNING")
+    .sort((left, right) =>
+      riskPriority[left.alertLevel] - riskPriority[right.alertLevel] ||
+      (left.coverageDays ?? Number.POSITIVE_INFINITY) - (right.coverageDays ?? Number.POSITIVE_INFINITY) ||
+      left.skuCode.localeCompare(right.skuCode));
   return (
     <section aria-label="低库存队列" className="space-y-3">
       <div className="flex items-center justify-between gap-3">

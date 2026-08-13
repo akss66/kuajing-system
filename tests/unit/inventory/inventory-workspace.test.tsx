@@ -125,4 +125,45 @@ describe("inventory workspace", () => {
     expect(row).toHaveTextContent("2");
     expect(row).toHaveTextContent("3");
   });
+
+  it("orders the low-stock queue by risk before the incoming balance freshness", () => {
+    const rowsFromUpdatedAtDescending = [
+      {
+        alertLevel: "WARNING" as const,
+        available: 8,
+        coverageDays: 35,
+        id: "sku-warning-newer",
+        locked: 2,
+        name: "近期更新的预警规格",
+        shippedQuantity7d: 2,
+        skuCode: "TZX-WARNING-NEWER",
+        total: 10,
+      },
+      {
+        alertLevel: "CRITICAL" as const,
+        available: 2,
+        coverageDays: 12,
+        id: "sku-critical-older",
+        locked: 3,
+        name: "较早更新的紧急规格",
+        shippedQuantity7d: 1,
+        skuCode: "TZX-CRITICAL-OLDER",
+        total: 5,
+      },
+    ];
+
+    render(
+      <InventoryWorkspace
+        adjustInventoryAction={successfulAction}
+        recentMovements={[]}
+        rows={rowsFromUpdatedAtDescending}
+      />,
+    );
+
+    const riskItems = within(screen.getByRole("region", { name: "低库存队列" }))
+      .getAllByRole("listitem");
+    expect(riskItems).toHaveLength(2);
+    expect(riskItems[0]).toHaveTextContent("TZX-CRITICAL-OLDER");
+    expect(riskItems[1]).toHaveTextContent("TZX-WARNING-NEWER");
+  });
 });
