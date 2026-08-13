@@ -2,14 +2,12 @@ import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import type { DbTransaction } from "@/db/client";
-import {
-  integrationAttempts,
-  integrationOutbox,
-} from "@/db/schema";
+import { integrationAttempts, integrationOutbox } from "@/db/schema";
 import { FeishuApiError } from "@/integrations/feishu/client";
 import {
   canProcessFeishuBot,
   canWriteFeishuCargo,
+  hasFeishuRuntimeConfiguration,
   readFeishuConfig,
   type FeishuIntegrationConfig,
 } from "@/integrations/feishu/config";
@@ -22,17 +20,19 @@ export type FeishuBotPort = {
 
 type FeishuWorkerConfig = Pick<
   FeishuIntegrationConfig,
-  "internalChatId" | "sourceWikiToken" | "targetSheetId" | "targetSpreadsheetToken"
+  | "internalChatId"
+  | "sourceWikiToken"
+  | "targetSheetId"
+  | "targetSpreadsheetToken"
 >;
 
 function isCargoWriterEnabledInEnvironment(
   environment: Record<string, string | undefined> = process.env,
 ) {
-  try {
-    return canWriteFeishuCargo(readFeishuConfig(environment));
-  } catch {
+  if (!hasFeishuRuntimeConfiguration(environment)) {
     return false;
   }
+  return canWriteFeishuCargo(readFeishuConfig(environment));
 }
 
 export async function enqueueCargoSyncEvent(
@@ -86,7 +86,11 @@ function safeError(error: unknown) {
       retryable: error.retryable,
     };
   }
-  return { code: "FEISHU_SYNC_FAILED", message: "飞书同步任务失败", retryable: true };
+  return {
+    code: "FEISHU_SYNC_FAILED",
+    message: "飞书同步任务失败",
+    retryable: true,
+  };
 }
 
 async function markEventsCompleted(

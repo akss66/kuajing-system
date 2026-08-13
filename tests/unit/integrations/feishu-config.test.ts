@@ -84,19 +84,28 @@ describe("Feishu integration config", () => {
     expect(canProcessFeishuBot(config)).toBe(true);
   });
 
-  test("uses the official API base in production and allows overrides only outside production", () => {
+  test("allows API base overrides only for explicit development and test environments", () => {
     expect(
       readFeishuApiBaseUrl({
         NODE_ENV: "production",
       }),
     ).toBe("https://open.feishu.cn");
 
-    expect(() =>
+    for (const nodeEnv of [undefined, "prod", "production", "staging"]) {
+      expect(() =>
+        readFeishuApiBaseUrl({
+          FEISHU_API_BASE_URL: "http://127.0.0.1:4010/",
+          NODE_ENV: nodeEnv,
+        }),
+      ).toThrowError("生产环境必须使用官方飞书 API 地址");
+    }
+
+    expect(
       readFeishuApiBaseUrl({
         FEISHU_API_BASE_URL: "http://127.0.0.1:4010/",
-        NODE_ENV: "production",
+        NODE_ENV: "development",
       }),
-    ).toThrowError("生产环境必须使用官方飞书 API 地址");
+    ).toBe("http://127.0.0.1:4010");
 
     expect(
       readFeishuApiBaseUrl({

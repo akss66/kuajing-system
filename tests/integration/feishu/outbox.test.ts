@@ -50,6 +50,17 @@ function setFeishuSourceOnlyEnv() {
   });
 }
 
+function setFeishuPartialTargetEnv() {
+  replaceProcessEnv({
+    ...originalEnv,
+    FEISHU_APP_ID: "app",
+    FEISHU_APP_SECRET: "secret",
+    FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-1",
+    FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: "spreadsheet-target",
+    FEISHU_CARGO_TARGET_SHEET_ID: undefined,
+  });
+}
+
 describe("Feishu integration outbox", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
@@ -259,6 +270,28 @@ describe("Feishu integration outbox", () => {
     await expect(
       enqueueFeishuCargoSync({ now, reason: "source-only-scheduled" }),
     ).resolves.toBe(false);
+
+    expect(await db.select().from(integrationOutbox)).toHaveLength(0);
+    expect(await db.select().from(integrationAttempts)).toHaveLength(0);
+  });
+
+  test("rejects partial target configuration instead of silently skipping cargo enqueue", async () => {
+    setFeishuPartialTargetEnv();
+    const now = new Date("2026-08-12T07:05:00.000Z");
+
+    await expect(
+      db.transaction((tx) =>
+        enqueueCargoSyncEvent(tx, {
+          idempotencyKey: "partial-target-transaction",
+          now,
+          reason: "partial-target",
+        }),
+      ),
+    ).rejects.toThrowError("飞书集成配置不完整，请检查服务端环境变量");
+
+    await expect(
+      enqueueFeishuCargoSync({ now, reason: "partial-target" }),
+    ).rejects.toThrowError("飞书集成配置不完整，请检查服务端环境变量");
 
     expect(await db.select().from(integrationOutbox)).toHaveLength(0);
     expect(await db.select().from(integrationAttempts)).toHaveLength(0);

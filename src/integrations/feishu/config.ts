@@ -21,7 +21,9 @@ const configSchema = z
     NODE_ENV: optionalString,
   })
   .superRefine((value, ctx) => {
-    const hasTargetSpreadsheet = Boolean(value.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN);
+    const hasTargetSpreadsheet = Boolean(
+      value.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN,
+    );
     const hasTargetSheet = Boolean(value.FEISHU_CARGO_TARGET_SHEET_ID);
     if (hasTargetSpreadsheet === hasTargetSheet) return;
 
@@ -38,6 +40,8 @@ const configSchema = z
   });
 
 const OFFICIAL_FEISHU_API_BASE_URL = "https://open.feishu.cn";
+const FEISHU_CONFIG_ERROR = "飞书集成配置不完整，请检查服务端环境变量";
+const FEISHU_API_BASE_OVERRIDE_ERROR = "生产环境必须使用官方飞书 API 地址";
 
 export type FeishuIntegrationConfig = {
   appId: string;
@@ -77,13 +81,13 @@ export function readFeishuApiBaseUrl(
 ) {
   const baseUrl = environment.FEISHU_API_BASE_URL?.trim();
   const nodeEnv = environment.NODE_ENV?.trim();
-  if (nodeEnv === "production") {
-    if (baseUrl) {
-      throw new Error("生产环境必须使用官方飞书 API 地址");
-    }
+  if (!baseUrl) {
     return OFFICIAL_FEISHU_API_BASE_URL;
   }
-  return (baseUrl || OFFICIAL_FEISHU_API_BASE_URL).replace(/\/$/, "");
+  if (nodeEnv !== "development" && nodeEnv !== "test") {
+    throw new Error(FEISHU_API_BASE_OVERRIDE_ERROR);
+  }
+  return baseUrl.replace(/\/$/, "");
 }
 
 export function readFeishuConfig(
@@ -91,7 +95,7 @@ export function readFeishuConfig(
 ): FeishuIntegrationConfig {
   const parsed = configSchema.safeParse(environment);
   if (!parsed.success) {
-    throw new Error("飞书集成配置不完整，请检查服务端环境变量");
+    throw new Error(FEISHU_CONFIG_ERROR);
   }
 
   readFeishuApiBaseUrl(environment);
@@ -120,7 +124,7 @@ export function assertSafeCargoTarget(
   resolvedSourceSpreadsheetToken: string,
 ) {
   if (!config.targetSpreadsheetToken || !config.targetSheetId) {
-    throw new Error("飞书集成配置不完整，请检查服务端环境变量");
+    throw new Error(FEISHU_CONFIG_ERROR);
   }
 
   if (
