@@ -1,13 +1,16 @@
-import { Store } from "lucide-react";
+import Link from "next/link";
+import { BarChart3, Boxes, Store, Trophy } from "lucide-react";
 
-import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
+import { OperationsReportTrend } from "@/components/reports/operations-report-trend";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { parseTorontoDateRange, ReportRangeError } from "@/modules/reports/date-range";
 import { getOperationsReport } from "@/modules/reports/query";
+import { getStockCoverageReport } from "@/modules/reports/stock-coverage";
 
 function money(fen: number) {
   return new Intl.NumberFormat("zh-CN", {
@@ -32,7 +35,15 @@ export default async function ReportsPage({
     range = parseTorontoDateRange({});
   }
 
-  const report = await getOperationsReport(range);
+  const [report, coverage] = await Promise.all([
+    getOperationsReport(range),
+    getStockCoverageReport(),
+  ]);
+  const hasOperations =
+    report.skuSales.length > 0 || report.stores.length > 0 || report.replacements.length > 0;
+  const coverageRisks = coverage.filter(
+    (row) => row.alertLevel === "CRITICAL" || row.alertLevel === "WARNING",
+  );
 
   return (
     <div className="space-y-6">
@@ -45,16 +56,8 @@ export default async function ReportsPage({
         title="经营报表"
       />
 
-      <MetricStrip
-        items={[
-          { label: "已发货订单", value: report.summary.orderCount.toLocaleString("zh-CN") },
-          { label: "普通出库件数", value: report.summary.quantity.toLocaleString("zh-CN") },
-          { label: "实际销售额", value: money(report.summary.revenueFen) },
-          { label: "补发件数", value: report.summary.replacementQuantity.toLocaleString("zh-CN") },
-        ]}
-      />
-
-      <WorkspacePanel className="p-4 sm:p-5">
+      <section aria-labelledby="report-range-title" className="border-y border-border py-4">
+        <h2 className="sr-only" id="report-range-title">报表日期范围</h2>
         <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" method="get">
           <label className="space-y-2 text-sm font-medium text-ink">
             开始日期
@@ -88,12 +91,37 @@ export default async function ReportsPage({
             </p>
           ) : null}
         </form>
-      </WorkspacePanel>
+      </section>
+
+      {!hasOperations ? (
+        <ActionableEmptyState
+          action={<Link className="text-sm font-semibold text-primary hover:text-primary-hover" href="/admin/reports">查看最近 7 天</Link>}
+          description="该时间段没有已发货普通包裹或补发记录。可调整日期，或返回默认区间继续查看。"
+          kind="filtered"
+          title="所选区间暂无经营数据"
+        />
+      ) : null}
+
+      <section aria-labelledby="report-trend-title" className="border-b border-border pb-6">
+        <div className="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-foreground" id="report-trend-title">
+              <BarChart3 aria-hidden="true" className="size-4 text-primary" />近 7 天经营趋势
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">按实际发货日观察订单与销售额变化。</p>
+          </div>
+          <dl className="hidden gap-5 text-right sm:flex">
+            <div><dt className="text-xs text-muted-foreground">已发货订单</dt><dd className="mt-1 font-semibold tabular-nums">{report.summary.orderCount}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">实际销售额</dt><dd className="mt-1 font-semibold tabular-nums">{money(report.summary.revenueFen)}</dd></div>
+          </dl>
+        </div>
+        {report.trend.length > 0 ? <OperationsReportTrend series={report.trend} /> : <p className="py-8 text-sm text-muted-foreground">所选日期内暂无可绘制的发货趋势。</p>}
+      </section>
 
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
           description="按普通包裹实际出库数量排序。收入使用订单保存的实际成交价。"
-          title="SKU 出库排名"
+          title={<span className="flex items-center gap-2"><Trophy aria-hidden="true" className="size-4 text-primary" />SKU 出库排名</span>}
         />
         <ResponsiveDataTable>
           <Table>
@@ -127,6 +155,24 @@ export default async function ReportsPage({
             </TableBody>
           </Table>
         </ResponsiveDataTable>
+      </WorkspacePanel>
+
+      <WorkspacePanel className="overflow-hidden">
+        <WorkspacePanelHeader
+          description="按最近 7 个完整自然日出库速度识别需要优先补货的 SKU。"
+          title={<span className="flex items-center gap-2"><Boxes aria-hidden="true" className="size-4 text-primary" />库存覆盖风险</span>}
+        />
+        {coverageRisks.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {coverageRisks.slice(0, 8).map((row) => (
+              <li className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:px-5" key={row.skuId}>
+                <div className="min-w-0"><p className="truncate font-semibold tabular-nums text-foreground">{row.skuCode}</p><p className="mt-0.5 truncate text-sm text-muted-foreground">{row.skuName}</p></div>
+                <p className="text-sm tabular-nums text-foreground">可售 {row.availableQuantity} 件</p>
+                <Badge className={row.alertLevel === "CRITICAL" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"} variant="secondary">{row.coverageDays == null ? "暂无基线" : `预计 ${row.coverageDays} 天`}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="px-5 py-6 text-sm text-muted-foreground" role="status">当前没有低库存覆盖风险。</p>}
       </WorkspacePanel>
 
       <WorkspacePanel className="overflow-hidden">

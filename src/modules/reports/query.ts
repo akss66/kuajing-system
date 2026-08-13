@@ -17,7 +17,7 @@ function number(value: number | string | null | undefined) {
 }
 
 export async function getOperationsReport(window: ReportWindow): Promise<OperationsReport> {
-  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, receivableRows] =
+  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, receivableRows, trendRows] =
     await Promise.all([
       db.execute<{
         quantity: number | string;
@@ -111,6 +111,23 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
           and submitted_at >= ${window.fromUtc.toISOString()}::timestamptz
           and submitted_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
+      db.execute<{
+        date: string | Date;
+        orderCount: number | string;
+        revenueFen: number | string;
+      }>(sql`
+        select
+          (os.shipped_at at time zone 'America/Toronto')::date as date,
+          count(distinct ol.order_id) as "orderCount",
+          sum(ol.line_amount_fen) as "revenueFen"
+        from order_lines ol
+        join order_shipments os on os.id = ol.shipment_id
+        where os.kind = 'NORMAL'
+          and os.shipped_at >= ${window.fromUtc.toISOString()}::timestamptz
+          and os.shipped_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
+        group by date
+        order by date
+      `),
     ]);
 
   const skuSales: SkuSalesReportRow[] = skuRows.map((row) => ({
@@ -148,6 +165,11 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
     replacements,
     skuSales,
     stores,
+    trend: trendRows.map((row) => ({
+      date: row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date),
+      orderCount: number(row.orderCount),
+      revenueFen: number(row.revenueFen),
+    })),
     summary: {
       orderCount: stores.reduce((sum, row) => sum + row.orderCount, 0),
       packageCount: stores.reduce((sum, row) => sum + row.packageCount, 0),
