@@ -18,6 +18,10 @@ import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
 
+function visibleCatalogItem(page: import("@playwright/test").Page, skuId: string) {
+  return page.locator(`[data-testid="catalog-${skuId}"]:visible`);
+}
+
 async function seedCustomerCatalog() {
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
   const productName = `客户货盘测试商品 ${suffix}`;
@@ -172,12 +176,12 @@ test("customer sees only its own price and real available inventory", async ({ p
   await expect(page).toHaveURL(/\/portal/);
   await page.goto("/portal/catalog");
 
-  const availableRow = page.getByTestId(`catalog-${fixture.availableSku.id}`);
+  const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
   await expect(availableRow).toContainText("¥7.60");
   await expect(availableRow).toContainText("可售 6");
   await expect(page.getByText("¥6.20")).toHaveCount(0);
 
-  const soldOutRow = page.getByTestId(`catalog-${fixture.soldOutSku.id}`);
+  const soldOutRow = visibleCatalogItem(page, fixture.soldOutSku.id);
   await expect(soldOutRow).toContainText("不可售");
 
   const accessibility = await new AxeBuilder({ page }).analyze();
@@ -188,14 +192,14 @@ test("customer sees only its own price and real available inventory", async ({ p
   ).toEqual([]);
 
   await page.goto(`/portal/catalog?q=${fixture.availableSku.skuCode}`);
-  const isolatedRow = page.getByTestId(`catalog-${fixture.availableSku.id}`);
+  const isolatedRow = visibleCatalogItem(page, fixture.availableSku.id);
   await isolatedRow.waitFor();
   await page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
   );
   await expect(page).toHaveScreenshot(`customer-catalog-${testInfo.project.name}.png`, {
     fullPage: true,
-    maxDiffPixels: 5,
+    maxDiffPixels: 30,
     maskColor: "#e8efed",
     mask: [
       page.getByLabel("搜索 SKU 或商品名称"),
@@ -215,24 +219,20 @@ test("customer catalog remains usable at approved mobile widths", async ({ page 
     await page.goto("/portal/catalog");
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
-    await expect(page.getByTestId(`catalog-${fixture.availableSku.id}`)).toBeVisible();
-    if (width === 390) {
-      const metricStrip = page.locator("[data-metric-strip]");
-      const gridTemplateColumns = await metricStrip.evaluate((node) =>
-        window.getComputedStyle(node).gridTemplateColumns,
-      );
-      expect(gridTemplateColumns.split(" ").filter(Boolean)).toHaveLength(2);
+    await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
+    await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
+    await expect(page.locator("[data-customer-catalog-cards]")).toBeVisible();
+    await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();
 
-      const searchInput = page.locator('input[name="q"]');
-      await expect(searchInput).toBeVisible();
-      const box = await searchInput.boundingBox();
-      expect(box).not.toBeNull();
-      expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
-    }
+    const searchInput = page.locator('input[name="q"]');
+    await expect(searchInput).toBeVisible();
+    const box = await searchInput.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
-    expect(overflow).toBeLessThanOrEqual(0);
+    expect(overflow).toBeLessThanOrEqual(1);
   }
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();

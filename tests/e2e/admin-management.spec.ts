@@ -681,3 +681,81 @@ test("ordinary admins can manage customer details and multi-store operations", a
   await loginThroughUi(page, { email: customerEmail, password: customerPassword });
   await expect(page).toHaveURL(/\/portal$/);
 });
+
+test("catalog and inventory keep mutations in drawers and fit approved mobile widths @mobile-only", async ({
+  page,
+}) => {
+  await resetAdminManagementBaseline();
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await loginThroughUi(page, seededSuperAdmin);
+  await expect(page).toHaveURL(/\/admin$/);
+
+  for (const width of [360, 390, 430]) {
+    await page.setViewportSize({ height: 844, width });
+    await page.goto("/admin/catalog");
+
+    const catalogSearch = page.getByRole("searchbox", { name: "搜索商品与 SKU" });
+    await expect(catalogSearch).toBeVisible();
+    const catalogSearchBox = await catalogSearch.boundingBox();
+    expect(catalogSearchBox).not.toBeNull();
+    expect(catalogSearchBox!.y + catalogSearchBox!.height).toBeLessThanOrEqual(844);
+    await expect(page.getByLabel("标准 SKU")).toHaveCount(0);
+    await expect(page.locator("[data-admin-catalog-cards]")).toBeVisible();
+    await expect(page.locator("[data-admin-catalog-table]")).not.toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+      `/admin/catalog overflowed at ${width}px`,
+    ).toBeLessThanOrEqual(1);
+
+    await page.goto("/admin/inventory");
+    const inventorySearch = page.getByRole("searchbox", { name: "搜索库存 SKU" });
+    await expect(inventorySearch).toBeVisible();
+    const inventorySearchBox = await inventorySearch.boundingBox();
+    expect(inventorySearchBox).not.toBeNull();
+    expect(inventorySearchBox!.y + inventorySearchBox!.height).toBeLessThanOrEqual(844);
+    await expect(page.getByText("总库存", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("订单锁定", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("可售库存", { exact: true }).first()).toBeVisible();
+    await expect(page.getByLabel("调整数量")).toHaveCount(0);
+    await expect(page.locator("[data-inventory-cards]")).toBeVisible();
+    await expect(page.locator("[data-inventory-table]")).not.toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+      `/admin/inventory overflowed at ${width}px`,
+    ).toBeLessThanOrEqual(1);
+  }
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.goto("/admin/catalog");
+  const catalogTrigger = page.getByRole("button", { name: "新建 SKU" });
+  expect((await catalogTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await catalogTrigger.click();
+  const catalogDrawer = page.getByRole("dialog", { name: "新建 SKU" });
+  await expect(catalogDrawer.getByLabel("标准 SKU")).toBeVisible();
+  await closeAccountDrawer(catalogDrawer);
+
+  await page.goto("/admin/inventory");
+  const inventoryTrigger = page.getByRole("button", { name: "调整库存" });
+  expect((await inventoryTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await inventoryTrigger.click();
+  const inventoryDrawer = page.getByRole("dialog", { name: "调整库存" });
+  await expect(inventoryDrawer.getByLabel("调整数量")).toBeVisible();
+  await expect(inventoryDrawer.getByLabel("调整原因")).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+  ).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});

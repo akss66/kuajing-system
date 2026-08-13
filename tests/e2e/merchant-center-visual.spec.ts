@@ -36,11 +36,21 @@ const workspaceRoutes = [
   },
   {
     audience: "admin" as const,
+    heading: "商品与 SKU",
+    expectedTexts: ["TZX-DEMO-001", "演示头绳", "新建 SKU"],
+    path: "/admin/catalog",
+    screenshot: "admin-catalog",
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-admin-catalog-workspace]",
+  },
+  {
+    audience: "admin" as const,
     heading: "货盘库存",
-    expectedTexts: ["TZX-DEMO-001", "黑色 10 件装", "暂无基线"],
+    expectedTexts: ["库存健康", "低库存队列", "TZX-DEMO-001", "暂无基线", "最近库存变动"],
     path: "/admin/inventory",
     screenshot: "admin-inventory",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-inventory-workspace]",
   },
   {
     audience: "admin" as const,
@@ -64,7 +74,8 @@ const workspaceRoutes = [
     expectedTexts: ["TZX-DEMO-001", "¥7.60", "可售 10"],
     path: "/portal/catalog",
     screenshot: "customer-catalog",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-customer-catalog-workspace]",
   },
   {
     audience: "customer" as const,
@@ -150,8 +161,12 @@ for (const route of workspaceRoutes) {
       await expectAnyVisibleText(page, text);
     }
 
-    const workspacePanelCount = await page.locator("[data-workspace-panel]").count();
-    expect(workspacePanelCount).toBeGreaterThan(0);
+    if (route.workspaceSelector) {
+      await expect(page.locator(route.workspaceSelector)).toBeVisible();
+    } else {
+      const workspacePanelCount = await page.locator("[data-workspace-panel]").count();
+      expect(workspacePanelCount).toBeGreaterThan(0);
+    }
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
