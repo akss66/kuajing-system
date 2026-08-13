@@ -155,8 +155,17 @@ function getSubmittableGroupIds(groups: readonly BulkOrderWorkspaceGroup[]) {
 function createMobileDisclosureState(
   groups: readonly BulkOrderWorkspaceGroup[],
 ): MobileDisclosureState {
+  const firstSubmittableIndex = groups.findIndex(
+    (group) => group.status === "SUBMITTABLE",
+  );
+  const expandedIndex = firstSubmittableIndex === -1 ? 0 : firstSubmittableIndex;
+
   return {
-    collapsedGroupIds: new Set(groups.slice(1).map((group) => group.groupId)),
+    collapsedGroupIds: new Set(
+      groups
+        .filter((_, index) => index !== expandedIndex)
+        .map((group) => group.groupId),
+    ),
     signature: buildGroupSignature(groups),
   };
 }
@@ -240,12 +249,76 @@ export function BulkOrderWorkspace({
     signature: buildGroupSignature(draft.groups),
     submittableGroupIds: getSubmittableGroupIds(draft.groups),
   }));
+  const [selectionRestored, setSelectionRestored] = useState(false);
   const [mobileDisclosureState, setMobileDisclosureState] =
     useState<MobileDisclosureState>(() => createMobileDisclosureState(draft.groups));
   const [walletState, setWalletState] = useState(() => ({
     signature: buildGroupSignature(draft.groups),
     value: "0",
   }));
+
+  useEffect(() => {
+    try {
+      const storedValue = window.localStorage.getItem(
+        `bulk-order-selection:${draft.id}`,
+      );
+      if (storedValue) {
+        const stored = JSON.parse(storedValue) as {
+          selectedGroupIds?: unknown;
+          submittableGroupIds?: unknown;
+        };
+        if (
+          Array.isArray(stored.selectedGroupIds) &&
+          stored.selectedGroupIds.every((value) => typeof value === "string") &&
+          Array.isArray(stored.submittableGroupIds) &&
+          stored.submittableGroupIds.every((value) => typeof value === "string")
+        ) {
+          const currentSubmittableGroupIds = getSubmittableGroupIds(groups);
+          const previousSubmittableGroupIds = new Set<string>(
+            stored.submittableGroupIds,
+          );
+          const previousSelectedGroupIds = new Set<string>(
+            stored.selectedGroupIds,
+          );
+          const selectedGroupIds = new Set<string>();
+
+          for (const groupId of currentSubmittableGroupIds) {
+            if (
+              !previousSubmittableGroupIds.has(groupId) ||
+              previousSelectedGroupIds.has(groupId)
+            ) {
+              selectedGroupIds.add(groupId);
+            }
+          }
+
+          // Restore only client-owned selection after hydration. Draft data
+          // and group validity continue to come from the server snapshot.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setSelectionState({
+            selectedGroupIds,
+            signature: groupSignature,
+            submittableGroupIds: currentSubmittableGroupIds,
+          });
+        }
+      }
+    } catch {
+      // Invalid local state must never override the safe server-backed default.
+    }
+    setSelectionRestored(true);
+    // The detail route keys the workspace by draft identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.id]);
+
+  useEffect(() => {
+    if (!selectionRestored) return;
+    window.localStorage.setItem(
+      `bulk-order-selection:${draft.id}`,
+      JSON.stringify({
+        selectedGroupIds: [...selectionState.selectedGroupIds],
+        submittableGroupIds: [...selectionState.submittableGroupIds],
+      }),
+    );
+  }, [draft.id, selectionRestored, selectionState]);
 
   useEffect(() => {
     if (selectionState.signature === groupSignature) return;
@@ -327,6 +400,9 @@ export function BulkOrderWorkspace({
   const wechatDueFen = Math.max(0, summary.totalAmountFen - requestedWalletFen);
   const submittableCount = groups.filter(
     (group) => group.status === "SUBMITTABLE",
+  ).length;
+  const blockedCount = groups.filter(
+    (group) => group.status !== "SUBMITTABLE" && group.status !== "ALREADY_SUBMITTED",
   ).length;
 
   function focusAlert() {
@@ -586,24 +662,6 @@ export function BulkOrderWorkspace({
       />
 
       <section className="space-y-4">
-        <div className="hidden flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-medium text-primary">按店铺批量拿货</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-              多店铺批量拿货
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm text-muted">
-              一个客户可按店铺上传多个 TEMU 原始 Excel，系统会跨文件去重并合并为每店一张拿货单。
-            </p>
-          </div>
-          <div className="rounded-[var(--radius-surface)] border border-border bg-background px-4 py-3 text-sm text-muted">
-            <p>{`草稿状态：${draftStatusLabel(draft.status)}`}</p>
-            <p className="mt-1">
-              {`创建于 ${formatDate(draft.createdAt)}，过期于 ${formatDate(draft.expiresAt)}`}
-            </p>
-          </div>
-        </div>
-
         <section className="grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="space-y-3">
             <p className="text-sm font-medium text-ink">{`${submittableCount} 个店铺可提交`}</p>
@@ -692,23 +750,6 @@ export function BulkOrderWorkspace({
         </div>
       )}
 
-      <BulkOrderSummaryBar
-        activeHoldFen={walletPosition.activeHoldFen}
-        availableFen={walletPosition.availableFen}
-        balanceFen={walletPosition.balanceFen}
-        fileCount={summary.fileCount}
-        onWalletInputChange={setWalletInput}
-        orderCount={summary.orderCount}
-        quantity={summary.quantity}
-        requestedWalletFen={requestedWalletFen}
-        requestedWalletInput={walletInput}
-        selectedCount={selectedGroups.length}
-        submitDisabled={pending}
-        submitting={pending}
-        totalAmountFen={summary.totalAmountFen}
-        wechatDueFen={wechatDueFen}
-      />
-
       <div className="flex justify-end">
         <Button
           className="min-h-11 px-4"
@@ -720,6 +761,24 @@ export function BulkOrderWorkspace({
           刷新草稿
         </Button>
       </div>
+
+      <BulkOrderSummaryBar
+        activeHoldFen={walletPosition.activeHoldFen}
+        availableFen={walletPosition.availableFen}
+        balanceFen={walletPosition.balanceFen}
+        fileCount={summary.fileCount}
+        blockedCount={blockedCount}
+        onWalletInputChange={setWalletInput}
+        orderCount={summary.orderCount}
+        quantity={summary.quantity}
+        requestedWalletFen={requestedWalletFen}
+        requestedWalletInput={walletInput}
+        selectedCount={selectedGroups.length}
+        submitDisabled={pending}
+        submitting={pending}
+        totalAmountFen={summary.totalAmountFen}
+        wechatDueFen={wechatDueFen}
+      />
     </form>
   );
 }

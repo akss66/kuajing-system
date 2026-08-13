@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
+import { ImportProgress } from "@/components/order-import/import-progress";
 import { Badge } from "@/components/ui/badge";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -78,6 +79,21 @@ export default async function ImportPreviewPage({
         title="核对 TEMU 订单"
       />
 
+      <ImportProgress currentStep={3} />
+
+      <section
+        aria-label="当前导入"
+        className="flex flex-col gap-2 border-b border-border pb-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div>
+          <p className="text-xs font-medium text-muted">已保留的导入内容</p>
+          <p className="mt-1 font-semibold text-ink">{preview.storeName}</p>
+        </div>
+        <p className="min-w-0 break-all text-muted sm:text-right">
+          {preview.fileName} · {preview.summary.total} 行
+        </p>
+      </section>
+
       <MetricStrip
         items={[
           { label: "可提交", value: `${preview.summary.ready}` },
@@ -98,6 +114,24 @@ export default async function ImportPreviewPage({
           </div>
         </div>
       ) : null}
+
+      <section
+        aria-label="错误处理分类"
+        className="divide-y divide-border rounded-[var(--radius-surface)] border border-border bg-background sm:grid sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+      >
+        <div className="p-4">
+          <p className="text-sm font-semibold text-ink">可修复</p>
+          <p className="mt-1 text-sm text-muted">{preview.summary.invalid} 行格式问题，修正文件后重新上传。</p>
+        </div>
+        <div className="p-4">
+          <p className="text-sm font-semibold text-ink">需管理员处理</p>
+          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行未知 SKU，联系管理员补齐映射。</p>
+        </div>
+        <div className="p-4">
+          <p className="text-sm font-semibold text-ink">不可提交</p>
+          <p className="mt-1 text-sm text-muted">{blocking} 行仍会阻止本批次提交；重复订单不计入。</p>
+        </div>
+      </section>
 
       <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
         <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">

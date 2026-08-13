@@ -244,10 +244,34 @@ test("customer import preview keeps re-upload navigation and unique heading metr
   const fixture = await seedImportPreview();
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/);
+  await page.goto("/portal/imports/new");
+  const uploadProgress = page.getByRole("navigation", { name: "订单导入进度" });
+  await expect(uploadProgress.getByText("选择店铺")).toBeVisible();
+  await expect(uploadProgress.getByText("上传文件")).toBeVisible();
+  await expect(uploadProgress.getByText("校验预览")).toBeVisible();
+  await expect(uploadProgress.getByText("确认提交")).toBeVisible();
+  await expect(uploadProgress.getByText("上传文件").locator("..")).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
   await page.goto(`/portal/imports/${fixture.preview.batchId}`);
 
   await expect(page.getByRole("heading", { name: "核对 TEMU 订单" })).toBeVisible();
   await expect(page.getByRole("link", { name: "重新上传" })).toBeVisible();
+  const progress = page.getByRole("navigation", { name: "订单导入进度" });
+  await expect(progress.getByText("选择店铺")).toBeVisible();
+  await expect(progress.getByText("上传文件")).toBeVisible();
+  await expect(progress.getByText("校验预览")).toBeVisible();
+  await expect(progress.getByText("确认提交")).toBeVisible();
+  await expect(progress.getByText("校验预览").locator("..")).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
+  await expect(page.getByRole("region", { name: "当前导入" })).toContainText("preview-orders.xlsx");
+  const recovery = page.getByRole("region", { name: "错误处理分类" });
+  await expect(recovery).toContainText("可修复");
+  await expect(recovery).toContainText("需管理员处理");
+  await expect(recovery).toContainText("不可提交");
   const metricStrip = page.locator("[data-metric-strip]");
   await expect(metricStrip).toBeVisible();
   await expect(metricStrip.locator("article")).toHaveCount(4);

@@ -14,6 +14,7 @@ export function BulkOrderSummaryBar({
   activeHoldFen,
   availableFen,
   balanceFen,
+  blockedCount,
   fileCount,
   onWalletInputChange,
   orderCount,
@@ -29,6 +30,7 @@ export function BulkOrderSummaryBar({
   activeHoldFen: number;
   availableFen: number;
   balanceFen: number;
+  blockedCount: number;
   fileCount: number;
   onWalletInputChange: (value: string) => void;
   orderCount: number;
@@ -43,24 +45,36 @@ export function BulkOrderSummaryBar({
 }) {
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
-  const metrics = [
-    { label: "已选店铺", value: `${selectedCount} 个店铺` },
+  const continuousMetrics = [
+    { label: "店铺", value: `${selectedCount}` },
+    { label: "订单", value: `${orderCount}` },
+    { label: "件数", value: `${quantity}` },
+    { label: "金额", value: money(totalAmountFen) },
+    { label: "不可提交", value: `${blockedCount}` },
+  ];
+  const expandedMetrics = [
     { label: "文件 / 订单", value: `${fileCount} / ${orderCount}` },
-    { label: "件数 / 总额", value: `${quantity} 件 / ${money(totalAmountFen)}` },
     { label: "账户余额 / 冻结", value: `${money(balanceFen)} / ${money(activeHoldFen)}` },
     { label: "可用余额 / 微信待付", value: `${money(availableFen)} / ${money(wechatDueFen)}` },
   ];
 
   return (
     <section
-      className="sticky bottom-0 z-20 rounded-t-[var(--radius-surface)] border border-border bg-background/98 px-4 py-2 shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur-sm sm:bottom-4 sm:rounded-[var(--radius-surface)] sm:px-5 sm:py-4 xl:py-2"
+      aria-label="批次摘要"
+      className="sticky bottom-0 z-20 rounded-t-[var(--radius-surface)] border border-border bg-background px-3 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] sm:bottom-4 sm:rounded-[var(--radius-surface)] sm:px-5 sm:py-4 xl:py-2"
       data-testid="bulk-order-summary"
     >
+      <span className="sr-only">{`已选 ${selectedCount} 个店铺`}</span>
       <div className="sm:hidden">
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-ink">{`已选 ${selectedCount} 个店铺`}</p>
-          </div>
+        <dl className="grid grid-cols-5 gap-1" aria-label="持续批次指标">
+          {continuousMetrics.map((item) => (
+            <div className="min-w-0 text-center" key={item.label}>
+              <dt className="truncate text-[0.65rem] text-muted">{item.label}</dt>
+              <dd className="mt-0.5 truncate text-xs font-semibold tabular-nums text-ink">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-1 flex items-center justify-end gap-2">
           <Button
             className="min-h-11 px-3"
             onClick={() => setMobileExpanded((current) => !current)}
@@ -78,7 +92,7 @@ export function BulkOrderSummaryBar({
         {mobileExpanded ? (
           <div className="mt-3 space-y-3 border-t border-border pt-3">
             <div className="grid gap-2">
-              {metrics.map((item) => (
+              {expandedMetrics.map((item) => (
                 <div className="rounded-lg bg-surface px-3 py-2" key={item.label}>
                   <p className="text-xs text-muted">{item.label}</p>
                   <p className="mt-1 font-semibold tabular-nums text-ink">{item.value}</p>
@@ -113,7 +127,7 @@ export function BulkOrderSummaryBar({
 
       <div className="hidden gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(340px,400px)] xl:items-center">
         <div className="grid gap-2 xl:grid-cols-5">
-          {metrics.map((item) => (
+          {continuousMetrics.map((item) => (
             <div className="rounded-lg bg-surface px-3 py-2 xl:py-1" key={item.label}>
               <p className="text-xs text-muted">{item.label}</p>
               <p className="mt-0.5 font-semibold tabular-nums text-ink">{item.value}</p>
@@ -148,20 +162,14 @@ export function BulkOrderSummaryBar({
 
       <div className="mt-3 hidden sm:block xl:hidden">
         <div className="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3">
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div>
-              <p className="text-xs text-muted">已选店铺</p>
-              <p className="mt-1 font-semibold text-ink">{`${selectedCount} 个店铺`}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">订单 / 件数</p>
-              <p className="mt-1 font-semibold text-ink">{`${orderCount} / ${quantity}`}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">微信待付</p>
-              <p className="mt-1 font-semibold text-ink">{money(wechatDueFen)}</p>
-            </div>
-          </div>
+          <dl className="grid grid-cols-5 gap-2">
+            {continuousMetrics.map((item) => (
+              <div className="min-w-0" key={item.label}>
+                <dt className="truncate text-xs text-muted">{item.label}</dt>
+                <dd className="mt-1 truncate font-semibold tabular-nums text-ink">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <label className="space-y-2 text-sm font-medium text-ink">
               本次使用钱包抵扣（元）

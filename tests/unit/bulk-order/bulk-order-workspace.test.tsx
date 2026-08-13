@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -89,6 +89,7 @@ describe("BulkOrderWorkspace", () => {
   });
 
   beforeEach(() => {
+    window.localStorage.clear();
     actionMocks.addStoreGroupAction.mockReset();
     actionMocks.removeStoreGroupFileAction.mockReset();
     actionMocks.submitBulkDraftAction.mockReset();
@@ -215,6 +216,69 @@ describe("BulkOrderWorkspace", () => {
     expect(document.querySelectorAll('[data-collapsed="false"]')).toHaveLength(1);
     expect(document.querySelectorAll('[data-collapsed="true"]')).toHaveLength(7);
     expect(screen.getAllByRole("button", { name: "展开详情" })).toHaveLength(7);
+  });
+
+  it("expands the first submittable store rather than an earlier blocked store", () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({
+            groupId: "group-blocked",
+            storeId: "store-blocked",
+            storeName: "受阻店铺",
+            helperText: "存在未知 SKU",
+            status: "BLOCKED_UNKNOWN_SKU",
+            statusLabel: "需管理员处理",
+          }),
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({ groupId: "group-b", storeId: "store-b", storeName: "杭州店" }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    expect(document.querySelector('[data-group-id="group-blocked"] [data-collapsed]')).toHaveAttribute(
+      "data-collapsed",
+      "true",
+    );
+    expect(document.querySelector('[data-group-id="group-a"] [data-collapsed]')).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+    expect(document.querySelector('[data-group-id="group-b"] [data-collapsed]')).toHaveAttribute(
+      "data-collapsed",
+      "true",
+    );
+  });
+
+  it("keeps stores, orders, items, amount, and blocked groups in the sticky summary", () => {
+    render(
+      <BulkOrderWorkspace
+        draft={createDraft([
+          createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+          createGroup({
+            groupId: "group-blocked",
+            storeId: "store-blocked",
+            storeName: "受阻店铺",
+            helperText: "存在格式错误",
+            status: "BLOCKED_INVALID",
+            statusLabel: "不可提交",
+          }),
+        ])}
+        stores={stores}
+        walletPosition={{ activeHoldFen: 120000, availableFen: 520000, balanceFen: 660000 }}
+      />,
+    );
+
+    const summary = screen.getByRole("region", { name: "批次摘要" });
+    expect(within(summary).getAllByText("店铺").length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText("订单").length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText("件数").length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText("金额").length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText("不可提交").length).toBeGreaterThan(0);
+    expect(summary).toHaveTextContent("1");
+    expect(summary).toHaveTextContent("¥128.00");
   });
 
   it("collapses mobile details for idle store cards after the first one", async () => {
@@ -385,6 +449,43 @@ describe("BulkOrderWorkspace", () => {
       );
       expect(screen.getByRole("checkbox", { name: "选择杭州店" })).toBeDisabled();
       expect(screen.getByRole("checkbox", { name: "选择广州店" })).toHaveAttribute(
+        "data-state",
+        "checked",
+      );
+    });
+  });
+
+  it("restores an explicit store deselection after the workspace refreshes", async () => {
+    const draft = createDraft([
+      createGroup({ groupId: "group-a", storeId: "store-a", storeName: "深圳店" }),
+      createGroup({ groupId: "group-b", storeId: "store-b", storeName: "杭州店" }),
+    ]);
+    const walletPosition = {
+      activeHoldFen: 120000,
+      availableFen: 520000,
+      balanceFen: 660000,
+    };
+    const firstRender = render(
+      <BulkOrderWorkspace draft={draft} stores={stores} walletPosition={walletPosition} />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择深圳店" }));
+    expect(screen.getByRole("checkbox", { name: "选择深圳店" })).toHaveAttribute(
+      "data-state",
+      "unchecked",
+    );
+
+    firstRender.unmount();
+    render(
+      <BulkOrderWorkspace draft={draft} stores={stores} walletPosition={walletPosition} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "选择深圳店" })).toHaveAttribute(
+        "data-state",
+        "unchecked",
+      );
+      expect(screen.getByRole("checkbox", { name: "选择杭州店" })).toHaveAttribute(
         "data-state",
         "checked",
       );

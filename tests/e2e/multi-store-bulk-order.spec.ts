@@ -51,6 +51,43 @@ async function expectUsableViewport(page: import("@playwright/test").Page) {
   expect(heights.every((height) => height >= 44)).toBe(true);
 }
 
+async function expectStickySummaryDoesNotObstructContent(
+  page: import("@playwright/test").Page,
+) {
+  const geometry = await page.evaluate(() => {
+    const summary = document.querySelector<HTMLElement>("[data-testid='bulk-order-summary']");
+    const refresh = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+      button.textContent?.includes("刷新草稿"),
+    );
+    if (!summary || !refresh) return null;
+    const summaryBox = summary.getBoundingClientRect();
+    const refreshBox = refresh.getBoundingClientRect();
+    return {
+      refreshBottom: refreshBox.bottom,
+      scrollHeight: document.documentElement.scrollHeight,
+      summaryTop: summaryBox.top,
+      viewportHeight: window.innerHeight,
+    };
+  });
+
+  expect(geometry).not.toBeNull();
+  expect(geometry?.refreshBottom).toBeLessThanOrEqual(geometry?.summaryTop ?? 0);
+  expect(geometry?.scrollHeight).toBeGreaterThan(geometry?.viewportHeight ?? 0);
+}
+
+async function expectContinuousSummaryMetrics(
+  page: import("@playwright/test").Page,
+) {
+  const visibleLabels = await page.getByTestId("bulk-order-summary").evaluate((summary) =>
+    [...summary.querySelectorAll("dt, p")]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => element.textContent?.trim()),
+  );
+  for (const label of ["店铺", "订单", "件数", "金额", "不可提交"]) {
+    expect(visibleLabels).toContain(label);
+  }
+}
+
 async function workbookBuffer(index: number) {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("sheet1");
@@ -215,6 +252,14 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal/);
 
+  await page.goto("/portal/bulk-orders");
+  const nextStep = page.getByRole("region", { name: "批量拿货下一步" });
+  await expect(nextStep.getByRole("link", { name: "继续上次草稿" })).toHaveAttribute(
+    "href",
+    `/portal/bulk-orders/${fixture.draftId}`,
+  );
+  await expect(nextStep.getByRole("button", { name: "新建批量草稿" })).toBeVisible();
+
   await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
   await expect(
     page.getByRole("heading", { name: "多店铺批量拿货" }),
@@ -225,6 +270,7 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   const summary = page.getByTestId("bulk-order-summary");
   await expect(summary).toBeVisible();
+  await expectContinuousSummaryMetrics(page);
   const summaryBox = await summary.boundingBox();
   expect(summaryBox?.height).toBeGreaterThanOrEqual(96);
   expect(summaryBox?.height).toBeLessThanOrEqual(120);
@@ -267,14 +313,9 @@ test("customer bulk workspace stays usable at approved mobile widths @mobile-onl
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal/);
 
-  const hydrationErrors: string[] = [];
+  const consoleErrors: string[] = [];
   page.on("console", (message) => {
-    if (
-      message.type() === "error" &&
-      /hydration|server rendered HTML|text content does not match/i.test(message.text())
-    ) {
-      hydrationErrors.push(message.text());
-    }
+    if (message.type() === "error") consoleErrors.push(message.text());
   });
 
   for (const width of [360, 390, 430]) {
@@ -288,16 +329,36 @@ test("customer bulk workspace stays usable at approved mobile widths @mobile-onl
     ).toBeVisible();
     await expectUsableViewport(page);
 
+    if (width === 360) {
+      const firstStore = page.getByRole("checkbox", { name: "选择TEMU 多店铺 1" });
+      await firstStore.click();
+      await expect(firstStore).toHaveAttribute("data-state", "unchecked");
+      await page.reload();
+      await expect(
+        page.getByRole("checkbox", { name: "选择TEMU 多店铺 1" }),
+      ).toHaveAttribute("data-state", "unchecked");
+      await page.getByRole("checkbox", { name: "选择TEMU 多店铺 1" }).click();
+    }
+
     const summary = page.getByTestId("bulk-order-summary");
     expect((await summary.boundingBox())?.height).toBeLessThanOrEqual(96);
+    await expectContinuousSummaryMetrics(page);
     expect((await page.locator("article").first().boundingBox())?.y).toBeLessThan(600);
+    await page.getByRole("button", { name: "刷新草稿" }).scrollIntoViewIfNeeded();
+    await expectStickySummaryDoesNotObstructContent(page);
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibility.violations.filter((violation) =>
+        ["serious", "critical"].includes(violation.impact ?? ""),
+      ),
+    ).toEqual([]);
     await page.screenshot({
       fullPage: true,
       path: `${VISUAL_REVIEW_DIR}/bulk-workspace-${width}.png`,
     });
   }
 
-  expect(hydrationErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
 
 test("administrator can open unified settlement/bulk diagnostics routes", async ({ page }) => {
