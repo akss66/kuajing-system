@@ -263,6 +263,13 @@ function isBlankRow(row: unknown[]) {
   return row.every((cell) => extractDisplayText(cell).length === 0);
 }
 
+function isBlankLinkCell(value: unknown) {
+  return (
+    extractDisplayText(value).length === 0 &&
+    collectLinkTargets(value).length === 0
+  );
+}
+
 function createEmptyContext(): GroupContext {
   return {
     combination: null,
@@ -500,17 +507,17 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       continue;
     }
 
-    const explicitLink = resolveLink(row[headerMap.link]);
+    const linkCell = row[headerMap.link];
+    const explicitLink = resolveLink(linkCell);
     const resolvedLink =
       explicitLink.kind === "valid"
         ? explicitLink.value
-        :
-      (context.productUrl
-        ? { text: context.productUrl.text, url: context.productUrl.url }
-        : null);
+        : isBlankLinkCell(linkCell) && context.productUrl
+          ? { text: context.productUrl.text, url: context.productUrl.url }
+          : null;
     if (explicitLink.kind === "valid") {
       context.productUrl = { ...explicitLink.value, rowNumber: sourceRowNumber };
-    } else if (context.productUrl) {
+    } else if (isBlankLinkCell(linkCell) && context.productUrl) {
       inheritedFrom.productUrl = context.productUrl.rowNumber;
     } else if (explicitLink.kind === "invalid") {
       issues.push({

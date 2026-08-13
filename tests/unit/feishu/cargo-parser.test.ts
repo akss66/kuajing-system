@@ -231,6 +231,41 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows[0].productUrl).toBe("https://example.test/products/tzx-001?ref=sheet");
   });
 
+  test.each([
+    {
+      cell: [{ text: "坏链接", link: "/relative/path", type: "url" }],
+      label: "/relative/path",
+    },
+    {
+      cell: [{ text: "坏链接", link: "javascript:alert(1)", type: "url" }],
+      label: "javascript:alert(1)",
+    },
+    {
+      cell: [{ text: "坏链接", link: "ftp://example.test/file", type: "url" }],
+      label: "ftp://example.test/file",
+    },
+    {
+      cell: [
+        { text: "一", link: "https://example.test/a", type: "url" },
+        { text: "二", link: "https://example.test/b", type: "url" },
+      ],
+      label: "ambiguous rich link",
+    },
+  ])("does not inherit a previous valid product url when the current cell is explicitly invalid: $label", ({ cell }) => {
+    const values = sampleRows();
+    values[2][7] = cell as unknown;
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-001-2");
+    expect(result.issues).toContainEqual({
+      code: "CARGO_INVALID_PRODUCT_URL",
+      message: "链接文字必须包含合法的绝对 http/https URL",
+      severity: "BLOCKING",
+      sourceRowNumber: 3,
+    });
+  });
+
   test("rejects explicit sale status values it does not recognize", () => {
     const values = sampleRows();
     values[2][12] = "停售中";
