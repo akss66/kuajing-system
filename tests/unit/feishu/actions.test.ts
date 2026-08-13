@@ -16,6 +16,7 @@ const guardMocks = vi.hoisted(() => ({
 }));
 
 const configMocks = vi.hoisted(() => ({
+  canImportFeishuCargo: vi.fn(),
   canWriteFeishuCargo: vi.fn(),
   hasFeishuCargoTargetConfig: vi.fn(),
   readFeishuApiBaseUrl: vi.fn(),
@@ -88,6 +89,7 @@ describe("feishu admin actions", () => {
     guardMocks.requireAdmin.mockReset();
     guardMocks.requireSuperAdmin.mockReset();
     configMocks.canWriteFeishuCargo.mockReset();
+    configMocks.canImportFeishuCargo.mockReset();
     configMocks.hasFeishuCargoTargetConfig.mockReset();
     configMocks.readFeishuApiBaseUrl.mockReset();
     configMocks.readFeishuConfig.mockReset();
@@ -108,11 +110,13 @@ describe("feishu admin actions", () => {
       userId: "super-admin-user-1",
     });
     configMocks.canWriteFeishuCargo.mockReturnValue(true);
+    configMocks.canImportFeishuCargo.mockReturnValue(true);
     configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuApiBaseUrl.mockReturnValue("http://127.0.0.1:4010");
     configMocks.readFeishuConfig.mockReturnValue({
       appId: "app-id",
       appSecret: "app-secret",
+      cargoImportEnabled: true,
       cargoWritesEnabled: true,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source-token",
@@ -213,6 +217,44 @@ describe("feishu admin actions", () => {
     );
   });
 
+  it("imports into PostgreSQL without a target sheet while Feishu writes stay disabled", async () => {
+    configMocks.canImportFeishuCargo.mockReturnValue(true);
+    configMocks.canWriteFeishuCargo.mockReturnValue(false);
+    configMocks.hasFeishuCargoTargetConfig.mockReturnValue(false);
+    configMocks.readFeishuConfig.mockReturnValue({
+      appId: "app-id",
+      appSecret: "app-secret",
+      cargoImportEnabled: true,
+      cargoWritesEnabled: false,
+      sourceSheetId: undefined,
+      sourceWikiToken: "wiki-source-token",
+      targetSheetId: undefined,
+      targetSpreadsheetToken: undefined,
+    });
+    serviceMocks.confirmCargoMigration.mockResolvedValue({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result.status).toBe("success");
+    expect(serviceMocks.confirmCargoMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          cargoImportEnabled: true,
+          cargoWritesEnabled: false,
+        }),
+      }),
+    );
+    expect(outboxMocks.enqueueCargoSyncEvent).not.toHaveBeenCalled();
+  });
+
   it("returns an action error when the persisted run summary is unavailable", async () => {
     queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue(null);
 
@@ -230,11 +272,13 @@ describe("feishu admin actions", () => {
   });
 
   it("keeps confirmation read-only while the rollout gate is off even when the phrase is correct", async () => {
+    configMocks.canImportFeishuCargo.mockReturnValue(false);
     configMocks.canWriteFeishuCargo.mockReturnValue(false);
     configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuConfig.mockReturnValue({
       appId: "app-id",
       appSecret: "app-secret",
+      cargoImportEnabled: false,
       cargoWritesEnabled: false,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source-token",
@@ -257,11 +301,13 @@ describe("feishu admin actions", () => {
   });
 
   it("keeps confirmation read-only while the rollout gate is off even when the phrase is tampered", async () => {
+    configMocks.canImportFeishuCargo.mockReturnValue(false);
     configMocks.canWriteFeishuCargo.mockReturnValue(false);
     configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuConfig.mockReturnValue({
       appId: "app-id",
       appSecret: "app-secret",
+      cargoImportEnabled: false,
       cargoWritesEnabled: false,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source-token",

@@ -20,6 +20,7 @@ const configSchema = z
     FEISHU_APP_SECRET: z.string().trim().min(1),
     FEISHU_CARGO_SOURCE_SHEET_ID: optionalString,
     FEISHU_CARGO_SOURCE_WIKI_TOKEN: z.string().trim().min(1),
+    FEISHU_CARGO_IMPORT_ENABLED: optionalExactString,
     FEISHU_CARGO_WRITES_ENABLED: optionalExactString,
     FEISHU_CARGO_TARGET_SHEET_ID: optionalString,
     FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: optionalString,
@@ -52,6 +53,7 @@ const FEISHU_API_BASE_OVERRIDE_ERROR = "生产环境必须使用官方飞书 API
 export type FeishuIntegrationConfig = {
   appId: string;
   appSecret: string;
+  cargoImportEnabled: boolean;
   cargoWritesEnabled: boolean;
   sourceWikiToken: string;
   sourceSheetId?: string;
@@ -64,6 +66,10 @@ type FeishuCargoTargetConfig = {
   cargoWritesEnabled?: boolean;
   targetSheetId?: string;
   targetSpreadsheetToken?: string;
+};
+
+type FeishuCargoImportConfig = {
+  cargoImportEnabled?: boolean;
 };
 
 type FeishuBotConfig = Pick<FeishuIntegrationConfig, "internalChatId">;
@@ -107,6 +113,7 @@ export function readFeishuConfig(
   return {
     appId: parsed.data.FEISHU_APP_ID,
     appSecret: parsed.data.FEISHU_APP_SECRET,
+    cargoImportEnabled: parsed.data.FEISHU_CARGO_IMPORT_ENABLED === "true",
     cargoWritesEnabled: parsed.data.FEISHU_CARGO_WRITES_ENABLED === "true",
     internalChatId: parsed.data.FEISHU_INTERNAL_CHAT_ID,
     sourceSheetId: parsed.data.FEISHU_CARGO_SOURCE_SHEET_ID,
@@ -114,6 +121,10 @@ export function readFeishuConfig(
     targetSheetId: parsed.data.FEISHU_CARGO_TARGET_SHEET_ID,
     targetSpreadsheetToken: parsed.data.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN,
   };
+}
+
+export function canImportFeishuCargo(config: FeishuCargoImportConfig) {
+  return config.cargoImportEnabled === true;
 }
 
 export function hasFeishuCargoTargetConfig(config: FeishuCargoTargetConfig) {

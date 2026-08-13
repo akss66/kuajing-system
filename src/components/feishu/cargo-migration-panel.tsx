@@ -39,6 +39,7 @@ type SourceSheetOption = {
 
 export type CargoMigrationPanelProps = {
   actorKind: ActorKind;
+  cargoImportEnabled: boolean;
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
@@ -91,6 +92,7 @@ function Field({
 
 export function CargoMigrationPanel({
   actorKind,
+  cargoImportEnabled,
   cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
@@ -147,7 +149,7 @@ export function CargoMigrationPanel({
     !requiresSourceSelection &&
     Boolean(effectiveSelectedSheetId);
   const canConfirm =
-    cargoWritesEnabled &&
+    cargoImportEnabled &&
     actorKind === "SUPER_ADMIN" &&
     latestMigrationRun?.status === "PREFLIGHT_READY" &&
     latestMigrationRun.blockingIssueCount === 0;
@@ -267,7 +269,7 @@ export function CargoMigrationPanel({
             </button>
           </form>
 
-          {latestMigrationRun && cargoWritesEnabled ? (
+          {latestMigrationRun && cargoImportEnabled ? (
             <ConfirmedActionForm
               action={confirmAction}
               className="space-y-4"

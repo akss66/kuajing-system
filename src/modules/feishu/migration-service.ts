@@ -574,14 +574,17 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
     client: FeishuSourcePort;
     config: Pick<
       FeishuIntegrationConfig,
-      "cargoWritesEnabled" | "sourceSheetId" | "sourceWikiToken"
+      | "cargoImportEnabled"
+      | "cargoWritesEnabled"
+      | "sourceSheetId"
+      | "sourceWikiToken"
     >;
     runId: string;
   }): Promise<ConfirmResult> {
-    if (!("cargoWritesEnabled" in input.config) || input.config.cargoWritesEnabled !== true) {
+    if (input.config.cargoImportEnabled !== true) {
       throw new FeishuCargoMigrationError(
         "ROLLOUT_READ_ONLY",
-        "Feishu cargo import stays read-only until FEISHU_CARGO_WRITES_ENABLED=true",
+        "Feishu cargo database import stays disabled until FEISHU_CARGO_IMPORT_ENABLED=true",
       );
     }
     const confirmedByAdminUserId = await resolveSuperAdminMirrorId(input.actor);

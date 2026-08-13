@@ -41,13 +41,14 @@ FEISHU_APP_ID=
 FEISHU_APP_SECRET=
 FEISHU_CARGO_SOURCE_WIKI_TOKEN=
 FEISHU_CARGO_SOURCE_SHEET_ID=
+FEISHU_CARGO_IMPORT_ENABLED=false
 FEISHU_CARGO_WRITES_ENABLED=false
 FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN=
 FEISHU_CARGO_TARGET_SHEET_ID=
 CATALOG_ASSET_DIR=/app/data/catalog-assets
 ```
 
-Phase A 要求 `FEISHU_CARGO_WRITES_ENABLED` 保持缺失或显式为 `false`。只有精确值 `true` 才会放开首批确认导入、手工目标同步、定时入队和 worker 写测试表。
+`FEISHU_CARGO_IMPORT_ENABLED` 与 `FEISHU_CARGO_WRITES_ENABLED` 是两条独立边界。前者只有精确值 `true` 时才允许把确认后的预检结果写入 PostgreSQL；后者控制独立飞书目标表写入，当前业务要求始终保持 `false`。生产 Compose 已把飞书写入值硬编码为 `false`，环境文件无法覆盖。开启数据库导入绝不会放开飞书写入。
 
 保存后只做最小校验：
 

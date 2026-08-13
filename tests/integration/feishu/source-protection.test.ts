@@ -55,6 +55,7 @@ function createConfig(input?: Partial<FeishuIntegrationConfig>): FeishuIntegrati
   return {
     appId: "test-app-id",
     appSecret: "test-app-secret",
+    cargoImportEnabled: false,
     cargoWritesEnabled: false,
     sourceSheetId: "sheet-primary",
     sourceWikiToken: "wiki-source-token",

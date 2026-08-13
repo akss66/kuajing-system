@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   assertSafeCargoTarget,
+  canImportFeishuCargo,
   canProcessFeishuBot,
   hasFeishuCargoTargetConfig,
   canWriteFeishuCargo,
@@ -11,6 +12,21 @@ import {
 } from "@/integrations/feishu/config";
 
 describe("Feishu integration config", () => {
+  test("enables database import without enabling any Feishu write", () => {
+    const config = readFeishuConfig({
+      FEISHU_APP_ID: "app",
+      FEISHU_APP_SECRET: "secret",
+      FEISHU_CARGO_IMPORT_ENABLED: "true",
+      FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-source",
+      FEISHU_CARGO_WRITES_ENABLED: "false",
+    });
+
+    expect(canImportFeishuCargo(config)).toBe(true);
+    expect(canWriteFeishuCargo(config)).toBe(false);
+    expect(config.targetSheetId).toBeUndefined();
+    expect(config.targetSpreadsheetToken).toBeUndefined();
+  });
+
   test("accepts paired source and target values while leaving bot chat optional", () => {
     const config = readFeishuConfig({
       FEISHU_APP_ID: "app",
@@ -23,6 +39,7 @@ describe("Feishu integration config", () => {
     expect(config).toEqual({
       appId: "app",
       appSecret: "secret",
+      cargoImportEnabled: false,
       cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,
@@ -45,6 +62,7 @@ describe("Feishu integration config", () => {
     expect(config).toEqual({
       appId: "app",
       appSecret: "secret",
+      cargoImportEnabled: false,
       cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,

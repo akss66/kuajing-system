@@ -6,14 +6,6 @@ import type {
 } from "@/modules/feishu/cargo-types";
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
-const REQUIRED_HEADER_KEYS = [
-  "sku",
-  "\u540d\u79f0",
-  "\u91c7\u8d2d\u4ef7",
-  "\u603b\u5e93\u5b58",
-  "\u72b6\u6001",
-] as const;
-
 const HEADER_ALIASES = {
   combination: ["\u7ec4\u5408\u9500\u552e"],
   color: ["\u989c\u8272"],
@@ -21,13 +13,25 @@ const HEADER_ALIASES = {
   link: ["\u94fe\u63a5\u6587\u5b57"],
   name: ["\u540d\u79f0"],
   price: ["\u91c7\u8d2d\u4ef7"],
-  quantity: ["\u603b\u5e93\u5b58", "\u603b\u5e93\u5b58/\u4ef6"],
+  quantity: [
+    "\u603b\u5e93\u5b58",
+    "\u603b\u5e93\u5b58/\u4ef6",
+    "\u603b\u5e93\u5b58(\u4efd)",
+  ],
   sequence: ["\u5e8f\u53f7"],
   sku: ["sku"],
   status: ["\u72b6\u6001"],
   specification: ["\u89c4\u683c"],
   weight: ["\u91cd\u91cf"],
 } satisfies Record<string, string[]>;
+
+const REQUIRED_HEADER_FIELDS = [
+  "sku",
+  "name",
+  "price",
+  "quantity",
+  "status",
+] as const satisfies ReadonlyArray<keyof typeof HEADER_ALIASES>;
 
 type HeaderMap = Record<keyof typeof HEADER_ALIASES, number>;
 
@@ -241,7 +245,11 @@ function findHeaderRow(values: unknown[][]) {
   for (let rowIndex = 0; rowIndex < Math.min(values.length, 20); rowIndex += 1) {
     const normalized = values[rowIndex].map((cell) => normalizeHeaderCell(cell));
     const headerKeys = new Set(normalized);
-    if (REQUIRED_HEADER_KEYS.every((header) => headerKeys.has(header))) {
+    if (
+      REQUIRED_HEADER_FIELDS.every((field) =>
+        HEADER_ALIASES[field].some((alias) => headerKeys.has(alias)),
+      )
+    ) {
       return rowIndex;
     }
   }

@@ -63,6 +63,7 @@ function createConfig(input?: Partial<FeishuIntegrationConfig>): FeishuIntegrati
   return {
     appId: "test-app-id",
     appSecret: "test-app-secret",
+    cargoImportEnabled: true,
     cargoWritesEnabled: true,
     sourceSheetId: "sheet-primary",
     sourceWikiToken: "wiki-source-token",
@@ -407,6 +408,7 @@ describe("Feishu cargo migration service", () => {
     process.env.FEISHU_APP_SECRET = "test-app-secret";
     process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN = "wiki-source-token";
     process.env.FEISHU_CARGO_SOURCE_SHEET_ID = "sheet-primary";
+    process.env.FEISHU_CARGO_IMPORT_ENABLED = "true";
     process.env.FEISHU_CARGO_WRITES_ENABLED = "true";
     process.env.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN = "target-spreadsheet-token";
     process.env.FEISHU_CARGO_TARGET_SHEET_ID = "target-sheet";
@@ -417,6 +419,7 @@ describe("Feishu cargo migration service", () => {
     delete process.env.FEISHU_APP_SECRET;
     delete process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN;
     delete process.env.FEISHU_CARGO_SOURCE_SHEET_ID;
+    delete process.env.FEISHU_CARGO_IMPORT_ENABLED;
     delete process.env.FEISHU_CARGO_WRITES_ENABLED;
     delete process.env.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN;
     delete process.env.FEISHU_CARGO_TARGET_SHEET_ID;
@@ -788,7 +791,7 @@ describe("Feishu cargo migration service", () => {
     ).resolves.toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
   });
 
-  test("blocks confirmation when cargo writes remain in read-only rollout mode", async () => {
+  test("blocks confirmation when database import remains disabled", async () => {
     const actor = await createSuperAdminActor();
     const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
@@ -804,11 +807,11 @@ describe("Feishu cargo migration service", () => {
         client: fakeSource.client,
         config: {
           ...createConfig(),
-          cargoWritesEnabled: false,
+          cargoImportEnabled: false,
         },
         runId: readyRun.runId,
       }),
-    ).rejects.toThrow(/read-only|只读/i);
+    ).rejects.toThrow(/database import|数据库导入/i);
   });
 
   test("blocks confirmation when catalog SKUs already exist", async () => {

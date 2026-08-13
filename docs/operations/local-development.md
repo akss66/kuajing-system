@@ -88,7 +88,7 @@ v0.2.0 之后，本地库至少要包含以下前向迁移：
 https://你的正式域名/api/integrations/jifeng/webhook
 ```
 
-飞书侧需要创建企业自建应用并开通知识库、电子表格与群消息权限；将应用添加为“同舟行跨境加拿大飞书货盘”的 source wiki 协作者，并为 target 测试表单独准备 `FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN` 与 `FEISHU_CARGO_TARGET_SHEET_ID`。这两个 target 变量必须成对出现或同时缺失；仅配置 `FEISHU_CARGO_SOURCE_WIKI_TOKEN`（以及可选的 `FEISHU_CARGO_SOURCE_SHEET_ID`）时只允许预检，不会执行货盘写入。`FEISHU_CARGO_WRITES_ENABLED` 只有在精确等于 `true` 时才会放开确认导入、手工同步和 worker 写测试表；缺失、`false`、`TRUE` 或带空格的值都保持只读。机器人通知仍需把机器人加入内部通知群并配置 `FEISHU_INTERNAL_CHAT_ID`。
+飞书侧需要创建企业自建应用并开通知识库、电子表格与群消息权限；将应用添加为“同舟行跨境加拿大飞书货盘”的 source wiki 只读协作者。`FEISHU_CARGO_IMPORT_ENABLED=true` 只允许把确认后的预检结果写入 PostgreSQL，不会授予任何飞书写权限。`FEISHU_CARGO_WRITES_ENABLED` 是独立的飞书目标表开关；当前业务要求保持 `false`，并且不配置目标 spreadsheet/sheet。机器人通知仍需把机器人加入内部通知群并配置 `FEISHU_INTERNAL_CHAT_ID`。
 
 联调顺序：
 

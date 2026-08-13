@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db/client";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
+  canImportFeishuCargo,
   canWriteFeishuCargo,
   hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
@@ -23,7 +24,7 @@ import type { FeishuSourceSheet } from "./source-reader";
 const INTEGRATIONS_PATH = "/admin/system/integrations";
 
 const READ_ONLY_CONFIRM_MESSAGE =
-  "当前仍处于只读发布阶段，需显式设置 FEISHU_CARGO_WRITES_ENABLED=true 后才允许确认首批导入。";
+  "系统数据库导入尚未启用，需显式设置 FEISHU_CARGO_IMPORT_ENABLED=true 后才允许确认首批导入；飞书源表仍保持只读。";
 const READ_ONLY_SYNC_MESSAGE =
   "当前仍处于只读发布阶段，目标测试表写入已禁用。需显式设置 FEISHU_CARGO_WRITES_ENABLED=true 后再执行目标同步。";
 const TARGET_NOT_CONFIGURED_MESSAGE =
@@ -222,11 +223,9 @@ export async function confirmCargoMigrationAction(
   const actor = await requireSuperAdmin();
   const config = readFeishuConfig();
 
-  if (!canWriteFeishuCargo(config)) {
+  if (!canImportFeishuCargo(config)) {
     return {
-      message: hasFeishuCargoTargetConfig(config)
-        ? READ_ONLY_CONFIRM_MESSAGE
-        : TARGET_NOT_CONFIGURED_MESSAGE,
+      message: READ_ONLY_CONFIRM_MESSAGE,
       status: "error",
     };
   }
@@ -266,6 +265,7 @@ export async function confirmCargoMigrationAction(
       actor,
       client,
       config: {
+        cargoImportEnabled: config.cargoImportEnabled,
         cargoWritesEnabled: config.cargoWritesEnabled,
         sourceSheetId: config.sourceSheetId,
         sourceWikiToken: config.sourceWikiToken,

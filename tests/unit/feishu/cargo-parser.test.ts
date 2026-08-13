@@ -56,6 +56,19 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows).toHaveLength(4);
   });
 
+  test("accepts the production inventory header with the unit in parentheses", () => {
+    const values = sampleRows();
+    values[0][5] = "总库存(份)";
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.headerRowNumber).toBe(1);
+    expect(result.rows).toHaveLength(4);
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ code: "CARGO_HEADER_NOT_FOUND" }),
+    );
+  });
+
   test("resets merged-field inheritance after a blank separator row", () => {
     const values = sampleRows();
     const blankRow = Array.from({ length: 13 }, () => "");

@@ -58,6 +58,7 @@ function createProps(
 ): CargoMigrationPanelProps {
   return {
     actorKind: "SUPER_ADMIN",
+    cargoImportEnabled: true,
     createCargoPreflightAction: idleAction,
     latestMigrationRun: {
       blockingIssueCount: 0,
@@ -279,6 +280,7 @@ describe("CargoMigrationPanel", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
+          cargoImportEnabled: false,
           cargoWritesEnabled: false,
           selectedSourceSheetId: "sheet-source-a",
           targetConfigured: true,
