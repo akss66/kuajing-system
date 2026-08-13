@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { Fragment, isValidElement, type ReactNode } from "react"
 
 import {
   Sheet,
@@ -27,9 +27,15 @@ export function EntityDrawer({
   size = "md",
   testId,
 }: EntityDrawerProps) {
+  const canUseTriggerAsChild = isValidElement(trigger) && trigger.type !== Fragment
+
   return (
     <Sheet>
-      <SheetTrigger asChild>{trigger}</SheetTrigger>
+      {canUseTriggerAsChild ? (
+        <SheetTrigger asChild>{trigger}</SheetTrigger>
+      ) : (
+        <SheetTrigger>{trigger}</SheetTrigger>
+      )}
       <SheetContent
         data-testid={testId}
         side="right"

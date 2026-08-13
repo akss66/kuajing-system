@@ -15,6 +15,19 @@ afterEach(() => {
 });
 
 describe("management primitives", () => {
+  it("renders a usable native trigger when the drawer trigger is text", async () => {
+    render(
+      <EntityDrawer trigger="创建客户" title="创建客户">
+        <button type="button">保存客户</button>
+      </EntityDrawer>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "创建客户" });
+    fireEvent.click(trigger);
+
+    expect(await screen.findByRole("dialog", { name: "创建客户" })).toBeVisible();
+  });
+
   it("opens a labelled drawer and restores focus to its trigger after close", async () => {
     render(
       <EntityDrawer
@@ -36,6 +49,19 @@ describe("management primitives", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("gives the drawer close control a 44px touch target", async () => {
+    render(
+      <EntityDrawer trigger={<button type="button">编辑店铺</button>} title="编辑店铺">
+        内容
+      </EntityDrawer>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑店铺" }));
+
+    await screen.findByRole("dialog", { name: "编辑店铺" });
+    expect(screen.getByRole("button", { name: "关闭" })).toHaveClass("size-11");
   });
 
   it("keeps entity drawers full width on mobile and uses the large desktop size", async () => {
