@@ -52,10 +52,13 @@ type ConfiguredField =
   | (typeof fulfillmentFields)[number]
   | "JIFENG_REFRESH_TOKEN";
 
-type FieldInspection<T> = {
+type FieldInspection = {
   configured: boolean;
   invalidFields: string[];
   missingFields: string[];
+};
+
+type ParsedFieldInspection<T> = FieldInspection & {
   value?: T;
 };
 
@@ -75,9 +78,9 @@ export type JifengConfigurationLevel =
   | "FULFILLMENT_READY";
 export type JifengConfigurationState = {
   anyConfigured: boolean;
-  authorized: FieldInspection<z.output<typeof authorizedSchema>>;
-  developer: FieldInspection<z.output<typeof developerSchema>>;
-  fulfillment: FieldInspection<z.output<typeof fulfillmentSchema>>;
+  authorized: FieldInspection;
+  developer: FieldInspection;
+  fulfillment: FieldInspection;
   level: JifengConfigurationLevel;
 };
 
@@ -133,7 +136,7 @@ function fieldNamesFromIssues(
 function inspectSchema<T>(
   schema: z.ZodType<T>,
   environment: EnvironmentSource,
-): FieldInspection<T> {
+): ParsedFieldInspection<T> {
   const parsed = schema.safeParse(environment);
   if (parsed.success) {
     return {
@@ -151,12 +154,20 @@ function inspectSchema<T>(
   return { configured: false, invalidFields, missingFields };
 }
 
+function toPublicInspection(inspection: FieldInspection): FieldInspection {
+  return {
+    configured: inspection.configured,
+    invalidFields: inspection.invalidFields,
+    missingFields: inspection.missingFields,
+  };
+}
+
 function describeFields(label: string, fields: string[]) {
   if (fields.length === 0) return "";
   return `${label}: ${fields.join(", ")}`;
 }
 
-function buildConfigErrorMessage(scope: string, inspection: FieldInspection<unknown>) {
+function buildConfigErrorMessage(scope: string, inspection: FieldInspection) {
   const details = [
     describeFields("missing", inspection.missingFields),
     describeFields("invalid", inspection.invalidFields),
@@ -165,7 +176,7 @@ function buildConfigErrorMessage(scope: string, inspection: FieldInspection<unkn
   return `Jifeng ${scope} configuration is incomplete${suffix}`;
 }
 
-function throwForInspection(scope: string, inspection: FieldInspection<unknown>): never {
+function throwForInspection(scope: string, inspection: FieldInspection): never {
   throw new JifengConfigError({
     invalidFields: inspection.invalidFields,
     message: buildConfigErrorMessage(scope, inspection),
@@ -205,9 +216,15 @@ export function inspectJifengConfiguration(
   options?: BaseUrlOverrideOptions,
 ): JifengConfigurationState {
   const normalized = normalizeEnvironment(environment, options);
-  const developer = inspectSchema(developerSchema, normalized);
-  const authorized = inspectSchema(authorizedSchema, normalized);
-  const fulfillment = inspectSchema(fulfillmentSchema, normalized);
+  const developer = toPublicInspection(
+    inspectSchema(developerSchema, normalized),
+  );
+  const authorized = toPublicInspection(
+    inspectSchema(authorizedSchema, normalized),
+  );
+  const fulfillment = toPublicInspection(
+    inspectSchema(fulfillmentSchema, normalized),
+  );
   const anyConfigured = allKnownFields.some((field) => {
     const value = normalized[field];
     return typeof value === "string" && value.trim().length > 0;

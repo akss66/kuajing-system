@@ -109,6 +109,7 @@ describe("Jifeng configuration", () => {
       JIFENG_BASE_URL: "https://warehouse.example.test",
       JIFENG_CLIENT_ID: "developer-id",
       JIFENG_CLIENT_SECRET: "developer-secret",
+      JIFENG_REFRESH_TOKEN: "refresh-token",
       JIFENG_USER_ID: "oms-user-7",
     });
 
@@ -120,5 +121,9 @@ describe("Jifeng configuration", () => {
       "JIFENG_LOGISTICS_ID",
       "JIFENG_WAREHOUSE_CODE",
     ]);
+    const serialized = JSON.stringify(state);
+    expect(serialized).not.toContain("access-token");
+    expect(serialized).not.toContain("refresh-token");
+    expect(serialized).not.toContain("developer-secret");
   });
 });

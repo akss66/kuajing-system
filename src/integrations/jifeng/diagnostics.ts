@@ -27,11 +27,7 @@ type RemoteProbeOutcome =
 export type JifengConnectivityDiagnosticResult = {
   configurationLevel: JifengConfigurationLevel;
   localSelfCheck: {
-    canonicalString: string;
-    expectedCanonicalString: string;
-    expectedSignature: string;
     ok: boolean;
-    signature: string;
     source: string;
   };
   remoteProbe:
@@ -108,13 +104,9 @@ function runLocalSigningSelfCheck() {
   );
 
   return {
-    canonicalString,
-    expectedCanonicalString,
-    expectedSignature,
     ok:
       canonicalString === expectedCanonicalString &&
       signature === expectedSignature,
-    signature,
     source: OFFICIAL_DOC_SOURCE,
   };
 }

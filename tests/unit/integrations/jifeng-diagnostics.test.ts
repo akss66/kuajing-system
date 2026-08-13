@@ -14,7 +14,18 @@ describe("Jifeng connectivity diagnostics", () => {
 
     expect(result.status).toBe("LOCAL_ONLY");
     expect(result.configurationLevel).toBe("DEVELOPER_ONLY");
-    expect(result.localSelfCheck).toMatchObject({ ok: true });
+    expect(result.localSelfCheck).toEqual({
+      ok: true,
+      source:
+        "https://s.apifox.cn/25bf1c44-f535-4c37-9bf4-7244130a67ce/doc-3651609.md",
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("canonicalString");
+    expect(serialized).not.toContain("expectedCanonicalString");
+    expect(serialized).not.toContain("signature");
+    expect(serialized).not.toContain("expectedSignature");
+    expect(serialized).not.toContain("accessToken=");
+    expect(serialized).not.toContain("9bc08ba7552c5dfea4efab6bda78a4a9738010913f2403bd93f09c6bf974b939");
     expect(result.remoteProbe).toEqual({
       attempted: false,
       missingFields: [
