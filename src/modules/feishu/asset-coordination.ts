@@ -1,8 +1,23 @@
 import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sql } from "drizzle-orm";
 
+type FileUrlLike = string | URL | { href: string };
+
+function toFileUrlInput(fileUrl: FileUrlLike) {
+  if (typeof fileUrl === "string" || fileUrl instanceof URL) {
+    return fileUrl;
+  }
+  return fileUrl.href;
+}
+
+export function resolveModuleRelativePath(relativePath: string, moduleUrl: FileUrlLike) {
+  return resolve(dirname(fileURLToPath(toFileUrlInput(moduleUrl))), relativePath);
+}
+
+const require = createRequire(resolveModuleRelativePath("./asset-coordination.ts", import.meta.url));
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 50;
 const COORDINATION_TIMEOUT_CODES = new Set(["55P03", "57014"]);
@@ -16,9 +31,6 @@ const CONNECTION_LOST_CODES = new Set([
   "EPIPE",
   "CONNECTION_CLOSED",
 ]);
-const DEFAULT_DB_CLIENT_PATH = fileURLToPath(new URL("../../db/client.ts", import.meta.url));
-
-const require = createRequire(import.meta.url);
 
 type TransactionDatabase = {
   transaction<T>(
@@ -116,7 +128,7 @@ export function createPostgresCatalogAssetCoordinator(
 ): CatalogAssetCoordinator {
   const database =
     options.db ??
-    (require(DEFAULT_DB_CLIENT_PATH) as {
+    (require("../../db/client.ts") as {
       db: TransactionDatabase;
     }).db;
   const heartbeatIntervalMs = Math.max(10, options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
