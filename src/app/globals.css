@@ -8,6 +8,8 @@
   --merchant-topbar: oklch(0.21 0.008 195);
   --merchant-topbar-foreground: oklch(0.985 0.002 180);
   --merchant-topbar-muted: oklch(0.82 0.01 190);
+  --merchant-header-height: 3.5rem;
+  --merchant-sidebar-width: 14rem;
   --merchant-canvas: rgb(244 245 245);
   --merchant-sidebar: rgb(250 251 251);
   --merchant-panel: rgb(255 255 255);
@@ -24,7 +26,7 @@
   --tzx-surface: var(--merchant-canvas);
   --tzx-surface-muted: oklch(0.95 0.004 188);
   --tzx-ink: oklch(0.24 0.015 185);
-  --tzx-muted: oklch(0.47 0.012 185);
+  --tzx-muted: oklch(0.41 0.012 185);
   --tzx-border: var(--merchant-panel-border);
   --tzx-success: rgb(42 101 63);
   --tzx-warning: rgb(132 88 22);
