@@ -479,4 +479,77 @@ describe("dashboard queries", () => {
     expect(pendingOrder.customerId).toBe(customer.id);
     expect(exceptionOrder.customerId).toBe(customer.id);
   });
+
+  test("routes payment-reported continuation to the latest pending flow detail", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `PAYMENT-FLOW-${suffix}`, name: "付款流客户" })
+      .returning();
+    const [store] = await db
+      .insert(stores)
+      .values({ customerId: customer.id, name: `付款流店铺 ${suffix}` })
+      .returning();
+    const [settlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `PAYMENT-FLOW-${suffix}`,
+        customerId: customer.id,
+        idempotencyKey: `payment-flow:${suffix}`,
+        offlineAmountFen: 800,
+        paymentDueAt: new Date("2026-08-15T04:00:00.000Z"),
+        paymentReportedAt: new Date("2026-08-13T10:00:00.000Z"),
+        status: "PAYMENT_REPORTED",
+        totalAmountFen: 800,
+        walletAmountFen: 0,
+      })
+      .returning();
+    await db.insert(settlementPaymentClaims).values({
+      amountFen: 800,
+      createdAt: new Date("2026-08-13T10:00:00.000Z"),
+      customerId: customer.id,
+      settlementBatchId: settlement.id,
+      status: "PENDING",
+    });
+
+    const settlementOnly = await getCustomerTaskDashboard(customer.id, FIXED_NOW);
+
+    expect(settlementOnly.primaryContinuationTarget).toEqual({
+      href: `/portal/settlements/${settlement.id}`,
+      kind: "PAYMENT_REPORTED",
+      label: `查看结算批次 ${settlement.batchNumber} 的付款确认`,
+    });
+
+    const [directOrder] = await db
+      .insert(fulfillmentOrders)
+      .values({
+        customerId: customer.id,
+        lockExpiresAt: new Date("2026-08-15T04:00:00.000Z"),
+        orderNumber: `DIRECT-FLOW-${suffix}`,
+        paymentDeclaredAt: new Date("2026-08-13T11:00:00.000Z"),
+        status: "PENDING_PAYMENT",
+        storeId: store.id,
+        submittedAt: new Date("2026-08-13T09:00:00.000Z"),
+        totalAmountFen: 650,
+        totalPackageCount: 1,
+        totalQuantity: 1,
+      })
+      .returning();
+    await db.insert(paymentClaims).values({
+      amountFen: 650,
+      createdAt: new Date("2026-08-13T11:00:00.000Z"),
+      customerId: customer.id,
+      orderId: directOrder.id,
+      status: "PENDING",
+    });
+
+    const latestDirect = await getCustomerTaskDashboard(customer.id, FIXED_NOW);
+
+    expect(latestDirect.paymentReportedCount).toBe(2);
+    expect(latestDirect.primaryContinuationTarget).toEqual({
+      href: `/portal/orders/${directOrder.id}`,
+      kind: "PAYMENT_REPORTED",
+      label: `查看订单 ${directOrder.orderNumber} 的付款确认`,
+    });
+  });
 });

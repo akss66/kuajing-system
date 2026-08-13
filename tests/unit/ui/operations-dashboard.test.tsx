@@ -75,9 +75,9 @@ describe("operations dashboards", () => {
           pendingPaymentFen: 8_800,
           paymentReportedCount: 1,
           primaryContinuationTarget: {
-            href: "/portal/bulk-orders/draft-1",
-            kind: "BULK_DRAFT",
-            label: "继续批量拿货草稿",
+            href: "/portal/settlements/settlement-1",
+            kind: "PAYMENT_REPORTED",
+            label: "查看结算批次 SETTLEMENT-1 的付款确认",
           },
           recentStoreSummaries: [
             {
@@ -89,7 +89,7 @@ describe("operations dashboards", () => {
               storeName: "北美主店",
             },
           ],
-          unfinishedDraftCount: 1,
+          unfinishedDraftCount: 0,
           walletAvailableFen: 9_000,
           walletBalanceFen: 10_000,
           walletHoldFen: 1_000,
@@ -110,10 +110,9 @@ describe("operations dashboards", () => {
       continuation.compareDocumentPosition(storeSummary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: /继续批量拿货草稿/ })).toHaveAttribute(
-      "href",
-      "/portal/bulk-orders/draft-1",
-    );
+    expect(
+      screen.getByRole("link", { name: /查看结算批次 SETTLEMENT-1 的付款确认/ }),
+    ).toHaveAttribute("href", "/portal/settlements/settlement-1");
     expect(screen.getByText("北美主店")).toBeVisible();
     expect(document.body).not.toHaveTextContent("390 px");
     expect(document.body).not.toHaveTextContent("2 种");

@@ -50,7 +50,7 @@ export async function getCustomerTaskDashboard(
     from: recentFrom,
     to: todayRange.toDate,
   });
-  const [summaryRows, storeRows] = await Promise.all([
+  const [summaryRows, storeRows, latestPaymentReportRows] = await Promise.all([
     db.execute<{
       activeStoreCount: number | string;
       fulfillmentExceptionCount: number | string;
@@ -153,6 +153,41 @@ export async function getCustomerTaskDashboard(
       order by "recentOrderCount" desc, store.name
       limit 5
     `),
+    db.execute<{
+      flow: "DIRECT" | "SETTLEMENT";
+      referenceId: string;
+      referenceNumber: string;
+    }>(sql`
+      select
+        report.flow,
+        report."referenceId",
+        report."referenceNumber"
+      from (
+        select
+          'DIRECT'::text as flow,
+          claim.order_id as "referenceId",
+          "order".order_number as "referenceNumber",
+          claim.created_at as "createdAt"
+        from payment_claims claim
+        join fulfillment_orders "order" on "order".id = claim.order_id
+        where claim.customer_id = ${customerId}
+          and claim.status = 'PENDING'
+
+        union all
+
+        select
+          'SETTLEMENT'::text as flow,
+          claim.settlement_batch_id as "referenceId",
+          batch.batch_number as "referenceNumber",
+          claim.created_at as "createdAt"
+        from settlement_payment_claims claim
+        join settlement_batches batch on batch.id = claim.settlement_batch_id
+        where claim.customer_id = ${customerId}
+          and claim.status = 'PENDING'
+      ) report
+      order by report."createdAt" desc, report."referenceId" desc
+      limit 1
+    `),
   ]);
   const summary = summaryRows[0];
   const unfinishedDraftCount = Number(summary?.unfinishedDraftCount ?? 0);
@@ -163,6 +198,7 @@ export async function getCustomerTaskDashboard(
   );
   const walletBalanceFen = Number(summary?.walletBalanceFen ?? 0);
   const walletHoldFen = Number(summary?.walletHoldFen ?? 0);
+  const latestPaymentReport = latestPaymentReportRows[0];
   let primaryContinuationTarget: CustomerContinuationTarget | null = null;
 
   if (unfinishedDraftCount > 0 && summary?.latestDraftId) {
@@ -177,12 +213,18 @@ export async function getCustomerTaskDashboard(
       kind: "PENDING_PAYMENT",
       label: "处理待付款拿货单",
     };
-  } else if (paymentReportedCount > 0) {
-    primaryContinuationTarget = {
-      href: "/portal/orders",
-      kind: "PAYMENT_REPORTED",
-      label: "查看付款确认进度",
-    };
+  } else if (paymentReportedCount > 0 && latestPaymentReport) {
+    primaryContinuationTarget = latestPaymentReport.flow === "SETTLEMENT"
+      ? {
+          href: `/portal/settlements/${latestPaymentReport.referenceId}`,
+          kind: "PAYMENT_REPORTED",
+          label: `查看结算批次 ${latestPaymentReport.referenceNumber} 的付款确认`,
+        }
+      : {
+          href: `/portal/orders/${latestPaymentReport.referenceId}`,
+          kind: "PAYMENT_REPORTED",
+          label: `查看订单 ${latestPaymentReport.referenceNumber} 的付款确认`,
+        };
   } else if (fulfillmentExceptionCount > 0) {
     primaryContinuationTarget = {
       href: "/portal/orders",
