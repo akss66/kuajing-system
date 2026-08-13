@@ -152,6 +152,29 @@ describe("AccountsPage", () => {
     expect(await screen.findByRole("button", { name: "查看 Customer Owner" })).toBeVisible();
   });
 
+  it("exposes account summaries as a labelled table with associated row cells", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(await AccountsPage());
+
+    const table = screen.getByRole("table", { name: "账号列表" });
+    for (const header of ["姓名", "邮箱", "角色", "所属客户", "店铺数", "状态", "最近登录", "操作"]) {
+      expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
+    }
+
+    const operationsRow = within(table).getByRole("row", { name: /Operations Admin/ });
+    const cells = within(operationsRow).getAllByRole("cell");
+    expect(cells).toHaveLength(8);
+    expect(cells[0]).toHaveTextContent("Operations Admin");
+    expect(cells[1]).toHaveTextContent("ops-admin@test.local");
+    expect(cells[2]).toHaveTextContent("普通管理员");
+    expect(cells[5]).toHaveTextContent("启用中");
+  });
+
   it("keeps the bootstrap super admin protected and links customer accounts to business details", async () => {
     guardMocks.requireAdmin.mockResolvedValue({
       kind: "SUPER_ADMIN",
@@ -233,5 +256,37 @@ describe("AccountsPage", () => {
     expect(
       screen.getByText("停用后该账号的现有会话会立即失效，但历史订单、客户关系和审计日志不会删除。"),
     ).toBeVisible();
+  });
+
+  it("keeps password reset neutral while account status confirmation remains destructive", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue([accountsFixture[1]]);
+
+    render(await AccountsPage());
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    const accountDialog = await screen.findByRole("dialog", { name: "Operations Admin" });
+    const resetTrigger = within(accountDialog).getByRole("button", { name: "重置密码" });
+    const statusTrigger = within(accountDialog).getByRole("button", { name: "停用账号" });
+
+    expect(resetTrigger).toHaveAttribute("data-variant", "outline");
+    expect(statusTrigger).toHaveAttribute("data-variant", "destructive");
+
+    fireEvent.click(resetTrigger);
+    const resetDialog = screen.getByRole("alertdialog");
+    expect(within(resetDialog).getByRole("button", { name: "重置密码" })).toHaveAttribute(
+      "data-variant",
+      "outline",
+    );
+
+    fireEvent.click(within(resetDialog).getByRole("button", { name: "返回检查" }));
+    await waitFor(() => expect(resetDialog).not.toBeInTheDocument());
+    fireEvent.click(statusTrigger);
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "停用账号" }),
+    ).toHaveAttribute("data-variant", "destructive");
   });
 });

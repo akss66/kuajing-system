@@ -56,33 +56,34 @@ function MobileFieldLabel({ children }: { children: string }) {
 
 function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] }) {
   return (
-    <section aria-label="账号列表" className="space-y-3">
+    <section aria-label="账号列表" className="space-y-3" role="table">
       <div
-        aria-hidden="true"
         className={`hidden min-h-10 items-center border-b border-border bg-[var(--merchant-table-header)] px-3 text-xs font-semibold text-muted-foreground lg:grid ${desktopColumns}`}
         data-account-table
+        role="row"
       >
-        <span>姓名</span>
-        <span>邮箱</span>
-        <span>角色</span>
-        <span>所属客户</span>
-        <span>店铺数</span>
-        <span>状态</span>
-        <span>最近登录</span>
-        <span>操作</span>
+        <span role="columnheader">姓名</span>
+        <span role="columnheader">邮箱</span>
+        <span role="columnheader">角色</span>
+        <span role="columnheader">所属客户</span>
+        <span role="columnheader">店铺数</span>
+        <span role="columnheader">状态</span>
+        <span role="columnheader">最近登录</span>
+        <span role="columnheader">操作</span>
       </div>
       <ul
         className="space-y-3 lg:space-y-0 lg:overflow-hidden lg:rounded-[var(--radius-surface)] lg:border lg:border-border lg:bg-background"
         data-account-list
-        role="list"
+        role="rowgroup"
       >
         {accounts.map((account) => (
           <li
             className={`grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 lg:min-h-14 lg:items-center lg:gap-2 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:px-3 lg:py-2 lg:last:border-b-0 ${desktopColumns}`}
             data-account-card
             key={account.userId}
+            role="row"
           >
-            <div className="min-w-0">
+            <div className="min-w-0" role="cell">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground">{account.displayName}</p>
                 {account.kind === "SUPER_ADMIN" ? (
@@ -92,34 +93,35 @@ function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] })
                   </Badge>
                 ) : null}
               </div>
-              <p className="mt-1 break-all text-sm text-muted-foreground lg:hidden">{account.email}</p>
             </div>
-            <p className="hidden min-w-0 break-all text-sm text-muted-foreground lg:block">{account.email}</p>
-            <div className="space-y-1">
+            <p className="min-w-0 break-all text-sm text-muted-foreground" role="cell">
+              {account.email}
+            </p>
+            <div className="space-y-1" role="cell">
               <MobileFieldLabel>角色</MobileFieldLabel>
               <p className="text-sm text-foreground">{accountKindLabel(account.kind)}</p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1" role="cell">
               <MobileFieldLabel>所属客户</MobileFieldLabel>
               <p className="text-sm text-foreground">{account.customerName ?? "—"}</p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1" role="cell">
               <MobileFieldLabel>店铺数</MobileFieldLabel>
               <p className="text-sm tabular-nums text-foreground">
                 {account.customerId ? `${account.storeCount} 家` : "—"}
               </p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1" role="cell">
               <MobileFieldLabel>状态</MobileFieldLabel>
               <Badge className={accountStatusTone(account.status)} variant="secondary">
                 {accountStatusLabel(account.status)}
               </Badge>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1" role="cell">
               <MobileFieldLabel>最近登录</MobileFieldLabel>
               <p className="text-sm text-muted-foreground">{formatAccountDateTime(account.lastLoginAt)}</p>
             </div>
-            <div className="lg:justify-self-end">
+            <div className="lg:justify-self-end" role="cell">
               <AccountDetailTrigger account={account} />
             </div>
           </li>

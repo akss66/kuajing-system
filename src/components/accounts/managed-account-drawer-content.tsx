@@ -69,6 +69,7 @@ function PasswordResetForm({ account }: { account: ManagedAccountSummary }) {
       confirmLabel="重置密码"
       confirmTitle="确认重置这个账号的密码？"
       submitLabel="重置密码"
+      variant="outline"
     >
       <input name="userId" type="hidden" value={account.userId} />
       <label className="space-y-2 text-sm font-medium text-foreground">

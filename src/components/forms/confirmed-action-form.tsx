@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useActionState, useEffect, useId, useRef } from "react";
 
 import {
@@ -31,6 +31,7 @@ export function ConfirmedActionForm({
   confirmTitle,
   onErrorFocus,
   submitLabel,
+  variant = "destructive",
 }: {
   action: ManagedAction;
   children: ReactNode;
@@ -40,6 +41,7 @@ export function ConfirmedActionForm({
   confirmTitle: string;
   onErrorFocus?: () => void;
   submitLabel: string;
+  variant?: ComponentProps<typeof Button>["variant"];
 }) {
   const formId = `confirmed-action-${useId().replaceAll(":", "")}`;
   const [state, formAction, pending] = useActionState(
@@ -88,7 +90,7 @@ export function ConfirmedActionForm({
             className="min-h-11 px-4"
             disabled={pending}
             type="button"
-            variant="destructive"
+            variant={variant}
           >
             {pending ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" />
@@ -107,7 +109,7 @@ export function ConfirmedActionForm({
               className="min-h-11"
               form={formId}
               type="submit"
-              variant="destructive"
+              variant={variant}
             >
               {confirmLabel}
             </AlertDialogAction>
