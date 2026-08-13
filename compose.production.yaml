@@ -69,6 +69,8 @@ services:
       edge:
         aliases:
           - tongzhouxing-web
+    volumes:
+      - catalog_assets:/app/data/catalog-assets
 
   worker:
     <<: *app
@@ -79,6 +81,8 @@ services:
     healthcheck:
       disable: true
     mem_limit: 640m
+    volumes:
+      - catalog_assets:/app/data/catalog-assets
 
 networks:
   backend:
@@ -87,5 +91,7 @@ networks:
     name: dyflow_default
 
 volumes:
+  catalog_assets:
+    name: tongzhouxing_shop_catalog_assets
   postgres_data:
     name: tongzhouxing_shop_postgres_data

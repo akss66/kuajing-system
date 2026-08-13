@@ -24,7 +24,9 @@ ENV NODE_ENV=production \
     PORT=3000
 
 RUN addgroup --system --gid 1001 nodejs \
-    && adduser --system --uid 1001 nextjs
+    && adduser --system --uid 1001 nextjs \
+    && mkdir -p /app/data/catalog-assets \
+    && chown -R nextjs:nodejs /app/data
 
 COPY --from=build --chown=nextjs:nodejs /app /app
 
