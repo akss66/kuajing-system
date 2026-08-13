@@ -3,6 +3,8 @@ import { describe, expect, test, vi } from "vitest";
 import {
   assertAllowedE2ETestDatabaseName,
   describeDatabaseTarget,
+  isDerivedLocalE2ETestDatabaseUrl,
+  provisionDerivedE2ETestDatabase,
   resetE2EDatabaseToSeedState,
   resolveE2ETestDatabaseUrl,
 } from "../../e2e/support/test-database";
@@ -17,12 +19,42 @@ describe("resolveE2ETestDatabaseUrl", () => {
     expect(resolved).toBe("postgres://test-user:test-pass@127.0.0.1:5432/tongzhouxing_test");
   });
 
-  test("uses the explicit local default test database when TEST_DATABASE_URL is missing", () => {
+  test("derives an isolated local test database from the validated E2E port when TEST_DATABASE_URL is missing", () => {
     const resolved = resolveE2ETestDatabaseUrl({
       DATABASE_URL: "postgres://prod-user:prod-pass@db.example.com:5432/tongzhouxing",
+      E2E_PORT: "3101",
     });
 
-    expect(resolved).toBe("postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_test");
+    expect(resolved).toBe(
+      "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+    );
+  });
+
+  test("assigns different default databases to different worktree ports", () => {
+    expect(resolveE2ETestDatabaseUrl({ E2E_PORT: "3101" })).not.toBe(
+      resolveE2ETestDatabaseUrl({ E2E_PORT: "3107" }),
+    );
+  });
+
+  test("rejects an unsafe E2E port instead of interpolating it into a database name", () => {
+    expect(() =>
+      resolveE2ETestDatabaseUrl({ E2E_PORT: '3101_test; drop database "postgres"' }),
+    ).toThrowError(/E2E_PORT must be an integer between 1 and 65535/);
+  });
+
+  test("only classifies the exact derived local target as harness-provisioned", () => {
+    expect(
+      isDerivedLocalE2ETestDatabaseUrl(
+        "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+        "3101",
+      ),
+    ).toBe(true);
+    expect(
+      isDerivedLocalE2ETestDatabaseUrl(
+        "postgres://tongzhouxing:tongzhouxing@localhost:5432/tongzhouxing_e2e_3101_test",
+        "3101",
+      ),
+    ).toBe(false);
   });
 
   test("rejects a resolved database name that does not follow the strict test-db rule", () => {
@@ -57,6 +89,54 @@ describe("assertAllowedE2ETestDatabaseName", () => {
     expect(describeDatabaseTarget("postgres://alice:secret@127.0.0.1:5432/tongzhouxing_test?sslmode=disable")).toBe(
       "postgres://127.0.0.1:5432/tongzhouxing_test?sslmode=disable",
     );
+  });
+});
+
+describe("provisionDerivedE2ETestDatabase", () => {
+  test("creates a missing derived database and migrates it before Playwright starts", async () => {
+    const operations: string[] = [];
+    const provisioner = {
+      databaseExists: async (databaseName: string) => {
+        operations.push(`exists:${databaseName}`);
+        return false;
+      },
+      createDatabase: async (databaseName: string) => {
+        operations.push(`create:${databaseName}`);
+      },
+      migrateDatabase: async (connectionString: string) => {
+        operations.push(`migrate:${new URL(connectionString).pathname}`);
+      },
+    };
+
+    await provisionDerivedE2ETestDatabase({
+      connectionString:
+        "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+      provisioner,
+    });
+
+    expect(operations).toEqual([
+      "exists:tongzhouxing_e2e_3101_test",
+      "create:tongzhouxing_e2e_3101_test",
+      "migrate:/tongzhouxing_e2e_3101_test",
+    ]);
+  });
+
+  test("migrates an existing derived database without attempting to recreate it", async () => {
+    const createDatabase = vi.fn(async () => undefined);
+    const migrateDatabase = vi.fn(async () => undefined);
+
+    await provisionDerivedE2ETestDatabase({
+      connectionString:
+        "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+      provisioner: {
+        databaseExists: async () => true,
+        createDatabase,
+        migrateDatabase,
+      },
+    });
+
+    expect(createDatabase).not.toHaveBeenCalled();
+    expect(migrateDatabase).toHaveBeenCalledOnce();
   });
 });
 

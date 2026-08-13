@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
 
-export const DEFAULT_E2E_TEST_DATABASE_URL =
+export const LOCAL_E2E_DATABASE_URL =
   "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_test";
+export const DEFAULT_E2E_PORT = "3101";
 
 const E2E_RESET_TABLES = [
   "system_notifications",
@@ -48,6 +49,12 @@ type DatabaseExecutor = {
 
 type EnvironmentSource = Record<string, string | undefined>;
 
+export type DerivedE2EDatabaseProvisioner = {
+  createDatabase: (databaseName: string) => Promise<void>;
+  databaseExists: (databaseName: string) => Promise<boolean>;
+  migrateDatabase: (connectionString: string) => Promise<void>;
+};
+
 function parseDatabaseUrl(connectionString: string) {
   return new URL(connectionString);
 }
@@ -62,6 +69,27 @@ function extractDatabaseNameFromUrl(url: URL) {
   }
 
   return databaseName;
+}
+
+export function resolveE2EPort(rawPort: string | undefined) {
+  const normalized = rawPort?.trim() || DEFAULT_E2E_PORT;
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error("E2E_PORT must be an integer between 1 and 65535");
+  }
+
+  const port = Number(normalized);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("E2E_PORT must be an integer between 1 and 65535");
+  }
+
+  return normalized;
+}
+
+export function deriveLocalE2ETestDatabaseUrl(rawPort: string | undefined) {
+  const port = resolveE2EPort(rawPort);
+  const url = new URL(LOCAL_E2E_DATABASE_URL);
+  url.pathname = `/tongzhouxing_e2e_${port}_test`;
+  return url.toString();
 }
 
 export function isAllowedE2ETestDatabaseName(databaseName: string) {
@@ -89,17 +117,39 @@ export function assertAllowedE2ETestDatabaseName(connectionString: string, conte
 }
 
 export function resolveE2ETestDatabaseUrl(env: EnvironmentSource) {
-  const connectionString = env.TEST_DATABASE_URL?.trim() || DEFAULT_E2E_TEST_DATABASE_URL;
+  const connectionString =
+    env.TEST_DATABASE_URL?.trim() || deriveLocalE2ETestDatabaseUrl(env.E2E_PORT);
 
   assertAllowedE2ETestDatabaseName(connectionString, "Playwright E2E");
   return connectionString;
 }
 
+export function isDerivedLocalE2ETestDatabaseUrl(
+  connectionString: string,
+  rawPort: string | undefined,
+) {
+  return connectionString === deriveLocalE2ETestDatabaseUrl(rawPort);
+}
+
 export function configureE2ETestDatabaseEnvironment(env: EnvironmentSource = process.env) {
   const connectionString = resolveE2ETestDatabaseUrl(env);
   env.DATABASE_URL = connectionString;
-  env.TEST_DATABASE_URL ??= connectionString;
+  env.TEST_DATABASE_URL = connectionString;
   return connectionString;
+}
+
+export async function provisionDerivedE2ETestDatabase(input: {
+  connectionString: string;
+  provisioner: DerivedE2EDatabaseProvisioner;
+}) {
+  const databaseName = assertAllowedE2ETestDatabaseName(
+    input.connectionString,
+    "Playwright E2E provisioning",
+  );
+  if (!(await input.provisioner.databaseExists(databaseName))) {
+    await input.provisioner.createDatabase(databaseName);
+  }
+  await input.provisioner.migrateDatabase(input.connectionString);
 }
 
 export async function assertCurrentE2ETestDatabase(database: DatabaseExecutor, context: string) {

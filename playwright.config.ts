@@ -1,11 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
-import { configureE2ETestDatabaseEnvironment } from "./tests/e2e/support/test-database";
+import {
+  configureE2ETestDatabaseEnvironment,
+  isDerivedLocalE2ETestDatabaseUrl,
+  resolveE2EPort,
+} from "./tests/e2e/support/test-database";
 
-const e2ePortValue = process.env.E2E_PORT?.trim() || "3101";
+const callerProvidedTestDatabase = Boolean(process.env.TEST_DATABASE_URL?.trim());
+const e2ePortValue = resolveE2EPort(process.env.E2E_PORT);
 const e2ePort = Number(e2ePortValue);
-if (!/^\d+$/.test(e2ePortValue) || !Number.isInteger(e2ePort) || e2ePort < 1 || e2ePort > 65_535) {
-  throw new Error("E2E_PORT must be an integer between 1 and 65535");
-}
 
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 const e2eDatabaseUrl = configureE2ETestDatabaseEnvironment(process.env);
@@ -20,6 +22,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: "html",
+  workers: 1,
   use: {
     baseURL: e2eBaseUrl,
     trace: "on-first-retry",
@@ -37,11 +40,16 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run dev -- --port ${e2ePort}`,
+    command:
+      !callerProvidedTestDatabase &&
+      isDerivedLocalE2ETestDatabaseUrl(e2eDatabaseUrl, e2ePortValue)
+        ? `npm run test:e2e:server -- --port ${e2ePort}`
+        : `npm run dev -- --port ${e2ePort}`,
     env: {
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
       DATABASE_URL: e2eDatabaseUrl,
+      E2E_PORT: e2ePortValue,
       PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY,
       TEST_DATABASE_URL: e2eDatabaseUrl,
     },

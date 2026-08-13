@@ -30,21 +30,48 @@ describe("playwright.config isolation", () => {
 
     expect(config.use?.baseURL).toBe("http://127.0.0.1:3217");
     expect(webServer).toMatchObject({
-      command: "npm run dev -- --port 3217",
+      command: "npm run test:e2e:server -- --port 3217",
       reuseExistingServer: false,
       url: "http://127.0.0.1:3217",
     });
     expect(webServer?.env?.BETTER_AUTH_URL).toBe("http://127.0.0.1:3217");
+    expect(webServer?.env?.DATABASE_URL).toBe(
+      "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3217_test",
+    );
+    expect(webServer?.env?.E2E_PORT).toBe("3217");
   });
 
   test("uses the tracked isolated port when the caller does not provide one", async () => {
     vi.stubEnv("E2E_PORT", "");
+    vi.stubEnv("TEST_DATABASE_URL", "");
 
     const { default: config } = await importPlaywrightConfig();
     const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
 
     expect(config.use?.baseURL).toBe("http://127.0.0.1:3101");
     expect(webServer?.url).toBe("http://127.0.0.1:3101");
+    expect(process.env.TEST_DATABASE_URL).toBe(
+      "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+    );
+    expect(webServer?.env?.DATABASE_URL).toBe(
+      "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+    );
+    expect(webServer?.command).toBe("npm run test:e2e:server -- --port 3101");
+    expect(webServer?.env?.E2E_PORT).toBe("3101");
+    expect(config.workers).toBe(1);
+  });
+
+  test("does not ask the harness to provision an explicitly supplied test database", async () => {
+    vi.stubEnv("E2E_PORT", "3101");
+    vi.stubEnv(
+      "TEST_DATABASE_URL",
+      "postgres://test-user:test-pass@db.example.com:5432/reviewer_owned_test",
+    );
+
+    const { default: config } = await importPlaywrightConfig();
+
+    const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
+    expect(webServer?.command).toBe("npm run dev -- --port 3101");
   });
 
   test("rejects an invalid E2E_PORT before constructing the dev-server command", async () => {
