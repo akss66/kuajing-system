@@ -10,6 +10,65 @@ import {
   skus,
 } from "@/db/schema";
 
+async function expectConstraintFailure(
+  operation: Promise<unknown>,
+  input: { code: string; constraintName: string },
+) {
+  try {
+    await operation;
+  } catch (error) {
+    expect(error).toMatchObject({
+      cause: expect.objectContaining({
+        code: input.code,
+        constraint_name: input.constraintName,
+      }),
+    });
+    return;
+  }
+
+  throw new Error(`Expected constraint failure: ${input.constraintName}`);
+}
+
+async function insertMigrationRunUnchecked(input: {
+  createdByAdminUserId: string;
+  issuesJson: unknown;
+  normalizedRowsJson: unknown;
+  sourceDigest: string;
+  sourceRevision: number;
+  sourceSheetId: string;
+  sourceSpreadsheetHash: string;
+  status: string;
+  summaryJson: unknown;
+  temporaryAssetsJson: unknown;
+}) {
+  return db.execute(sql`
+    insert into feishu_cargo_migration_runs (
+      status,
+      source_spreadsheet_hash,
+      source_sheet_id,
+      source_revision,
+      source_digest,
+      summary_json,
+      normalized_rows_json,
+      issues_json,
+      temporary_assets_json,
+      created_by_admin_user_id
+    )
+    values (
+      ${input.status},
+      ${input.sourceSpreadsheetHash},
+      ${input.sourceSheetId},
+      ${input.sourceRevision},
+      ${input.sourceDigest},
+      ${JSON.stringify(input.summaryJson)}::jsonb,
+      ${JSON.stringify(input.normalizedRowsJson)}::jsonb,
+      ${JSON.stringify(input.issuesJson)}::jsonb,
+      ${JSON.stringify(input.temporaryAssetsJson)}::jsonb,
+      ${input.createdByAdminUserId}::uuid
+    )
+  `);
+}
+
 describe("Feishu cargo migration schema", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
@@ -36,7 +95,28 @@ describe("Feishu cargo migration schema", () => {
       .insert(feishuCargoMigrationRuns)
       .values({
         createdByAdminUserId: admin.id,
-        normalizedRowsJson: [],
+        issuesJson: [],
+        normalizedRowsJson: [
+          {
+            color: null,
+            combination: null,
+            defaultUnitPriceFen: 299,
+            imageContentSha256: "1".repeat(64),
+            imageTemporaryKey: "temp-assets/tzx-001.png",
+            inheritedFrom: { image: 1, productName: 1, weight: 1 },
+            linkText: "Cargo Product",
+            productGroupKey: "group-1",
+            productName: "Cargo Product",
+            productUrl: "https://example.test/products/tzx-001",
+            saleStatus: "SELLABLE",
+            skuCode: "TZX-001",
+            skuName: "Cargo SKU",
+            sourceRowNumber: 1,
+            specification: null,
+            totalQuantity: 148,
+            weightGrams: 1200,
+          },
+        ],
         sourceDigest: "a".repeat(64),
         sourceRevision: 12,
         sourceSheetId: "cargo-sheet",
@@ -48,6 +128,16 @@ describe("Feishu cargo migration schema", () => {
           skuCount: 74,
           totalQuantity: 148,
         },
+        temporaryAssetsJson: [
+          {
+            byteSize: 1024,
+            contentSha256: "2".repeat(64),
+            mimeType: "image/png",
+            originalFileName: "TZX-001.png",
+            skuCode: "TZX-001",
+            temporaryKey: "temp-assets/tzx-001.png",
+          },
+        ],
       })
       .returning();
 
@@ -85,7 +175,35 @@ describe("Feishu cargo migration schema", () => {
         confirmedByAdminUserId: admin.id,
         createdByAdminUserId: admin.id,
         importedAt: new Date("2026-08-13T08:00:00.000Z"),
-        normalizedRowsJson: [],
+        issuesJson: [
+          {
+            code: "WARN_DUPLICATE_IMAGE",
+            message: "duplicate image reused",
+            severity: "WARNING",
+            sourceRowNumber: 1,
+          },
+        ],
+        normalizedRowsJson: [
+          {
+            color: null,
+            combination: null,
+            defaultUnitPriceFen: 299,
+            imageContentSha256: "3".repeat(64),
+            imageTemporaryKey: "temp-assets/tzx-001-v2.png",
+            inheritedFrom: { image: 2 },
+            linkText: "Cargo Product",
+            productGroupKey: "group-1",
+            productName: "Cargo Product",
+            productUrl: "https://example.test/products/tzx-001",
+            saleStatus: "SELLABLE",
+            skuCode: "TZX-001",
+            skuName: "Cargo SKU",
+            sourceRowNumber: 2,
+            specification: "Standard",
+            totalQuantity: 10,
+            weightGrams: 1200,
+          },
+        ],
         sourceDigest: "d".repeat(64),
         sourceRevision: 13,
         sourceSheetId: "cargo-sheet",
@@ -97,6 +215,16 @@ describe("Feishu cargo migration schema", () => {
           skuCount: 1,
           totalQuantity: 10,
         },
+        temporaryAssetsJson: [
+          {
+            byteSize: 1024,
+            contentSha256: "4".repeat(64),
+            mimeType: "image/png",
+            originalFileName: "TZX-001-v2.png",
+            skuCode: "TZX-001",
+            temporaryKey: "temp-assets/tzx-001-v2.png",
+          },
+        ],
       })
       .returning();
 
@@ -105,11 +233,12 @@ describe("Feishu cargo migration schema", () => {
     expect(sku.imageAssetId).toBe(asset.id);
     expect(sku.imageUrl).toBe("https://example.test/legacy-image.png");
 
-    await expect(
+    await expectConstraintFailure(
       db.insert(feishuCargoMigrationRuns).values({
         confirmedByAdminUserId: admin.id,
         createdByAdminUserId: admin.id,
         importedAt: new Date("2026-08-13T09:00:00.000Z"),
+        issuesJson: [],
         normalizedRowsJson: [],
         sourceDigest: "f".repeat(64),
         sourceRevision: 14,
@@ -122,12 +251,17 @@ describe("Feishu cargo migration schema", () => {
           skuCount: 2,
           totalQuantity: 20,
         },
+        temporaryAssetsJson: [],
       }),
-    ).rejects.toThrow();
+      {
+        code: "23505",
+        constraintName: "feishu_cargo_migration_runs_imported_once",
+      },
+    );
   });
 
-  test("rejects invalid sha256 digests and negative asset byte sizes", async () => {
-    await expect(
+  test("rejects invalid sha256 digests and negative asset byte sizes with named constraints", async () => {
+    await expectConstraintFailure(
       db.insert(catalogAssets).values({
         byteSize: 1024,
         contentSha256: "not-a-sha",
@@ -135,9 +269,13 @@ describe("Feishu cargo migration schema", () => {
         originalFileName: "bad-sha.png",
         storageKey: "sha256/bad/bad-sha.png",
       }),
-    ).rejects.toThrow();
+      {
+        code: "23514",
+        constraintName: "catalog_assets_content_sha256_format",
+      },
+    );
 
-    await expect(
+    await expectConstraintFailure(
       db.insert(catalogAssets).values({
         byteSize: -1,
         contentSha256: "9".repeat(64),
@@ -145,6 +283,142 @@ describe("Feishu cargo migration schema", () => {
         originalFileName: "negative-size.webp",
         storageKey: "sha256/99/negative-size.webp",
       }),
-    ).rejects.toThrow();
+      {
+        code: "23514",
+        constraintName: "catalog_assets_byte_size_non_negative",
+      },
+    );
+  });
+
+  test("rejects invalid migration json payloads with named constraints", async () => {
+    const [admin] = await db
+      .insert(adminUsers)
+      .values({
+        displayName: "JSON Constraint Admin",
+        loginIdentifier: "json-constraint-admin@test.local",
+      })
+      .returning();
+
+    const baseValues = {
+      createdByAdminUserId: admin.id,
+      sourceDigest: "a".repeat(64),
+      sourceRevision: 12,
+      sourceSheetId: "cargo-sheet",
+      sourceSpreadsheetHash: "b".repeat(64),
+      status: "PREFLIGHT_READY" as const,
+    };
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [],
+        normalizedRowsJson: [],
+        summaryJson: {
+          imageCount: 1,
+          productCount: 1,
+          skuCount: 1,
+          totalQuantity: -1,
+        },
+        temporaryAssetsJson: [],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_summary_json_valid",
+      },
+    );
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [],
+        normalizedRowsJson: [
+          {
+            color: null,
+            combination: null,
+            defaultUnitPriceFen: 299.5,
+            fileToken: "should-not-persist",
+            imageContentSha256: "1".repeat(64),
+            imageTemporaryKey: "temp-assets/tzx-001.png",
+            inheritedFrom: {},
+            linkText: "Cargo Product",
+            productGroupKey: "group-1",
+            productName: "Cargo Product",
+            productUrl: "https://example.test/products/tzx-001",
+            saleStatus: "PENDING",
+            skuCode: "TZX-001",
+            skuName: "Cargo SKU",
+            sourceRowNumber: 0,
+            specification: null,
+            totalQuantity: -1,
+            weightGrams: -2,
+          },
+        ],
+        summaryJson: {
+          imageCount: 1,
+          productCount: 1,
+          skuCount: 1,
+          totalQuantity: 1,
+        },
+        temporaryAssetsJson: [],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_normalized_rows_json_valid",
+      },
+    );
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [],
+        normalizedRowsJson: [],
+        summaryJson: {
+          imageCount: 1,
+          productCount: 1,
+          skuCount: 1,
+          totalQuantity: 1,
+        },
+        temporaryAssetsJson: [
+          {
+            byteSize: -1,
+            contentSha256: "not-a-sha",
+            mimeType: "image/gif",
+            originalFileName: "bad.gif",
+            skuCode: "TZX-001",
+            temporaryKey: "temp-assets/bad.gif",
+          },
+        ],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_temporary_assets_json_valid",
+      },
+    );
+
+    await expectConstraintFailure(
+      insertMigrationRunUnchecked({
+        ...baseValues,
+        issuesJson: [
+          {
+            code: "BAD",
+            message: "bad issue payload",
+            severity: "INFO",
+            sourceRowNumber: 0,
+          },
+        ],
+        normalizedRowsJson: [],
+        summaryJson: {
+          imageCount: 1,
+          productCount: 1,
+          skuCount: 1,
+          totalQuantity: 1,
+        },
+        temporaryAssetsJson: [],
+      }),
+      {
+        code: "23514",
+        constraintName: "feishu_cargo_migration_runs_issues_json_valid",
+      },
+    );
   });
 });

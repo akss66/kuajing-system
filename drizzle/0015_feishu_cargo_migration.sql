@@ -33,7 +33,47 @@ CREATE TABLE "feishu_cargo_migration_runs" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "feishu_cargo_migration_runs_source_spreadsheet_hash_format" CHECK ("feishu_cargo_migration_runs"."source_spreadsheet_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "feishu_cargo_migration_runs_source_digest_format" CHECK ("feishu_cargo_migration_runs"."source_digest" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "feishu_cargo_migration_runs_source_revision_non_negative" CHECK ("feishu_cargo_migration_runs"."source_revision" >= 0)
+	CONSTRAINT "feishu_cargo_migration_runs_source_revision_non_negative" CHECK ("feishu_cargo_migration_runs"."source_revision" >= 0),
+	CONSTRAINT "feishu_cargo_migration_runs_summary_json_valid" CHECK (jsonb_typeof("feishu_cargo_migration_runs"."summary_json") = 'object' and not jsonb_path_exists("feishu_cargo_migration_runs"."summary_json", '$ ? (
+  !exists(@.productCount) || @.productCount.type() != "number" || @.productCount < 0 || @.productCount.floor() != @.productCount || @.productCount > 9007199254740991 ||
+  !exists(@.skuCount) || @.skuCount.type() != "number" || @.skuCount < 0 || @.skuCount.floor() != @.skuCount || @.skuCount > 9007199254740991 ||
+  !exists(@.imageCount) || @.imageCount.type() != "number" || @.imageCount < 0 || @.imageCount.floor() != @.imageCount || @.imageCount > 9007199254740991 ||
+  !exists(@.totalQuantity) || @.totalQuantity.type() != "number" || @.totalQuantity < 0 || @.totalQuantity.floor() != @.totalQuantity || @.totalQuantity > 9007199254740991
+)'::jsonpath)),
+	CONSTRAINT "feishu_cargo_migration_runs_normalized_rows_json_valid" CHECK (jsonb_typeof("feishu_cargo_migration_runs"."normalized_rows_json") = 'array' and not jsonb_path_exists("feishu_cargo_migration_runs"."normalized_rows_json", '$[*] ? (
+  @.type() != "object" ||
+  !exists(@.sourceRowNumber) || @.sourceRowNumber.type() != "number" || @.sourceRowNumber < 1 || @.sourceRowNumber.floor() != @.sourceRowNumber || @.sourceRowNumber > 9007199254740991 ||
+  !exists(@.defaultUnitPriceFen) || @.defaultUnitPriceFen.type() != "number" || @.defaultUnitPriceFen < 0 || @.defaultUnitPriceFen.floor() != @.defaultUnitPriceFen || @.defaultUnitPriceFen > 9007199254740991 ||
+  !exists(@.totalQuantity) || @.totalQuantity.type() != "number" || @.totalQuantity < 0 || @.totalQuantity.floor() != @.totalQuantity || @.totalQuantity > 9007199254740991 ||
+  !exists(@.weightGrams) || !( @.weightGrams.type() == "null" || ( @.weightGrams.type() == "number" && @.weightGrams >= 0 && @.weightGrams.floor() == @.weightGrams && @.weightGrams <= 9007199254740991 ) ) ||
+  !exists(@.saleStatus) ||
+  !(@.saleStatus == "SELLABLE" || @.saleStatus == "NOT_SELLABLE") ||
+  exists(@.fileToken)
+)'::jsonpath)),
+	CONSTRAINT "feishu_cargo_migration_runs_temporary_assets_json_valid" CHECK (jsonb_typeof("feishu_cargo_migration_runs"."temporary_assets_json") = 'array' and not jsonb_path_exists("feishu_cargo_migration_runs"."temporary_assets_json", '$[*] ? (
+  @.type() != "object" ||
+  !exists(@.byteSize) || @.byteSize.type() != "number" || @.byteSize < 0 || @.byteSize.floor() != @.byteSize || @.byteSize > 9007199254740991 ||
+  !exists(@.mimeType) ||
+  !(
+    @.mimeType == "image/jpeg" ||
+    @.mimeType == "image/png" ||
+    @.mimeType == "image/webp"
+  ) ||
+  !exists(@.contentSha256) ||
+  @.contentSha256.type() != "string" ||
+  !(@.contentSha256 like_regex "^[0-9a-f]{64}$") ||
+  exists(@.fileToken)
+)'::jsonpath)),
+	CONSTRAINT "feishu_cargo_migration_runs_issues_json_valid" CHECK (jsonb_typeof("feishu_cargo_migration_runs"."issues_json") = 'array' and not jsonb_path_exists("feishu_cargo_migration_runs"."issues_json", '$[*] ? (
+  @.type() != "object" ||
+  !exists(@.severity) ||
+  !(
+    @.severity == "BLOCKING" ||
+    @.severity == "RETRYABLE" ||
+    @.severity == "WARNING"
+  ) ||
+  exists(@.sourceRowNumber) && !(@.sourceRowNumber.type() == "number" && @.sourceRowNumber >= 1 && @.sourceRowNumber.floor() == @.sourceRowNumber && @.sourceRowNumber <= 9007199254740991)
+)'::jsonpath))
 );
 --> statement-breakpoint
 ALTER TABLE "skus" ADD COLUMN "image_asset_id" uuid;--> statement-breakpoint
