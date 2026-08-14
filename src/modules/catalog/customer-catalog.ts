@@ -11,6 +11,8 @@ import {
 
 export type CustomerCatalogItem = {
   id: string;
+  productId: string;
+  sourceSequence: string | null;
   skuCode: string;
   productName: string;
   skuName: string;
@@ -83,11 +85,13 @@ export async function listCustomerCatalog(
       id: skus.id,
       imageUrl: skus.imageUrl,
       linkText: products.linkText,
+      productId: products.id,
       productName: products.name,
       productUrl: skus.productUrl,
       saleStatus: skus.saleStatus,
       skuCode: skus.skuCode,
       skuName: skus.name,
+      sourceSequence: products.sourceSequence,
       specification: skus.specification,
       weightGrams: skus.weightGrams,
     })
