@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  compareCatalogNaturally,
   filterCatalogGroups,
   filterCatalogGroupVariants,
   groupCatalogItems,
@@ -67,6 +68,41 @@ describe("groupCatalogItems", () => {
     ]);
   });
 
+  it("uses deterministic natural ordering for Chinese names, numeric sequences, and SKU ties", () => {
+    const groups = groupCatalogItems([
+      item({
+        id: "sku-b",
+        productId: "product-report",
+        productName: "报表商品 5C73AE3B",
+        skuCode: "TZX-10",
+        sourceSequence: "10",
+      }),
+      item({
+        id: "sku-a-2",
+        productId: "product-multi",
+        productName: "多店铺商品 64D135AB",
+        skuCode: "TZX-2",
+        sourceSequence: "2",
+      }),
+      item({
+        id: "sku-a-1",
+        productId: "product-multi",
+        productName: "多店铺商品 64D135AB",
+        skuCode: "TZX-2",
+        sourceSequence: "2",
+      }),
+    ]);
+
+    expect(groups.map((group) => group.productName)).toEqual([
+      "多店铺商品 64D135AB",
+      "报表商品 5C73AE3B",
+    ]);
+    expect(groups[0]!.variants.map((variant) => variant.id)).toEqual([
+      "sku-a-1",
+      "sku-a-2",
+    ]);
+  });
+
   it("preserves distinct sibling product links on variants", () => {
     const groups = groupCatalogItems([
       item({
@@ -86,6 +122,40 @@ describe("groupCatalogItems", () => {
       "https://example.com/products/first-variant",
       "https://example.com/products/second-variant",
     ]);
+  });
+});
+
+describe("compareCatalogNaturally", () => {
+  it("orders numeric tokens naturally without locale-specific collation", () => {
+    expect(compareCatalogNaturally("2", "10")).toBeLessThan(0);
+    expect(compareCatalogNaturally("TZX-2", "TZX-10")).toBeLessThan(0);
+    expect(compareCatalogNaturally("多店铺商品 64D135AB", "报表商品 5C73AE3B")).toBeLessThan(0);
+    expect(compareCatalogNaturally("same", "same")).toBe(0);
+  });
+
+  it("does not depend on ambient Intl.Collator availability at module load", async () => {
+    const originalCollator = Intl.Collator;
+    vi.resetModules();
+
+    Intl.Collator = class {
+      constructor() {
+        throw new Error("ambient collator should not be used");
+      }
+    } as unknown as typeof Intl.Collator;
+
+    try {
+      const freshProductGroups = await import("@/modules/catalog/product-groups");
+      expect(freshProductGroups.compareCatalogNaturally("TZX-2", "TZX-10")).toBeLessThan(0);
+      expect(
+        freshProductGroups.groupCatalogItems([
+          item({ productId: "product-report", productName: "报表商品 5C73AE3B", sourceSequence: "10" }),
+          item({ productId: "product-multi", productName: "多店铺商品 64D135AB", sourceSequence: "2" }),
+        ]).map((group) => group.productName),
+      ).toEqual(["多店铺商品 64D135AB", "报表商品 5C73AE3B"]);
+    } finally {
+      Intl.Collator = originalCollator;
+      vi.resetModules();
+    }
   });
 });
 

@@ -500,8 +500,7 @@ describe("catalog workspaces", () => {
     ).toEqual(["SKU", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
-    const firstCard = within(cards).getAllByRole("listitem")[0]!;
-    const firstVariant = within(firstCard).getByTestId("catalog-customer-sku-available");
+    const firstVariant = within(cards).getByTestId("catalog-customer-sku-available");
     expect(
       Array.from(firstVariant.querySelectorAll("[data-customer-catalog-section]")).map(
         (section) => section.getAttribute("data-customer-catalog-section"),

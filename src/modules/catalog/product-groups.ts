@@ -18,16 +18,87 @@ export type CatalogProductGroup<T extends CatalogGroupableItem> = {
 
 export type CatalogSaleStatusFilter = "ALL" | "SELLABLE" | "NOT_SELLABLE";
 
-const collator = new Intl.Collator(undefined, {
-  numeric: true,
-  sensitivity: "base",
-});
+function isAsciiDigit(character: string) {
+  return character >= "0" && character <= "9";
+}
+
+function compareCodeUnits(left: string, right: string) {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function normalizeNumericToken(value: string) {
+  const normalized = value.replace(/^0+/, "");
+  return normalized === "" ? "0" : normalized;
+}
+
+function compareNumericTokens(left: string, right: string) {
+  const normalizedLeft = normalizeNumericToken(left);
+  const normalizedRight = normalizeNumericToken(right);
+
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length - normalizedRight.length;
+  }
+
+  const normalizedComparison = compareCodeUnits(normalizedLeft, normalizedRight);
+  if (normalizedComparison !== 0) {
+    return normalizedComparison;
+  }
+
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+
+  return compareCodeUnits(left, right);
+}
+
+export function compareCatalogNaturally(left: string, right: string) {
+  if (left === right) return 0;
+
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftCharacter = left[leftIndex]!;
+    const rightCharacter = right[rightIndex]!;
+    const leftIsDigit = isAsciiDigit(leftCharacter);
+    const rightIsDigit = isAsciiDigit(rightCharacter);
+
+    if (leftIsDigit && rightIsDigit) {
+      const leftStart = leftIndex;
+      const rightStart = rightIndex;
+
+      while (leftIndex < left.length && isAsciiDigit(left[leftIndex]!)) leftIndex += 1;
+      while (rightIndex < right.length && isAsciiDigit(right[rightIndex]!)) rightIndex += 1;
+
+      const numericComparison = compareNumericTokens(
+        left.slice(leftStart, leftIndex),
+        right.slice(rightStart, rightIndex),
+      );
+      if (numericComparison !== 0) {
+        return numericComparison;
+      }
+      continue;
+    }
+
+    if (leftCharacter !== rightCharacter) {
+      return compareCodeUnits(leftCharacter, rightCharacter);
+    }
+
+    leftIndex += 1;
+    rightIndex += 1;
+  }
+
+  if (leftIndex < left.length) return 1;
+  if (rightIndex < right.length) return -1;
+  return 0;
+}
 
 function compareGroups<T extends CatalogGroupableItem>(
   left: CatalogProductGroup<T>,
   right: CatalogProductGroup<T>,
 ) {
-  const sourceSequence = collator.compare(
+  const sourceSequence = compareCatalogNaturally(
     left.sourceSequence ?? "",
     right.sourceSequence ?? "",
   );
@@ -35,12 +106,12 @@ function compareGroups<T extends CatalogGroupableItem>(
     return sourceSequence;
   }
 
-  const productName = collator.compare(left.productName, right.productName);
+  const productName = compareCatalogNaturally(left.productName, right.productName);
   if (productName !== 0) {
     return productName;
   }
 
-  return collator.compare(left.productId, right.productId);
+  return compareCatalogNaturally(left.productId, right.productId);
 }
 
 export function groupCatalogItems<T extends CatalogGroupableItem>(
@@ -66,7 +137,14 @@ export function groupCatalogItems<T extends CatalogGroupableItem>(
 
   const groups = [...groupsByProductId.values()];
   for (const group of groups) {
-    group.variants.sort((left, right) => collator.compare(left.skuCode, right.skuCode));
+    group.variants.sort((left, right) => {
+      const skuCode = compareCatalogNaturally(left.skuCode, right.skuCode);
+      if (skuCode !== 0) {
+        return skuCode;
+      }
+
+      return compareCatalogNaturally(left.id, right.id);
+    });
   }
 
   return groups.sort(compareGroups);
