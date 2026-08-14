@@ -381,6 +381,24 @@ describe("Jifeng connection lifecycle", () => {
     });
   });
 
+  test("persists a production logistics identifier larger than a 32-bit integer", async () => {
+    const productionId = 7_451_320_609;
+    const admin = await createAdmin("bigint-logistics");
+
+    const { view } = await authorizeFixture(admin.authUserId, {
+      discovery: {
+        logistics: [logistics(productionId)],
+        warehouses: [warehouse("CA-OTTAWA")],
+      },
+    });
+
+    expect(view).toMatchObject({
+      logistics: { id: productionId, name: "Canada Post" },
+      status: "READY_DISABLED",
+      warehouse: { code: "CA-OTTAWA" },
+    });
+  });
+
   test("does not let resource selection manufacture authorization for a disconnected row", async () => {
     const admin = await createAdmin("selection-disconnected");
     await db.insert(jifengConnections).values({ connectionKey: "PRIMARY" });

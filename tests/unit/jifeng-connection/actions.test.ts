@@ -158,7 +158,10 @@ describe("Jifeng connection actions", () => {
 
   it.each([
     [{ logisticsId: "0", warehouseCode: "CA-1" }, "logisticsId"],
-    [{ logisticsId: "2147483648", warehouseCode: "CA-1" }, "logisticsId"],
+    [
+      { logisticsId: "9007199254740992", warehouseCode: "CA-1" },
+      "logisticsId",
+    ],
     [{ logisticsId: "7", warehouseCode: " " }, "warehouseCode"],
     [{ logisticsId: "7", warehouseCode: "x".repeat(129) }, "warehouseCode"],
   ])("rejects an invalid bounded resource identifier", async (entries, field) => {
@@ -206,6 +209,37 @@ describe("Jifeng connection actions", () => {
     expect(cacheMocks.revalidatePath).toHaveBeenCalledExactlyOnceWith(
       "/admin/system/integrations",
     );
+  });
+
+  it("accepts a production logistics identifier larger than a 32-bit integer", async () => {
+    const productionId = 7_451_320_609;
+    serviceMocks.discoverJifengResources.mockResolvedValueOnce({
+      logistics: [
+        { code: "ship-233", id: productionId, name: "ship-233" },
+      ],
+      warehouses: [
+        { code: "Ottawa", country: "CA", name: "Ottawa Warehouse" },
+      ],
+    });
+
+    const result = await selectJifengResourcesAction(
+      { status: "idle" },
+      form({
+        logisticsId: String(productionId),
+        warehouseCode: "Ottawa",
+      }),
+    );
+
+    expect(result.status).toBe("success");
+    expect(serviceMocks.selectJifengResources).toHaveBeenCalledWith({
+      actor,
+      logistics: { code: "ship-233", id: productionId, name: "ship-233" },
+      warehouse: {
+        code: "Ottawa",
+        country: "CA",
+        name: "Ottawa Warehouse",
+      },
+    });
   });
 
   it.each(["INVALID_RESPONSE", "NETWORK_ERROR", "TIMEOUT"])(

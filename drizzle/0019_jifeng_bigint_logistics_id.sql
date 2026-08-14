@@ -1,0 +1,1 @@
+ALTER TABLE "jifeng_connections" ALTER COLUMN "logistics_id" SET DATA TYPE bigint;

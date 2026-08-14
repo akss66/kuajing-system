@@ -44,7 +44,7 @@ const resourceSelectionSchema = z.object({
     .number({ error: "请选择物流渠道。" })
     .int("物流渠道标识无效。")
     .positive("请选择物流渠道。")
-    .max(2_147_483_647, "物流渠道标识无效。"),
+    .max(Number.MAX_SAFE_INTEGER, "物流渠道标识无效。"),
   warehouseCode: z
     .string({ error: "请选择仓库。" })
     .trim()
