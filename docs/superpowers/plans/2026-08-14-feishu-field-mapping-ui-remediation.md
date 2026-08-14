@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Persist the current Feishu cargo field structure in PostgreSQL and remediate the admin catalog, customer catalog, account management, and navigation UI without changing fulfillment, settlement, tenancy, inventory, or authorization semantics.
+**Goal:** Persist the current Feishu cargo field structure in PostgreSQL and remediate the admin catalog, customer catalog, account management, navigation, and inventory workspaces without changing fulfillment, settlement, tenancy, automatic shipment deduction, or authorization semantics.
 
-**Architecture:** Extend the product aggregate with nullable Feishu-owned metadata (`sourceSequence`, `linkText`, and `cargoUnitPriceMilliYuan`), then make the existing read-only preflight confirmation reconcile current Feishu-owned catalog metadata idempotently by SKU code and source sequence. Keep inventory balances authoritative in PostgreSQL for existing SKUs, initialize inventory only for genuinely new SKUs, remove the migration-to-target-write handoff, and expose separate admin and customer read models so internal cost/stock facts cannot leak into the portal. Preserve the incumbent merchant-center visual system while switching dense desktop views to semantic tables and narrow layouts to task-ordered cards.
+**Architecture:** Extend the product aggregate with nullable Feishu-owned metadata (`sourceSequence`, `linkText`, and `cargoUnitPriceMilliYuan`), then make the existing read-only preflight confirmation reconcile current Feishu-owned catalog metadata idempotently by SKU code and source sequence. Keep inventory balances authoritative in PostgreSQL for existing SKUs, initialize inventory only for genuinely new SKUs, remove the migration-to-target-write handoff, and expose separate admin and customer read models so internal cost/stock facts cannot leak into the portal. Extend inventory movements with structured reasons, query indexes, and real stocktake-batch references while preserving the existing row-locked balance/reservation invariant and automatic system-shipment path. Preserve the incumbent merchant-center visual system while switching dense desktop views to semantic tables and narrow layouts to task-ordered cards.
 
 **Tech Stack:** Next.js 16.3 App Router, React 19.2, TypeScript 6, Drizzle ORM 0.45, PostgreSQL, Tailwind CSS 4, Vitest, Testing Library, Playwright, axe-core.
 
@@ -13,7 +13,7 @@
 - The Feishu source Wiki and business spreadsheet are permanently read-only: never write cells, rows, formatting, worksheets, permissions, or images to the source.
 - `FEISHU_CARGO_WRITES_ENABLED` remains `false` in production, local E2E, and every remediation flow; confirmation must not enqueue or call any Feishu target writer.
 - This work may read Feishu into PostgreSQL and modify this application's UI only; it must not deploy or alter external systems.
-- Do not change Jifeng authorization/fulfillment state machines, order settlement, inventory reservation/deduction, customer isolation, permission, audit, or dangerous-action semantics.
+- Do not change Jifeng authorization/fulfillment state machines, order settlement, automatic system-shipment deduction, customer isolation, permission, audit, or dangerous-action semantics.
 - `cargoUnitPriceMilliYuan` is independent from SKU `defaultUnitPriceMilliYuan`; both use non-negative integer milli-yuan values and must never be collapsed.
 - `sourceSequence` is the long-lived Feishu sequence value. There are exactly 74 source-sequence groups and 140 SKU rows in the field-aligned acceptance fixture; one sequence may own multiple SKUs, including `TZX-034-1`, `TZX-034-2`, and `TZX-034-3`.
 - One SKU has at most one current image. Missing images preserve the SKU and business fields and render an explicit placeholder.
@@ -21,6 +21,11 @@
 - Manual sale status and order availability are separate facts. `SELLABLE` with zero available inventory is sold out; `NOT_SELLABLE` remains visible to customers but is not orderable.
 - The general customer catalog has no order-specific temporary-price context. It resolves active customer-specific price then default price; existing order submission continues to resolve temporary override, active customer price, then default price.
 - Customer UI never exposes source sequence, total inventory, default procurement-cost wording, or cargo unit price; it shows actual customer price and available inventory only.
+- Inventory has exactly two first-level views: `实时库存` and `库存流水`; batch paste and set-to-actual stocktake remain secondary actions.
+- Manual adjustments use a direction plus a positive integer quantity. Increase defaults to structured reason `补货入库`; decrease defaults to `线下发货/人工出库`, which means only offline/non-system fulfillment and must show a double-deduction warning.
+- Automatic system-order shipment remains `SHIPMENT + SYSTEM + ORDER_SHIPMENT`; manual offline shipment remains a distinct admin movement/source and may never masquerade as the automatic path.
+- Every new manual movement persists a structured reason code and optional remark. Decreases are rejected inside the existing locked transaction when the resulting total would be below active order reservations.
+- `设置为实际库存` is a low-frequency secondary stocktake mode. Changed counts reference a real stocktake batch; an unchanged count creates no movement and states that explicitly.
 - Global typography remains locally bundled `Geist Variable` + `Noto Sans SC Variable`; pages and business components must not set their own `font-family`.
 - Acceptance sizes are 1440×900, 1920×1080, 430×900, 390×844, and 360×800. No page-level horizontal overflow is allowed; mobile catalog and account tasks cannot depend on horizontal scrolling.
 - WCAG 2.2 AA is the target; axe serious/critical findings, console errors, page errors, and hydration errors must be zero on covered routes.
@@ -37,6 +42,10 @@
 - `src/components/catalog/*` own separate admin and customer presentations; neither reads the database.
 - `src/components/accounts/account-management-workspace.tsx` owns the semantic account table and mobile summary cards.
 - `src/components/layout/navigation-section.tsx` owns active-group hierarchy without changing routes or order.
+- `src/db/schema/inventory.ts` and migration `0021_inventory_movement_listing_and_stocktakes.sql` own structured inventory reasons, movement query indexes, and stocktake-batch references; migrations `0019` and `0020` remain byte-for-byte intact.
+- `src/modules/inventory/read-model.ts` owns paginated real-time inventory and movement projections, including typed source and allowlisted business references.
+- `src/modules/inventory/service.ts` and `actions.ts` own direction/quantity normalization, row-locked availability invariants, structured reasons, remarks, and secondary set-to-actual stocktakes.
+- `src/components/inventory/*` owns exactly two first-level views, row-scoped `+ / -` adjustment, live previews, filters, pagination, and responsive movement presentation.
 - Focused unit/integration tests prove behavior; Playwright specs own responsive, accessibility, overflow, console, hydration, and visual evidence.
 
 ---
@@ -574,15 +583,9 @@ npm.cmd run test:e2e -- tests/e2e/merchant-center-visual.spec.ts --update-snapsh
 
 Expected: all functional, axe, overflow, console, hydration, and screenshot assertions pass at the exact viewport matrix.
 
-- [ ] **Step 4: Run the bounded Impeccable visual inspection and detector pass**
+- [ ] **Step 4: Run the bounded Impeccable visual inspection**
 
-Capture desktop and mobile together, inspect once for overlap, hierarchy, wrapping, and status clarity, fix the complete defect batch in the owning earlier component (with its focused RED/GREEN test), then confirm with at most one more screenshot round. Run the required one-time detector only after UI is finished:
-
-```powershell
-node C:\Users\AKSSINA\.agents\skills\impeccable\scripts\detect.mjs --json src/components/catalog src/components/accounts/account-management-workspace.tsx src/components/layout/navigation-section.tsx src/components/ui/tabs.tsx
-```
-
-Expected: no unapproved detector findings; any narrow intentional exception is documented in the task report.
+Capture desktop and mobile together, inspect once for overlap, hierarchy, wrapping, and status clarity, fix the complete defect batch in the owning earlier component (with its focused RED/GREEN test), then confirm with at most one more screenshot round. Defer the required one-time detector until the inventory UI is also finished so the branch receives exactly one complete detector pass.
 
 - [ ] **Step 5: Commit deterministic E2E coverage and screenshots**
 
@@ -591,9 +594,211 @@ git add tests/e2e
 git commit -m "test: cover field-aligned catalog UI"
 ```
 
+### Task 8: Add structured inventory movement metadata and paginated read models
+
+**Files:**
+- Modify: `src/db/schema/inventory.ts`
+- Modify: `src/db/schema/index.ts`
+- Create: `drizzle/0021_inventory_movement_listing_and_stocktakes.sql`
+- Create: `drizzle/meta/0021_snapshot.json`
+- Modify: `drizzle/meta/_journal.json`
+- Create: `src/modules/inventory/read-model.ts`
+- Create: `tests/integration/schema/inventory-movement-listing.test.ts`
+- Create: `tests/integration/inventory/movement-query.test.ts`
+
+**Interfaces:**
+- Add nullable `inventory_movements.reason_code` backed by `inventory_movement_reason_code`. Values cover at least `RESTOCK_RECEIPT`, `OFFLINE_FULFILLMENT`, `CUSTOMER_RETURN`, `DAMAGED_WRITE_OFF`, `STOCKTAKE_CORRECTION`, `OTHER`, `SYSTEM_SHIPMENT`, `SHIPMENT_REVERSAL`, and `FEISHU_INITIAL_IMPORT`. Legacy rows may remain null when an honest code cannot be inferred; every new manual adjustment requires a code.
+- Add `inventory_stocktake_batches` with UUID id, administrator actor id, optional remark, and timestamp. Add nullable `inventory_movements.stocktake_batch_id` with a restrictive foreign key. A changed set-to-actual operation creates one batch and one linked movement; an unchanged count creates neither.
+- Add global time/keyset-supporting, movement-type/time, actor/time, and reason/time indexes without removing the existing SKU/time index.
+- `listInventorySnapshot(filters?)` returns product/SKU identity plus `totalQuantity`, `lockedQuantity`, and clamped `availableQuantity`.
+- `listInventoryMovements(filters)` accepts `skuCode`, `from`, `to`, `movementType`, typed `source`, `actorId`, `page`, and bounded `pageSize`; it returns total/page metadata and rows with before/delta/after, reason code/label, remark, operator label, typed source, time, and an allowlisted relation descriptor.
+- Read-model `source` values distinguish `SYSTEM_ORDER_SHIPMENT`, `ADMIN_OFFLINE_FULFILLMENT`, `ADMIN_ADJUSTMENT`, `STOCKTAKE`, `FEISHU_MIGRATION`, and `SYSTEM_REVERSAL`. Unknown legacy references render as plain unavailable metadata, never arbitrary links.
+
+- [ ] **Step 1: Write migration and read-model tests first**
+
+Assert migration order is `0019_jifeng_bigint_logistics_id` → `0020_feishu_field_mapping` → `0021_inventory_movement_listing_and_stocktakes`, with the 0019 and 0020 SQL/snapshots unchanged. Assert reason-code checks/FK/indexes, 20+ movement pagination, combined SKU/time/type/operator/source filters, deterministic descending order, human operator fallback, and typed relations for order shipment, replacement, Feishu migration, and stocktake batch.
+
+- [ ] **Step 2: Run focused tests and witness RED**
+
+```powershell
+npm.cmd run test:integration -- tests/integration/schema/inventory-movement-listing.test.ts tests/integration/inventory/movement-query.test.ts
+```
+
+Expected: the 0021 migration, structured reason column, stocktake batch relation, and paginated read model do not exist.
+
+- [ ] **Step 3: Implement the smallest schema migration and read model**
+
+Generate 0021 from the committed 0020 snapshot, then inspect SQL manually. Preserve `0019_jifeng_bigint_logistics_id.sql`, `0019_snapshot.json`, `0020_feishu_field_mapping.sql`, and `0020_snapshot.json` byte-for-byte. Backfill only unambiguous automatic rows (`SHIPMENT`/`ORDER_SHIPMENT`, reversal, and Feishu migration); do not guess legacy manual reasons from free text. Use parameterized Drizzle predicates, bounded page sizes, deterministic `(createdAt DESC, id DESC)` ordering, and allowlisted reference resolvers.
+
+- [ ] **Step 4: Run focused integration tests and migration integrity checks to witness GREEN**
+
+```powershell
+npm.cmd run test:integration -- tests/integration/schema/inventory-movement-listing.test.ts tests/integration/inventory/movement-query.test.ts
+git diff --exit-code main..HEAD -- drizzle/0019_jifeng_bigint_logistics_id.sql drizzle/meta/0019_snapshot.json
+git diff --exit-code ce04ff2..HEAD -- drizzle/0020_feishu_field_mapping.sql drizzle/meta/0020_snapshot.json
+```
+
+Expected: schema/read-model tests pass; both protected migration diffs are empty.
+
+- [ ] **Step 5: Inspect and commit the atomic change**
+
+```powershell
+git add src/db/schema/inventory.ts src/db/schema/index.ts drizzle/0021_inventory_movement_listing_and_stocktakes.sql drizzle/meta/0021_snapshot.json drizzle/meta/_journal.json src/modules/inventory/read-model.ts tests/integration/schema/inventory-movement-listing.test.ts tests/integration/inventory/movement-query.test.ts
+git commit -m "feat: add auditable inventory movement views"
+```
+
+### Task 9: Implement row-locked directional adjustments and secondary stocktakes
+
+**Files:**
+- Modify: `src/modules/inventory/types.ts`
+- Modify: `src/modules/inventory/service.ts`
+- Modify: `src/modules/inventory/actions.ts`
+- Modify: `src/modules/fulfillment/status-sync.ts`
+- Modify: `tests/integration/inventory/concurrency.test.ts`
+- Modify: `tests/integration/fulfillment/status-sync.test.ts`
+- Create: `tests/unit/inventory/actions.test.ts`
+
+**Interfaces:**
+- `adjustInventoryAction` accepts `skuId`, `direction: "INCREASE" | "DECREASE"`, positive integer `quantity`, structured `reasonCode`, and optional trimmed `remark`; it rejects reason/direction combinations that would encode automatic order shipment as a manual movement.
+- Direction defaults are stable product behavior: `INCREASE` → `RESTOCK_RECEIPT` (`补货入库`), `DECREASE` → `OFFLINE_FULFILLMENT` (`线下发货/人工出库`). Administrators may choose another allowlisted reason suitable for that direction.
+- `adjustTotalInventory` remains the transaction-level authority. It derives `delta`, locks the SKU balance, recomputes active reservations, rejects `afterQuantity < lockedQuantity`, persists reason code/label/remark, and writes the existing audit record atomically.
+- `setInventoryToActualCount` accepts a non-negative actual total plus `STOCKTAKE_CORRECTION`; a changed result creates and links one stocktake batch/movement/audit record in the same transaction. An unchanged result returns `NO_CHANGE` and creates no batch, movement, or audit log.
+- Remove inventory adjustment's Feishu outbox enqueue. Add only `reasonCode: SYSTEM_SHIPMENT` metadata to the existing automatic shipment movement insert; do not change the Jifeng/fulfillment transition, deduction amount, idempotency, or reference.
+
+- [ ] **Step 1: Write action, concurrency, stocktake, and automatic-source assertions first**
+
+Cover positive integer parsing; direction-specific defaults; optional notes; manual offline fulfillment stored as `MANUAL_DECREASE + ADMIN + OFFLINE_FULFILLMENT` with no order reference; locked-inventory rejection under concurrency; stocktake batch linkage/no-change behavior; zero Feishu outbox events; and automatic shipment remaining `SHIPMENT + SYSTEM + ORDER_SHIPMENT + SYSTEM_SHIPMENT` exactly once.
+
+- [ ] **Step 2: Run focused tests and witness RED**
+
+```powershell
+npm.cmd test -- tests/unit/inventory/actions.test.ts
+npm.cmd run test:integration -- tests/integration/inventory/concurrency.test.ts tests/integration/fulfillment/status-sync.test.ts
+```
+
+Expected: current action accepts a signed delta/free-text reason, does not persist structured metadata or stocktake batches, and inventory service still invokes the Feishu outbox helper.
+
+- [ ] **Step 3: Implement minimal typed commands without altering fulfillment semantics**
+
+Keep reason-code lists and Chinese labels in one shared typed module. Treat client defaults as convenience only: validate them again on the server. Continue using the existing transaction and `FOR UPDATE` ordering; no UI-only invariant may replace it. Ensure manual offline fulfillment cannot accept an order-shipment reference. Delete only the obsolete inventory-to-Feishu enqueue call, not unrelated fulfillment behavior.
+
+- [ ] **Step 4: Run focused and adjacent regressions to witness GREEN**
+
+```powershell
+npm.cmd test -- tests/unit/inventory/actions.test.ts
+npm.cmd run test:integration -- tests/integration/inventory/concurrency.test.ts tests/integration/fulfillment/status-sync.test.ts tests/integration/fulfillment/replacement.test.ts tests/integration/feishu/outbox.test.ts
+```
+
+Expected: manual and automatic paths are structurally distinct, concurrent decreases preserve locked inventory, stocktake metadata is atomic, and no inventory adjustment enqueues Feishu work.
+
+- [ ] **Step 5: Inspect and commit the atomic change**
+
+```powershell
+git add src/modules/inventory/types.ts src/modules/inventory/service.ts src/modules/inventory/actions.ts src/modules/fulfillment/status-sync.ts tests/unit/inventory/actions.test.ts tests/integration/inventory/concurrency.test.ts tests/integration/fulfillment/status-sync.test.ts
+git commit -m "feat: harden manual inventory adjustments"
+```
+
+### Task 10: Build the two-view inventory workspace and row adjustment flow
+
+**Files:**
+- Modify: `src/app/(admin)/admin/inventory/page.tsx`
+- Modify: `src/components/inventory/inventory-workspace.tsx`
+- Modify: `src/components/inventory/inventory-results.tsx`
+- Modify: `src/components/inventory/inventory-adjustment-drawer.tsx`
+- Create: `src/components/inventory/inventory-movements-view.tsx`
+- Create: `src/components/inventory/inventory-adjustment-preview.tsx`
+- Modify: `tests/unit/inventory/inventory-workspace.test.tsx`
+
+**Interfaces:**
+- The only first-level tabs/links are `实时库存` and `库存流水`; the old bottom-eight movement summary is removed. Batch paste, if retained, and `设置为实际库存` are secondary real-time-inventory actions, never tabs.
+- Each SKU row/card has one primary `+ / - 调整` control that opens a row-scoped drawer/dialog. The form starts with an increase/decrease segmented choice and a positive integer quantity, then applies the confirmed default reason and allows another direction-compatible structured reason plus optional remark.
+- The preview always shows before total, signed delta, after total, order locked, current available, and after available. Invalid decreases are announced inline and disabled before submit; the server remains authoritative.
+- Selecting `线下发货/人工出库` displays: “仅用于未经过本系统订单的线下发货或历史补录；系统订单确认发货后会自动扣减，请勿重复调整。”
+- The movement view provides SKU/time/type/operator/source filters, reset, pagination, and desktop semantic table columns for before/delta/after, reason/remark, operator, source, time, and relation. Mobile cards preserve the same facts without horizontal scrolling.
+
+- [ ] **Step 1: Write component assertions and witness RED**
+
+Assert exactly two first-level views; no “批量盘点” tab; per-row adjustment trigger; increase/decrease defaults; positive quantity; all six preview facts; locked-quantity inline error; offline-shipment warning; secondary set-to-actual mode; filter controls; pagination; automatic/manual shipment source labels; semantic desktop table; and 360/390-safe class/DOM order.
+
+```powershell
+npm.cmd test -- tests/unit/inventory/inventory-workspace.test.tsx
+```
+
+Expected: current workspace mixes sections, renders only eight movements, exposes signed delta/free-text reason, and has no row-scoped preview or full movement view.
+
+- [ ] **Step 2: Read the installed Next.js guidance before production UI edits**
+
+Read the repository-local Next 16 guides for server actions, forms, server/client components, caching/revalidation, and page conventions under `node_modules/next/dist/docs/`. Follow deprecations in the installed version rather than recalled APIs.
+
+- [ ] **Step 3: Implement the smallest complete two-view workflow**
+
+Load snapshot/movement DTOs in the server page and pass serializable props to client components. Reuse shared Tabs/Table/Drawer/Button/Input primitives and global Geist/Noto Sans SC typography. Keep the merchant-center token system, avoid raw colors/gradients/page fonts, make touch targets at least 44px, and use cards below the wide-table breakpoint. URL search parameters are the canonical movement filters/page so refresh and back/forward remain coherent.
+
+- [ ] **Step 4: Run unit and type checks to witness GREEN**
+
+```powershell
+npm.cmd test -- tests/unit/inventory/inventory-workspace.test.tsx tests/unit/ui/management-primitives.test.tsx
+npm.cmd run typecheck
+```
+
+Expected: all two-view, adjustment, warning, movement, responsive, and typing assertions pass without React console warnings.
+
+- [ ] **Step 5: Inspect and commit the atomic change**
+
+```powershell
+git add src/app/\(admin\)/admin/inventory/page.tsx src/components/inventory tests/unit/inventory/inventory-workspace.test.tsx
+git commit -m "feat: rebuild inventory workspace around movements"
+```
+
+### Task 11: Add inventory desktop/mobile, accessibility, overflow, and visual acceptance
+
+**Files:**
+- Create: `tests/e2e/inventory-movements.spec.ts`
+- Modify: `tests/e2e/admin-management.spec.ts`
+- Modify: `tests/e2e/ui-v2-responsive.spec.ts`
+- Modify: `tests/e2e/merchant-center-visual.spec.ts`
+- Modify: affected `tests/e2e/*-snapshots/*.png`
+
+**Interfaces:**
+- Acceptance data includes locked inventory, one automatic system-order shipment with order/replacement context, one manual offline fulfillment, one Feishu migration movement, one stocktake batch, a long SKU/name/reason note, and more than one movement page.
+- Width matrix remains 1440×900, 1920×1080, 430×900, 390×844, and 360×800. Every inventory run installs console/pageerror/hydration collectors before navigation.
+- Screenshots are deterministic and unmasked for both inventory views and the adjustment drawer.
+
+- [ ] **Step 1: Write E2E acceptance and witness RED**
+
+Cover two-tab navigation; per-row plus/minus flow; default reasons; live preview; locked-inventory rejection; offline-shipment warning; successful note persistence; automatic/manual source distinction; SKU/time/type/operator/source filters; pagination; all before/delta/after/relation facts; secondary stocktake; keyboard completion; axe serious/critical zero; console/page/hydration zero; and document overflow ≤1px at every width.
+
+```powershell
+npm.cmd run test:e2e -- tests/e2e/inventory-movements.spec.ts
+```
+
+Expected: current rendered inventory workspace fails the two-view, full-history, structured-adjustment, and responsive acceptance contract.
+
+- [ ] **Step 2: Make deterministic fixture/selector fixes only**
+
+Use role/name selectors, fixed timestamps, local assets, and typed references. Do not change production behavior in this task; any discovered product defect returns to Task 8-10 ownership with a focused RED/GREEN test.
+
+- [ ] **Step 3: Run functional/responsive E2E and update unmasked baselines once**
+
+```powershell
+npm.cmd run test:e2e -- tests/e2e/inventory-movements.spec.ts tests/e2e/admin-management.spec.ts tests/e2e/ui-v2-responsive.spec.ts
+npm.cmd run test:e2e -- tests/e2e/merchant-center-visual.spec.ts --update-snapshots
+```
+
+- [ ] **Step 4: Perform one bounded visual review and the one-time detector pass**
+
+Inspect desktop and 390/360 screenshots together for hierarchy, table/card parity, long-text wrapping, preview clarity, warning prominence, and overlap. Fix one consolidated defect batch in the owning component, rerun its focused RED/GREEN test, then capture at most one confirmation round. Extend the final detector target to `src/components/inventory`.
+
+- [ ] **Step 5: Commit E2E coverage and screenshots**
+
+```powershell
+git add tests/e2e
+git commit -m "test: cover inventory operations across viewports"
+```
+
 ## Final Whole-Branch Verification
 
-After all seven task reviews are clean, run a whole-branch review from `git merge-base main HEAD` through `HEAD`, address one consolidated fix wave, and perform one scoped re-review. Then run fresh, complete evidence commands:
+After all eleven task reviews are clean, run a whole-branch review from `git merge-base main HEAD` through `HEAD`, address one consolidated fix wave, and perform one scoped re-review. Then run fresh, complete evidence commands:
 
 ```powershell
 npm.cmd test
@@ -601,7 +806,8 @@ npm.cmd run test:integration -- --no-file-parallelism
 npm.cmd run typecheck
 npm.cmd run lint
 npm.cmd run build
-npm.cmd run test:e2e -- tests/e2e/feishu-cargo-migration.spec.ts tests/e2e/admin-management.spec.ts tests/e2e/customer-catalog.spec.ts tests/e2e/ui-v2-responsive.spec.ts tests/e2e/merchant-center-visual.spec.ts
+npm.cmd run test:e2e -- tests/e2e/feishu-cargo-migration.spec.ts tests/e2e/admin-management.spec.ts tests/e2e/customer-catalog.spec.ts tests/e2e/inventory-movements.spec.ts tests/e2e/ui-v2-responsive.spec.ts tests/e2e/merchant-center-visual.spec.ts
+node C:\Users\AKSSINA\.agents\skills\impeccable\scripts\detect.mjs --json src/components/catalog src/components/inventory src/components/accounts/account-management-workspace.tsx src/components/layout/navigation-section.tsx src/components/ui/tabs.tsx
 git diff --check main...HEAD
 git status --short
 ```
@@ -612,8 +818,8 @@ Record screenshot paths, test counts, command exit codes, console/axe/overflow e
 
 ## Self-Review
 
-- Spec coverage: the plan covers three new structured fields, 74 groups/140 SKUs, one-image-per-SKU, read-only idempotent backfill, independent status/inventory facts, admin catalog, customer privacy, account semantics, sidebar hierarchy, desktop/mobile layouts, axe/overflow/console/hydration checks, and unmasked screenshots.
+- Spec coverage: the plan covers three new structured fields, 74 groups/140 SKUs, one-image-per-SKU, read-only idempotent backfill, independent status/inventory facts, admin catalog, customer privacy, account semantics, sidebar hierarchy, the two-view inventory workspace, structured directional adjustments, automatic/manual shipment separation, stocktake batches, complete movement history, desktop/mobile layouts, axe/overflow/console/hydration checks, and unmasked screenshots.
 - Placeholder scan: every code change has named files, concrete interfaces, RED/GREEN commands, expected failure causes, and commit boundaries.
 - Type consistency: `sourceSequence`, `linkText`, and `cargoUnitPriceMilliYuan` are product fields; `defaultUnitPriceMilliYuan` remains the SKU procurement/default price; customer items expose neither internal price.
-- Boundary consistency: existing inventory is preserved during metadata backfill, new SKU inventory is initialized once, and general catalog pricing does not invent an order-specific override scope.
+- Boundary consistency: existing inventory is preserved during metadata backfill, new SKU inventory is initialized once, general catalog pricing does not invent an order-specific override scope, manual offline fulfillment cannot impersonate the automatic order path, and the locked-total invariant stays transactional.
 - Execution selection: the delegation already requires subagent-driven development, so execution proceeds without another user-choice gate.
