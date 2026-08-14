@@ -40,6 +40,7 @@ const offlineLogisticsDataSchema = z.object({
   page: z.object({
     heads: z
       .array(z.object({ key: z.string(), value: z.string() }))
+      .nullable()
       .optional(),
     pageNo: z.coerce.number().int(),
     pageSize: z.coerce.number().int(),

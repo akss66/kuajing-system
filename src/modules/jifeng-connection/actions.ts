@@ -125,6 +125,13 @@ function businessErrorState(error: unknown): JifengActionState | null {
         message: "仓库或物流渠道尚未确认，请重新发现并明确选择。",
         status: "error",
       };
+    case "INVALID_RESPONSE":
+    case "NETWORK_ERROR":
+    case "TIMEOUT":
+      return {
+        message: "极风资源读取失败，请稍后重新发现；现有授权不会丢失。",
+        status: "error",
+      };
     case "DIAGNOSTIC_REQUIRED":
       return {
         message: "启用前必须先通过最新一次只读诊断。",
