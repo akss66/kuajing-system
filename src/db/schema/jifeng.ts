@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   check,
-  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -53,7 +53,7 @@ export const jifengConnections = pgTable(
     }),
     warehouseCode: varchar("warehouse_code", { length: 160 }),
     warehouseName: varchar("warehouse_name", { length: 240 }),
-    logisticsId: integer("logistics_id"),
+    logisticsId: bigint("logistics_id", { mode: "number" }),
     logisticsName: varchar("logistics_name", { length: 240 }),
     authorizedByAdminUserId: uuid("authorized_by_admin_user_id").references(
       () => adminUsers.id,
