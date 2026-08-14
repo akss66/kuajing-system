@@ -263,4 +263,43 @@ describe("inventory workspace", () => {
       expect.stringContaining("page=3"),
     );
   });
+
+  it("resets every uncontrolled movement filter when canonical URL props clear", () => {
+    const { rerender } = render(
+      <InventoryWorkspace
+        activeView="movements"
+        adjustInventoryAction={successfulAction}
+        movementFilters={{
+          actorId: "admin-1",
+          from: "2026-08-01",
+          movementType: "MANUAL_DECREASE",
+          skuCode: "TZX-LOW-001",
+          source: "ADMIN_OFFLINE_FULFILLMENT",
+          to: "2026-08-14",
+        }}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
+      />,
+    );
+
+    rerender(
+      <InventoryWorkspace
+        activeView="movements"
+        adjustInventoryAction={successfulAction}
+        movementFilters={{}}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
+      />,
+    );
+
+    const filters = screen.getByRole("search", { name: "筛选库存流水" });
+    expect(within(filters).getByLabelText("SKU")).toHaveValue("");
+    expect(within(filters).getByLabelText("开始时间")).toHaveValue("");
+    expect(within(filters).getByLabelText("结束时间")).toHaveValue("");
+    expect(within(filters).getByLabelText("流水类型")).toHaveValue("");
+    expect(within(filters).getByLabelText("操作人")).toHaveValue("");
+    expect(within(filters).getByLabelText("来源")).toHaveValue("");
+  });
 });

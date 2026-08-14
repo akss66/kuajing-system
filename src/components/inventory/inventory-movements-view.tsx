@@ -91,6 +91,7 @@ export function InventoryMovementsView({
       <form
         aria-label="筛选库存流水"
         className="grid gap-3 border-y border-border py-4 sm:grid-cols-2 xl:grid-cols-6"
+        key={movementHref(filters, 1)}
         method="get"
         role="search"
       >
