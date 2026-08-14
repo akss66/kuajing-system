@@ -27,6 +27,21 @@ export const inventoryMovementType = pgEnum("inventory_movement_type", [
   "REVERSAL",
 ]);
 
+export const inventoryMovementReasonCode = pgEnum(
+  "inventory_movement_reason_code",
+  [
+    "RESTOCK_RECEIPT",
+    "OFFLINE_FULFILLMENT",
+    "CUSTOMER_RETURN",
+    "DAMAGED_WRITE_OFF",
+    "STOCKTAKE_CORRECTION",
+    "OTHER",
+    "SYSTEM_SHIPMENT",
+    "SHIPMENT_REVERSAL",
+    "FEISHU_INITIAL_IMPORT",
+  ],
+);
+
 export const inventoryBalances = pgTable(
   "inventory_balances",
   {
@@ -85,6 +100,18 @@ export const inventoryReservations = pgTable(
   ],
 );
 
+export const inventoryStocktakeBatches = pgTable(
+  "inventory_stocktake_batches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    actorId: text("actor_id").notNull(),
+    remark: text("remark"),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+);
+
 export const inventoryMovements = pgTable(
   "inventory_movements",
   {
@@ -99,9 +126,14 @@ export const inventoryMovements = pgTable(
     actorType: actorType("actor_type").notNull(),
     actorId: text("actor_id"),
     reason: text("reason").notNull(),
+    reasonCode: inventoryMovementReasonCode("reason_code"),
     remark: text("remark"),
     referenceType: varchar("reference_type", { length: 60 }),
     referenceId: varchar("reference_id", { length: 160 }),
+    stocktakeBatchId: uuid("stocktake_batch_id").references(
+      () => inventoryStocktakeBatches.id,
+      { onDelete: "restrict" },
+    ),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -119,6 +151,25 @@ export const inventoryMovements = pgTable(
     index("inventory_movements_sku_created_index").on(
       table.skuId,
       table.createdAt,
+    ),
+    index("inventory_movements_created_id_index").on(
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("inventory_movements_type_created_id_index").on(
+      table.movementType,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("inventory_movements_actor_created_id_index").on(
+      table.actorId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("inventory_movements_reason_created_id_index").on(
+      table.reasonCode,
+      table.createdAt.desc(),
+      table.id.desc(),
     ),
   ],
 );

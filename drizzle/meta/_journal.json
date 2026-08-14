@@ -148,6 +148,13 @@
       "when": 1786699844510,
       "tag": "0020_feishu_field_mapping",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786713841234,
+      "tag": "0021_inventory_movement_listing_and_stocktakes",
+      "breakpoints": true
     }
   ]
 }
