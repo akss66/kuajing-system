@@ -509,6 +509,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     values,
   });
   const context = createEmptyContext();
+  const skuProductGroupBySourceSequence = new Map<string, string>();
 
   for (let offset = headerRowIndex + 1; offset < values.length; offset += 1) {
     const row = values[offset] ?? [];
@@ -559,6 +560,20 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         severity: "WARNING",
         sourceRowNumber,
       });
+    }
+    if (explicitSourceSequence && skuProductGroupKey) {
+      const existingGroup = skuProductGroupBySourceSequence.get(explicitSourceSequence);
+      if (existingGroup && existingGroup !== skuProductGroupKey) {
+        issues.push(
+          buildIssue({
+            code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
+            message: `序号 ${explicitSourceSequence} 已用于 SKU 商品编号 ${existingGroup}，不能再用于 SKU 商品编号 ${skuProductGroupKey}`,
+            sourceRowNumber,
+          }),
+        );
+        continue;
+      }
+      skuProductGroupBySourceSequence.set(explicitSourceSequence, skuProductGroupKey);
     }
 
     const previousProductGroupKey =

@@ -197,12 +197,17 @@ describe("parseLegacyCargoSheet", () => {
 
     const result = parseLegacyCargoSheet(values);
 
-    expect(result.rows.at(-1)?.productGroupKey).toBe("3");
-    expect(result.summary.productCount).toBe(3);
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-003");
     expect(result.issues).toContainEqual({
       code: "CARGO_SEQUENCE_SKU_MISMATCH",
       message: "序号 1 与 SKU 商品编号 3 不一致，迁移按 SKU 商品编号 3 分组",
       severity: "WARNING",
+      sourceRowNumber: 6,
+    });
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
+      message: "序号 1 已用于 SKU 商品编号 1，不能再用于 SKU 商品编号 3",
+      severity: "BLOCKING",
       sourceRowNumber: 6,
     });
   });

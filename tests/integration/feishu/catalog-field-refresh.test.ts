@@ -20,8 +20,23 @@ import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field
 const sourceWikiToken = "read-only-wiki-token";
 const sourceSheetId = "read-only-sheet";
 
-function createReadOnlyClient(): CatalogFieldRefreshReadPort {
+function createConflictingSourceSequenceValues() {
   const values = buildFieldAlignedCargoSourceFixture().value;
+  const sequenceIndex = values[0].indexOf("序号");
+  const skuIndex = values[0].indexOf("SKU");
+  const conflictingRow = values.find(
+    (row, index) => index > 0 && row[skuIndex] === "TZX-034-3",
+  );
+  if (sequenceIndex === -1 || skuIndex === -1 || !conflictingRow) {
+    throw new Error("FIELD_ALIGNED_CONFLICT_FIXTURE_SETUP_FAILED");
+  }
+  conflictingRow[sequenceIndex] = "74";
+  return values;
+}
+
+function createReadOnlyClient(
+  values: unknown[][] = buildFieldAlignedCargoSourceFixture().value,
+): CatalogFieldRefreshReadPort {
   return {
     async listSheets() {
       return [{ index: 0, sheetId: sourceSheetId, title: "Read-only catalog" }];
@@ -138,5 +153,15 @@ describe("catalog field refresh", () => {
       products: await db.select().from(products).orderBy(asc(products.id)),
       skus: await db.select().from(skus).orderBy(asc(skus.id)),
     }).toEqual(beforeCatalogFacts);
+  });
+
+  test("blocks preview when one source sequence points at multiple TZX product groups", async () => {
+    await seedCatalog();
+    const service = createCatalogFieldRefreshService();
+
+    await expect(service.preview({
+      client: createReadOnlyClient(createConflictingSourceSequenceValues()),
+      ...validInput,
+    })).rejects.toThrow("PARSER_BLOCKING_ISSUES");
   });
 });
