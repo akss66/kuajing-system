@@ -29,7 +29,7 @@
 ## File Structure
 
 - `src/db/schema/catalog.ts` owns the three product metadata columns and database checks.
-- `drizzle/0019_feishu_field_mapping.sql` plus Drizzle snapshot/journal files own the forward-only schema migration.
+- `drizzle/0020_feishu_field_mapping.sql` plus Drizzle snapshot/journal files own the forward-only schema migration.
 - `src/modules/feishu/cargo-types.ts` and `cargo-parser.ts` own the source-sequence/cargo-price normalized contract and inventory-independent manual status.
 - `src/modules/feishu/migration-service.ts` owns idempotent PostgreSQL reconciliation and must not enqueue target writes.
 - `src/modules/catalog/admin-catalog.ts` owns the admin-only query model, including total and available inventory.
@@ -45,7 +45,7 @@
 
 **Files:**
 - Modify: `src/db/schema/catalog.ts`
-- Create: `drizzle/0019_feishu_field_mapping.sql`
+- Create: `drizzle/0020_feishu_field_mapping.sql`
 - Create: `drizzle/meta/0019_snapshot.json`
 - Modify: `drizzle/meta/_journal.json`
 - Modify: `src/modules/feishu/cargo-types.ts`

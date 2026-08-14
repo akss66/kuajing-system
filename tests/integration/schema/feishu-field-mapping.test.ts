@@ -63,7 +63,8 @@ test("0019 persists independent Feishu fields and rejects a negative cargo price
     for (const migration of migrations) {
       await applyMigrationFile(sql, migration);
     }
-    await applyMigrationFile(sql, "0019_feishu_field_mapping.sql");
+    await applyMigrationFile(sql, "0019_jifeng_bigint_logistics_id.sql");
+    await applyMigrationFile(sql, "0020_feishu_field_mapping.sql");
 
     const [product] = await sql<{
       cargoUnitPriceMilliYuan: number;
