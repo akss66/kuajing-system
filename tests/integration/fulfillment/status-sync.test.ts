@@ -167,6 +167,7 @@ describe("Jifeng order status convergence", () => {
       beforeQuantity: 20,
       delta: -1,
       movementType: "SHIPMENT",
+      reasonCode: "SYSTEM_SHIPMENT",
       referenceId: fixture.shipments[0].id,
       referenceType: "ORDER_SHIPMENT",
     });
@@ -206,6 +207,9 @@ describe("Jifeng order status convergence", () => {
     expect(reservation).toMatchObject({ quantity: 2, status: "CONSUMED" });
     movements = await db.select().from(inventoryMovements);
     expect(movements).toHaveLength(2);
+    expect(movements.every((movement) => movement.reasonCode === "SYSTEM_SHIPMENT")).toBe(
+      true,
+    );
     const [updatedOrder] = await db
       .select()
       .from(fulfillmentOrders)

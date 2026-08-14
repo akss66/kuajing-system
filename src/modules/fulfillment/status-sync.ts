@@ -153,6 +153,7 @@ export async function applyJifengOrderStatus(input: {
           delta: -line.quantity,
           movementType: "SHIPMENT",
           reason: `极风已发货扣减，ERP 单号 ${input.detail.erpNo}`,
+          reasonCode: "SYSTEM_SHIPMENT",
           referenceId: current.shipmentId,
           referenceType: "ORDER_SHIPMENT",
           skuId: line.skuId,

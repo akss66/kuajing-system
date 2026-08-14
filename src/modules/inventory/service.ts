@@ -6,8 +6,8 @@ import {
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
+  inventoryStocktakeBatches,
 } from "@/db/schema";
-import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 
 import { getReservedQuantity } from "./queries";
 import type {
@@ -15,6 +15,12 @@ import type {
   InventoryMovement,
   InventoryReservation,
   ReserveInventoryInput,
+  SetInventoryToActualCountInput,
+  SetInventoryToActualCountResult,
+} from "./types";
+import {
+  inventoryReasonLabel,
+  isManualInventoryReasonCode,
 } from "./types";
 
 export class InventoryValidationError extends Error {
@@ -248,17 +254,28 @@ export async function adjustTotalInventory(
   tx: DbTransaction,
   input: AdjustTotalInventoryInput,
 ): Promise<InventoryMovement> {
-  if (!Number.isSafeInteger(input.delta) || input.delta === 0) {
-    throw new InventoryValidationError("Inventory delta must be a non-zero integer");
+  if (
+    input.actorType !== "ADMIN" ||
+    typeof input.actorId !== "string" ||
+    !input.actorId.trim()
+  ) {
+    throw new InventoryValidationError("Manual adjustment requires an administrator");
   }
-  const reason = input.reason.trim();
-  if (!reason) throw new InventoryValidationError("Adjustment reason is required");
+  assertPositiveQuantity(input.quantity);
+  if (!isManualInventoryReasonCode(input.direction, input.reasonCode)) {
+    throw new InventoryValidationError(
+      "Inventory reason is not allowed for this adjustment direction",
+    );
+  }
+  const delta = input.direction === "INCREASE" ? input.quantity : -input.quantity;
+  const reason = inventoryReasonLabel(input.reasonCode, input.direction);
+  const remark = normalizedRemark(input.remark);
 
   const balance = await lockInventoryBalance(tx, input.skuId);
   const reserved = await getReservedQuantity(tx, input.skuId);
-  const afterQuantity = balance.totalQuantity + input.delta;
+  const afterQuantity = balance.totalQuantity + delta;
 
-  if (afterQuantity < reserved) {
+  if (!Number.isSafeInteger(afterQuantity) || afterQuantity < reserved) {
     throw new InsufficientInventoryError(input.skuId);
   }
 
@@ -274,10 +291,11 @@ export async function adjustTotalInventory(
       actorType: input.actorType,
       afterQuantity,
       beforeQuantity: balance.totalQuantity,
-      delta: input.delta,
-      movementType: input.delta > 0 ? "MANUAL_INCREASE" : "MANUAL_DECREASE",
+      delta,
+      movementType: input.direction === "INCREASE" ? "MANUAL_INCREASE" : "MANUAL_DECREASE",
       reason,
-      remark: input.remark,
+      reasonCode: input.reasonCode,
+      remark,
       skuId: input.skuId,
     })
     .returning({
@@ -286,23 +304,131 @@ export async function adjustTotalInventory(
       delta: inventoryMovements.delta,
       id: inventoryMovements.id,
       movementType: inventoryMovements.movementType,
+      reasonCode: inventoryMovements.reasonCode,
+      remark: inventoryMovements.remark,
       skuId: inventoryMovements.skuId,
+      stocktakeBatchId: inventoryMovements.stocktakeBatchId,
     });
 
   await tx.insert(auditLogs).values({
     action: "INVENTORY_ADJUSTED",
     actorId: input.actorId,
     actorType: input.actorType,
-    afterJson: { totalQuantity: afterQuantity },
+    afterJson: {
+      delta,
+      reasonCode: input.reasonCode,
+      remark,
+      totalQuantity: afterQuantity,
+    },
     beforeJson: { totalQuantity: balance.totalQuantity },
     entityId: input.skuId,
     entityType: "SKU_INVENTORY",
     reason,
   });
-  await enqueueCargoSyncEvent(tx, {
-    idempotencyKey: `inventory-movement:${movement.id}`,
-    reason: "manual-inventory-adjustment",
-  });
 
   return movement;
+}
+
+function normalizedRemark(remark: string | null | undefined): string | null {
+  const normalized = remark?.trim();
+  if (!normalized) return null;
+  if (normalized.length > 1000) {
+    throw new InventoryValidationError("Inventory remark is too long");
+  }
+  return normalized;
+}
+
+export async function setInventoryToActualCount(
+  tx: DbTransaction,
+  input: SetInventoryToActualCountInput,
+): Promise<SetInventoryToActualCountResult> {
+  if (
+    input.actorType !== "ADMIN" ||
+    typeof input.actorId !== "string" ||
+    !input.actorId.trim()
+  ) {
+    throw new InventoryValidationError("Stocktake requires an administrator");
+  }
+  if (
+    !Number.isSafeInteger(input.actualTotalQuantity) ||
+    input.actualTotalQuantity < 0
+  ) {
+    throw new InventoryValidationError(
+      "Actual inventory total must be a non-negative integer",
+    );
+  }
+  if (input.reasonCode !== "STOCKTAKE_CORRECTION") {
+    throw new InventoryValidationError("Stocktake requires its structured reason");
+  }
+  const remark = normalizedRemark(input.remark);
+  const balance = await lockInventoryBalance(tx, input.skuId);
+  if (balance.totalQuantity === input.actualTotalQuantity) {
+    return { status: "NO_CHANGE", totalQuantity: balance.totalQuantity };
+  }
+  const reserved = await getReservedQuantity(tx, input.skuId);
+  if (input.actualTotalQuantity < reserved) {
+    throw new InsufficientInventoryError(input.skuId);
+  }
+
+  const reason = inventoryReasonLabel(input.reasonCode);
+  const delta = input.actualTotalQuantity - balance.totalQuantity;
+  const [batch] = await tx
+    .insert(inventoryStocktakeBatches)
+    .values({ actorId: input.actorId, remark })
+    .returning({ id: inventoryStocktakeBatches.id });
+
+  await tx
+    .update(inventoryBalances)
+    .set({ totalQuantity: input.actualTotalQuantity, updatedAt: new Date() })
+    .where(eq(inventoryBalances.skuId, input.skuId));
+
+  const [movement] = await tx
+    .insert(inventoryMovements)
+    .values({
+      actorId: input.actorId,
+      actorType: input.actorType,
+      afterQuantity: input.actualTotalQuantity,
+      beforeQuantity: balance.totalQuantity,
+      delta,
+      movementType: delta > 0 ? "MANUAL_INCREASE" : "MANUAL_DECREASE",
+      reason,
+      reasonCode: input.reasonCode,
+      remark,
+      skuId: input.skuId,
+      stocktakeBatchId: batch.id,
+    })
+    .returning({
+      afterQuantity: inventoryMovements.afterQuantity,
+      beforeQuantity: inventoryMovements.beforeQuantity,
+      delta: inventoryMovements.delta,
+      id: inventoryMovements.id,
+      movementType: inventoryMovements.movementType,
+      reasonCode: inventoryMovements.reasonCode,
+      remark: inventoryMovements.remark,
+      skuId: inventoryMovements.skuId,
+      stocktakeBatchId: inventoryMovements.stocktakeBatchId,
+    });
+
+  await tx.insert(auditLogs).values({
+    action: "INVENTORY_ADJUSTED",
+    actorId: input.actorId,
+    actorType: input.actorType,
+    afterJson: {
+      delta,
+      reasonCode: input.reasonCode,
+      remark,
+      stocktakeBatchId: batch.id,
+      totalQuantity: input.actualTotalQuantity,
+    },
+    beforeJson: { totalQuantity: balance.totalQuantity },
+    entityId: input.skuId,
+    entityType: "SKU_INVENTORY",
+    reason,
+  });
+
+  return {
+    movement,
+    status: "CHANGED",
+    stocktakeBatchId: batch.id,
+  };
 }
