@@ -7,6 +7,7 @@ import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { AdminCatalogItem } from "@/modules/catalog/admin-catalog";
 import type { ManagedAction } from "@/shared/action-state";
 
 import { AliasDrawer, CreateSkuDrawer, CustomerPriceDrawer } from "./catalog-mutation-drawers";
@@ -14,15 +15,7 @@ import { CatalogResults } from "./catalog-results";
 
 export { CustomerCatalogWorkspace } from "./customer-catalog-workspace";
 
-export type CatalogRow = {
-  id: string;
-  name: string;
-  price: number;
-  priceMilliYuan: number;
-  productName: string;
-  saleStatus: string;
-  skuCode: string;
-};
+export type CatalogRow = AdminCatalogItem;
 
 export type CatalogWorkspaceProps = {
   actions: {
@@ -41,8 +34,9 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
     const normalized = query.trim().toLocaleLowerCase("zh-CN");
     if (!normalized) return rows;
     return rows.filter((row) =>
-      [row.skuCode, row.productName, row.name]
-        .some((value) => value.toLocaleLowerCase("zh-CN").includes(normalized)),
+      [row.sourceSequence, row.productName, row.specification, row.skuCode].some(
+        (value) => value?.toLocaleLowerCase("zh-CN").includes(normalized),
+      ),
     );
   }, [query, rows]);
 
@@ -51,7 +45,7 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
       <PageHeading
         action={<CreateSkuDrawer action={actions.createSku} />}
         breadcrumbs={[{ href: "/admin", label: "管理工作台" }, { label: "商品与 SKU" }]}
-        description="搜索标准 SKU，按需维护统一拿货价、客户专属价和店铺 SKU 映射。"
+        description="按来源序号、商品、真实规格或 SKU 快速核对货盘，并维护客户价格和店铺映射。"
         title="商品与 SKU"
       />
       <section aria-label="商品与 SKU 搜索及操作" className="grid min-w-0 gap-3 border-y border-border py-4 lg:grid-cols-[minmax(18rem,1fr)_auto_auto]">
