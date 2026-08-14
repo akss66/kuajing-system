@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { eq } from "drizzle-orm";
 import sharp from "sharp";
 
 import { db } from "@/db/client";
@@ -27,6 +28,16 @@ const seededCustomer = {
   email: "customer@tongzhouxing.local",
   password: "TongZhouXing-Customer-2026!",
 };
+
+const LONG_SPECIFICATION =
+  "跨境仓配字段验收专用超长规格：适配加拿大冬季运输场景，包含加厚防潮内衬、可重复封装保护层、独立颜色标签与多件组合销售说明，用于验证桌面表格和移动卡片在真实长文本下仍能稳定换行且不侵入价格、库存与状态区域。";
+const APPROVED_VIEWPORTS = [
+  { height: 900, kind: "desktop", width: 1440 },
+  { height: 1080, kind: "desktop", width: 1920 },
+  { height: 900, kind: "mobile", width: 430 },
+  { height: 844, kind: "mobile", width: 390 },
+  { height: 800, kind: "mobile", width: 360 },
+] as const;
 
 function visibleCatalogItem(page: import("@playwright/test").Page, skuId: string) {
   return page.locator(`[data-testid="catalog-${skuId}"]:visible`);
@@ -56,7 +67,7 @@ async function createCatalogImage(seedValue: number) {
     skuCode: `CATALOG-${seedValue}`,
   });
   const storageKey = await commitCatalogAsset(manifest);
-  const [asset] = await db
+  const [insertedAsset] = await db
     .insert(catalogAssets)
     .values({
       byteSize: manifest.byteSize,
@@ -65,14 +76,26 @@ async function createCatalogImage(seedValue: number) {
       originalFileName: manifest.originalFileName,
       storageKey,
     })
+    .onConflictDoNothing()
     .returning({ id: catalogAssets.id });
-
-  return asset;
+  if (insertedAsset) return insertedAsset;
+  const [existingAsset] = await db
+    .select({ id: catalogAssets.id })
+    .from(catalogAssets)
+    .where(eq(catalogAssets.contentSha256, manifest.contentSha256))
+    .limit(1);
+  if (!existingAsset) throw new Error("Catalog asset upsert did not return a row");
+  return existingAsset;
 }
 
 async function seedCustomerCatalog() {
-  const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
-  const asset = await createCatalogImage(Number.parseInt(suffix, 16));
+  await resetE2EDatabaseToSeedState({
+    context: "field-aligned customer catalog E2E reset",
+    database: db,
+    reseed: seed,
+  });
+  const suffix = "FIELDALIGNED";
+  const asset = await createCatalogImage(34);
   const productName = `客户货盘测试商品 ${suffix}`;
   const [customerA, customerB] = await db
     .insert(customers)
@@ -83,33 +106,73 @@ async function seedCustomerCatalog() {
     .returning({ id: customers.id });
   const [product] = await db
     .insert(products)
-    .values({ name: productName })
+    .values({
+      cargoUnitPriceMilliYuan: 1366,
+      linkText: "查看商品详情",
+      name: productName,
+      sourceSequence: "34",
+    })
     .returning({ id: products.id });
-  const [availableSku, soldOutSku] = await db
+  const [availableSku, manualUnavailableSku, soldOutSku] = await db
     .insert(skus)
     .values([
       {
-        defaultUnitPriceFen: 690,
+        color: "深海青",
+        combination: "三件组合",
+        defaultUnitPriceFen: 33,
+        defaultUnitPriceMilliYuan: 325,
         imageAssetId: asset.id,
         imageUrl: `/api/catalog-assets/${asset.id}`,
-        name: "红色",
+        name: "SKU 名称不能冒充规格",
         productId: product.id,
-        skuCode: `TZX-A-${suffix}`,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "SELLABLE",
+        skuCode: "TZX-034-1",
+        specification: LONG_SPECIFICATION,
+        weightGrams: 325,
+      },
+      {
+        color: "红色",
+        combination: "单个",
+        defaultUnitPriceFen: 137,
+        defaultUnitPriceMilliYuan: 1366,
+        name: "人工不可售变体",
+        productId: product.id,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "NOT_SELLABLE",
+        skuCode: "TZX-034-2",
+        specification: "人工不可售但仍保留库存",
+        weightGrams: 100,
       },
       {
         defaultUnitPriceFen: 520,
+        defaultUnitPriceMilliYuan: 5200,
         name: "蓝色",
         productId: product.id,
-        skuCode: `TZX-B-${suffix}`,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "SELLABLE",
+        skuCode: "TZX-034-3",
+        specification: "可售状态但当前库存为零",
       },
     ])
     .returning({ id: skus.id, skuCode: skus.skuCode });
   await db.insert(customerSkuPrices).values([
-    { customerId: customerA.id, skuId: availableSku.id, unitPriceFen: 760 },
-    { customerId: customerB.id, skuId: availableSku.id, unitPriceFen: 620 },
+    {
+      customerId: customerA.id,
+      skuId: availableSku.id,
+      unitPriceFen: 760,
+      unitPriceMilliYuan: 7600,
+    },
+    {
+      customerId: customerB.id,
+      skuId: availableSku.id,
+      unitPriceFen: 620,
+      unitPriceMilliYuan: 6200,
+    },
   ]);
   await db.insert(inventoryBalances).values([
     { skuId: availableSku.id, totalQuantity: 10 },
+    { skuId: manualUnavailableSku.id, totalQuantity: 5 },
     { skuId: soldOutSku.id, totalQuantity: 4 },
   ]);
   await db.insert(inventoryReservations).values([
@@ -127,7 +190,40 @@ async function seedCustomerCatalog() {
     },
   ]);
   const user = await createManagedUser({ customerId: customerA.id, role: "user" });
-  return { availableSku, productName, soldOutSku, user };
+  return { availableSku, manualUnavailableSku, productName, soldOutSku, user };
+}
+
+function observeBrowserFailures(page: import("@playwright/test").Page) {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/hydration|hydrated|did not match|server rendered/i.test(text)) {
+      hydrationErrors.push(`${message.type()}: ${text}`);
+    }
+    if (message.type() === "error") consoleErrors.push(text);
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  return { consoleErrors, hydrationErrors, pageErrors };
+}
+
+async function expectNoOverlap(left: import("@playwright/test").Locator, right: import("@playwright/test").Locator, context: string) {
+  const leftBox = await left.boundingBox();
+  const rightBox = await right.boundingBox();
+  expect(leftBox, `${context} left bounding box`).not.toBeNull();
+  expect(rightBox, `${context} right bounding box`).not.toBeNull();
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(leftBox!.x + leftBox!.width, rightBox!.x + rightBox!.width) -
+      Math.max(leftBox!.x, rightBox!.x),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(leftBox!.y + leftBox!.height, rightBox!.y + rightBox!.height) -
+      Math.max(leftBox!.y, rightBox!.y),
+  );
+  expect(intersectionWidth * intersectionHeight, `${context} overlap area`).toBeLessThanOrEqual(1);
 }
 
 async function previewWorkbookBuffer() {
@@ -192,6 +288,7 @@ async function seedImportPreview() {
     .insert(skus)
     .values({
       defaultUnitPriceFen: 760,
+      defaultUnitPriceMilliYuan: 7600,
       name: "黑色",
       productId: product.id,
       skuCode: `PREVIEW-SKU-${suffix}`,
@@ -202,6 +299,7 @@ async function seedImportPreview() {
     customerId: customer.id,
     skuId: sku.id,
     unitPriceFen: 760,
+    unitPriceMilliYuan: 7600,
   });
   await db.insert(skuAliases).values({
     externalSku: "PREVIEW-SKU-1",
@@ -222,6 +320,7 @@ async function seedImportPreview() {
 }
 
 test("customer sees only its own price and real available inventory", async ({ page }, testInfo) => {
+  const failures = observeBrowserFailures(page);
   const fixture = await seedCustomerCatalog();
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/, { timeout: 15_000 });
@@ -230,7 +329,7 @@ test("customer sees only its own price and real available inventory", async ({ p
   const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
   const protectedImage = availableRow.locator("img").first();
   await expect(availableRow).toContainText("¥7.60");
-  await expect(availableRow).toContainText("可售 6");
+  await expect(availableRow.getByText("6", { exact: true })).toBeVisible();
   await expect(page.getByText("¥6.20")).toHaveCount(0);
 
   await expect(protectedImage).toBeVisible();
@@ -244,8 +343,19 @@ test("customer sees only its own price and real available inventory", async ({ p
     .poll(() => protectedImage.evaluate((element) => (element as HTMLImageElement).naturalWidth))
     .toBeGreaterThan(0);
 
+  const manualUnavailableRow = visibleCatalogItem(page, fixture.manualUnavailableSku.id);
+  await expect(manualUnavailableRow.getByText("5", { exact: true })).toBeVisible();
+  await expect(manualUnavailableRow).toContainText("不可售");
   const soldOutRow = visibleCatalogItem(page, fixture.soldOutSku.id);
-  await expect(soldOutRow).toContainText("不可售");
+  await expect(soldOutRow).toContainText("售罄");
+  await expect(availableRow).toContainText(LONG_SPECIFICATION);
+  for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
+    await expect(page.getByText(internalLabel, { exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole("link", { name: "查看商品详情" }).first()).toHaveAttribute(
+    "rel",
+    /noopener/,
+  );
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(
@@ -253,6 +363,9 @@ test("customer sees only its own price and real available inventory", async ({ p
       ["serious", "critical"].includes(item.impact ?? ""),
     ),
   ).toEqual([]);
+  expect(failures.consoleErrors).toEqual([]);
+  expect(failures.pageErrors).toEqual([]);
+  expect(failures.hydrationErrors).toEqual([]);
 
   await page.context().clearCookies();
   await resetE2EDatabaseToSeedState({
@@ -268,7 +381,8 @@ test("customer sees only its own price and real available inventory", async ({ p
     .filter({ hasText: "TZX-DEMO-001" });
   await expect(seededRow).toContainText("演示头绳");
   await expect(seededRow).toContainText("¥7.60");
-  await expect(seededRow).toContainText("可售 10");
+  await expect(seededRow.getByText("10", { exact: true })).toBeVisible();
+  await expect(seededRow).toContainText("可售");
   await page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
   );
@@ -278,32 +392,60 @@ test("customer sees only its own price and real available inventory", async ({ p
   });
 });
 
-test("customer catalog remains usable at approved mobile widths", async ({ page }) => {
+test("customer catalog passes the exact five-viewport field-aligned matrix @desktop-only", async ({ page }) => {
+  const failures = observeBrowserFailures(page);
   const fixture = await seedCustomerCatalog();
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/);
 
-  for (const width of [360, 390, 430]) {
-    await page.setViewportSize({ height: 844, width });
+  for (const viewport of APPROVED_VIEWPORTS) {
+    await page.setViewportSize({ height: viewport.height, width: viewport.width });
     await page.goto("/portal/catalog");
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
-    await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("不可售");
+    await expect(visibleCatalogItem(page, fixture.manualUnavailableSku.id)).toContainText("不可售");
+    await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("售罄");
     await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
-    await expect(page.locator("[data-customer-catalog-cards]")).toBeVisible();
-    await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();
+    if (viewport.kind === "desktop") {
+      const table = page.getByRole("table", { name: "客户货盘列表" });
+      await expect(table).toBeVisible();
+      await expect(page.locator("[data-customer-catalog-cards]")).not.toBeVisible();
+    } else {
+      await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+      await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();
+    }
 
     const searchInput = page.locator('input[name="q"]');
     await expect(searchInput).toBeVisible();
     const box = await searchInput.boundingBox();
     expect(box).not.toBeNull();
-    expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
+    expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
+
+    const availableItem = visibleCatalogItem(page, fixture.availableSku.id);
+    const specification = availableItem.locator("[title]").first();
+    const price = availableItem.getByText("¥7.60", { exact: true });
+    const inventory = availableItem.getByText("6", { exact: true });
+    const status = availableItem.getByText("可售", { exact: true });
+    await expectNoOverlap(specification, price, `${viewport.width}x${viewport.height} spec/price`);
+    await expectNoOverlap(specification, inventory, `${viewport.width}x${viewport.height} spec/inventory`);
+    await expectNoOverlap(specification, status, `${viewport.width}x${viewport.height} spec/status`);
+
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibility.violations.filter((item) =>
+        ["serious", "critical"].includes(item.impact ?? ""),
+      ),
+    ).toEqual([]);
   }
+
+  expect(failures.consoleErrors).toEqual([]);
+  expect(failures.pageErrors).toEqual([]);
+  expect(failures.hydrationErrors).toEqual([]);
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();
   await page.getByRole("menuitem", { name: "退出登录" }).click();

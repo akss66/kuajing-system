@@ -22,6 +22,60 @@ const seededSuperAdmin = {
   userId: "00000000-0000-4000-8000-00000000a001",
 };
 
+const LONG_EMAIL =
+  "field-aligned-account-with-a-deliberately-long-local-part-for-responsive-wrapping@operations.e2e.tongzhouxing.local";
+const APPROVED_VIEWPORTS = [
+  { height: 900, kind: "desktop", width: 1440 },
+  { height: 1080, kind: "desktop", width: 1920 },
+  { height: 900, kind: "mobile", width: 430 },
+  { height: 844, kind: "mobile", width: 390 },
+  { height: 800, kind: "mobile", width: 360 },
+] as const;
+
+function observeBrowserFailures(page: Page) {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/hydration|hydrated|did not match|server rendered/i.test(text)) {
+      hydrationErrors.push(`${message.type()}: ${text}`);
+    }
+    if (message.type() === "error") consoleErrors.push(text);
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  return { consoleErrors, hydrationErrors, pageErrors };
+}
+
+async function expectContained(inner: Locator, outer: Locator, context: string) {
+  const innerBox = await inner.boundingBox();
+  const outerBox = await outer.boundingBox();
+  expect(innerBox, `${context} inner box`).not.toBeNull();
+  expect(outerBox, `${context} outer box`).not.toBeNull();
+  expect(innerBox!.x, `${context} left edge`).toBeGreaterThanOrEqual(outerBox!.x - 1);
+  expect(innerBox!.x + innerBox!.width, `${context} right edge`).toBeLessThanOrEqual(
+    outerBox!.x + outerBox!.width + 1,
+  );
+}
+
+async function expectNoOverlap(left: Locator, right: Locator, context: string) {
+  const leftBox = await left.boundingBox();
+  const rightBox = await right.boundingBox();
+  expect(leftBox, `${context} left box`).not.toBeNull();
+  expect(rightBox, `${context} right box`).not.toBeNull();
+  const width = Math.max(
+    0,
+    Math.min(leftBox!.x + leftBox!.width, rightBox!.x + rightBox!.width) -
+      Math.max(leftBox!.x, rightBox!.x),
+  );
+  const height = Math.max(
+    0,
+    Math.min(leftBox!.y + leftBox!.height, rightBox!.y + rightBox!.height) -
+      Math.max(leftBox!.y, rightBox!.y),
+  );
+  expect(width * height, `${context} overlap area`).toBeLessThanOrEqual(1);
+}
+
 async function resetAdminManagementBaseline() {
   await resetE2EDatabaseToSeedState({
     context: "admin-management E2E reset",
@@ -156,6 +210,92 @@ async function confirmDialog(scope: Locator, page: Page, buttonName: string) {
 function loginErrorMessage(page: Page) {
   return page.locator("p[role='alert']").filter({ hasText: "邮箱或密码不正确" });
 }
+
+test("account table, cards, and navigation pass the exact five-viewport field-aligned matrix @desktop-only", async ({
+  page,
+}) => {
+  const failures = observeBrowserFailures(page);
+  await resetAdminManagementBaseline();
+  const longEmailAccount = await createManagedUser({ role: "admin" });
+  await db
+    .update(authUsers)
+    .set({ email: LONG_EMAIL, name: "字段对齐长邮箱管理员" })
+    .where(eq(authUsers.id, longEmailAccount.userId));
+
+  await loginThroughUi(page, seededSuperAdmin);
+  await expect(page).toHaveURL(/\/admin$/);
+
+  for (const viewport of APPROVED_VIEWPORTS) {
+    const context = `/admin/accounts ${viewport.width}x${viewport.height}`;
+    await page.setViewportSize({ height: viewport.height, width: viewport.width });
+    await page.goto("/admin/accounts");
+    await expect(page.getByRole("heading", { level: 1, name: "账号管理" })).toBeVisible();
+
+    if (viewport.kind === "desktop") {
+      const table = page.getByRole("table", { name: "账号列表" });
+      await expect(table).toBeVisible();
+      await expect(table.getByRole("columnheader")).toHaveText([
+        "姓名",
+        "邮箱",
+        "角色",
+        "所属客户",
+        "店铺数",
+        "状态",
+        "最近登录",
+        "操作",
+      ]);
+      const row = table.getByRole("row", { name: new RegExp(LONG_EMAIL) });
+      const emailCell = row.locator("[data-account-email]");
+      const emailText = emailCell.getByText(LONG_EMAIL);
+      const action = row.getByRole("button", { name: "查看 字段对齐长邮箱管理员" });
+      await expectContained(emailText, emailCell, `${context} long email`);
+      await expectNoOverlap(emailCell, action, `${context} email/action`);
+      const tabList = page.getByRole("tablist");
+      expect(
+        await tabList.evaluate((element) => element.scrollWidth - element.clientWidth),
+        `${context} desktop tabs overflow`,
+      ).toBeLessThanOrEqual(1);
+    } else {
+      const card = page
+        .getByRole("list", { name: "账号摘要卡片" })
+        .getByText(LONG_EMAIL)
+        .locator("xpath=ancestor::li[1]");
+      const emailText = card.getByText(LONG_EMAIL);
+      const action = card.getByRole("button", { name: "查看 字段对齐长邮箱管理员" });
+      await expectContained(emailText, card, `${context} long email card`);
+      await expectNoOverlap(emailText, action, `${context} mobile email/action`);
+      expect((await action.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
+    const currentGroup = page.locator(
+      '[data-navigation-section="admin-system"][data-current-group="true"]',
+    );
+    if (viewport.kind === "desktop") {
+      await expect(currentGroup).toHaveCount(1);
+      await expect(currentGroup.getByRole("link", { name: "账号管理" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+      `${context} document overflow`,
+    ).toBeLessThanOrEqual(1);
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibility.violations.filter((violation) =>
+        ["serious", "critical"].includes(violation.impact ?? ""),
+      ),
+      `${context} serious/critical axe violations`,
+    ).toEqual([]);
+  }
+
+  expect(failures.consoleErrors).toEqual([]);
+  expect(failures.pageErrors).toEqual([]);
+  expect(failures.hydrationErrors).toEqual([]);
+});
 
 test("super admin can govern admin accounts and ordinary admins are denied account governance", async ({
   page,

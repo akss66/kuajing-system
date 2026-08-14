@@ -66,20 +66,20 @@ const navigation = {
 } as const;
 
 function observeBrowserErrors(page: Page) {
-  const errors: string[] = [];
+  const consoleErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+  const pageErrors: string[] = [];
 
   page.on("console", (message) => {
     const text = message.text();
-    const hydrationWarning =
-      message.type() === "warning" &&
-      /hydration|hydrated|did not match|server rendered/i.test(text);
-    if (message.type() === "error" || hydrationWarning) {
-      errors.push(`${message.type()}: ${text}`);
+    if (/hydration|hydrated|did not match|server rendered/i.test(text)) {
+      hydrationErrors.push(`${message.type()}: ${text}`);
     }
+    if (message.type() === "error") consoleErrors.push(text);
   });
-  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("pageerror", (error) => pageErrors.push(error.message));
 
-  return errors;
+  return { consoleErrors, hydrationErrors, pageErrors };
 }
 
 async function waitForLayout(page: Page) {
@@ -268,6 +268,13 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     },
     {
       audience: "admin",
+      heading: "商品与 SKU",
+      keyTarget: { name: "搜索商品与 SKU", role: "searchbox" },
+      pageType: "resource-list",
+      path: "/admin/catalog",
+    },
+    {
+      audience: "admin",
       heading: "客户与店铺",
       keyTarget: { name: "新建客户", role: "button" },
       pageType: "resource-list",
@@ -298,7 +305,7 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     {
       audience: "customer",
       heading: "货盘选品",
-      keyTarget: { name: "搜索 SKU 或商品名称", role: "searchbox" },
+      keyTarget: { name: "搜索 SKU、商品、规格或链接文字", role: "searchbox" },
       pageType: "resource-list",
       path: "/portal/catalog",
     },
@@ -372,6 +379,41 @@ async function runApprovedViewportAcceptance(
           await expectNoPermanentRowForms(page, route);
           await expectNoPageOverflow(page, context);
 
+          const currentGroup = page.locator(
+            `[data-navigation-section][data-current-group="true"]`,
+          );
+          if (viewport.kind === "desktop") {
+            await expect(currentGroup).toHaveCount(1);
+            await expect(currentGroup.locator('[aria-current="page"]')).toHaveCount(1);
+          }
+
+          if (route.path === "/admin/catalog") {
+            if (viewport.kind === "desktop") {
+              await expect(page.getByRole("table", { name: "商品与 SKU 列表" })).toBeVisible();
+            } else {
+              await expect(page.getByRole("list", { name: "商品与 SKU 卡片列表" })).toBeVisible();
+            }
+          }
+          if (route.path === "/admin/accounts") {
+            if (viewport.kind === "desktop") {
+              await expect(page.getByRole("table", { name: "账号列表" })).toBeVisible();
+              const tabs = page.getByRole("tablist");
+              const tabOverflow = await tabs.evaluate(
+                (element) => element.scrollWidth - element.clientWidth,
+              );
+              expect(tabOverflow, `${context} desktop tab overflow`).toBeLessThanOrEqual(1);
+            } else {
+              await expect(page.getByRole("list", { name: "账号摘要卡片" })).toBeVisible();
+            }
+          }
+          if (route.path === "/portal/catalog") {
+            if (viewport.kind === "desktop") {
+              await expect(page.getByRole("table", { name: "客户货盘列表" })).toBeVisible();
+            } else {
+              await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+            }
+          }
+
           if (viewport.kind === "mobile") {
             const target = page.locator("main").getByRole(route.keyTarget.role, {
               exact: typeof route.keyTarget.name === "string",
@@ -386,7 +428,9 @@ async function runApprovedViewportAcceptance(
     }
   }
 
-  expect(browserErrors, "unexpected page, hydration or console errors").toEqual([]);
+  expect(browserErrors.consoleErrors, "unexpected console errors").toEqual([]);
+  expect(browserErrors.pageErrors, "unexpected page errors").toEqual([]);
+  expect(browserErrors.hydrationErrors, "unexpected hydration errors").toEqual([]);
 }
 
 test("both audiences and all five page types pass the approved desktop viewport acceptance matrix @desktop-only", async ({ page }) => {

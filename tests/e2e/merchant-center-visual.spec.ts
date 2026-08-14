@@ -1,10 +1,20 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
+import sharp from "sharp";
 
 import { seed } from "@/db/seed";
 import { db } from "@/db/client";
-import { customers } from "@/db/schema";
+import {
+  authUsers,
+  authSessions,
+  catalogAssets,
+  customers,
+  inventoryBalances,
+  products,
+  skus,
+} from "@/db/schema";
+import { commitCatalogAsset, stageCatalogAsset } from "@/modules/feishu/asset-storage";
 
 import { loginThroughUi } from "./support/managed-user";
 import { resetE2EDatabaseToSeedState } from "./support/test-database";
@@ -18,6 +28,18 @@ const seededCustomer = {
   email: "customer@tongzhouxing.local",
   password: "TongZhouXing-Customer-2026!",
 };
+
+const LONG_EMAIL =
+  "field-aligned-account-with-a-deliberately-long-local-part-for-responsive-wrapping@operations.e2e.tongzhouxing.local";
+const LONG_SPECIFICATION =
+  "跨境仓配字段验收专用超长规格：适配加拿大冬季运输场景，包含加厚防潮内衬、可重复封装保护层、独立颜色标签与多件组合销售说明，用于验证桌面表格和移动卡片在真实长文本下仍能稳定换行且不侵入价格、库存与状态区域。";
+const APPROVED_VIEWPORTS = [
+  { height: 900, width: 1440 },
+  { height: 1080, width: 1920 },
+  { height: 900, width: 430 },
+  { height: 844, width: 390 },
+  { height: 800, width: 360 },
+] as const;
 
 const workspaceRoutes = [
   {
@@ -73,7 +95,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "货盘选品",
-    expectedTexts: ["TZX-DEMO-001", "¥7.60", "可售 10"],
+    expectedTexts: ["TZX-DEMO-001", "¥7.60", "10", "可售"],
     path: "/portal/catalog",
     screenshot: "customer-catalog",
     shouldShowMetricStrip: false,
@@ -150,6 +172,149 @@ async function resetVisualBaseline() {
   });
 }
 
+async function waitForCatalogImages(page: import("@playwright/test").Page) {
+  await page.waitForLoadState("networkidle");
+}
+
+function observeBrowserFailures(page: import("@playwright/test").Page) {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/hydration|hydrated|did not match|server rendered/i.test(text)) {
+      hydrationErrors.push(`${message.type()}: ${text}`);
+    }
+    if (message.type() === "error") consoleErrors.push(text);
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  return { consoleErrors, hydrationErrors, pageErrors };
+}
+
+async function createFieldAlignedVisualAsset() {
+  const bytes = await sharp({
+    create: {
+      background: { alpha: 1, b: 146, g: 119, r: 41 },
+      channels: 4,
+      height: 48,
+      width: 48,
+    },
+  })
+    .png()
+    .toBuffer();
+  const manifest = await stageCatalogAsset({
+    bytes,
+    contentType: "image/png",
+    originalFileName: "field-aligned-catalog.png",
+    runId: `visual-${crypto.randomUUID()}`,
+    skuCode: "TZX-034-1",
+  });
+  const storageKey = await commitCatalogAsset(manifest);
+  const [insertedAsset] = await db
+    .insert(catalogAssets)
+    .values({
+      byteSize: manifest.byteSize,
+      contentSha256: manifest.contentSha256,
+      mimeType: manifest.mimeType,
+      originalFileName: manifest.originalFileName,
+      storageKey,
+    })
+    .onConflictDoNothing()
+    .returning({ id: catalogAssets.id });
+  if (insertedAsset) return insertedAsset;
+  const [existingAsset] = await db
+    .select({ id: catalogAssets.id })
+    .from(catalogAssets)
+    .where(eq(catalogAssets.contentSha256, manifest.contentSha256))
+    .limit(1);
+  if (!existingAsset) throw new Error("Visual catalog asset upsert did not return a row");
+  return existingAsset;
+}
+
+async function seedFieldAlignedVisualCatalog() {
+  const asset = await createFieldAlignedVisualAsset();
+  const [product] = await db
+    .insert(products)
+    .values({
+      cargoUnitPriceMilliYuan: 1366,
+      linkText: "查看商品详情",
+      name: "字段映射商品 34",
+      sourceSequence: "34",
+    })
+    .returning({ id: products.id });
+  const rows = await db
+    .insert(skus)
+    .values([
+      {
+        color: "深海青",
+        combination: "三件组合",
+        defaultUnitPriceFen: 33,
+        defaultUnitPriceMilliYuan: 325,
+        imageAssetId: asset.id,
+        imageUrl: `/api/catalog-assets/${asset.id}`,
+        name: "长规格变体",
+        productId: product.id,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "SELLABLE",
+        skuCode: "TZX-034-1",
+        specification: LONG_SPECIFICATION,
+        weightGrams: 325,
+      },
+      {
+        color: "红色",
+        combination: "单个",
+        defaultUnitPriceFen: 137,
+        defaultUnitPriceMilliYuan: 1366,
+        imageAssetId: asset.id,
+        imageUrl: `/api/catalog-assets/${asset.id}`,
+        name: "人工不可售变体",
+        productId: product.id,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "NOT_SELLABLE",
+        skuCode: "TZX-034-2",
+        specification: "人工不可售但仍有库存",
+        weightGrams: 100,
+      },
+      {
+        defaultUnitPriceFen: 520,
+        defaultUnitPriceMilliYuan: 5200,
+        imageAssetId: asset.id,
+        imageUrl: `/api/catalog-assets/${asset.id}`,
+        name: "售罄变体",
+        productId: product.id,
+        productUrl: "https://example.test/products/34",
+        saleStatus: "SELLABLE",
+        skuCode: "TZX-034-3",
+        specification: "可售状态但当前库存为零",
+      },
+    ])
+    .returning({ id: skus.id });
+  await db.insert(inventoryBalances).values([
+    { skuId: rows[0].id, totalQuantity: 8 },
+    { skuId: rows[1].id, totalQuantity: 5 },
+    { skuId: rows[2].id, totalQuantity: 0 },
+  ]);
+}
+
+async function expectVisualRouteQuality(
+  page: import("@playwright/test").Page,
+  context: string,
+) {
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ),
+    `${context} document overflow`,
+  ).toBeLessThanOrEqual(1);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((violation) =>
+      ["serious", "critical"].includes(violation.impact ?? ""),
+    ),
+    `${context} serious/critical axe violations`,
+  ).toEqual([]);
+}
+
 async function seededCustomerDetailRoute() {
   const [customer] = await db
     .select({ id: customers.id, name: customers.name })
@@ -167,6 +332,80 @@ async function seededCustomerDetailRoute() {
 }
 
 test.describe.configure({ mode: "serial" });
+
+test("field-aligned catalog and account screenshots cover the exact viewport matrix without masks @desktop-only", async ({
+  page,
+}) => {
+  const failures = observeBrowserFailures(page);
+  await resetVisualBaseline();
+  await loginThroughUi(page, seededSuperAdmin);
+  await expect(page).toHaveURL(/\/admin$/);
+  await db
+    .update(authUsers)
+    .set({ email: LONG_EMAIL })
+    .where(eq(authUsers.role, "super_admin"));
+  await db
+    .update(authSessions)
+    .set({ updatedAt: new Date("2026-08-14T00:37:00.000Z") });
+  await seedFieldAlignedVisualCatalog();
+
+  for (const viewport of APPROVED_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    await page.goto("/admin/catalog");
+    await waitForCatalogImages(page);
+    await expectAnyVisibleText(page, LONG_SPECIFICATION);
+    await expectAnyVisibleText(page, "¥0.325");
+    await expectAnyVisibleText(page, "¥1.366");
+    await expectVisualRouteQuality(
+      page,
+      `/admin/catalog ${viewport.width}x${viewport.height}`,
+    );
+    await waitForVisualStability(page);
+    await expect(page).toHaveScreenshot(
+      `admin-catalog-${viewport.width}x${viewport.height}.png`,
+      { animations: "disabled", fullPage: true },
+    );
+
+    await page.goto("/admin/accounts");
+    await expectAnyVisibleText(page, LONG_EMAIL);
+    await expectVisualRouteQuality(
+      page,
+      `/admin/accounts ${viewport.width}x${viewport.height}`,
+    );
+    await waitForVisualStability(page);
+    await expect(page).toHaveScreenshot(
+      `admin-accounts-${viewport.width}x${viewport.height}.png`,
+      { animations: "disabled", fullPage: true },
+    );
+  }
+
+  await page.context().clearCookies();
+  await resetVisualBaseline();
+  await loginThroughUi(page, seededCustomer);
+  await expect(page).toHaveURL(/\/portal$/);
+  await seedFieldAlignedVisualCatalog();
+  for (const viewport of APPROVED_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    await page.goto("/portal/catalog?q=TZX-034");
+    await waitForCatalogImages(page);
+    await expectAnyVisibleText(page, LONG_SPECIFICATION);
+    await expectAnyVisibleText(page, "不可售");
+    await expectAnyVisibleText(page, "售罄");
+    await expectVisualRouteQuality(
+      page,
+      `/portal/catalog ${viewport.width}x${viewport.height}`,
+    );
+    await waitForVisualStability(page);
+    await expect(page).toHaveScreenshot(
+      `customer-catalog-${viewport.width}x${viewport.height}.png`,
+      { animations: "disabled", fullPage: true },
+    );
+  }
+
+  expect(failures.consoleErrors).toEqual([]);
+  expect(failures.pageErrors).toEqual([]);
+  expect(failures.hydrationErrors).toEqual([]);
+});
 
 for (const route of workspaceRoutes) {
   test(`${route.audience} workspace route ${route.path} uses the shared merchant-center visual structure`, async ({

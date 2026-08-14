@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
 import { eq, sql } from "drizzle-orm";
 import sharp from "sharp";
 
-import cargoSourceValues from "@/../tests/fixtures/feishu/cargo-source-values.json" with { type: "json" };
+import { buildFieldAlignedCargoSourceFixture } from "@/../tests/fixtures/feishu/field-aligned-cargo-source";
 import { db } from "@/db/client";
 import { seed } from "@/db/seed";
 import {
@@ -15,12 +15,12 @@ import {
   authUsers,
   catalogAssets,
   feishuCargoMigrationRuns,
+  inventoryBalances,
   integrationOutbox,
   products,
   skus,
 } from "@/db/schema";
 import { FeishuClient } from "@/integrations/feishu/client";
-import { syncCargoSnapshot } from "@/modules/feishu/cargo-sync";
 import { createFeishuCargoMigrationService } from "@/modules/feishu/migration-service";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
@@ -32,6 +32,15 @@ const SOURCE_WIKI_TOKEN = "wiki-source-token";
 const SOURCE_SPREADSHEET_TOKEN = "source-spreadsheet-token";
 const TARGET_SPREADSHEET_TOKEN = "target-spreadsheet-token";
 const TARGET_SHEET_ID = "target-sheet-id";
+const LONG_SPECIFICATION =
+  "跨境仓配字段验收专用超长规格：适配加拿大冬季运输场景，包含加厚防潮内衬、可重复封装保护层、独立颜色标签与多件组合销售说明，用于验证桌面表格和移动卡片在真实长文本下仍能稳定换行且不侵入价格、库存与状态区域。";
+const APPROVED_VIEWPORTS = [
+  { height: 900, width: 1440 },
+  { height: 1080, width: 1920 },
+  { height: 900, width: 430 },
+  { height: 844, width: 390 },
+  { height: 800, width: 360 },
+] as const;
 
 const seededSuperAdmin = {
   email: "admin@tongzhouxing.local",
@@ -282,8 +291,29 @@ async function createImageBuffer(seedValue: number) {
 
 async function buildValidSourceDataset() {
   const downloads = new Map<string, DownloadRecord>();
-  const values = structuredClone(cargoSourceValues as unknown[][]);
+  const values = structuredClone(buildFieldAlignedCargoSourceFixture().value);
   const dataRows = values.slice(1);
+
+  for (const row of dataRows) {
+    if (row[1] === "TZX-034-1") {
+      row[6] = "8";
+      row[7] = "8";
+      row[9] = LONG_SPECIFICATION;
+      row[13] = "可售";
+    }
+    if (row[1] === "TZX-034-2") {
+      row[6] = "5";
+      row[7] = "5";
+      row[9] = "人工不可售但仍有库存";
+      row[13] = "不可售";
+    }
+    if (row[1] === "TZX-034-3") {
+      row[6] = "0";
+      row[7] = "0";
+      row[9] = "可售状态但库存为零";
+      row[13] = "可售";
+    }
+  }
 
   for (let index = 0; index < dataRows.length; index += 1) {
     const row = dataRows[index];
@@ -304,6 +334,44 @@ async function buildValidSourceDataset() {
   }
 
   return { downloads, values } satisfies FakeFeishuDataset;
+}
+
+function observeBrowserFailures(page: import("@playwright/test").Page) {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/hydration|hydrated|did not match|server rendered/i.test(text)) {
+      hydrationErrors.push(`${message.type()}: ${text}`);
+    }
+    if (message.type() === "error") consoleErrors.push(text);
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  return { consoleErrors, hydrationErrors, pageErrors };
+}
+
+async function expectCleanPage(
+  page: import("@playwright/test").Page,
+  failures: ReturnType<typeof observeBrowserFailures>,
+  context: string,
+) {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, `${context} document overflow`).toBeLessThanOrEqual(1);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((item) =>
+      ["serious", "critical"].includes(item.impact ?? ""),
+    ),
+    `${context} serious/critical axe violations`,
+  ).toEqual([]);
+  expect(failures.consoleErrors, `${context} console errors`).toEqual([]);
+  expect(failures.pageErrors, `${context} page errors`).toEqual([]);
+  expect(failures.hydrationErrors, `${context} hydration errors`).toEqual([]);
 }
 
 async function clearMigrationDomain() {
@@ -411,16 +479,13 @@ test.describe.serial("Feishu cargo migration", () => {
     }
   });
 
-  test("super admin preflights 74 SKU, confirms import, and syncs only the target sheet", async ({ page }, testInfo) => {
+  test("super admin confirms the 74-sequence/140-SKU read-only import with zero Feishu writes @desktop-only", async ({ page }) => {
+    const failures = observeBrowserFailures(page);
     await resetMigrationBaseline(assetDir);
     fakeServer = new FakeFeishuServer(await buildValidSourceDataset());
     await fakeServer.listen();
 
-    if (testInfo.project.name === "mobile-chromium") {
-      await page.setViewportSize({ width: 390, height: 844 });
-    } else {
-      await page.setViewportSize({ width: 1440, height: 900 });
-    }
+    await page.setViewportSize(APPROVED_VIEWPORTS[0]);
 
     await loginThroughUi(page, seededSuperAdmin);
     await expect(page).toHaveURL(/\/admin/);
@@ -463,15 +528,15 @@ test.describe.serial("Feishu cargo migration", () => {
     await page.reload();
     drawer = await openFeishuDrawer(page);
     await expect(
-      drawer.getByRole("button", { name: "确认迁移 74 个SKU" }),
+      drawer.getByRole("button", { name: "确认迁移 140 个SKU" }),
     ).toBeVisible();
-    await drawer.getByLabel("确认语句").fill("确认迁移74个SKU");
-    await drawer.getByRole("button", { name: "确认迁移 74 个SKU" }).click();
+    await drawer.getByLabel("确认语句").fill("确认迁移140个SKU");
+    await drawer.getByRole("button", { name: "确认迁移 140 个SKU" }).click();
     const confirmDialog = page.getByRole("alertdialog", {
-      name: "确认导入 74 个SKU",
+      name: "确认导入 140 个SKU",
     });
     await expect(confirmDialog).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "确认导入 74 个SKU" }).click();
+    await confirmDialog.getByRole("button", { name: "确认导入 140 个SKU" }).click();
     await expect
       .poll(async () => {
         const [run] = await db
@@ -492,49 +557,61 @@ test.describe.serial("Feishu cargo migration", () => {
     const [assetCountRow] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(catalogAssets);
-    expect(productCountRow?.count).toBe(72);
-    expect(skuCountRow?.count).toBe(74);
-    expect(assetCountRow?.count).toBe(74);
+    const [sourceSequenceCountRow] = await db
+      .select({ count: sql<number>`count(distinct ${products.sourceSequence})::int` })
+      .from(products);
+    expect(productCountRow?.count).toBe(74);
+    expect(sourceSequenceCountRow?.count).toBe(74);
+    expect(skuCountRow?.count).toBe(140);
+    expect(assetCountRow?.count).toBe(140);
 
-    await drawer.getByRole("button", { name: "重新同步目标测试表" }).click();
-    await expect(
-      drawer.getByText("目标测试表同步已加入队列，后台任务会继续重试。"),
-    ).toBeVisible();
-
-    const [queuedSyncEvent] = await db
+    const trio = await db
       .select({
-        payload: integrationOutbox.payload,
-        status: integrationOutbox.status,
+        cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+        defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
+        saleStatus: skus.saleStatus,
+        skuCode: skus.skuCode,
+        sourceSequence: products.sourceSequence,
+        specification: skus.specification,
+        totalQuantity: inventoryBalances.totalQuantity,
       })
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.eventType, "FEISHU_CARGO_SYNC"))
-      .orderBy(sql`${integrationOutbox.updatedAt} desc`)
-      .limit(1);
-    expect(queuedSyncEvent).toMatchObject({
-      payload: { reason: "administrator-manual-sync" },
-      status: expect.stringMatching(/^(PENDING|FAILED)$/),
+      .from(skus)
+      .innerJoin(products, eq(products.id, skus.productId))
+      .innerJoin(inventoryBalances, eq(inventoryBalances.skuId, skus.id))
+      .where(sql`${skus.skuCode} in ('TZX-034-1', 'TZX-034-2', 'TZX-034-3')`)
+      .orderBy(skus.skuCode);
+    expect(trio.map((row) => row.skuCode)).toEqual([
+      "TZX-034-1",
+      "TZX-034-2",
+      "TZX-034-3",
+    ]);
+    expect(new Set(trio.map((row) => row.sourceSequence))).toEqual(new Set(["34"]));
+    expect(trio[0]).toMatchObject({
+      cargoUnitPriceMilliYuan: 1366,
+      defaultUnitPriceMilliYuan: 325,
+      saleStatus: "SELLABLE",
+      specification: LONG_SPECIFICATION,
+      totalQuantity: 8,
     });
+    expect(trio[1]).toMatchObject({ saleStatus: "NOT_SELLABLE", totalQuantity: 5 });
+    expect(trio[2]).toMatchObject({ saleStatus: "SELLABLE", totalQuantity: 0 });
 
-    await syncCargoSnapshot({
-      client: new FeishuClient({
-        appId: "e2e-feishu-app-id",
-        appSecret: "e2e-feishu-app-secret",
-        baseUrl: FEISHU_BASE_URL,
-      }),
-      config: {
-        sourceSpreadsheetToken: SOURCE_SPREADSHEET_TOKEN,
-        targetSheetId: TARGET_SHEET_ID,
-        targetSpreadsheetToken: TARGET_SPREADSHEET_TOKEN,
-      },
-    });
-
+    expect(await db.select({ id: integrationOutbox.id }).from(integrationOutbox)).toEqual([]);
+    await expect(drawer.getByRole("button", { name: /同步目标测试表/ })).toHaveCount(0);
     expect(fakeServer.sourceWrites).toEqual([]);
-    expect(fakeServer.targetWrites.length).toBeGreaterThan(0);
-    expect(
-      fakeServer.targetWrites.every(
-        (write) => write.spreadsheetToken === TARGET_SPREADSHEET_TOKEN,
-      ),
-    ).toBe(true);
+    expect(fakeServer.targetWrites).toEqual([]);
+
+    for (const viewport of APPROVED_VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      drawer = await openFeishuDrawer(page);
+      await expect(drawer.getByText("飞书源货盘始终只读。", { exact: false })).toBeVisible();
+      await expectCleanPage(
+        page,
+        failures,
+        `/admin/system/integrations ${viewport.width}x${viewport.height}`,
+      );
+      await page.keyboard.press("Escape");
+    }
 
     await page.context().clearCookies();
     await loginThroughUi(page, seededCustomer);
@@ -552,12 +629,7 @@ test.describe.serial("Feishu cargo migration", () => {
       )
       .toBeGreaterThan(0);
 
-    const accessibility = await new AxeBuilder({ page }).analyze();
-    expect(
-      accessibility.violations.filter((item) =>
-        ["serious", "critical"].includes(item.impact ?? ""),
-      ),
-    ).toEqual([]);
+    await expectCleanPage(page, failures, "/portal/catalog imported SKU");
   });
 
   test("ordinary admin only gets the read-only status view at mobile widths", async ({ page }) => {
@@ -574,25 +646,19 @@ test.describe.serial("Feishu cargo migration", () => {
       await page.setViewportSize({ width, height: 844 });
       const drawer = await openFeishuDrawer(page);
       await expect(
-        drawer.getByText("原业务货盘受保护，系统不会写入。"),
+        drawer.getByText("飞书源货盘始终只读。", { exact: false }),
       ).toBeVisible();
       await expect(
         drawer.getByRole("button", { name: "验证只读连接" }),
       ).toBeVisible();
       await expect(
-        drawer.getByRole("button", { name: "重新同步目标测试表" }),
-      ).toBeVisible();
-      await expect(
         drawer.getByRole("button", { name: "验证只读连接" }),
-      ).toHaveJSProperty("disabled", false);
-      await expect(
-        drawer.getByRole("button", { name: "重新同步目标测试表" }),
       ).toHaveJSProperty("disabled", false);
       await expect(
         drawer.getByRole("button", { name: "开始只读预检" }),
       ).toHaveCount(0);
       await expect(
-        drawer.getByRole("button", { name: "确认迁移 74 个SKU" }),
+        drawer.getByRole("button", { name: "确认迁移 140 个SKU" }),
       ).toHaveCount(0);
       await expect(
         drawer.getByRole("combobox", { name: "源工作表" }),
@@ -605,15 +671,11 @@ test.describe.serial("Feishu cargo migration", () => {
       const readOnlyButtonBox = await drawer
         .getByRole("button", { name: "验证只读连接" })
         .boundingBox();
-      const rerunButtonBox = await drawer
-        .getByRole("button", { name: "重新同步目标测试表" })
-        .boundingBox();
       const detailsButtonBox = await drawer
         .getByRole("button", { name: "查看详情" })
         .first()
         .boundingBox();
       expect(readOnlyButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-      expect(rerunButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
       expect(detailsButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
       const overflow = await page.evaluate(
