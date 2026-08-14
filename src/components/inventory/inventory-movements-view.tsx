@@ -137,7 +137,18 @@ export function InventoryMovementsView({
       {movementPage.rows.length ? (
         <>
           <div className="hidden min-w-0 xl:block" data-inventory-movement-table>
-            <Table aria-label="库存流水列表">
+            <Table aria-label="库存流水列表" className="table-fixed">
+              <colgroup>
+                <col className="w-[12%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[21%]" />
+                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+                <col className="w-[12%]" />
+                <col className="w-[9%]" />
+              </colgroup>
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead><TableHead className="text-right">前值</TableHead><TableHead className="text-right">变动</TableHead><TableHead className="text-right">后值</TableHead><TableHead>原因与备注</TableHead><TableHead>操作人</TableHead><TableHead>来源</TableHead><TableHead>时间</TableHead><TableHead>关联单据</TableHead>
@@ -146,15 +157,15 @@ export function InventoryMovementsView({
               <TableBody>
                 {movementPage.rows.map((movement) => (
                   <TableRow key={movement.id}>
-                    <TableCell className="font-semibold tabular-nums">{movement.skuCode}</TableCell>
+                    <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"><span className="font-semibold tabular-nums">{movement.skuCode}</span></TableCell>
                     <TableCell className="text-right tabular-nums">{movement.beforeQuantity}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{movement.delta > 0 ? "+" : ""}{movement.delta}</TableCell>
                     <TableCell className="text-right tabular-nums">{movement.afterQuantity}</TableCell>
-                    <TableCell><p>{movement.reasonLabel}</p>{movement.remark ? <p className="mt-1 max-w-64 break-words text-xs text-muted-foreground">{movement.remark}</p> : null}</TableCell>
-                    <TableCell>{movement.operator.label}</TableCell>
-                    <TableCell>{sourceLabel(movement.source)}</TableCell>
+                    <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"><p>{movement.reasonLabel}</p>{movement.remark ? <p className="mt-1 text-xs text-muted-foreground">{movement.remark}</p> : null}</TableCell>
+                    <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{movement.operator.label}</TableCell>
+                    <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{sourceLabel(movement.source)}</TableCell>
                     <TableCell><time className="whitespace-nowrap tabular-nums" dateTime={movement.createdAt}>{timeFormatter.format(new Date(movement.createdAt))}</time></TableCell>
-                    <TableCell><Relation relation={movement.relation} /></TableCell>
+                    <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"><Relation relation={movement.relation} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -150,7 +150,14 @@ describe("inventory workspace", () => {
     );
 
     const table = screen.getByRole("table", { name: "实时库存列表" });
+    expect(table).toHaveClass("table-fixed");
+    expect(table.querySelectorAll("colgroup > col")).toHaveLength(9);
     const lowRow = within(table).getByRole("row", { name: /TZX-LOW-001/ });
+    expect(within(lowRow).getByText("低库存规格").closest("td")).toHaveClass(
+      "min-w-0",
+      "whitespace-normal",
+      "[overflow-wrap:anywhere]",
+    );
     fireEvent.click(within(lowRow).getByRole("button", { name: "+ / - 调整 TZX-LOW-001" }));
 
     const drawer = await screen.findByRole("dialog", { name: "TZX-LOW-001 调整库存" });
@@ -236,6 +243,8 @@ describe("inventory workspace", () => {
     );
 
     const table = screen.getByRole("table", { name: "库存流水列表" });
+    expect(table).toHaveClass("table-fixed");
+    expect(table.querySelectorAll("colgroup > col")).toHaveLength(9);
     for (const header of ["前值", "变动", "后值", "原因与备注", "操作人", "来源", "时间", "关联单据"]) {
       expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
     }
@@ -245,6 +254,13 @@ describe("inventory workspace", () => {
       "href",
       "/admin/orders/order-1",
     );
+    for (const content of ["系统发货扣减", "仓库管理员", "订单 · CA-10001"]) {
+      expect(within(table).getByText(content).closest("td")).toHaveClass(
+        "min-w-0",
+        "whitespace-normal",
+        "[overflow-wrap:anywhere]",
+      );
+    }
 
     const cards = screen.getByRole("list", { name: "库存流水列表" });
     expect(cards).toHaveTextContent(/前值3/);

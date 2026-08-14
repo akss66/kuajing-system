@@ -25,7 +25,18 @@ export function InventoryResults({
   return (
     <>
       <div className="hidden min-w-0 xl:block" data-inventory-table>
-        <Table aria-label="实时库存列表">
+        <Table aria-label="实时库存列表" className="table-fixed">
+          <colgroup>
+            <col className="w-[13%]" />
+            <col className="w-[23%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+            <col className="w-[10%]" />
+            <col className="w-[11%]" />
+          </colgroup>
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead><TableHead>名称</TableHead><TableHead className="text-right">总库存</TableHead><TableHead className="text-right">订单锁定</TableHead><TableHead className="text-right">可售库存</TableHead><TableHead className="text-right">7 日出库</TableHead><TableHead className="text-right">覆盖天数</TableHead><TableHead>库存预警</TableHead><TableHead className="text-right">操作</TableHead>
@@ -34,8 +45,8 @@ export function InventoryResults({
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.id}>
-                <TableCell className="font-semibold tabular-nums">{row.skuCode}</TableCell>
-                <TableCell><p className="max-w-64 break-words">{row.name}</p></TableCell>
+                <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"><span className="font-semibold tabular-nums">{row.skuCode}</span></TableCell>
+                <TableCell className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{row.name}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.total}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.locked}</TableCell>
                 <TableCell className="text-right font-semibold tabular-nums">{row.available}</TableCell>
