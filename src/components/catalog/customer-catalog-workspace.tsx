@@ -2,6 +2,7 @@
 
 import { ExternalLink, ImageIcon, Search } from "lucide-react";
 import Image from "next/image";
+import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
@@ -19,10 +20,14 @@ import {
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
 import {
   filterCatalogGroups,
+  filterCatalogGroupVariants,
   groupCatalogItems,
+  type CatalogSaleStatusFilter,
   type CatalogProductGroup,
 } from "@/modules/catalog/product-groups";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
+
+import { CatalogSaleStatusFilterControl } from "./catalog-sale-status-filter";
 
 function CatalogImage({ item }: { item: CustomerCatalogItem }) {
   if (item.imageUrl) {
@@ -322,7 +327,8 @@ export function CustomerCatalogWorkspace({
   items: CustomerCatalogItem[];
   query: string;
 }) {
-  const groups = filterCatalogGroups(
+  const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const searchedGroups = filterCatalogGroups(
     groupCatalogItems(items).map((group) => ({ ...group, sourceSequence: null })),
     query,
     (item) => [
@@ -336,7 +342,16 @@ export function CustomerCatalogWorkspace({
       item.productUrl,
     ],
   );
-  const skuCount = groups.reduce((count, group) => count + group.variants.length, 0);
+  const filteredGroups = useMemo(
+    () =>
+      filterCatalogGroupVariants(
+        searchedGroups,
+        saleStatus,
+        (variant) => variant.availabilityReason === "AVAILABLE",
+      ),
+    [saleStatus, searchedGroups],
+  );
+  const skuCount = filteredGroups.reduce((count, group) => count + group.variants.length, 0);
 
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
@@ -345,55 +360,64 @@ export function CustomerCatalogWorkspace({
         title="货盘选品"
       />
       <section aria-label="货盘搜索" className="border-y border-border py-4">
-        <form
-          className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,36rem)_auto] sm:justify-start"
-          method="get"
-        >
-          <label className="relative min-w-0">
-            <span className="sr-only">搜索 SKU、商品、规格或链接文字</span>
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              aria-label="搜索 SKU、商品、规格或链接文字"
-              className="min-h-11 pl-10"
-              defaultValue={query}
-              name="q"
-              placeholder="搜索 SKU、商品、规格或链接文字"
-              type="search"
-            />
-          </label>
-          <Button className="min-h-11" type="submit">
-            搜索货盘
-          </Button>
-        </form>
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
+          <form
+            className="grid min-w-0 gap-3 sm:flex-1 sm:grid-cols-[minmax(0,36rem)_auto] sm:justify-start"
+            method="get"
+          >
+            <label className="relative min-w-0">
+              <span className="sr-only">搜索 SKU、商品、规格或链接文字</span>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                aria-label="搜索 SKU、商品、规格或链接文字"
+                className="min-h-11 pl-10"
+                defaultValue={query}
+                name="q"
+                placeholder="搜索 SKU、商品、规格或链接文字"
+                type="search"
+              />
+            </label>
+            <Button className="min-h-11" type="submit">
+              搜索货盘
+            </Button>
+          </form>
+          <CatalogSaleStatusFilterControl onValueChange={setSaleStatus} value={saleStatus} />
+        </div>
       </section>
       <section aria-label="客户货盘结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">可选货盘</h2>
           <p className="text-sm tabular-nums text-muted-foreground">
-            {groups.length} 个商品 / {skuCount} 个 SKU
+            {filteredGroups.length} 个商品 / {skuCount} 个 SKU
           </p>
         </div>
-        {groups.length > 0 ? (
-          <CustomerCatalogResults groups={groups} />
+        {filteredGroups.length > 0 ? (
+          <CustomerCatalogResults groups={filteredGroups} />
         ) : (
           <ActionableEmptyState
             action={
-              query ? (
+              saleStatus !== "ALL" ? (
+                <Button className="min-h-11" onClick={() => setSaleStatus("ALL")} type="button" variant="outline">
+                  显示全部 SKU
+                </Button>
+              ) : query ? (
                 <Button asChild className="min-h-11" variant="outline">
                   <a href="/portal/catalog">清除搜索</a>
                 </Button>
               ) : undefined
             }
             description={
-              query
-                ? "当前关键词没有匹配的 SKU，请清除或调整搜索。"
-                : "当前没有可选 SKU，请联系管理员确认货盘状态。"
+              saleStatus !== "ALL"
+                ? "当前销售状态下没有结果，请切换销售状态。"
+                : query
+                  ? "当前关键词没有匹配的 SKU，请清除或调整搜索。"
+                  : "当前没有可选 SKU，请联系管理员确认货盘状态。"
             }
-            kind={query ? "filtered" : "initial"}
-            title={query ? "没有符合条件的 SKU" : "暂无可选货盘"}
+            kind={saleStatus !== "ALL" || query ? "filtered" : "initial"}
+            title={saleStatus !== "ALL" || query ? "没有符合条件的 SKU" : "暂无可选货盘"}
           />
         )}
       </section>

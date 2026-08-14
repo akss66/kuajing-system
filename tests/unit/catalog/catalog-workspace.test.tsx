@@ -434,10 +434,11 @@ describe("catalog workspaces", () => {
     );
 
     expect(screen.getByRole("searchbox")).toBeVisible();
-    expect(screen.getAllByText("¥7.60")).toHaveLength(2);
-    expect(screen.getAllByText("可售")).toHaveLength(2);
-    expect(screen.getAllByText("不可售")).toHaveLength(2);
-    expect(screen.getAllByText("售罄")).toHaveLength(2);
+    const results = within(screen.getByTestId("customer-catalog-results"));
+    expect(results.getAllByText("¥7.60")).toHaveLength(2);
+    expect(results.getAllByText("可售")).toHaveLength(2);
+    expect(results.getAllByText("不可售")).toHaveLength(2);
+    expect(results.getAllByText("售罄")).toHaveLength(2);
     expect(screen.getAllByText(longSpecification)).toHaveLength(2);
     expect(screen.queryByText("SKU 名称不能冒充规格")).not.toBeInTheDocument();
     expect(screen.getAllByText("颜色：炭黑")).toHaveLength(2);
@@ -505,7 +506,7 @@ describe("catalog workspaces", () => {
     ).not.toBeInTheDocument();
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 
   it("groups customer SKU variants and retains sibling variants for a one-SKU search", () => {
@@ -542,6 +543,49 @@ describe("catalog workspaces", () => {
     expect(desktopGroup!.textContent).not.toContain("采购价");
     expect(desktopGroup!.textContent).not.toContain("总库存");
     expect(desktopGroup!.textContent).not.toContain("货品价格");
+  });
+
+  it("filters customer catalog variants by availability while retaining detailed unavailable reasons", () => {
+    const mixedAvailabilityRows: CustomerCatalogItem[] = [
+      {
+        ...customerRows[0]!,
+        id: "customer-availability-available",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-1",
+      },
+      {
+        ...customerRows[1]!,
+        id: "customer-availability-manual",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-2",
+      },
+      {
+        ...customerRows[2]!,
+        id: "customer-availability-sold-out",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-3",
+      },
+    ];
+
+    render(<CustomerCatalogWorkspace items={mixedAvailabilityRows} query="" />);
+
+    expect(screen.getByRole("group", { name: "销售状态筛选" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "只看不可售 SKU" }));
+
+    expect(screen.queryByText("TZX-034-1")).not.toBeInTheDocument();
+    expect(screen.getAllByText("TZX-034-2")).toHaveLength(2);
+    expect(screen.getAllByText("TZX-034-3")).toHaveLength(2);
+    expect(screen.getByText("1 个商品 / 2 个 SKU")).toBeVisible();
+    const results = within(screen.getByTestId("customer-catalog-results"));
+    expect(results.getAllByText("不可售")).toHaveLength(2);
+    expect(results.getAllByText("售罄")).toHaveLength(2);
+
+    for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
+      expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
+    }
   });
 
   it("gives duplicate customer product names distinct table names without exposing source sequence", () => {

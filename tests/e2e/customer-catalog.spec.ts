@@ -348,6 +348,20 @@ test("customer sees only its own price and real available inventory", async ({ p
   await expect(manualUnavailableRow).toContainText("不可售");
   const soldOutRow = visibleCatalogItem(page, fixture.soldOutSku.id);
   await expect(soldOutRow).toContainText("售罄");
+  const saleStatusFilter = page.getByRole("group", { name: "销售状态筛选" });
+  await expect(saleStatusFilter).toBeVisible();
+  await saleStatusFilter.getByRole("button", { name: "只看不可售 SKU" }).click();
+  await expect(availableRow).toHaveCount(0);
+  await expect(manualUnavailableRow).toContainText("不可售");
+  await expect(soldOutRow).toContainText("售罄");
+  await expect(page.getByText("1 个商品 / 2 个 SKU")).toBeVisible();
+  await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(1);
+  await saleStatusFilter.getByRole("button", { name: "只看可售 SKU" }).click();
+  await expect(availableRow).toBeVisible();
+  await expect(manualUnavailableRow).toHaveCount(0);
+  await expect(soldOutRow).toHaveCount(0);
+  await expect(page.getByText("2 个商品 / 2 个 SKU")).toBeVisible();
+  await saleStatusFilter.getByRole("button", { name: "查看全部 SKU" }).click();
   await expect(availableRow).toContainText(LONG_SPECIFICATION);
   await expect(page.getByText("2 个商品 / 4 个 SKU")).toBeVisible();
   await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(2);
@@ -438,6 +452,27 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
     const box = await searchInput.boundingBox();
     expect(box).not.toBeNull();
     expect((box?.y ?? 9999) + (box?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+    const saleStatusFilter = page.getByRole("group", { name: "销售状态筛选" });
+    await expect(saleStatusFilter).toBeVisible();
+    for (const buttonName of ["查看全部 SKU", "只看可售 SKU", "只看不可售 SKU"]) {
+      const filterButton = saleStatusFilter.getByRole("button", { name: buttonName });
+      await expect(filterButton).toBeVisible();
+      const filterButtonBox = await filterButton.boundingBox();
+      expect(filterButtonBox).not.toBeNull();
+      expect(filterButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await saleStatusFilter.getByRole("button", { name: "只看可售 SKU" }).click();
+    await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
+    await expect(visibleCatalogItem(page, fixture.manualUnavailableSku.id)).toHaveCount(0);
+    await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toHaveCount(0);
+    await expect(page.getByText("2 个商品 / 2 个 SKU")).toBeVisible();
+    await saleStatusFilter.getByRole("button", { name: "只看不可售 SKU" }).click();
+    await expect(visibleCatalogItem(page, fixture.availableSku.id)).toHaveCount(0);
+    await expect(visibleCatalogItem(page, fixture.manualUnavailableSku.id)).toContainText("不可售");
+    await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("售罄");
+    await expect(page.getByText("1 个商品 / 2 个 SKU")).toBeVisible();
+    await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(1);
+    await saleStatusFilter.getByRole("button", { name: "查看全部 SKU" }).click();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
