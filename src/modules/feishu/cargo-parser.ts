@@ -195,7 +195,15 @@ function parseNonNegativeSafeInteger(value: unknown) {
   return parsed;
 }
 
-function parseWeightGrams(value: unknown) {
+function parsePackagedCombinationCount(value: string | null) {
+  const match = /^(\d+)pcs$/i.exec(value?.replace(/\s+/g, "") ?? "");
+  if (!match) return null;
+
+  const count = Number.parseInt(match[1], 10);
+  return Number.isSafeInteger(count) && count > 0 ? count : null;
+}
+
+function parseWeightGrams(value: unknown, combination: string | null = null) {
   if (typeof value === "number") {
     return Number.isSafeInteger(value) && value >= 0
       ? { grams: value, normalizedNotation: null }
@@ -206,6 +214,15 @@ function parseWeightGrams(value: unknown) {
   if (raw.length === 0) return null;
 
   const normalized = raw.replace(/\s+/g, "").toLowerCase();
+  const perPieceMatch = /^(\d+)g\/pcs$/.exec(normalized);
+  if (perPieceMatch) {
+    const gramsPerPiece = Number.parseInt(perPieceMatch[1], 10);
+    const packageCount = parsePackagedCombinationCount(combination);
+    const total = packageCount === null ? null : gramsPerPiece * packageCount;
+    return total !== null && Number.isSafeInteger(total) && total >= 0
+      ? { grams: total, normalizedNotation: raw }
+      : null;
+  }
   const packagedMatch = /^(\d+)g\/包$/.exec(normalized);
   if (packagedMatch) {
     const grams = Number.parseInt(packagedMatch[1], 10);
@@ -700,7 +717,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       inheritedFrom.combination = context.combination.rowNumber;
     }
 
-    const explicitWeight = parseWeightGrams(row[headerMap.weight]);
+    const explicitWeight = parseWeightGrams(row[headerMap.weight], combination);
     const weightText = extractDisplayText(row[headerMap.weight]);
     const weightGrams =
       explicitWeight?.grams ??

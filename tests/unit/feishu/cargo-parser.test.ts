@@ -331,6 +331,37 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
+  test.each([
+    { combination: "6PCS", expected: 90, raw: "15g/PCS" },
+    { combination: "5PCS", expected: 25, raw: "5g/PCS" },
+  ])(
+    "normalizes per-piece weight $raw using packaged combination $combination",
+    ({ combination, expected, raw }) => {
+      const values = sampleRows();
+      values[3][10] = combination;
+      values[3][11] = raw;
+
+      const result = parseLegacyCargoSheet(values);
+
+      expect(
+        result.rows.find((row) => row.sourceRowNumber === 4)?.weightGrams,
+      ).toBe(expected);
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: "CARGO_WEIGHT_NOTATION_NORMALIZED",
+          severity: "WARNING",
+          sourceRowNumber: 4,
+        }),
+      );
+      expect(result.issues).not.toContainEqual(
+        expect.objectContaining({
+          code: "CARGO_INVALID_WEIGHT",
+          sourceRowNumber: 4,
+        }),
+      );
+    },
+  );
+
   test("normalizes product link sentinel 0 to an inherited null link", () => {
     const values = sampleRows();
     values[1][7] = "0";
