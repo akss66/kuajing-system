@@ -979,6 +979,41 @@ describe("Feishu cargo migration service", () => {
     expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
   });
 
+  test("reuses one committed asset when multiple SKUs have identical image bytes", async () => {
+    const actor = await createSuperAdminActor();
+    const dataset = await buildValidSourceDataset({ rowCount: 2 });
+    const sharedImage = dataset.downloads.get("file-token-SKU-001");
+    if (!sharedImage) throw new Error("Expected source image fixture");
+    dataset.downloads.set("file-token-SKU-002", sharedImage);
+
+    const fakeSource = createMutableSourceClient({ initialDataset: dataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(
+      await service.createCargoPreflight({
+        actor,
+        client: fakeSource.client,
+        config: createConfig(),
+      }),
+    );
+
+    await expect(
+      service.confirmCargoMigration({
+        actor,
+        client: fakeSource.client,
+        config: createConfig(),
+        runId: readyRun.runId,
+      }),
+    ).resolves.toEqual({ imageCount: 2, productCount: 2, skuCount: 2 });
+
+    const storedAssets = await db.select().from(catalogAssets);
+    const storedSkus = await db.select().from(skus);
+    expect(storedAssets).toHaveLength(1);
+    expect(storedSkus).toHaveLength(2);
+    expect(new Set(storedSkus.map((sku) => sku.imageAssetId))).toEqual(
+      new Set([storedAssets[0].id]),
+    );
+  });
+
   test("imports products, skus, assets, balances, movements, audit and one outbox sync exactly once", async () => {
     const actor = await createSuperAdminActor();
     const exactDataset = cloneDataset(baseDataset);

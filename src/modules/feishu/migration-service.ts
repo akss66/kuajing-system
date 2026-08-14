@@ -687,9 +687,17 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
         }
 
         const assetBySkuCode = new Map<string, CatalogAssetRecord>();
+        const assetByContentDigest = new Map<string, CatalogAssetRecord>();
         for (const manifest of revalidated.temporaryAssets) {
+          const sharedAsset = assetByContentDigest.get(manifest.contentSha256);
+          if (sharedAsset) {
+            assetBySkuCode.set(manifest.skuCode, sharedAsset);
+            continue;
+          }
+
           const storageKey = await storage.commitCatalogAsset(manifest);
           const asset = await ensureCatalogAssetRecord(tx, manifest, storageKey);
+          assetByContentDigest.set(manifest.contentSha256, asset);
           assetBySkuCode.set(manifest.skuCode, asset);
         }
 
