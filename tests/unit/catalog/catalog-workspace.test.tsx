@@ -6,7 +6,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { createElement, type ImgHTMLAttributes } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { matchesCustomerCatalogQuery } from "@/app/(customer)/portal/catalog/page";
 import {
   CatalogWorkspace,
   CustomerCatalogWorkspace,
@@ -165,6 +164,17 @@ const customerRows: CustomerCatalogItem[] = [
     weightGrams: 120,
   },
 ];
+
+const groupedCustomerRows: CustomerCatalogItem[] = ["1", "2", "3"].map(
+  (variant) => ({
+    ...customerRows[0]!,
+    id: `customer-group-sku-${variant}`,
+    productId: "customer-group-product",
+    productName: "三规格客户货品",
+    productUrl: `https://example.test/products/customer-group-${variant}`,
+    skuCode: `TZX-CUSTOMER-GROUP-00${variant}`,
+  }),
+);
 
 afterEach(() => {
   cleanup();
@@ -409,17 +419,18 @@ describe("catalog workspaces", () => {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
 
-    const desktopTable = screen.getByRole("table", { name: "客户货盘列表" });
+    const desktopTable = screen.getAllByRole("table", { name: "客户货盘列表" })[0]!;
     expect(
       within(desktopTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual(["商品", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
+    ).toEqual(["SKU", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
     const firstCard = within(cards).getAllByRole("listitem")[0]!;
+    const firstVariant = within(firstCard).getByTestId("catalog-customer-sku-available");
     expect(
-      Array.from(firstCard.querySelectorAll("[data-customer-catalog-section]")).map(
+      Array.from(firstVariant.querySelectorAll("[data-customer-catalog-section]")).map(
         (section) => section.getAttribute("data-customer-catalog-section"),
       ),
     ).toEqual(["identity", "attributes", "price", "inventory", "status", "link"]);
@@ -450,26 +461,38 @@ describe("catalog workspaces", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
-  it("matches customer catalog search only against normalized safe fields", () => {
-    const item = {
-      ...customerRows[0]!,
-      cargoUnitPriceMilliYuan: 1_366,
-      defaultUnitPriceMilliYuan: 325,
-      linkText: "SAFE-LINK-TEXT",
-      productName: "Demo Cable",
-      sourceSequence: "ADMIN-SOURCE-34",
-      specification: "WINTER SPEC VALUE",
-      totalQuantity: 99,
-    };
+  it("groups customer SKU variants and retains sibling variants for a one-SKU search", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          ...groupedCustomerRows,
+          { ...customerRows[1]!, productName: "另一件客户货品" },
+        ]}
+        query="TZX-CUSTOMER-GROUP-002"
+      />,
+    );
 
-    expect(matchesCustomerCatalogQuery(item, "  tzx-customer-001  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  demo cable  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  winter spec  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  safe-link  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "SKU 名称不能冒充规格")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "ADMIN-SOURCE-34")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "1366")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "99")).toBe(false);
+    expect(screen.getByText("1 个商品 / 3 个 SKU")).toBeVisible();
+    expect(screen.queryByText("另一件客户货品")).not.toBeInTheDocument();
+
+    const desktopGroup = screen
+      .getAllByTestId("catalog-product-customer-group-product")
+      .find((element) => element.tagName === "SECTION");
+    expect(desktopGroup).toBeDefined();
+    expect(within(desktopGroup!).getByRole("heading", { name: "三规格客户货品" })).toBeVisible();
+    const desktopTable = within(desktopGroup!).getByRole("table", { name: "客户货盘列表" });
+    for (const skuCode of [
+      "TZX-CUSTOMER-GROUP-001",
+      "TZX-CUSTOMER-GROUP-002",
+      "TZX-CUSTOMER-GROUP-003",
+    ]) {
+      expect(within(desktopTable).getByText(skuCode)).toBeVisible();
+    }
+
+    expect(desktopGroup!.textContent).not.toContain("sourceSequence");
+    expect(desktopGroup!.textContent).not.toContain("采购价");
+    expect(desktopGroup!.textContent).not.toContain("总库存");
+    expect(desktopGroup!.textContent).not.toContain("货品价格");
   });
 
   it.each([

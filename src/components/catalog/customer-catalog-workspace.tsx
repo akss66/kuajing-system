@@ -17,6 +17,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
+import {
+  filterCatalogGroups,
+  groupCatalogItems,
+  type CatalogProductGroup,
+} from "@/modules/catalog/product-groups";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 function CatalogImage({ item }: { item: CustomerCatalogItem }) {
@@ -45,15 +50,12 @@ function CatalogImage({ item }: { item: CustomerCatalogItem }) {
   );
 }
 
-function ProductIdentity({ item }: { item: CustomerCatalogItem }) {
+function VariantIdentity({ item }: { item: CustomerCatalogItem }) {
   return (
     <div className="flex min-w-0 items-start gap-3">
       <CatalogImage item={item} />
       <div className="min-w-0">
-        <p className="line-clamp-2 whitespace-normal break-words font-medium text-foreground">
-          {item.productName}
-        </p>
-        <p className="mt-1 truncate text-xs font-semibold tabular-nums text-muted-foreground">
+        <p className="whitespace-normal break-words text-sm font-semibold tabular-nums text-foreground">
           {item.skuCode}
         </p>
       </div>
@@ -144,126 +146,156 @@ function CatalogProductLink({ item }: { item: CustomerCatalogItem }) {
   );
 }
 
-function CustomerCatalogTable({ items }: { items: CustomerCatalogItem[] }) {
+function ProductGroupHeader({ group }: { group: CatalogProductGroup<CustomerCatalogItem> }) {
   return (
-    <div className="hidden min-w-0 xl:block" data-customer-catalog-table>
-      <Table aria-label="客户货盘列表" className="w-full table-fixed">
-        <colgroup>
-          <col className="w-[24%]" />
-          <col className="w-[29%]" />
-          <col className="w-[13%]" />
-          <col className="w-[11%]" />
-          <col className="w-[10%]" />
-          <col className="w-[13%]" />
-        </colgroup>
-        <TableHeader>
-          <TableRow>
-            <TableHead>商品</TableHead>
-            <TableHead>规格/属性</TableHead>
-            <TableHead className="text-right">实际拿货价</TableHead>
-            <TableHead className="text-right">可售库存</TableHead>
-            <TableHead>状态</TableHead>
-            <TableHead>链接</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((item) => (
-            <TableRow
-              data-testid={`catalog-${item.id}`}
-              key={item.id}
-            >
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <ProductIdentity item={item} />
-              </TableCell>
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <CatalogAttributes item={item} />
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                {formatMilliYuan(item.actualUnitPriceMilliYuan)}
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                {item.availableQuantity}
-              </TableCell>
-              <TableCell className="whitespace-normal align-top">
-                <CatalogStatus item={item} />
-              </TableCell>
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <CatalogProductLink item={item} />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <header className="min-w-0 border-b border-border px-4 py-3 sm:px-5">
+      <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
+        {group.productName}
+      </h3>
+      <p className="mt-1 whitespace-normal break-words text-xs text-muted-foreground">
+        商品链接：{group.linkText?.trim() || "未提供"}
+      </p>
+    </header>
+  );
+}
+
+function CustomerCatalogTable({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
+  return (
+    <div className="hidden min-w-0 space-y-3 xl:block" data-customer-catalog-table>
+      {groups.map((group) => (
+        <section
+          className="min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
+          data-testid={`catalog-product-${group.productId}`}
+          key={group.productId}
+        >
+          <ProductGroupHeader group={group} />
+          <Table aria-label="客户货盘列表" className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[19%]" />
+              <col className="w-[28%]" />
+              <col className="w-[13%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[18%]" />
+            </colgroup>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>规格/属性</TableHead>
+                <TableHead className="text-right">实际拿货价</TableHead>
+                <TableHead className="text-right">可售库存</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>链接</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {group.variants.map((item) => (
+                <TableRow data-testid={`catalog-${item.id}`} key={item.id}>
+                  <TableCell className="min-w-0 whitespace-normal align-top">
+                    <VariantIdentity item={item} />
+                  </TableCell>
+                  <TableCell className="min-w-0 whitespace-normal align-top">
+                    <CatalogAttributes item={item} />
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                    {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                    {item.availableQuantity}
+                  </TableCell>
+                  <TableCell className="whitespace-normal align-top">
+                    <CatalogStatus item={item} />
+                  </TableCell>
+                  <TableCell className="min-w-0 whitespace-normal align-top">
+                    <CatalogProductLink item={item} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
+      ))}
     </div>
   );
 }
 
-function CustomerCatalogCards({ items }: { items: CustomerCatalogItem[] }) {
+function CustomerCatalogCards({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
   return (
     <ul
       aria-label="客户货盘卡片列表"
       className="space-y-3 xl:hidden"
       data-customer-catalog-cards
     >
-      {items.map((item) => (
+      {groups.map((group) => (
         <li
           className="min-w-0 rounded-[var(--radius-surface)] border border-border bg-background p-4"
-          data-testid={`catalog-${item.id}`}
-          key={item.id}
+          data-testid={`catalog-product-${group.productId}`}
+          key={group.productId}
         >
-          <div data-customer-catalog-section="identity">
-            <ProductIdentity item={item} />
-          </div>
-          <div
-            className="mt-4 border-t border-border pt-3"
-            data-customer-catalog-section="attributes"
-          >
-            <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
-            <CatalogAttributes item={item} />
-          </div>
-          <dl
-            className="mt-4 border-t border-border pt-3"
-            data-customer-catalog-section="price"
-          >
-            <dt className="text-xs font-medium text-muted-foreground">实际拿货价</dt>
-            <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-              {formatMilliYuan(item.actualUnitPriceMilliYuan)}
-            </dd>
-          </dl>
-          <dl
-            className="mt-4 border-t border-border pt-3"
-            data-customer-catalog-section="inventory"
-          >
-            <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
-            <dd className="mt-1 font-semibold tabular-nums text-foreground">
-              {item.availableQuantity}
-            </dd>
-          </dl>
-          <div
-            className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
-            data-customer-catalog-section="status"
-          >
-            <span className="text-xs font-medium text-muted-foreground">状态</span>
-            <CatalogStatus item={item} />
-          </div>
-          <div
-            className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
-            data-customer-catalog-section="link"
-          >
-            <span className="text-xs font-medium text-muted-foreground">链接</span>
-            <CatalogProductLink item={item} />
-          </div>
+          <ProductGroupHeader group={group} />
+          <ul aria-label={`${group.productName} SKU 变体`} className="mt-4 space-y-3">
+            {group.variants.map((item) => (
+              <li
+                className="min-w-0 rounded-[var(--radius-control)] border border-border bg-background p-3"
+                data-testid={`catalog-${item.id}`}
+                key={item.id}
+              >
+                <div data-customer-catalog-section="identity">
+                  <VariantIdentity item={item} />
+                </div>
+                <div
+                  className="mt-4 border-t border-border pt-3"
+                  data-customer-catalog-section="attributes"
+                >
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
+                  <CatalogAttributes item={item} />
+                </div>
+                <dl
+                  className="mt-4 border-t border-border pt-3"
+                  data-customer-catalog-section="price"
+                >
+                  <dt className="text-xs font-medium text-muted-foreground">实际拿货价</dt>
+                  <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+                    {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+                  </dd>
+                </dl>
+                <dl
+                  className="mt-4 border-t border-border pt-3"
+                  data-customer-catalog-section="inventory"
+                >
+                  <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
+                  <dd className="mt-1 font-semibold tabular-nums text-foreground">
+                    {item.availableQuantity}
+                  </dd>
+                </dl>
+                <div
+                  className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
+                  data-customer-catalog-section="status"
+                >
+                  <span className="text-xs font-medium text-muted-foreground">状态</span>
+                  <CatalogStatus item={item} />
+                </div>
+                <div
+                  className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
+                  data-customer-catalog-section="link"
+                >
+                  <span className="text-xs font-medium text-muted-foreground">链接</span>
+                  <CatalogProductLink item={item} />
+                </div>
+              </li>
+            ))}
+          </ul>
         </li>
       ))}
     </ul>
   );
 }
 
-function CustomerCatalogResults({ items }: { items: CustomerCatalogItem[] }) {
+function CustomerCatalogResults({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
   return (
     <div data-testid="customer-catalog-results">
-      <CustomerCatalogTable items={items} />
-      <CustomerCatalogCards items={items} />
+      <CustomerCatalogTable groups={groups} />
+      <CustomerCatalogCards groups={groups} />
     </div>
   );
 }
@@ -275,6 +307,22 @@ export function CustomerCatalogWorkspace({
   items: CustomerCatalogItem[];
   query: string;
 }) {
+  const groups = filterCatalogGroups(
+    groupCatalogItems(items).map((group) => ({ ...group, sourceSequence: null })),
+    query,
+    (item) => [
+      item.skuCode,
+      item.specification,
+      item.color,
+      item.combination,
+      item.weightGrams === null ? null : String(item.weightGrams),
+      item.weightGrams === null ? null : `重量：${item.weightGrams} 克`,
+      item.linkText,
+      item.productUrl,
+    ],
+  );
+  const skuCount = groups.reduce((count, group) => count + group.variants.length, 0);
+
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
       <PageHeading
@@ -309,10 +357,12 @@ export function CustomerCatalogWorkspace({
       <section aria-label="客户货盘结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">可选货盘</h2>
-          <p className="text-sm tabular-nums text-muted-foreground">{items.length} 个结果</p>
+          <p className="text-sm tabular-nums text-muted-foreground">
+            {groups.length} 个商品 / {skuCount} 个 SKU
+          </p>
         </div>
-        {items.length > 0 ? (
-          <CustomerCatalogResults items={items} />
+        {groups.length > 0 ? (
+          <CustomerCatalogResults groups={groups} />
         ) : (
           <ActionableEmptyState
             action={
