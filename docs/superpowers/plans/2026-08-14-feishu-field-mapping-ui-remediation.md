@@ -608,6 +608,7 @@ git commit -m "test: cover field-aligned catalog UI"
 
 **Interfaces:**
 - Add nullable `inventory_movements.reason_code` backed by `inventory_movement_reason_code`. Values cover at least `RESTOCK_RECEIPT`, `OFFLINE_FULFILLMENT`, `CUSTOMER_RETURN`, `DAMAGED_WRITE_OFF`, `STOCKTAKE_CORRECTION`, `OTHER`, `SYSTEM_SHIPMENT`, `SHIPMENT_REVERSAL`, and `FEISHU_INITIAL_IMPORT`. Legacy rows may remain null when an honest code cannot be inferred; every new manual adjustment requires a code.
+- Keep the existing non-null `inventory_movements.reason` column in this branch as a compatibility/display snapshot. For every new coded movement the server, not the form, writes `reason = labelFor(reasonCode)`; user-authored detail belongs only in `remark`. Legacy `reason` text remains untouched, and read models prefer the structured label when `reasonCode` exists, otherwise they fall back to legacy `reason`. No consumer or column removal occurs here.
 - Add `inventory_stocktake_batches` with UUID id, administrator actor id, optional remark, and timestamp. Add nullable `inventory_movements.stocktake_batch_id` with a restrictive foreign key. A changed set-to-actual operation creates one batch and one linked movement; an unchanged count creates neither.
 - Add global time/keyset-supporting, movement-type/time, actor/time, and reason/time indexes without removing the existing SKU/time index.
 - `listInventorySnapshot(filters?)` returns product/SKU identity plus `totalQuantity`, `lockedQuantity`, and clamped `availableQuantity`.
@@ -634,8 +635,8 @@ Generate 0021 from the committed 0020 snapshot, then inspect SQL manually. Prese
 
 ```powershell
 npm.cmd run test:integration -- tests/integration/schema/inventory-movement-listing.test.ts tests/integration/inventory/movement-query.test.ts
-git diff --exit-code main..HEAD -- drizzle/0019_jifeng_bigint_logistics_id.sql drizzle/meta/0019_snapshot.json
-git diff --exit-code ce04ff2..HEAD -- drizzle/0020_feishu_field_mapping.sql drizzle/meta/0020_snapshot.json
+git diff --exit-code e917031 HEAD -- drizzle/0019_jifeng_bigint_logistics_id.sql drizzle/meta/0019_snapshot.json
+git diff --exit-code ce04ff2 HEAD -- drizzle/0020_feishu_field_mapping.sql drizzle/meta/0020_snapshot.json
 ```
 
 Expected: schema/read-model tests pass; both protected migration diffs are empty.
@@ -661,6 +662,7 @@ git commit -m "feat: add auditable inventory movement views"
 **Interfaces:**
 - `adjustInventoryAction` accepts `skuId`, `direction: "INCREASE" | "DECREASE"`, positive integer `quantity`, structured `reasonCode`, and optional trimmed `remark`; it rejects reason/direction combinations that would encode automatic order shipment as a manual movement.
 - Direction defaults are stable product behavior: `INCREASE` → `RESTOCK_RECEIPT` (`补货入库`), `DECREASE` → `OFFLINE_FULFILLMENT` (`线下发货/人工出库`). Administrators may choose another allowlisted reason suitable for that direction.
+- The shared manual allowlist is exact: `INCREASE` permits `RESTOCK_RECEIPT` (`补货入库`, default), `CUSTOMER_RETURN` (`客户退货入库`), and `OTHER` (`其他入库`); `DECREASE` permits `OFFLINE_FULFILLMENT` (`线下发货/人工出库`, default), `DAMAGED_WRITE_OFF` (`破损报废`), and `OTHER` (`其他出库`). `STOCKTAKE_CORRECTION` belongs only to set-to-actual mode. `SYSTEM_SHIPMENT`, `SHIPMENT_REVERSAL`, and `FEISHU_INITIAL_IMPORT` are system-only and are rejected by the manual action. UI options and server validation import this single typed matrix rather than duplicating it.
 - `adjustTotalInventory` remains the transaction-level authority. It derives `delta`, locks the SKU balance, recomputes active reservations, rejects `afterQuantity < lockedQuantity`, persists reason code/label/remark, and writes the existing audit record atomically.
 - `setInventoryToActualCount` accepts a non-negative actual total plus `STOCKTAKE_CORRECTION`; a changed result creates and links one stocktake batch/movement/audit record in the same transaction. An unchanged result returns `NO_CHANGE` and creates no batch, movement, or audit log.
 - Remove inventory adjustment's Feishu outbox enqueue. Add only `reasonCode: SYSTEM_SHIPMENT` metadata to the existing automatic shipment movement insert; do not change the Jifeng/fulfillment transition, deduction amount, idempotency, or reference.
@@ -680,7 +682,7 @@ Expected: current action accepts a signed delta/free-text reason, does not persi
 
 - [ ] **Step 3: Implement minimal typed commands without altering fulfillment semantics**
 
-Keep reason-code lists and Chinese labels in one shared typed module. Treat client defaults as convenience only: validate them again on the server. Continue using the existing transaction and `FOR UPDATE` ordering; no UI-only invariant may replace it. Ensure manual offline fulfillment cannot accept an order-shipment reference. Delete only the obsolete inventory-to-Feishu enqueue call, not unrelated fulfillment behavior.
+Keep the exact direction/reason-code matrix and Chinese labels in one shared typed module. Treat client defaults as convenience only: validate them again on the server. Derive the required legacy `reason` snapshot from that label table and accept free text only as `remark`. Continue using the existing transaction and `FOR UPDATE` ordering; no UI-only invariant may replace it. Ensure manual offline fulfillment cannot accept an order-shipment reference. Delete only the obsolete inventory-to-Feishu enqueue call, not unrelated fulfillment behavior.
 
 - [ ] **Step 4: Run focused and adjacent regressions to witness GREEN**
 
