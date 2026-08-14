@@ -8,15 +8,9 @@ import {
   createCatalogFieldRefreshService,
   type CatalogFieldRefreshReadPort,
 } from "@/modules/feishu/catalog-field-refresh";
+import { parseCatalogFieldRefreshCliArguments } from "@/modules/feishu/catalog-field-refresh-cli";
 
 const BOOTSTRAP_SUPER_ADMIN_ID = "00000000-0000-4000-8000-00000000a001";
-const REQUIRED_SEQUENCE_COUNT = 74;
-const REQUIRED_SKU_COUNT = 140;
-
-function optionValue(name: string) {
-  const prefix = `--${name}=`;
-  return process.argv.slice(2).find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
-}
 
 async function resolveSourceSheetId(configuredSourceSheetId: string | undefined) {
   if (configuredSourceSheetId?.trim()) return configuredSourceSheetId.trim();
@@ -47,20 +41,7 @@ async function resolveBootstrapActorId() {
 }
 
 async function main() {
-  const apply = process.argv.slice(2).includes("--apply");
-  const expectedSourceSequences = Number(optionValue("expected-source-sequences") ?? REQUIRED_SEQUENCE_COUNT);
-  const expectedSkus = Number(optionValue("expected-skus") ?? REQUIRED_SKU_COUNT);
-  const reason = optionValue("reason")?.trim() ?? "";
-
-  if (apply && (
-    expectedSourceSequences !== REQUIRED_SEQUENCE_COUNT ||
-    expectedSkus !== REQUIRED_SKU_COUNT ||
-    reason.length === 0
-  )) {
-    throw new Error(
-      "Apply requires --expected-source-sequences=74 --expected-skus=140 and --reason=<non-empty>",
-    );
-  }
+  const options = parseCatalogFieldRefreshCliArguments(process.argv.slice(2));
 
   const config = readFeishuConfig();
   const sourceSheetId = await resolveSourceSheetId(config.sourceSheetId);
@@ -77,22 +58,22 @@ async function main() {
   const service = createCatalogFieldRefreshService();
   const baseInput = {
     client,
-    expectedSkuCount: expectedSkus,
-    expectedSourceSequenceCount: expectedSourceSequences,
+    expectedSkuCount: options.expectedSkuCount,
+    expectedSourceSequenceCount: options.expectedSourceSequenceCount,
     sourceSheetId,
     sourceWikiToken: config.sourceWikiToken,
   };
-  const result = apply
+  const result = options.apply
     ? await service.apply({
         ...baseInput,
         actorUserId: await resolveBootstrapActorId(),
-        reason,
+        reason: options.reason,
       })
     : await service.preview(baseInput);
 
   console.info(JSON.stringify({
     matchedSkuCount: result.matchedSkuCount,
-    mode: apply ? "apply" : "preview",
+    mode: options.apply ? "apply" : "preview",
     productsToMerge: result.productsToMerge,
     skuCount: result.skuCount,
     sourceSequenceCount: result.sourceSequenceCount,
