@@ -26,7 +26,7 @@ async function applyMigrationFile(sql: postgres.Sql, fileName: string) {
   }
 }
 
-test("0019 persists independent Feishu fields and rejects a negative cargo price", async () => {
+test("0020 persists independent Feishu fields and rejects a negative cargo price", async () => {
   const databaseName = `tzx_feishu_field_mapping_${randomUUID().replaceAll("-", "")}`;
   const adminUrl = new URL(baseDatabaseUrl);
   adminUrl.pathname = "/postgres";

@@ -46,7 +46,7 @@
 **Files:**
 - Modify: `src/db/schema/catalog.ts`
 - Create: `drizzle/0020_feishu_field_mapping.sql`
-- Create: `drizzle/meta/0019_snapshot.json`
+- Create: `drizzle/meta/0020_snapshot.json`
 - Modify: `drizzle/meta/_journal.json`
 - Modify: `src/modules/feishu/cargo-types.ts`
 - Modify: `src/modules/feishu/cargo-parser.ts`
