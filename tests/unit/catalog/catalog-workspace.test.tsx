@@ -221,6 +221,44 @@ describe("catalog workspaces", () => {
     }
   });
 
+  it("filters administrator catalog variants by sale status after preserving search siblings", () => {
+    const mixedStatusRows: AdminCatalogItem[] = [
+      { ...adminRows[0]!, id: "sku-001-1", productId: "product-001", productName: "混合状态货品", skuCode: "TZX-001-1", sourceSequence: "1", saleStatus: "SELLABLE" },
+      { ...adminRows[0]!, id: "sku-001-2", productId: "product-001", productName: "混合状态货品", skuCode: "TZX-001-2", sourceSequence: "1", saleStatus: "NOT_SELLABLE" },
+      { ...adminRows[1]!, id: "sku-002", productId: "product-002", productName: "仅不可售货品", skuCode: "TZX-002", sourceSequence: "2", saleStatus: "NOT_SELLABLE" },
+    ];
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={mixedStatusRows}
+        stores={[]}
+      />,
+    );
+
+    const statusFilter = screen.getByRole("group", { name: "销售状态筛选" });
+    for (const label of ["全部", "可售", "不可售"]) {
+      expect(within(statusFilter).getByRole("button", { name: label })).toBeVisible();
+    }
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "TZX-001-1" } });
+    expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
+    expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
+
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "可售" }));
+    expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
+    expect(screen.queryByText("TZX-001-2")).not.toBeInTheDocument();
+    expect(screen.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
+
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "不可售" }));
+    expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
+    expect(screen.queryByText("TZX-001-1")).not.toBeInTheDocument();
+  });
+
   it("keeps catalog mutations out of the resource list until their drawers open", async () => {
     render(
       <CatalogWorkspace

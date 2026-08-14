@@ -16,6 +16,8 @@ export type CatalogProductGroup<T extends CatalogGroupableItem> = {
   variants: T[];
 };
 
+export type CatalogSaleStatusFilter = "ALL" | "SELLABLE" | "NOT_SELLABLE";
+
 const collator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
@@ -95,4 +97,20 @@ export function filterCatalogGroups<T extends CatalogGroupableItem>(
         ),
       ),
   );
+}
+
+export function filterCatalogGroupVariants<T extends CatalogGroupableItem>(
+  groups: readonly CatalogProductGroup<T>[],
+  status: CatalogSaleStatusFilter,
+  isSellable: (variant: T) => boolean,
+): CatalogProductGroup<T>[] {
+  if (status === "ALL") {
+    return groups.map((group) => ({ ...group, variants: [...group.variants] }));
+  }
+
+  const expected = status === "SELLABLE";
+  return groups.flatMap((group) => {
+    const variants = group.variants.filter((variant) => isSellable(variant) === expected);
+    return variants.length > 0 ? [{ ...group, variants }] : [];
+  });
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   filterCatalogGroups,
+  filterCatalogGroupVariants,
   groupCatalogItems,
   type CatalogGroupableItem,
 } from "@/modules/catalog/product-groups";
@@ -137,5 +138,35 @@ describe("filterCatalogGroups", () => {
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0].variants).toHaveLength(2);
+  });
+});
+
+describe("filterCatalogGroupVariants", () => {
+  it("filters variants by sale status and removes empty product groups", () => {
+    const groups = groupCatalogItems([
+      { ...item({ id: "sku-1", skuCode: "TZX-001-1" }), sellable: true },
+      { ...item({ id: "sku-2", skuCode: "TZX-001-2" }), sellable: false },
+      {
+        ...item({
+          id: "sku-3",
+          productId: "product-2",
+          productName: "Product two",
+          skuCode: "TZX-002",
+        }),
+        sellable: false,
+      },
+    ]);
+
+    const sellable = filterCatalogGroupVariants(groups, "SELLABLE", (item) => item.sellable);
+    expect(sellable).toHaveLength(1);
+    expect(sellable[0]!.variants.map((item) => item.skuCode)).toEqual(["TZX-001-1"]);
+
+    const unavailable = filterCatalogGroupVariants(
+      groups,
+      "NOT_SELLABLE",
+      (item) => item.sellable,
+    );
+    expect(unavailable.flatMap((group) => group.variants.map((item) => item.skuCode)))
+      .toEqual(["TZX-001-2", "TZX-002"]);
   });
 });
