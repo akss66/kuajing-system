@@ -70,7 +70,14 @@ const workspaceRoutes = [
   {
     audience: "admin" as const,
     heading: "货盘库存",
-    expectedTexts: ["库存健康", "低库存队列", "TZX-DEMO-001", "暂无基线", "最近库存变动"],
+    expectedTexts: [
+      "实时库存",
+      "库存流水",
+      "库存健康",
+      "低库存队列",
+      "TZX-DEMO-001",
+      "+ / - 调整",
+    ],
     path: "/admin/inventory",
     screenshot: "admin-inventory",
     shouldShowMetricStrip: false,

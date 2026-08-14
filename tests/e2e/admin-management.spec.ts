@@ -921,10 +921,12 @@ test("catalog and inventory keep mutations in drawers and fit approved mobile wi
   await closeAccountDrawer(catalogDrawer);
 
   await page.goto("/admin/inventory");
-  const inventoryTrigger = page.getByRole("button", { name: "调整库存" });
+  const inventoryTrigger = page
+    .getByRole("button", { name: /^\+ \/ - 调整 / })
+    .first();
   expect((await inventoryTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   await inventoryTrigger.click();
-  const inventoryDrawer = page.getByRole("dialog", { name: "调整库存" });
+  const inventoryDrawer = page.getByRole("dialog", { name: /调整库存$/ });
   await expect(inventoryDrawer.getByLabel("调整数量")).toBeVisible();
   await expect(inventoryDrawer.getByLabel("调整原因")).toBeVisible();
   await expect(inventoryDrawer).toHaveCSS("opacity", "1");
