@@ -3,8 +3,21 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/modules/inventory/actions", () => ({
+  adjustInventoryAction: vi.fn(),
+  setInventoryToActualCountAction: vi.fn(),
+}));
+vi.mock("@/modules/inventory/read-model", () => ({
+  listInventoryMovements: vi.fn(),
+  listInventorySnapshot: vi.fn(),
+}));
+vi.mock("@/modules/reports/stock-coverage", () => ({
+  getStockCoverageReport: vi.fn(),
+}));
+
+import { inventoryDateBoundary } from "@/app/(admin)/admin/inventory/page";
 import { InventoryWorkspace } from "@/components/inventory/inventory-workspace";
 import type { ManagedAction } from "@/shared/action-state";
 
@@ -84,6 +97,20 @@ const movementPage = {
 afterEach(cleanup);
 
 describe("inventory workspace", () => {
+  it("interprets strict inventory filter dates in the Toronto business day", () => {
+    expect(inventoryDateBoundary("2026-08-14", "start")?.toISOString()).toBe(
+      "2026-08-14T04:00:00.000Z",
+    );
+    expect(inventoryDateBoundary("2026-08-14", "end")?.toISOString()).toBe(
+      "2026-08-15T03:59:59.999Z",
+    );
+    expect(inventoryDateBoundary("2026-01-14", "start")?.toISOString()).toBe(
+      "2026-01-14T05:00:00.000Z",
+    );
+    expect(inventoryDateBoundary("2026-02-31", "start")).toBeUndefined();
+    expect(inventoryDateBoundary("14-08-2026", "start")).toBeUndefined();
+  });
+
   it("exposes exactly the two canonical first-level inventory views", () => {
     render(
       <InventoryWorkspace

@@ -14,6 +14,7 @@ import type {
   InventoryMovementPage,
   InventoryMovementSource,
 } from "@/modules/inventory/read-model";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 export type SerializableInventoryMovementPage = Omit<InventoryMovementPage, "rows"> & {
   rows: Array<Omit<InventoryMovementPage["rows"][number], "createdAt"> & { createdAt: string }>;
@@ -47,7 +48,7 @@ const sources = [
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",
   timeStyle: "short",
-  timeZone: "America/Toronto",
+  timeZone: BUSINESS_TIME_ZONE,
 });
 
 function sourceLabel(source: InventoryMovementSource) {

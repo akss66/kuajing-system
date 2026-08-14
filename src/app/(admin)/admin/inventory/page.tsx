@@ -1,3 +1,5 @@
+import { DateTime } from "luxon";
+
 import { InventoryWorkspace } from "@/components/inventory/inventory-workspace";
 import {
   adjustInventoryAction,
@@ -10,6 +12,7 @@ import {
   type InventoryMovementSource,
 } from "@/modules/inventory/read-model";
 import { getStockCoverageReport } from "@/modules/reports/stock-coverage";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 type InventoryPageSearchParams = Record<string, string | string[] | undefined>;
 
@@ -37,10 +40,17 @@ function positivePage(value: string | undefined) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
-function dateBoundary(value: string | undefined, endOfDay = false) {
+export function inventoryDateBoundary(
+  value: string | undefined,
+  boundary: "start" | "end",
+) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  const parsed = DateTime.fromISO(value, {
+    setZone: true,
+    zone: BUSINESS_TIME_ZONE,
+  }).setZone(BUSINESS_TIME_ZONE);
+  if (!parsed.isValid || parsed.toISODate() !== value) return undefined;
+  return (boundary === "end" ? parsed.endOf("day") : parsed.startOf("day")).toJSDate();
 }
 
 export default async function InventoryPage({
@@ -79,12 +89,12 @@ export default async function InventoryPage({
     activeView === "movements"
       ? listInventoryMovements({
           actorId,
-          from: dateBoundary(from),
+          from: inventoryDateBoundary(from, "start"),
           movementType,
           page: positivePage(firstValue(params.page)),
           skuCode,
           source,
-          to: dateBoundary(to, true),
+          to: inventoryDateBoundary(to, "end"),
         })
       : Promise.resolve({ page: 1, pageSize: 20, rows: [], total: 0, totalPages: 0 }),
   ]);

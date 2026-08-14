@@ -49,6 +49,21 @@ All commands exited `0`.
 ## Residual risks and Task 11 handoff
 
 - Component tests prove DOM semantics and responsive table/card separation, but real 1440/1920/430/390/360 layout, keyboard completion, axe, console/hydration, page overflow, filter navigation, and unmasked screenshots remain Task 11 acceptance work.
-- Movement date inputs are canonical `YYYY-MM-DD` URL values and server boundaries are ISO instants; Task 11 should use fixed midday fixture timestamps when asserting date-range behavior across the Toronto display timezone.
 - Stocktake batch relations intentionally remain plain allowlisted labels because Task 8 exposes no invented stocktake detail route.
 - No production deployment, push, merge, external write, or Feishu source operation occurred.
+
+## Fix Round 1 — business-time date boundaries
+
+Independent review found that the first implementation interpreted date-filter days as UTC while rendering movement timestamps in Toronto time, and JavaScript date normalization could accept impossible calendar dates.
+
+RED added direct pure-function coverage for Toronto summer and winter offsets plus strict invalid input. After isolating the Server Page's data imports, the focused test exited `1` with 1 failure and 4 passes because `inventoryDateBoundary` did not exist.
+
+The minimal fix exports `inventoryDateBoundary`, parses strict `YYYY-MM-DD` values with Luxon in the shared `BUSINESS_TIME_ZONE`, rejects normalized/impossible dates, and returns the Toronto `startOf("day")` or `endOf("day")` instant. The movement formatter now imports that same shared time-zone token instead of repeating a raw zone string.
+
+GREEN evidence after the fix:
+
+```powershell
+npm.cmd test -- tests/unit/inventory/inventory-workspace.test.tsx
+```
+
+Exit code `0`: 1 file passed, 5/5 tests passed. Exact assertions include summer start `2026-08-14T04:00:00.000Z`, summer end `2026-08-15T03:59:59.999Z`, winter start `2026-01-14T05:00:00.000Z`, and rejection of `2026-02-31` plus wrong-format input.
