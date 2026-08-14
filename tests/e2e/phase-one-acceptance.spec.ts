@@ -105,17 +105,19 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
   await expect(drawer.getByText("客户专属价已保存。")).toBeVisible();
 
   await page.goto("/admin/inventory");
-  await page.getByRole("button", { name: "调整库存" }).click();
-  drawer = page.getByRole("dialog", { name: "调整库存" });
-  await drawer.getByLabel("库存 SKU").selectOption({ label: "TZX-DEMO-001" });
+  await page.getByRole("button", { name: "+ / - 调整 TZX-DEMO-001" }).click();
+  drawer = page.getByRole("dialog", { name: "TZX-DEMO-001 调整库存" });
   await drawer.getByLabel("调整数量").fill("10");
-  await drawer.getByLabel("调整原因").fill("首批测试库存");
+  await drawer.getByLabel("备注（可选）").fill("首批测试库存");
   await drawer.getByRole("button", { name: "确认调整库存" }).click();
   await expect(drawer.getByText("库存已调整并记录流水。")).toBeVisible();
   await page.goto("/admin/system/audit?action=INVENTORY_ADJUSTED");
   await expect(page.getByRole("heading", { name: "审计日志" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "库存调整" }).first()).toBeVisible();
-  await expect(page.getByText("首批测试库存").first()).toBeVisible();
+  await page.goto("/admin/inventory?view=movements&sku=TZX-DEMO-001");
+  await expect(page.getByRole("table", { name: "库存流水列表" })).toContainText(
+    "首批测试库存",
+  );
 
   await page.context().clearCookies();
   await loginThroughUi(page, { email: customerEmail, password: customerPassword });
@@ -127,5 +129,6 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
     .where(eq(skus.skuCode, "TZX-DEMO-001"));
   const row = page.locator(`[data-testid="catalog-${sku.id}"]:visible`);
   await expect(row).toContainText("¥7.60");
-  await expect(row).toContainText("可售 10");
+  await expect(row.getByRole("cell", { name: "10", exact: true })).toBeVisible();
+  await expect(row.getByText("可售", { exact: true })).toBeVisible();
 });
