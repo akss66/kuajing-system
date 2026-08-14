@@ -215,6 +215,33 @@ describe("catalog workspaces", () => {
     expect(within(desktopTable).queryByText(excludedSku)).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["JavaScript scheme", "javascript:alert(document.domain)"],
+    ["FTP scheme", "ftp://example.test/products/34"],
+    ["relative URL", "/products/34"],
+  ])("does not render an unsafe %s product link", (_case, productUrl) => {
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={[{ ...adminRows[0]!, productUrl }]}
+        stores={[]}
+      />,
+    );
+
+    const desktopTable = screen.getByRole("table", {
+      name: "商品与 SKU 列表",
+    });
+    const cards = screen.getByRole("list", { name: "商品与 SKU 卡片列表" });
+    expect(within(desktopTable).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(cards).queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getAllByText("链接不可用")).toHaveLength(2);
+  });
+
   it("keeps customer search first and presents isolated actual price and available stock", () => {
     render(
       <CustomerCatalogWorkspace

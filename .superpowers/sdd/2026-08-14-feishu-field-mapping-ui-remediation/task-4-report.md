@@ -94,3 +94,26 @@ Impeccable influenced the result by preserving the incumbent flat merchant-cente
 - Browser-level overflow, zoom, axe, console/hydration, and screenshot verification across the exact viewport matrix belong to Task 7 and were not run in this component-only task.
 - The shared `Table` primitive retains its local overflow container for all application tables. This Task 4 table has no minimum width, uses fixed 100% column geometry, and is hidden below `xl`, so it does not introduce page-level horizontal overflow; real-browser acceptance remains the Task 7 proof.
 - The catalog remains intentionally unpaginated because Task 3 returns the complete administrator catalog and the current acceptance set is 140 SKUs.
+
+## Fix round 1: restrict rendered external-link protocols
+
+Independent review identified that the shared product-link renderer inserted the database `productUrl` directly into `href`. React rewrote a `javascript:` URL to its blocked sentinel but still emitted an anchor; FTP and relative values remained clickable. The rendering boundary now parses the value with one pure guard and permits only absolute `http:` or `https:` URLs. Invalid values render the explicit non-interactive text `链接不可用` in both the table and cards. Valid HTTP(S) URL rendering, supplied link text, safe new-tab attributes, and the distinct missing-value state `暂无链接` remain unchanged.
+
+Witnessed RED (exit 1):
+
+```powershell
+npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
+```
+
+- Test files: 1 failed (1).
+- Tests: 3 failed, 8 passed (11 total).
+- `javascript:`, `ftp:`, and relative URLs each still rendered an anchor instead of `链接不可用`.
+
+Focused GREEN (exit 0):
+
+```powershell
+npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
+```
+
+- Test files: 1 passed (1).
+- Tests: 11 passed (11).

@@ -97,15 +97,29 @@ function CatalogAttributes({ row }: { row: CatalogRow }) {
   );
 }
 
+function safeAbsoluteHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function CatalogProductLink({ row }: { row: CatalogRow }) {
   if (!row.productUrl) {
     return <span className="text-sm text-muted-foreground">暂无链接</span>;
   }
 
+  const safeUrl = safeAbsoluteHttpUrl(row.productUrl);
+  if (!safeUrl) {
+    return <span className="text-sm text-muted-foreground">链接不可用</span>;
+  }
+
   return (
     <a
       className="inline-flex min-h-11 min-w-0 items-center gap-1.5 whitespace-normal break-words text-sm font-medium text-primary underline-offset-4 hover:underline xl:min-h-0"
-      href={row.productUrl}
+      href={safeUrl}
       rel="noopener noreferrer"
       target="_blank"
     >
