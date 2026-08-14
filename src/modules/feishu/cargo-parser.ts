@@ -71,6 +71,17 @@ function normalizeHeaderCell(value: unknown) {
   return extractDisplayText(value).replace(/\s+/g, "").toLowerCase();
 }
 
+function matchesHeader(key: keyof typeof HEADER_ALIASES, value: unknown) {
+  const normalized = normalizeHeaderCell(value);
+  if (key === "cargoPrice") {
+    return (
+      normalized === "货品价格" ||
+      /^货品价格[（(]/.test(normalized)
+    );
+  }
+  return HEADER_ALIASES[key].includes(normalized);
+}
+
 function extractDisplayText(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (
@@ -308,11 +319,9 @@ function resolveImageToken(value: unknown) {
 
 function findHeaderRow(values: unknown[][]) {
   for (let rowIndex = 0; rowIndex < Math.min(values.length, 20); rowIndex += 1) {
-    const normalized = values[rowIndex].map((cell) => normalizeHeaderCell(cell));
-    const headerKeys = new Set(normalized);
     if (
       REQUIRED_HEADER_FIELDS.every((field) =>
-        HEADER_ALIASES[field].some((alias) => headerKeys.has(alias)),
+        values[rowIndex].some((cell) => matchesHeader(field, cell)),
       )
     ) {
       return rowIndex;
@@ -323,10 +332,8 @@ function findHeaderRow(values: unknown[][]) {
 
 function createHeaderMap(row: unknown[]) {
   const map = {} as HeaderMap;
-  for (const [key, aliases] of Object.entries(HEADER_ALIASES) as Array<
-    [keyof HeaderMap, string[]]
-  >) {
-    const index = row.findIndex((cell) => aliases.includes(normalizeHeaderCell(cell)));
+  for (const key of Object.keys(HEADER_ALIASES) as Array<keyof HeaderMap>) {
+    const index = row.findIndex((cell) => matchesHeader(key, cell));
     map[key] = index;
   }
   return map;

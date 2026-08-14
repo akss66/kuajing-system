@@ -110,6 +110,20 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
+  test("recognizes the production long-form cargo price header without confusing it with purchase price", () => {
+    const values = buildFieldAlignedCargoSourceFixture().value;
+    const cargoPriceIndex = values[0].indexOf("货品价格");
+    values[0][cargoPriceIndex] = "货品价格\n（采购价+头程+打包材料+人工费）";
+
+    const parsed = parseLegacyCargoSheet(values);
+
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.rows.find((row) => row.skuCode === "TZX-034-1")).toMatchObject({
+      cargoUnitPriceMilliYuan: 1366,
+      defaultUnitPriceMilliYuan: 325,
+    });
+  });
+
   test("keeps a manually sellable zero-stock SKU sellable", () => {
     const parsed = parseLegacyCargoSheet(
       buildFieldAlignedCargoSourceFixture().value,

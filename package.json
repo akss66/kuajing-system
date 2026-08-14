@@ -21,7 +21,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:bootstrap-super-admin": "tsx src/db/bootstrap-super-admin.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "ops:refresh-feishu-catalog-fields": "tsx scripts/refresh-feishu-catalog-fields.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",

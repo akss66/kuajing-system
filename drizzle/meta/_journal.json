@@ -155,6 +155,13 @@
       "when": 1786713841234,
       "tag": "0021_inventory_movement_listing_and_stocktakes",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786730200000,
+      "tag": "0022_backfill_feishu_product_fields",
+      "breakpoints": true
     }
   ]
 }
