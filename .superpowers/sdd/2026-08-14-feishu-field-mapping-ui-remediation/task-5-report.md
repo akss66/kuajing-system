@@ -9,7 +9,7 @@ Date: 2026-08-14
 - Rebuilt the wide customer view as a semantic table named `客户货盘列表` with the task-focused columns `商品`, `规格/属性`, `实际拿货价`, `可售库存`, `状态`, and `链接`.
 - Kept the table hidden below `xl`; narrow layouts use a named list of cards ordered exactly as identity, specification/attributes, actual customer price, available inventory, status, and link.
 - Rendered `specification` as the primary specification. Color, combination sales, and gram weight appear only as labeled secondary attributes; `skuName` is not rendered as specification.
-- Mapped availability reasons to the exact copy `可售`, `不可售`, and `售罄`. Manual-unavailable and sold-out rows remain visible, retain their actual available inventory, and expose `aria-disabled="true"` rather than presenting an ordering action.
+- Mapped availability reasons to the exact copy `可售`, `不可售`, and `售罄`. Manual-unavailable and sold-out rows remain visible, retain their actual available inventory, and do not present an ordering action.
 - Rendered only the resolved customer price and available inventory. Customer markup contains no source sequence, procurement-price label, total inventory, or cargo-price label.
 - Added a fail-closed URL guard at the customer rendering boundary. Only absolute HTTP(S) product URLs become links; unsafe values render `链接不可用`, missing values render `暂无链接`, and valid new-tab links include `noopener noreferrer`.
 - Reserved 48×48 image geometry, added useful real/missing image accessible names, clamped long specifications to two wrapping lines, retained tabular figures, and kept customer touch targets at least 44px.
@@ -87,7 +87,7 @@ git diff --check
 - The table is a native semantic table and the narrow view is a semantic named list. Both representations expose the same safe facts.
 - Long product/specification/link/attribute content uses `min-w-0`, controlled wrapping/clamping, or truncation at the correct level. The table has no minimum width and is not rendered below `xl`, so this task adds no page-level horizontal scrolling.
 - Product links remain native keyboard-focusable anchors with visible text, safe target relationship attributes, and a consistent Lucide external-link icon.
-- Status is conveyed through exact text in addition to semantic token colors. Unavailable records remain visible and expose a disabled state; the unchanged integration boundary remains authoritative for ordering.
+- Status is conveyed through exact text in addition to semantic token colors. Unavailable records remain visible without misleading disabled semantics on structural containers; the unchanged integration boundary remains authoritative for ordering.
 - The source uses only project semantic tokens and global typography. No raw colors, gradients, local `font-family`, decorative motion, nested cards, or new global styles were added.
 
 Impeccable influenced the result by preserving the incumbent flat merchant-center world, treating this as a narrow refinement, sharing table/card fact renderers, prioritizing real long/missing/disabled states, and keeping interactive targets at the customer portal's 44px floor. Frontend UI Engineering influenced the native semantics, visible status text, stable image geometry, responsive composition, and source-safe Server/Client boundary. Per the Task 5 brief, the final Impeccable detector was not run.
@@ -96,4 +96,34 @@ Impeccable influenced the result by preserving the incumbent flat merchant-cente
 
 - Real-browser overflow, axe, zoom, console/hydration, keyboard-path, and unmasked screenshot verification across the exact viewport matrix belong to Task 7 and were not run in this component task.
 - The shared `Table` primitive still owns an overflow container globally; this customer table uses fixed 100% geometry with no minimum width and is hidden below `xl`, but Task 7 remains the browser-level proof.
-- This task does not add an ordering control to the catalog. Non-orderability is communicated through exact status text and `aria-disabled`; the existing order submission and bulk-order validation remain the enforcement boundary.
+- This task does not add an ordering control to the catalog. Non-orderability is communicated through exact status text and the absence of an order action; the existing order submission and bulk-order validation remain the enforcement boundary.
+
+## Fix round 1: structural semantics and directly tested safe-field search
+
+Review identified two gaps. First, `aria-disabled` on structural table rows and list items misleadingly implied that all descendant interactions were disabled even though safe detail links remain intentionally operable. Second, the page-level safe-field search policy was implemented inline and therefore lacked direct regression coverage.
+
+The customer table rows and cards no longer carry `aria-disabled`. Component coverage now proves that manual-unavailable and sold-out entries remain present in both wide and narrow representations, safe manual-unavailable detail links remain operable with `noopener`, and neither presentation exposes a `下单` or `加入拿货单` control. The unchanged bulk-order and order-submission services remain the authoritative non-orderability enforcement boundary.
+
+The owned page now exports the pure `matchesCustomerCatalogQuery(CustomerCatalogItem, query)` helper and uses it in the server-side filter. The helper preserves trimmed `zh-CN` lower-case normalization and matches only SKU code, product name, true specification, and link text. Direct unit coverage proves positive mixed-case/whitespace matches for all four safe fields and negative matches for `skuName` plus injected `sourceSequence`, default/cargo price, and total-inventory values. Search remains server-side and the strict Task 3 DTO remains unchanged.
+
+Qualifying RED (exit 1):
+
+```powershell
+npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
+```
+
+- Test files: 1 failed (1).
+- Tests: 2 failed, 16 passed (18 total).
+- Existing unavailable row/card structures still emitted `aria-disabled="true"`.
+- After isolating the page's database/principal imports, the expected pure search helper was `undefined`; this was an assertion failure for missing behavior, not an environment or module-load error.
+
+Focused GREEN (exit 0):
+
+```powershell
+npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
+```
+
+- Test files: 1 passed (1).
+- Tests: 18 passed (18).
+
+Non-orderability is now communicated through the exact visible `不可售` / `售罄` status and the absence of an ordering control, without applying disabled semantics to structural containers. Server integration remains authoritative.

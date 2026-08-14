@@ -169,7 +169,6 @@ function CustomerCatalogTable({ items }: { items: CustomerCatalogItem[] }) {
         <TableBody>
           {items.map((item) => (
             <TableRow
-              aria-disabled={item.orderable ? undefined : true}
               data-testid={`catalog-${item.id}`}
               key={item.id}
             >
@@ -208,7 +207,6 @@ function CustomerCatalogCards({ items }: { items: CustomerCatalogItem[] }) {
     >
       {items.map((item) => (
         <li
-          aria-disabled={item.orderable ? undefined : true}
           className="min-w-0 rounded-[var(--radius-surface)] border border-border bg-background p-4"
           data-testid={`catalog-${item.id}`}
           key={item.id}

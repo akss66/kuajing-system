@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { createElement, type ImgHTMLAttributes } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { matchesCustomerCatalogQuery } from "@/app/(customer)/portal/catalog/page";
 import {
   CatalogWorkspace,
   CustomerCatalogWorkspace,
@@ -27,6 +28,14 @@ vi.mock("next/image", () => ({
     void unoptimized;
     return createElement("img", { alt, src, ...props });
   },
+}));
+
+vi.mock("@/modules/catalog/customer-catalog", () => ({
+  listCustomerCatalog: vi.fn(),
+}));
+
+vi.mock("@/modules/identity/principal", () => ({
+  getCurrentPrincipal: vi.fn(),
 }));
 
 const successfulAction: ManagedAction = async () => ({ status: "success" });
@@ -362,17 +371,52 @@ describe("catalog workspaces", () => {
       ),
     ).toEqual(["identity", "attributes", "price", "inventory", "status", "link"]);
 
-    expect(screen.getAllByTestId("catalog-customer-sku-manual")[0]).toHaveAttribute(
-      "aria-disabled",
-      "true",
+    const manualUnavailableSurfaces = screen.getAllByTestId(
+      "catalog-customer-sku-manual",
     );
-    expect(screen.getAllByTestId("catalog-customer-sku-sold-out")[0]).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    const soldOutSurfaces = screen.getAllByTestId("catalog-customer-sku-sold-out");
+    expect(manualUnavailableSurfaces).toHaveLength(2);
+    expect(soldOutSurfaces).toHaveLength(2);
+    for (const surface of [...manualUnavailableSurfaces, ...soldOutSurfaces]) {
+      expect(surface).not.toHaveAttribute("aria-disabled");
+    }
+
+    const manualUnavailableLinks = screen.getAllByRole("link", {
+      name: "人工不可售商品",
+    });
+    expect(manualUnavailableLinks).toHaveLength(2);
+    for (const link of manualUnavailableLinks) {
+      expect(link).toHaveAttribute("href", "https://example.test/products/manual");
+      expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    }
+    expect(
+      screen.queryByRole("button", { name: /下单|加入拿货单/ }),
+    ).not.toBeInTheDocument();
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("matches customer catalog search only against normalized safe fields", () => {
+    const item = {
+      ...customerRows[0]!,
+      cargoUnitPriceMilliYuan: 1_366,
+      defaultUnitPriceMilliYuan: 325,
+      linkText: "SAFE-LINK-TEXT",
+      productName: "Demo Cable",
+      sourceSequence: "ADMIN-SOURCE-34",
+      specification: "WINTER SPEC VALUE",
+      totalQuantity: 99,
+    };
+
+    expect(matchesCustomerCatalogQuery(item, "  tzx-customer-001  ")).toBe(true);
+    expect(matchesCustomerCatalogQuery(item, "  demo cable  ")).toBe(true);
+    expect(matchesCustomerCatalogQuery(item, "  winter spec  ")).toBe(true);
+    expect(matchesCustomerCatalogQuery(item, "  safe-link  ")).toBe(true);
+    expect(matchesCustomerCatalogQuery(item, "SKU 名称不能冒充规格")).toBe(false);
+    expect(matchesCustomerCatalogQuery(item, "ADMIN-SOURCE-34")).toBe(false);
+    expect(matchesCustomerCatalogQuery(item, "1366")).toBe(false);
+    expect(matchesCustomerCatalogQuery(item, "99")).toBe(false);
   });
 
   it.each([
