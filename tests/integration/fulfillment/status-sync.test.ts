@@ -167,6 +167,7 @@ describe("Jifeng order status convergence", () => {
       beforeQuantity: 20,
       delta: -1,
       movementType: "SHIPMENT",
+      reason: "系统发货扣减",
       reasonCode: "SYSTEM_SHIPMENT",
       referenceId: fixture.shipments[0].id,
       referenceType: "ORDER_SHIPMENT",

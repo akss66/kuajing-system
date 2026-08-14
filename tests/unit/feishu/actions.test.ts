@@ -219,6 +219,72 @@ describe("feishu admin actions", () => {
     );
   });
 
+  it("replays an imported migration through the service when the rollout gate is off", async () => {
+    configMocks.canImportFeishuCargo.mockReturnValue(false);
+    configMocks.readFeishuConfig.mockReturnValue({
+      appId: "app-id",
+      appSecret: "app-secret",
+      cargoImportEnabled: false,
+      cargoWritesEnabled: false,
+      sourceSheetId: undefined,
+      sourceWikiToken: "wiki-source-token",
+      targetSheetId: undefined,
+      targetSpreadsheetToken: undefined,
+    });
+    queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue({
+      blockingIssueCount: 0,
+      runId: "run-74",
+      skuCount: 74,
+      status: "IMPORTED",
+    });
+    serviceMocks.confirmCargoMigration.mockResolvedValue({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+      sourceSequenceCount: 50,
+      totalQuantity: 428,
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toMatchObject({
+      message: expect.stringContaining("50 个来源序号、74 个SKU"),
+      status: "success",
+    });
+    expect(serviceMocks.confirmCargoMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ cargoImportEnabled: false }),
+        runId: "run-74",
+      }),
+    );
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
+      "/admin/system/integrations",
+    );
+  });
+
+  it("still rejects a non-imported run that is not ready", async () => {
+    queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue({
+      blockingIssueCount: 1,
+      runId: "run-74",
+      skuCount: 74,
+      status: "PREFLIGHT_BLOCKED",
+    });
+
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
+
+    expect(result).toMatchObject({ status: "error" });
+    expect(result.message).toContain("不可确认");
+    expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+
   it("imports into PostgreSQL without a target sheet while Feishu writes stay disabled", async () => {
     configMocks.canImportFeishuCargo.mockReturnValue(true);
     configMocks.canWriteFeishuCargo.mockReturnValue(false);
@@ -303,7 +369,9 @@ describe("feishu admin actions", () => {
       status: "error",
     });
     expect(result.message).toContain("只读");
-    expect(queryMocks.findCargoMigrationRunConfirmationSummary).not.toHaveBeenCalled();
+    expect(queryMocks.findCargoMigrationRunConfirmationSummary).toHaveBeenCalledWith(
+      "run-74",
+    );
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
   });
 
@@ -333,7 +401,9 @@ describe("feishu admin actions", () => {
       status: "error",
     });
     expect(result.message).toContain("只读");
-    expect(queryMocks.findCargoMigrationRunConfirmationSummary).not.toHaveBeenCalled();
+    expect(queryMocks.findCargoMigrationRunConfirmationSummary).toHaveBeenCalledWith(
+      "run-74",
+    );
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
   });
 

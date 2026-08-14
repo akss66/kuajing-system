@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
+import { inventoryReasonLabel } from "@/modules/inventory/types";
 import { createSystemNotification } from "@/modules/notifications/service";
 
 type StatusSource = "POLL" | "WEBHOOK";
@@ -152,7 +153,7 @@ export async function applyJifengOrderStatus(input: {
           beforeQuantity: balance.totalQuantity,
           delta: -line.quantity,
           movementType: "SHIPMENT",
-          reason: `极风已发货扣减，ERP 单号 ${input.detail.erpNo}`,
+          reason: inventoryReasonLabel("SYSTEM_SHIPMENT"),
           reasonCode: "SYSTEM_SHIPMENT",
           referenceId: current.shipmentId,
           referenceType: "ORDER_SHIPMENT",

@@ -222,22 +222,24 @@ export async function confirmCargoMigrationAction(
   void _previousState;
   const actor = await requireSuperAdmin();
   const config = readFeishuConfig();
+  const runId = String(formData.get("runId") ?? "").trim();
+  const runSummary = runId
+    ? await findCargoMigrationRunConfirmationSummary(runId)
+    : null;
+  const isImportedReplay = runSummary?.status === "IMPORTED";
 
-  if (!canImportFeishuCargo(config)) {
+  if (!isImportedReplay && !canImportFeishuCargo(config)) {
     return {
       message: READ_ONLY_CONFIRM_MESSAGE,
       status: "error",
     };
   }
 
-  const runId = String(formData.get("runId") ?? "").trim();
-  const runSummary = runId
-    ? await findCargoMigrationRunConfirmationSummary(runId)
-    : null;
   if (
     !runSummary ||
-    runSummary.status !== "PREFLIGHT_READY" ||
-    runSummary.blockingIssueCount > 0
+    (!isImportedReplay &&
+      (runSummary.status !== "PREFLIGHT_READY" ||
+        runSummary.blockingIssueCount > 0))
   ) {
     return {
       message: "当前预检记录不可确认，请重新执行只读预检。",

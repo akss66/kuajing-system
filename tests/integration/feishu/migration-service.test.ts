@@ -1026,6 +1026,8 @@ describe("Feishu cargo migration service", () => {
       expect.objectContaining({
         afterQuantity: Number(sequenceRows[2][6]),
         beforeQuantity: 0,
+        reason: "飞书初始导入",
+        reasonCode: "FEISHU_INITIAL_IMPORT",
         skuId: missingSku.id,
       }),
     ]);

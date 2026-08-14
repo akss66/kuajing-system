@@ -15,6 +15,7 @@ import {
 import { FeishuApiError } from "@/integrations/feishu/client";
 import type { FeishuIntegrationConfig } from "@/integrations/feishu/config";
 import type { SuperAdminPrincipal } from "@/modules/identity/principal";
+import { inventoryReasonLabel } from "@/modules/inventory/types";
 
 import { createCatalogAssetStorage } from "./asset-storage";
 import { parseLegacyCargoSheet } from "./cargo-parser";
@@ -800,7 +801,8 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
             beforeQuantity: 0,
             delta: row.totalQuantity,
             movementType: "MANUAL_INCREASE" as const,
-            reason: IMPORT_REASON,
+            reason: inventoryReasonLabel("FEISHU_INITIAL_IMPORT"),
+            reasonCode: "FEISHU_INITIAL_IMPORT" as const,
             referenceId: input.runId,
             referenceType: "FEISHU_CARGO_MIGRATION",
             skuId,
