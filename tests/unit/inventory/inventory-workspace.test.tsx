@@ -10,160 +10,230 @@ import type { ManagedAction } from "@/shared/action-state";
 
 const successfulAction: ManagedAction = async () => ({ status: "success" });
 
-afterEach(() => {
-  cleanup();
-});
+const rows = [
+  {
+    alertLevel: "CRITICAL" as const,
+    available: 2,
+    coverageDays: 6,
+    id: "sku-low",
+    locked: 3,
+    name: "低库存规格",
+    shippedQuantity7d: 4,
+    skuCode: "TZX-LOW-001",
+    total: 5,
+  },
+  {
+    alertLevel: "NONE" as const,
+    available: 20,
+    coverageDays: 60,
+    id: "sku-ok",
+    locked: 0,
+    name: "库存充足规格",
+    shippedQuantity7d: 2,
+    skuCode: "TZX-OK-002",
+    total: 20,
+  },
+];
+
+const movementPage = {
+  page: 2,
+  pageSize: 20,
+  rows: [
+    {
+      afterQuantity: 2,
+      beforeQuantity: 3,
+      createdAt: "2026-08-13T12:00:00.000Z",
+      delta: -1,
+      id: "movement-system",
+      movementType: "SHIPMENT" as const,
+      operator: { actorId: null, actorType: "SYSTEM" as const, label: "系统" },
+      reasonCode: "SYSTEM_SHIPMENT" as const,
+      reasonLabel: "系统发货扣减",
+      relation: {
+        href: "/admin/orders/order-1" as const,
+        id: "shipment-1",
+        label: "订单 · CA-10001",
+        type: "ORDER_SHIPMENT" as const,
+      },
+      remark: null,
+      skuCode: "TZX-LOW-001",
+      skuId: "sku-low",
+      source: "SYSTEM_ORDER_SHIPMENT" as const,
+    },
+    {
+      afterQuantity: 3,
+      beforeQuantity: 5,
+      createdAt: "2026-08-12T12:00:00.000Z",
+      delta: -2,
+      id: "movement-manual",
+      movementType: "MANUAL_DECREASE" as const,
+      operator: { actorId: "admin-1", actorType: "ADMIN" as const, label: "仓库管理员" },
+      reasonCode: "OFFLINE_FULFILLMENT" as const,
+      reasonLabel: "线下发货/人工出库",
+      relation: null,
+      remark: "历史订单补录",
+      skuCode: "TZX-LOW-001",
+      skuId: "sku-low",
+      source: "ADMIN_OFFLINE_FULFILLMENT" as const,
+    },
+  ],
+  total: 42,
+  totalPages: 3,
+};
+
+afterEach(cleanup);
 
 describe("inventory workspace", () => {
-  it("leads with stock risk and keeps audited inventory editing in a drawer", async () => {
+  it("exposes exactly the two canonical first-level inventory views", () => {
     render(
       <InventoryWorkspace
+        activeView="snapshot"
         adjustInventoryAction={successfulAction}
-        recentMovements={[
-          {
-            afterQuantity: 13,
-            createdAt: "2026-08-13T12:00:00.000Z",
-            delta: 8,
-            id: "movement-1",
-            movementType: "MANUAL_INCREASE",
-            reason: "首批入库",
-            skuCode: "TZX-LOW-001",
-          },
-        ]}
-        rows={[
-          {
-            alertLevel: "CRITICAL",
-            available: 2,
-            coverageDays: 6,
-            id: "sku-low",
-            locked: 3,
-            name: "低库存规格",
-            shippedQuantity7d: 4,
-            skuCode: "TZX-LOW-001",
-            total: 5,
-          },
-          {
-            alertLevel: "NONE",
-            available: 20,
-            coverageDays: 60,
-            id: "sku-ok",
-            locked: 0,
-            name: "库存充足规格",
-            shippedQuantity7d: 2,
-            skuCode: "TZX-OK-002",
-            total: 20,
-          },
-        ]}
+        movementFilters={{}}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
       />,
     );
 
-    expect(screen.getByRole("searchbox", { name: "搜索库存 SKU" })).toBeVisible();
-    const health = screen.getByRole("region", { name: "库存健康摘要" });
-    expect(health).toHaveTextContent("可售库存");
-    expect(health).toHaveTextContent("22");
+    const viewTabs = screen.getByRole("tablist", { name: "库存视图" });
+    expect(within(viewTabs).getAllByRole("tab")).toHaveLength(2);
+    expect(within(viewTabs).getByRole("tab", { name: "实时库存" })).toHaveAttribute(
+      "href",
+      "/admin/inventory",
+    );
+    expect(within(viewTabs).getByRole("tab", { name: "库存流水" })).toHaveAttribute(
+      "href",
+      "/admin/inventory?view=movements",
+    );
+    expect(within(viewTabs).queryByRole("tab", { name: /批量盘点/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "最近库存变动" })).not.toBeInTheDocument();
+  });
 
-    const riskQueue = screen.getByRole("region", { name: "低库存队列" });
-    expect(riskQueue).toHaveTextContent("TZX-LOW-001");
-    expect(riskQueue).not.toHaveTextContent("TZX-OK-002");
+  it("opens a row-scoped directional adjustment with shared defaults and six-fact preview", async () => {
+    render(
+      <InventoryWorkspace
+        activeView="snapshot"
+        adjustInventoryAction={successfulAction}
+        movementFilters={{}}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
+      />,
+    );
 
     const table = screen.getByRole("table", { name: "实时库存列表" });
-    for (const header of ["总库存", "订单锁定", "可售库存"]) {
+    const lowRow = within(table).getByRole("row", { name: /TZX-LOW-001/ });
+    fireEvent.click(within(lowRow).getByRole("button", { name: "+ / - 调整 TZX-LOW-001" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "TZX-LOW-001 调整库存" });
+    expect(within(drawer).getByRole("radio", { name: "增加" })).toBeChecked();
+    expect(within(drawer).getByLabelText("调整原因")).toHaveValue("RESTOCK_RECEIPT");
+    expect(within(drawer).getByRole("option", { name: "补货入库" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("option", { name: "客户退货入库" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("option", { name: "破损报废" })).not.toBeInTheDocument();
+    expect(within(drawer).getByLabelText("调整数量")).toHaveAttribute("min", "1");
+    expect(within(drawer).getByLabelText("调整数量")).toHaveAttribute("step", "1");
+
+    fireEvent.change(within(drawer).getByLabelText("调整数量"), { target: { value: "4" } });
+    const preview = within(drawer).getByRole("region", { name: "库存调整预览" });
+    for (const fact of ["调整前总库存", "变化量", "调整后总库存", "订单锁定", "当前可售", "调整后可售"]) {
+      expect(within(preview).getByText(fact)).toBeVisible();
+    }
+    expect(preview).toHaveTextContent("+4");
+    expect(preview).toHaveTextContent("9");
+
+    fireEvent.click(within(drawer).getByRole("radio", { name: "减少" }));
+    expect(within(drawer).getByLabelText("调整原因")).toHaveValue("OFFLINE_FULFILLMENT");
+    expect(within(drawer).getByRole("option", { name: "破损报废" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("option", { name: "其他出库" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("option", { name: "客户退货入库" })).not.toBeInTheDocument();
+    expect(within(drawer).getByText("仅用于未经过本系统订单的线下发货或历史补录；系统订单确认发货后会自动扣减，请勿重复调整。")).toBeVisible();
+    fireEvent.change(within(drawer).getByLabelText("调整数量"), { target: { value: "3" } });
+    expect(within(drawer).getByRole("alert")).toHaveTextContent("调整后总库存不能低于订单锁定");
+    expect(within(drawer).getByRole("button", { name: "确认调整库存" })).toBeDisabled();
+  });
+
+  it("keeps set-to-actual as a secondary mode and explains no-change", async () => {
+    render(
+      <InventoryWorkspace
+        activeView="snapshot"
+        adjustInventoryAction={successfulAction}
+        movementFilters={{}}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "实时库存列表" });
+    const lowRow = within(table).getByRole("row", { name: /TZX-LOW-001/ });
+    fireEvent.click(within(lowRow).getByRole("button", { name: "+ / - 调整 TZX-LOW-001" }));
+    const drawer = await screen.findByRole("dialog", { name: "TZX-LOW-001 调整库存" });
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "设置为实际库存" }));
+    fireEvent.change(within(drawer).getByLabelText("盘点后实际总库存"), { target: { value: "5" } });
+    expect(within(drawer).getByRole("status")).toHaveTextContent("无变化，不生成库存流水");
+    expect(within(drawer).getByRole("button", { name: "确认盘点结果" })).toBeDisabled();
+  });
+
+  it("renders canonical movement filters, pagination, source distinction, and table/card fact parity", () => {
+    render(
+      <InventoryWorkspace
+        activeView="movements"
+        adjustInventoryAction={successfulAction}
+        movementFilters={{
+          actorId: "admin-1",
+          from: "2026-08-01",
+          movementType: "SHIPMENT",
+          skuCode: "TZX-LOW-001",
+          source: "SYSTEM_ORDER_SHIPMENT",
+          to: "2026-08-14",
+        }}
+        movementPage={movementPage}
+        rows={rows}
+        setInventoryToActualCountAction={successfulAction}
+      />,
+    );
+
+    const filters = screen.getByRole("search", { name: "筛选库存流水" });
+    expect(within(filters).getByLabelText("SKU")).toHaveValue("TZX-LOW-001");
+    expect(within(filters).getByLabelText("开始时间")).toHaveValue("2026-08-01");
+    expect(within(filters).getByLabelText("结束时间")).toHaveValue("2026-08-14");
+    expect(within(filters).getByLabelText("流水类型")).toHaveValue("SHIPMENT");
+    expect(within(filters).getByLabelText("操作人")).toHaveValue("admin-1");
+    expect(within(filters).getByLabelText("来源")).toHaveValue("SYSTEM_ORDER_SHIPMENT");
+    expect(within(filters).getByRole("link", { name: "重置筛选" })).toHaveAttribute(
+      "href",
+      "/admin/inventory?view=movements",
+    );
+
+    const table = screen.getByRole("table", { name: "库存流水列表" });
+    for (const header of ["前值", "变动", "后值", "原因与备注", "操作人", "来源", "时间", "关联单据"]) {
       expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
     }
-
-    expect(screen.getByRole("region", { name: "最近库存变动" })).toHaveTextContent("首批入库");
-    expect(screen.queryByLabelText("调整数量")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("调整原因")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "调整库存" }));
-    const drawer = await screen.findByRole("dialog", { name: "调整库存" });
-    expect(within(drawer).getByLabelText("调整数量")).toBeVisible();
-    expect(within(drawer).getByLabelText("调整原因")).toBeVisible();
-    expect(within(drawer).getByRole("button", { name: "确认调整库存" })).toBeEnabled();
-  });
-
-  it("filters inventory without dropping stock facts", () => {
-    render(
-      <InventoryWorkspace
-        adjustInventoryAction={successfulAction}
-        recentMovements={[]}
-        rows={[
-          {
-            alertLevel: "NO_BASELINE",
-            available: 10,
-            coverageDays: null,
-            id: "sku-1",
-            locked: 0,
-            name: "黑色 10 件装",
-            shippedQuantity7d: 0,
-            skuCode: "TZX-DEMO-001",
-            total: 10,
-          },
-          {
-            alertLevel: "WARNING",
-            available: 3,
-            coverageDays: 35,
-            id: "sku-2",
-            locked: 2,
-            name: "白色 20 件装",
-            shippedQuantity7d: 1,
-            skuCode: "TZX-WHITE-002",
-            total: 5,
-          },
-        ]}
-      />,
+    expect(within(table).getByText("系统订单自动发货")).toBeVisible();
+    expect(within(table).getAllByText("线下发货/人工出库")).toHaveLength(2);
+    expect(within(table).getByRole("link", { name: "订单 · CA-10001" })).toHaveAttribute(
+      "href",
+      "/admin/orders/order-1",
     );
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "搜索库存 SKU" }), {
-      target: { value: "WHITE" },
-    });
+    const cards = screen.getByRole("list", { name: "库存流水列表" });
+    expect(cards).toHaveTextContent(/前值3/);
+    expect(cards).toHaveTextContent(/变动-1/);
+    expect(cards).toHaveTextContent(/后值2/);
+    expect(cards).toHaveTextContent("系统订单自动发货");
+    expect(cards).toHaveTextContent("历史订单补录");
 
-    const table = screen.getByRole("table", { name: "实时库存列表" });
-    expect(within(table).queryByText("TZX-DEMO-001")).not.toBeInTheDocument();
-    const row = within(table).getByRole("row", { name: /TZX-WHITE-002/ });
-    expect(row).toHaveTextContent("5");
-    expect(row).toHaveTextContent("2");
-    expect(row).toHaveTextContent("3");
-  });
-
-  it("orders the low-stock queue by risk before the incoming balance freshness", () => {
-    const rowsFromUpdatedAtDescending = [
-      {
-        alertLevel: "WARNING" as const,
-        available: 8,
-        coverageDays: 35,
-        id: "sku-warning-newer",
-        locked: 2,
-        name: "近期更新的预警规格",
-        shippedQuantity7d: 2,
-        skuCode: "TZX-WARNING-NEWER",
-        total: 10,
-      },
-      {
-        alertLevel: "CRITICAL" as const,
-        available: 2,
-        coverageDays: 12,
-        id: "sku-critical-older",
-        locked: 3,
-        name: "较早更新的紧急规格",
-        shippedQuantity7d: 1,
-        skuCode: "TZX-CRITICAL-OLDER",
-        total: 5,
-      },
-    ];
-
-    render(
-      <InventoryWorkspace
-        adjustInventoryAction={successfulAction}
-        recentMovements={[]}
-        rows={rowsFromUpdatedAtDescending}
-      />,
+    expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("view=movements"),
     );
-
-    const riskItems = within(screen.getByRole("region", { name: "低库存队列" }))
-      .getAllByRole("listitem");
-    expect(riskItems).toHaveLength(2);
-    expect(riskItems[0]).toHaveTextContent("TZX-CRITICAL-OLDER");
-    expect(riskItems[1]).toHaveTextContent("TZX-WARNING-NEWER");
+    expect(screen.getByRole("link", { name: "上一页" }).getAttribute("href")).not.toContain("page=");
+    expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("page=3"),
+    );
   });
 });
