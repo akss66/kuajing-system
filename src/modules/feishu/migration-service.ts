@@ -20,6 +20,7 @@ import { createCatalogAssetStorage } from "./asset-storage";
 import { parseLegacyCargoSheet } from "./cargo-parser";
 import type {
   MigrationIssue,
+  MigrationSummary,
   NormalizedCargoRow,
   ParsedCargoRow,
   TemporaryAssetManifest,
@@ -94,12 +95,7 @@ type SourceValidationResult =
       sourceRevision: number;
       sourceSheetId: string;
       sourceSpreadsheetHash: string;
-      summary: {
-        imageCount: number;
-        productCount: number;
-        skuCount: number;
-        totalQuantity: number;
-      };
+      summary: MigrationSummary;
       temporaryAssets: TemporaryAssetManifest[];
     } & { status: "PREFLIGHT_BLOCKED" | "PREFLIGHT_READY" });
 
@@ -197,6 +193,7 @@ function normalizeDownloadedRow(
 ): NormalizedCargoRow {
   return {
     color: row.color,
+    cargoUnitPriceMilliYuan: row.cargoUnitPriceMilliYuan,
     combination: row.combination,
     defaultUnitPriceFen: row.defaultUnitPriceFen,
     defaultUnitPriceMilliYuan: row.defaultUnitPriceMilliYuan,
@@ -211,6 +208,7 @@ function normalizeDownloadedRow(
     skuCode: row.skuCode,
     skuName: row.skuName,
     sourceRowNumber: row.sourceRowNumber,
+    sourceSequence: row.sourceSequence,
     specification: row.specification,
     totalQuantity: row.totalQuantity,
     weightGrams: row.weightGrams,
@@ -527,6 +525,7 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
         : {
             imageCount: 0,
             productCount: 0,
+            sourceSequenceCount: 0,
             skuCount: 0,
             totalQuantity: 0,
           };

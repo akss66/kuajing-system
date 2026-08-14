@@ -10,6 +10,7 @@ const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const HEADER_ALIASES = {
   combination: ["\u7ec4\u5408\u9500\u552e"],
   color: ["\u989c\u8272"],
+  cargoPrice: ["\u8d27\u54c1\u4ef7\u683c"],
   image: ["\u56fe\u7247"],
   link: ["\u94fe\u63a5\u6587\u5b57"],
   name: ["\u540d\u79f0"],
@@ -53,6 +54,7 @@ type GroupFieldState = {
 
 type GroupContext = {
   combination: GroupFieldState | null;
+  cargoPrice: GroupFieldState | null;
   image: GroupFieldState | null;
   price: GroupFieldState | null;
   productGroupKey: GroupFieldState | null;
@@ -60,6 +62,7 @@ type GroupContext = {
   productUrl: ({ text: string; url: string | null } & { rowNumber: number }) | null;
   specification: GroupFieldState | null;
   saleStatus: GroupFieldState | null;
+  sourceSequence: GroupFieldState | null;
   weight: GroupFieldState | null;
 };
 
@@ -369,6 +372,7 @@ function isBlankLinkCell(value: unknown) {
 function createEmptyContext(): GroupContext {
   return {
     combination: null,
+    cargoPrice: null,
     image: null,
     price: null,
     productGroupKey: null,
@@ -376,6 +380,7 @@ function createEmptyContext(): GroupContext {
     productUrl: null,
     specification: null,
     saleStatus: null,
+    sourceSequence: null,
     weight: null,
   };
 }
@@ -458,6 +463,7 @@ function buildSummary(rows: ParsedCargoRow[]) {
     summary: {
       imageCount: rows.length,
       productCount: new Set(rows.map((row) => row.productGroupKey)).size,
+      sourceSequenceCount: new Set(rows.map((row) => row.sourceSequence)).size,
       skuCount: rows.length,
       totalQuantity: overflowed ? 0 : totalQuantity,
     },
@@ -480,6 +486,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       summary: {
         imageCount: 0,
         productCount: 0,
+        sourceSequenceCount: 0,
         skuCount: 0,
         totalQuantity: 0,
       },
@@ -528,6 +535,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     }
 
     const explicitGroupText = extractDisplayText(row[headerMap.sequence]);
+    const explicitSourceSequence = explicitGroupText;
     const explicitGroupKey = explicitGroupText
       ? normalizeProductGroupKey(explicitGroupText)
       : "";
@@ -554,6 +562,20 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
 
     if (productGroupKey && previousProductGroupKey !== productGroupKey) {
       resetGroupContext(context);
+    }
+
+    const sourceSequence =
+      explicitSourceSequence ||
+      (typeof context.sourceSequence?.value === "string"
+        ? context.sourceSequence.value
+        : "");
+    if (explicitSourceSequence) {
+      context.sourceSequence = {
+        rowNumber: sourceRowNumber,
+        value: explicitSourceSequence,
+      };
+    } else if (context.sourceSequence) {
+      inheritedFrom.sourceSequence = context.sourceSequence.rowNumber;
     }
 
     if (explicitGroupKey || (!context.productGroupKey && productGroupKey)) {
@@ -636,6 +658,49 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         buildIssue({
           code: "CARGO_INVALID_PRICE",
           message: "\u91c7\u8d2d\u4ef7\u5fc5\u987b\u662f\u5408\u6cd5\u4eba\u6c11\u5e01\u91d1\u989d",
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    if (sourceSequence.length === 0) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_MISSING_SOURCE_SEQUENCE",
+          message: "序号不能为空",
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    const hasCargoPriceColumn = headerMap.cargoPrice >= 0;
+    const explicitCargoPrice = hasCargoPriceColumn
+      ? parseYuanPrice(row[headerMap.cargoPrice])
+      : null;
+    const cargoUnitPriceMilliYuan =
+      hasCargoPriceColumn
+        ? (explicitCargoPrice?.unitPriceMilliYuan ??
+          (typeof context.cargoPrice?.value === "number"
+            ? context.cargoPrice.value
+            : null))
+        : defaultUnitPriceMilliYuan;
+    if (explicitCargoPrice !== null) {
+      context.cargoPrice = {
+        rowNumber: sourceRowNumber,
+        value: explicitCargoPrice.unitPriceMilliYuan,
+      };
+    } else if (
+      extractDisplayText(row[headerMap.cargoPrice]).length === 0 &&
+      context.cargoPrice
+    ) {
+      inheritedFrom.cargoPrice = context.cargoPrice.rowNumber;
+    } else if (hasCargoPriceColumn) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_INVALID_CARGO_PRICE",
+          message: "货品价格必须是合法人民币金额",
           sourceRowNumber,
         }),
       );
@@ -783,6 +848,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
 
     rows.push({
       color: extractDisplayText(row[headerMap.color]) || null,
+      cargoUnitPriceMilliYuan: cargoUnitPriceMilliYuan!,
       combination,
       defaultUnitPriceFen: roundMilliYuanToFen(defaultUnitPriceMilliYuan!),
       defaultUnitPriceMilliYuan: defaultUnitPriceMilliYuan!,
@@ -792,7 +858,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       productGroupKey,
       productName,
       productUrl: resolvedLink!.url,
-      saleStatus: quantity === 0 ? "NOT_SELLABLE" : parsedSaleStatus!,
+      saleStatus: parsedSaleStatus!,
       skuCode,
       skuName: buildSkuName({
         color: extractDisplayText(row[headerMap.color]) || null,
@@ -801,6 +867,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         specification,
       }),
       sourceRowNumber,
+      sourceSequence,
       specification,
       totalQuantity: quantity,
       weightGrams,

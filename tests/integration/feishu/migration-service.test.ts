@@ -867,6 +867,7 @@ describe("Feishu cargo migration service", () => {
       summaryJson: {
         imageCount: 0,
         productCount: 0,
+        sourceSequenceCount: 0,
         skuCount: 0,
         totalQuantity: 0,
       },

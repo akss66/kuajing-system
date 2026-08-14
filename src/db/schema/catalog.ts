@@ -34,13 +34,28 @@ const timestamps = {
     .notNull(),
 };
 
-export const products = pgTable("products", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  description: text("description"),
-  status: accountStatus("status").default("ACTIVE").notNull(),
-  ...timestamps,
-});
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: varchar("name", { length: 200 }).notNull(),
+    description: text("description"),
+    sourceSequence: varchar("source_sequence", { length: 64 }),
+    linkText: varchar("link_text", { length: 500 }),
+    cargoUnitPriceMilliYuan: integer("cargo_unit_price_milli_yuan"),
+    status: accountStatus("status").default("ACTIVE").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("products_source_sequence_unique")
+      .on(table.sourceSequence)
+      .where(sql`${table.sourceSequence} is not null`),
+    check(
+      "products_cargo_unit_price_milli_yuan_non_negative",
+      sql`${table.cargoUnitPriceMilliYuan} >= 0`,
+    ),
+  ],
+);
 
 export const catalogAssets = pgTable(
   "catalog_assets",

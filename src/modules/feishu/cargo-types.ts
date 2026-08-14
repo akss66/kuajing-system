@@ -7,6 +7,7 @@ export type MigrationIssue = {
 
 export type MigrationSummary = {
   productCount: number;
+  sourceSequenceCount: number;
   skuCount: number;
   imageCount: number;
   totalQuantity: number;
@@ -23,8 +24,10 @@ export type TemporaryAssetManifest = {
 
 export type CargoInheritedField =
   | "productGroupKey"
+  | "sourceSequence"
   | "productName"
   | "image"
+  | "cargoPrice"
   | "price"
   | "productUrl"
   | "specification"
@@ -35,6 +38,7 @@ export type CargoInheritedField =
 export type NormalizedCargoRow = {
   sourceRowNumber: number;
   productGroupKey: string;
+  sourceSequence: string;
   skuCode: string;
   imageContentSha256: string;
   imageTemporaryKey: string;
@@ -42,6 +46,7 @@ export type NormalizedCargoRow = {
   skuName: string;
   defaultUnitPriceFen: number;
   defaultUnitPriceMilliYuan: number;
+  cargoUnitPriceMilliYuan: number;
   totalQuantity: number;
   linkText: string;
   productUrl: string | null;

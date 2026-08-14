@@ -20,6 +20,7 @@ import type {
 type DatabaseLike = DbTransaction | typeof db;
 
 const inheritedFieldLabels: Record<CargoInheritedField, string> = {
+  cargoPrice: "货品价格",
   combination: "组合销售",
   image: "图片",
   price: "价格",
@@ -27,9 +28,20 @@ const inheritedFieldLabels: Record<CargoInheritedField, string> = {
   productName: "商品名称",
   productUrl: "商品链接",
   saleStatus: "销售状态",
+  sourceSequence: "源序号",
   specification: "规格",
   weight: "重量",
 };
+
+function withSourceSequenceCount(
+  summary: Omit<MigrationSummary, "sourceSequenceCount"> &
+    Partial<Pick<MigrationSummary, "sourceSequenceCount">>,
+): MigrationSummary {
+  return {
+    ...summary,
+    sourceSequenceCount: summary.sourceSequenceCount ?? summary.productCount,
+  };
+}
 
 function formatCurrencyFromFen(value: number) {
   return `¥${(value / 100).toFixed(2)}`;
@@ -352,7 +364,10 @@ export async function getLatestCargoMigrationRun() {
     status: run.status,
     statusLabel: status.label,
     statusTone: status.tone,
-    summary: run.summaryJson as MigrationSummary,
+    summary: withSourceSequenceCount(
+      run.summaryJson as Omit<MigrationSummary, "sourceSequenceCount"> &
+        Partial<Pick<MigrationSummary, "sourceSequenceCount">>,
+    ),
     updatedAtLabel: formatDateTime(run.updatedAt),
     warningIssueCount: issues.filter((issue) => issue.severity === "WARNING")
       .length,

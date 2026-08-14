@@ -132,6 +132,7 @@ describe("Feishu cargo migration schema", () => {
         normalizedRowsJson: [
           {
             color: null,
+            cargoUnitPriceMilliYuan: 2_990,
             combination: null,
             defaultUnitPriceFen: 299,
             defaultUnitPriceMilliYuan: 2_990,
@@ -146,6 +147,7 @@ describe("Feishu cargo migration schema", () => {
             skuCode: "TZX-001",
             skuName: "Cargo SKU",
             sourceRowNumber: 1,
+            sourceSequence: "group-1",
             specification: null,
             totalQuantity: 148,
             weightGrams: 1200,
@@ -159,6 +161,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 74,
           productCount: 50,
+          sourceSequenceCount: 50,
           skuCount: 74,
           totalQuantity: 148,
         },
@@ -221,6 +224,7 @@ describe("Feishu cargo migration schema", () => {
         normalizedRowsJson: [
           {
             color: null,
+            cargoUnitPriceMilliYuan: 2_990,
             combination: null,
             defaultUnitPriceFen: 299,
             defaultUnitPriceMilliYuan: 2_990,
@@ -235,6 +239,7 @@ describe("Feishu cargo migration schema", () => {
             skuCode: "TZX-001",
             skuName: "Cargo SKU",
             sourceRowNumber: 2,
+            sourceSequence: "group-1",
             specification: "Standard",
             totalQuantity: 10,
             weightGrams: 1200,
@@ -248,6 +253,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 1,
           productCount: 1,
+          sourceSequenceCount: 1,
           skuCount: 1,
           totalQuantity: 10,
         },
@@ -284,6 +290,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 2,
           productCount: 2,
+          sourceSequenceCount: 2,
           skuCount: 2,
           totalQuantity: 20,
         },
@@ -352,6 +359,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 1,
           productCount: 1,
+          sourceSequenceCount: 1,
           skuCount: 1,
           totalQuantity: -1,
         },
@@ -393,6 +401,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 1,
           productCount: 1,
+          sourceSequenceCount: 1,
           skuCount: 1,
           totalQuantity: 1,
         },
@@ -412,6 +421,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 1,
           productCount: 1,
+          sourceSequenceCount: 1,
           skuCount: 1,
           totalQuantity: 1,
         },
@@ -447,6 +457,7 @@ describe("Feishu cargo migration schema", () => {
         summaryJson: {
           imageCount: 1,
           productCount: 1,
+          sourceSequenceCount: 1,
           skuCount: 1,
           totalQuantity: 1,
         },
@@ -482,6 +493,7 @@ describe("Feishu cargo migration schema", () => {
       summaryJson: {
         imageCount: 1,
         productCount: 1,
+        sourceSequenceCount: 1,
         skuCount: 1,
         totalQuantity: 1,
       },

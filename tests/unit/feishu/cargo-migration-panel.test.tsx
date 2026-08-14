@@ -78,6 +78,7 @@ function createProps(
       summary: {
         imageCount: 74,
         productCount: 50,
+        sourceSequenceCount: 50,
         skuCount: 74,
         totalQuantity: 428,
       },

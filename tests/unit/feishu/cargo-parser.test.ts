@@ -1,4 +1,5 @@
 import cargoSourceValues from "@/../tests/fixtures/feishu/cargo-source-values.json";
+import { buildFieldAlignedCargoSourceFixture } from "@/../tests/fixtures/feishu/field-aligned-cargo-source";
 import { parseLegacyCargoSheet } from "@/modules/feishu/cargo-parser";
 
 import { describe, expect, test } from "vitest";
@@ -25,7 +26,7 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows[1].inheritedFrom.productName).toBe(2);
     expect(result.rows[1].skuCode).toBe("TZX-001-2");
     expect(result.rows[2].weightGrams).toBe(218);
-    expect(result.rows[3].saleStatus).toBe("NOT_SELLABLE");
+    expect(result.rows[3].saleStatus).toBe("SELLABLE");
     expect(result.rows[0].defaultUnitPriceFen).toBe(293);
     expect(result.rows[0].defaultUnitPriceMilliYuan).toBe(2_930);
     expect(result.rows[0].productUrl).toBe("https://example.test/products/tzx-001");
@@ -40,10 +41,36 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.summary).toEqual({
       imageCount: 74,
       productCount: 72,
+      sourceSequenceCount: 72,
       skuCount: 74,
       totalQuantity: 377,
     });
     expect(result.issues).toEqual([]);
+  });
+
+  test("preserves field-aligned source sequences, cargo prices, and manual sale status", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
+    expect(parsed.summary).toMatchObject({
+      skuCount: 140,
+      sourceSequenceCount: 74,
+    });
+    expect(new Set(parsed.rows.map((row) => row.skuCode)).size).toBe(140);
+    expect(
+      parsed.rows
+        .filter((row) => row.sourceSequence === "34")
+        .map((row) => row.skuCode),
+    ).toEqual(["TZX-034-1", "TZX-034-2", "TZX-034-3"]);
+    expect(
+      parsed.rows.find((row) => row.skuCode === "TZX-034-1"),
+    ).toMatchObject({
+      cargoUnitPriceMilliYuan: 1366,
+      defaultUnitPriceMilliYuan: 325,
+      saleStatus: "SELLABLE",
+      totalQuantity: 0,
+    });
   });
 
   test("finds the header row within the first twenty rows", () => {
@@ -616,6 +643,7 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.summary).toEqual({
       imageCount: 2,
       productCount: 2,
+      sourceSequenceCount: 2,
       skuCount: 2,
       totalQuantity: 0,
     });
