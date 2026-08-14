@@ -588,6 +588,21 @@ describe("catalog workspaces", () => {
     }
   });
 
+  it("clears a no-result customer query and availability filter locally", () => {
+    render(<CustomerCatalogWorkspace items={customerRows} query="no customer SKU matches this query" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "只看可售 SKU" }));
+    expect(screen.getByRole("heading", { name: "没有符合条件的 SKU" })).toBeVisible();
+
+    const clearFilters = screen.getByRole("button", { name: "清除筛选" });
+    expect(clearFilters.closest("a")).toBeNull();
+    fireEvent.click(clearFilters);
+
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.getByText("3 个商品 / 3 个 SKU")).toBeVisible();
+    expect(within(screen.getByTestId("customer-catalog-results")).getAllByText("可售")).toHaveLength(2);
+  });
+
   it("gives duplicate customer product names distinct table names without exposing source sequence", () => {
     render(
       <CustomerCatalogWorkspace

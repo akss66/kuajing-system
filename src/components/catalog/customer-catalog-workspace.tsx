@@ -328,9 +328,11 @@ export function CustomerCatalogWorkspace({
   query: string;
 }) {
   const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const [searchQuery, setSearchQuery] = useState(query);
+  const [searchTerm, setSearchTerm] = useState(query);
   const searchedGroups = filterCatalogGroups(
     groupCatalogItems(items).map((group) => ({ ...group, sourceSequence: null })),
-    query,
+    searchQuery,
     (item) => [
       item.skuCode,
       item.specification,
@@ -352,6 +354,11 @@ export function CustomerCatalogWorkspace({
     [saleStatus, searchedGroups],
   );
   const skuCount = filteredGroups.reduce((count, group) => count + group.variants.length, 0);
+  const resetFilters = () => {
+    setSaleStatus("ALL");
+    setSearchQuery("");
+    setSearchTerm("");
+  };
 
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
@@ -364,6 +371,10 @@ export function CustomerCatalogWorkspace({
           <form
             className="grid min-w-0 gap-3 sm:flex-1 sm:grid-cols-[minmax(0,36rem)_auto] sm:justify-start"
             method="get"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setSearchQuery(searchTerm);
+            }}
           >
             <label className="relative min-w-0">
               <span className="sr-only">搜索 SKU、商品、规格或链接文字</span>
@@ -374,10 +385,11 @@ export function CustomerCatalogWorkspace({
               <Input
                 aria-label="搜索 SKU、商品、规格或链接文字"
                 className="min-h-11 pl-10"
-                defaultValue={query}
                 name="q"
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="搜索 SKU、商品、规格或链接文字"
                 type="search"
+                value={searchTerm}
               />
             </label>
             <Button className="min-h-11" type="submit">
@@ -399,25 +411,21 @@ export function CustomerCatalogWorkspace({
         ) : (
           <ActionableEmptyState
             action={
-              saleStatus !== "ALL" ? (
-                <Button className="min-h-11" onClick={() => setSaleStatus("ALL")} type="button" variant="outline">
-                  显示全部 SKU
-                </Button>
-              ) : query ? (
-                <Button asChild className="min-h-11" variant="outline">
-                  <a href="/portal/catalog">清除搜索</a>
+              saleStatus !== "ALL" || searchQuery ? (
+                <Button className="min-h-11" onClick={resetFilters} type="button" variant="outline">
+                  清除筛选
                 </Button>
               ) : undefined
             }
             description={
               saleStatus !== "ALL"
                 ? "当前销售状态下没有结果，请切换销售状态。"
-                : query
+                : searchQuery
                   ? "当前关键词没有匹配的 SKU，请清除或调整搜索。"
                   : "当前没有可选 SKU，请联系管理员确认货盘状态。"
             }
-            kind={saleStatus !== "ALL" || query ? "filtered" : "initial"}
-            title={saleStatus !== "ALL" || query ? "没有符合条件的 SKU" : "暂无可选货盘"}
+            kind={saleStatus !== "ALL" || searchQuery ? "filtered" : "initial"}
+            title={saleStatus !== "ALL" || searchQuery ? "没有符合条件的 SKU" : "暂无可选货盘"}
           />
         )}
       </section>
