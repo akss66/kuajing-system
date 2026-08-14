@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -16,82 +16,105 @@ export type CustomerCatalogItem = {
   skuName: string;
   imageUrl: string | null;
   specification: string | null;
+  color: string | null;
+  combination: string | null;
+  weightGrams: number | null;
+  linkText: string | null;
+  productUrl: string | null;
   actualUnitPriceFen: number;
   actualUnitPriceMilliYuan: number;
   availableQuantity: number;
+  saleStatus: "SELLABLE" | "NOT_SELLABLE";
+  orderable: boolean;
+  availabilityReason:
+    | "AVAILABLE"
+    | "MANUALLY_UNAVAILABLE"
+    | "SOLD_OUT";
   sellable: boolean;
 };
+
+export function resolveCatalogAvailability(
+  saleStatus: "SELLABLE" | "NOT_SELLABLE",
+  availableQuantity: number,
+) {
+  if (saleStatus === "NOT_SELLABLE") {
+    return {
+      availabilityReason: "MANUALLY_UNAVAILABLE" as const,
+      orderable: false,
+    };
+  }
+  if (availableQuantity <= 0) {
+    return { availabilityReason: "SOLD_OUT" as const, orderable: false };
+  }
+  return { availabilityReason: "AVAILABLE" as const, orderable: true };
+}
 
 export async function listCustomerCatalog(
   customerId: string,
 ): Promise<CustomerCatalogItem[]> {
-  const [skuRows, priceRows, balanceRows, reservationRows] = await Promise.all([
-    db
-      .select({
-        defaultUnitPriceFen: skus.defaultUnitPriceFen,
-        defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
-        id: skus.id,
-        imageUrl: skus.imageUrl,
-        productName: products.name,
-        skuCode: skus.skuCode,
-        skuName: skus.name,
-        specification: skus.specification,
-      })
-      .from(skus)
-      .innerJoin(products, eq(products.id, skus.productId))
-      .where(
-        and(eq(skus.saleStatus, "SELLABLE"), eq(products.status, "ACTIVE")),
-      ),
-    db
-      .select({
-        skuId: customerSkuPrices.skuId,
-        unitPriceFen: customerSkuPrices.unitPriceFen,
-        unitPriceMilliYuan: customerSkuPrices.unitPriceMilliYuan,
-      })
-      .from(customerSkuPrices)
-      .where(
-        and(
-          eq(customerSkuPrices.customerId, customerId),
-          eq(customerSkuPrices.active, true),
+  const activeReservations = db
+    .select({
+      quantity:
+        sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)::int`
+          .mapWith(Number)
+          .as("reserved_quantity"),
+      skuId: inventoryReservations.skuId,
+    })
+    .from(inventoryReservations)
+    .where(eq(inventoryReservations.status, "ACTIVE"))
+    .groupBy(inventoryReservations.skuId)
+    .as("customer_catalog_active_reservations");
+  const rows = await db
+    .select({
+      actualUnitPriceFen:
+        sql<number>`coalesce(${customerSkuPrices.unitPriceFen}, ${skus.defaultUnitPriceFen})::int`.mapWith(
+          Number,
         ),
-      ),
-    db
-      .select({ skuId: inventoryBalances.skuId, totalQuantity: inventoryBalances.totalQuantity })
-      .from(inventoryBalances),
-    db
-      .select({
-        quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)`.mapWith(Number),
-        skuId: inventoryReservations.skuId,
-      })
-      .from(inventoryReservations)
-      .where(eq(inventoryReservations.status, "ACTIVE"))
-      .groupBy(inventoryReservations.skuId),
-  ]);
-
-  const prices = new Map(priceRows.map((row) => [row.skuId, row]));
-  const balances = new Map(balanceRows.map((row) => [row.skuId, row.totalQuantity]));
-  const reservations = new Map(
-    reservationRows.map((row) => [row.skuId, row.quantity]),
-  );
-
-  return skuRows.map((row) => {
-    const availableQuantity = Math.max(
-      0,
-      (balances.get(row.id) ?? 0) - (reservations.get(row.id) ?? 0),
-    );
-    const customerPrice = prices.get(row.id);
-    return {
-      actualUnitPriceFen: customerPrice?.unitPriceFen ?? row.defaultUnitPriceFen,
       actualUnitPriceMilliYuan:
-        customerPrice?.unitPriceMilliYuan ?? row.defaultUnitPriceMilliYuan,
-      availableQuantity,
-      id: row.id,
-      imageUrl: row.imageUrl,
-      productName: row.productName,
-      sellable: availableQuantity > 0,
-      skuCode: row.skuCode,
-      skuName: row.skuName,
-      specification: row.specification,
+        sql<number>`coalesce(${customerSkuPrices.unitPriceMilliYuan}, ${skus.defaultUnitPriceMilliYuan})::int`.mapWith(
+          Number,
+        ),
+      availableQuantity:
+        sql<number>`greatest(coalesce(${inventoryBalances.totalQuantity}, 0) - coalesce(${activeReservations.quantity}, 0), 0)::int`.mapWith(
+          Number,
+        ),
+      color: skus.color,
+      combination: skus.combination,
+      id: skus.id,
+      imageUrl: skus.imageUrl,
+      linkText: products.linkText,
+      productName: products.name,
+      productUrl: skus.productUrl,
+      saleStatus: skus.saleStatus,
+      skuCode: skus.skuCode,
+      skuName: skus.name,
+      specification: skus.specification,
+      weightGrams: skus.weightGrams,
+    })
+    .from(skus)
+    .innerJoin(products, eq(products.id, skus.productId))
+    .leftJoin(
+      customerSkuPrices,
+      and(
+        eq(customerSkuPrices.skuId, skus.id),
+        eq(customerSkuPrices.customerId, customerId),
+        eq(customerSkuPrices.active, true),
+      ),
+    )
+    .leftJoin(inventoryBalances, eq(inventoryBalances.skuId, skus.id))
+    .leftJoin(activeReservations, eq(activeReservations.skuId, skus.id))
+    .where(eq(products.status, "ACTIVE"))
+    .orderBy(asc(skus.skuCode));
+
+  return rows.map((row) => {
+    const availability = resolveCatalogAvailability(
+      row.saleStatus,
+      row.availableQuantity,
+    );
+    return {
+      ...row,
+      ...availability,
+      sellable: availability.orderable,
     };
   });
 }

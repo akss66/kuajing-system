@@ -580,7 +580,7 @@ describe("bulk draft validation", () => {
     });
   });
 
-  test("uses Task 3 ownership isolation and keeps expired drafts readable as blocked previews", async () => {
+  test("isolates customer-owned drafts and keeps expired drafts readable as blocked previews", async () => {
     const fixture = await createDraftFixture(["expired"]);
     const group = fixture.groups.get("expired")!;
     const sku = await createSku({ code: "EXPIRED", stock: 1 });

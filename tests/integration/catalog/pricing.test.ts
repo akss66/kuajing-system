@@ -63,7 +63,7 @@ describe("catalog price priority", () => {
     ).rejects.toThrow();
   });
 
-  test("uses a temporary override before the customer and default prices", async () => {
+  test("uses an order-specific override before the customer and default prices", async () => {
     const fixture = await createCatalogFixture();
     await db.insert(customerSkuPrices).values({
       customerId: fixture.customer.id,
@@ -122,8 +122,36 @@ describe("catalog price priority", () => {
     });
   });
 
+  test("never leaks another customer's active price", async () => {
+    const fixture = await createCatalogFixture();
+    const [otherCustomer] = await db
+      .insert(customers)
+      .values({
+        code: `OTHER-${crypto.randomUUID().slice(0, 12)}`,
+        name: "Other catalog customer",
+      })
+      .returning({ id: customers.id });
+    await db.insert(customerSkuPrices).values({
+      customerId: otherCustomer.id,
+      skuId: fixture.sku.id,
+      unitPriceFen: 990,
+    });
+
+    const actual = await db.transaction((tx) =>
+      resolveUnitPrice(tx, {
+        customerId: fixture.customer.id,
+        skuId: fixture.sku.id,
+      }),
+    );
+
+    expect(actual).toEqual({
+      unitPriceFen: 690,
+      unitPriceMilliYuan: 6_900,
+    });
+  });
+
   test.each([-1, 1.5, Number.NaN])(
-    "rejects invalid temporary prices: %s",
+    "rejects invalid order-specific override prices: %s",
     async (overrideUnitPriceFen) => {
       const fixture = await createCatalogFixture();
 

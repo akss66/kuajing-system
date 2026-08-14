@@ -369,7 +369,7 @@ describe("catalog asset route", () => {
     }
   });
 
-  test("hides inactive and not-sellable assets from customers with a unified 404", async () => {
+  test("hides inactive assets but serves visible manual-unavailable SKU images to customers", async () => {
     const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
 
     try {
@@ -402,7 +402,14 @@ describe("catalog asset route", () => {
         );
 
         expect(inactiveResponse.status).toBe(404);
-        expect(notSellableResponse.status).toBe(404);
+        expect(notSellableResponse.status).toBe(200);
+        expect(notSellableResponse.headers.get("content-type")).toBe("image/png");
+        expect(
+          Buffer.compare(
+            Buffer.from(await notSellableResponse.arrayBuffer()),
+            notSellable.bytes,
+          ),
+        ).toBe(0);
       });
     } finally {
       await rm(assetDir, { force: true, recursive: true });

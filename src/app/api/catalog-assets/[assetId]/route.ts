@@ -35,7 +35,6 @@ async function findCustomerAsset(assetId: string) {
       and(
         eq(catalogAssets.id, assetId),
         eq(products.status, "ACTIVE"),
-        eq(skus.saleStatus, "SELLABLE"),
       ),
     )
     .limit(1);
