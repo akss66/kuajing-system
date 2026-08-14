@@ -243,8 +243,13 @@ function readDeveloperConfiguration() {
   }
 }
 
-function expiry(now: Date, seconds: number) {
-  return new Date(now.getTime() + seconds * 1_000);
+function expiry(now: Date, value: number) {
+  // Jifeng production returns absolute Unix milliseconds even though the
+  // field is named `expireIn`; retain compatibility with documented/tested
+  // duration seconds and providers that return absolute Unix seconds.
+  if (value >= 1_000_000_000_000) return new Date(value);
+  if (value >= 1_000_000_000) return new Date(value * 1_000);
+  return new Date(now.getTime() + value * 1_000);
 }
 
 function safeErrorCategory(error: unknown) {

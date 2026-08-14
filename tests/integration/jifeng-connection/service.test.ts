@@ -293,6 +293,28 @@ describe("Jifeng connection lifecycle", () => {
     );
   });
 
+  test("stores provider expiry timestamps when Jifeng returns absolute epoch milliseconds", async () => {
+    const admin = await createAdmin("absolute-expiry");
+    const accessTokenExpiresAt = new Date(
+      startedAt.getTime() + 24 * 60 * 60 * 1_000,
+    );
+    const refreshTokenExpiresAt = new Date(
+      startedAt.getTime() + 10 * 365 * 24 * 60 * 60 * 1_000,
+    );
+
+    await authorizeFixture(admin.authUserId, {
+      tokens: {
+        ...tokenSet(),
+        expireIn: accessTokenExpiresAt.getTime(),
+        refreshExpireIn: refreshTokenExpiresAt.getTime(),
+      },
+    });
+
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored.accessTokenExpiresAt).toEqual(accessTokenExpiresAt);
+    expect(stored.refreshTokenExpiresAt).toEqual(refreshTokenExpiresAt);
+  });
+
   test("uses the server-configured authorization domain instead of the API hostname", async () => {
     process.env.JIFENG_DOMAIN = "ottawasumo01";
     const admin = await createAdmin("authorization-domain");
