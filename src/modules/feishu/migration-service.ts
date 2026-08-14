@@ -25,13 +25,14 @@ import type {
   ParsedCargoRow,
   TemporaryAssetManifest,
 } from "./cargo-types";
-import { enqueueCargoSyncEvent } from "./outbox";
 import {
   catalogAssetExistsForDigest,
-  countSkus,
   findActiveSuperAdminMirrorId,
   findMigrationRun,
   findMigrationRunForUpdate,
+  findProductBySourceSequence,
+  findSkuByCode,
+  findSkuCodesByProductId,
   importedMigrationExists,
 } from "./queries";
 import {
@@ -49,11 +50,7 @@ type PreflightReadyResult = {
   status: "PREFLIGHT_BLOCKED" | "PREFLIGHT_READY";
 };
 
-type ConfirmResult = {
-  imageCount: number;
-  productCount: number;
-  skuCount: number;
-};
+type ConfirmResult = MigrationSummary;
 
 type MigrationServiceOptions = {
   assetDir?: string;
@@ -456,14 +453,23 @@ async function markRunStale(runId: string) {
     .where(eq(feishuCargoMigrationRuns.id, runId));
 }
 
-function groupRowsByProduct(rows: NormalizedCargoRow[]) {
+function groupRowsBySourceSequence(rows: NormalizedCargoRow[]) {
   const grouped = new Map<string, NormalizedCargoRow[]>();
   for (const row of rows) {
-    const group = grouped.get(row.productGroupKey) ?? [];
+    const group = grouped.get(row.sourceSequence) ?? [];
     group.push(row);
-    grouped.set(row.productGroupKey, group);
+    grouped.set(row.sourceSequence, group);
   }
   return grouped;
+}
+
+function summaryForRun(run: ExistingMigrationRun): MigrationSummary {
+  const summary = run.summaryJson as Omit<MigrationSummary, "sourceSequenceCount"> &
+    Partial<Pick<MigrationSummary, "sourceSequenceCount">>;
+  return {
+    ...summary,
+    sourceSequenceCount: summary.sourceSequenceCount ?? summary.productCount,
+  };
 }
 
 export function createFeishuCargoMigrationService(options: MigrationServiceOptions = {}) {
@@ -581,12 +587,6 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
     >;
     runId: string;
   }): Promise<ConfirmResult> {
-    if (input.config.cargoImportEnabled !== true) {
-      throw new FeishuCargoMigrationError(
-        "ROLLOUT_READ_ONLY",
-        "Feishu cargo database import stays disabled until FEISHU_CARGO_IMPORT_ENABLED=true",
-      );
-    }
     const confirmedByAdminUserId = await resolveSuperAdminMirrorId(input.actor);
     try {
       const currentRun = await findMigrationRun(db, input.runId);
@@ -597,9 +597,12 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
         );
       }
       if (currentRun.status === "IMPORTED") {
+        return summaryForRun(currentRun);
+      }
+      if (input.config.cargoImportEnabled !== true) {
         throw new FeishuCargoMigrationError(
-          "ALREADY_IMPORTED",
-          "Feishu cargo migration has already been confirmed",
+          "ROLLOUT_READ_ONLY",
+          "Feishu cargo database import stays disabled until FEISHU_CARGO_IMPORT_ENABLED=true",
         );
       }
       if (currentRun.status !== "PREFLIGHT_READY") {
@@ -644,10 +647,7 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
         }
 
         if (run.status === "IMPORTED") {
-          throw new FeishuCargoMigrationError(
-            "ALREADY_IMPORTED",
-            "Feishu cargo migration has already been confirmed",
-          );
+          return summaryForRun(run);
         }
         if (run.status !== "PREFLIGHT_READY") {
           throw new FeishuCargoMigrationError(
@@ -660,12 +660,6 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           throw new FeishuCargoMigrationError(
             "ALREADY_IMPORTED",
             "Another Feishu cargo migration has already been imported",
-          );
-        }
-        if ((await countSkus(tx)) > 0) {
-          throw new FeishuCargoMigrationError(
-            "CATALOG_NOT_EMPTY",
-            "Catalog SKUs already exist",
           );
         }
         const lockedRunDigest = await createCanonicalDigest(
@@ -700,17 +694,56 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           assetBySkuCode.set(manifest.skuCode, asset);
         }
 
-        const grouped = groupRowsByProduct(revalidated.normalizedRows);
+        const grouped = groupRowsBySourceSequence(revalidated.normalizedRows);
         const productIdByGroup = new Map<string, string>();
-        for (const [groupKey, rows] of grouped) {
-          const [product] = await tx
-            .insert(products)
-            .values({
-              description: rows[0].linkText,
-              name: rows[0].productName,
-            })
-            .returning({ id: products.id });
-          productIdByGroup.set(groupKey, product.id);
+        const claimedProductIds = new Set<string>();
+        for (const [sourceSequence, rows] of grouped) {
+          const importedSkuCodes = new Set(rows.map((row) => row.skuCode));
+          let product = await findProductBySourceSequence(tx, sourceSequence);
+          if (!product) {
+            for (const row of rows) {
+              const existingSku = await findSkuByCode(tx, row.skuCode);
+              if (
+                existingSku &&
+                existingSku.productSourceSequence == null &&
+                !claimedProductIds.has(existingSku.productId)
+              ) {
+                const siblingSkus = await findSkuCodesByProductId(
+                  tx,
+                  existingSku.productId,
+                );
+                if (siblingSkus.every((sku) => importedSkuCodes.has(sku.skuCode))) {
+                  product = { id: existingSku.productId };
+                  break;
+                }
+              }
+            }
+          }
+
+          if (product) {
+            await tx
+              .update(products)
+              .set({
+                cargoUnitPriceMilliYuan: rows[0].cargoUnitPriceMilliYuan,
+                linkText: rows[0].linkText,
+                name: rows[0].productName,
+                sourceSequence,
+                updatedAt: new Date(),
+              })
+              .where(eq(products.id, product.id));
+          } else {
+            [product] = await tx
+              .insert(products)
+              .values({
+                cargoUnitPriceMilliYuan: rows[0].cargoUnitPriceMilliYuan,
+                linkText: rows[0].linkText,
+                name: rows[0].productName,
+                sourceSequence,
+              })
+              .returning({ id: products.id });
+          }
+          claimedProductIds.add(product.id);
+          productIdByGroup.set(sourceSequence, product.id);
         }
 
         const insertedSkus = [];
@@ -719,25 +752,34 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           if (!asset) {
             throw new Error(`Missing staged asset for ${row.skuCode}`);
           }
-          const [createdSku] = await tx
-            .insert(skus)
-            .values({
-              color: row.color,
-              combination: row.combination,
-              defaultUnitPriceFen: row.defaultUnitPriceFen,
-              defaultUnitPriceMilliYuan: row.defaultUnitPriceMilliYuan,
-              imageAssetId: asset.id,
-              imageUrl: `/api/catalog-assets/${asset.id}`,
-              name: row.skuName,
-              productId: productIdByGroup.get(row.productGroupKey)!,
-              productUrl: row.productUrl,
-              saleStatus: row.saleStatus,
-              skuCode: row.skuCode,
-              specification: row.specification,
-              weightGrams: row.weightGrams,
-            })
-            .returning({ id: skus.id });
-          insertedSkus.push({ row, skuId: createdSku.id });
+          const productId = productIdByGroup.get(row.sourceSequence)!;
+          const skuMetadata = {
+            color: row.color,
+            combination: row.combination,
+            defaultUnitPriceFen: row.defaultUnitPriceFen,
+            defaultUnitPriceMilliYuan: row.defaultUnitPriceMilliYuan,
+            imageAssetId: asset.id,
+            imageUrl: `/api/catalog-assets/${asset.id}`,
+            name: row.skuName,
+            productId,
+            productUrl: row.productUrl,
+            saleStatus: row.saleStatus,
+            specification: row.specification,
+            weightGrams: row.weightGrams,
+          };
+          const existingSku = await findSkuByCode(tx, row.skuCode);
+          if (existingSku) {
+            await tx
+              .update(skus)
+              .set({ ...skuMetadata, updatedAt: new Date() })
+              .where(eq(skus.id, existingSku.id));
+          } else {
+            const [createdSku] = await tx
+              .insert(skus)
+              .values({ ...skuMetadata, skuCode: row.skuCode })
+              .returning({ id: skus.id });
+            insertedSkus.push({ row, skuId: createdSku.id });
+          }
         }
 
         if (insertedSkus.length > 0) {
@@ -774,18 +816,14 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           afterJson: {
             imageCount: revalidated.temporaryAssets.length,
             productCount: grouped.size,
-            skuCount: insertedSkus.length,
+            skuCount: revalidated.normalizedRows.length,
+            sourceSequenceCount: grouped.size,
           },
           beforeJson: {},
           entityId: run.id,
           entityType: "FEISHU_CARGO_MIGRATION",
           reason: IMPORT_REASON,
         });
-        await enqueueCargoSyncEvent(tx, {
-          idempotencyKey: `feishu-cargo-import:${run.id}`,
-          reason: "feishu-cargo-import",
-        });
-
         await tx
           .update(feishuCargoMigrationRuns)
           .set({
@@ -796,11 +834,7 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           })
           .where(eq(feishuCargoMigrationRuns.id, run.id));
 
-        return {
-          imageCount: revalidated.temporaryAssets.length,
-          productCount: grouped.size,
-          skuCount: insertedSkus.length,
-        };
+        return summaryForRun(run);
       });
 
       return result;

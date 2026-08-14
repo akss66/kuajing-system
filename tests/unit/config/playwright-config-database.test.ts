@@ -65,7 +65,7 @@ describe("playwright.config database isolation", () => {
     expect(webServer?.env?.DATABASE_URL).toBe("postgres://test-user:test-pass@127.0.0.1:5432/tongzhouxing_test");
   });
 
-  test("explicitly enables Feishu writes only inside the fake E2E server", async () => {
+  test("keeps Feishu writes disabled inside every E2E server", async () => {
     vi.stubEnv("E2E_PORT", "3101");
     vi.stubEnv("TEST_DATABASE_URL", "");
     vi.stubEnv("FEISHU_CARGO_WRITES_ENABLED", "");
@@ -73,7 +73,7 @@ describe("playwright.config database isolation", () => {
     const { default: config } = await importPlaywrightConfig();
     const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
 
-    expect(webServer?.env?.FEISHU_CARGO_WRITES_ENABLED).toBe("true");
+    expect(webServer?.env?.FEISHU_CARGO_WRITES_ENABLED).toBe("false");
   });
 
   test("shares one absolute catalog asset root between the runner and isolated app workspaces", async () => {

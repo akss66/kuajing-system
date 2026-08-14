@@ -87,7 +87,7 @@ const commonWebServerEnvironment = {
   FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN:
     process.env.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN ??
     "target-spreadsheet-token",
-  FEISHU_CARGO_WRITES_ENABLED: "true",
+  FEISHU_CARGO_WRITES_ENABLED: "false",
   PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY,
   TEST_DATABASE_URL: e2eDatabaseUrl,
 };

@@ -10,7 +10,11 @@ import { afterEach, describe, expect, expectTypeOf, test } from "vitest";
 import { db } from "@/db/client";
 import { FeishuApiError } from "@/integrations/feishu/client";
 import type { FeishuIntegrationConfig } from "@/integrations/feishu/config";
-import { authUsers, feishuCargoMigrationRuns } from "@/db/schema";
+import {
+  authUsers,
+  feishuCargoMigrationRuns,
+  integrationOutbox,
+} from "@/db/schema";
 import {
   createFeishuCargoMigrationService,
 } from "@/modules/feishu/migration-service";
@@ -21,14 +25,16 @@ const HEADER_ROW = [
   "sku",
   "\u56fe\u7247",
   "\u540d\u79f0",
+  "\u8d27\u54c1\u4ef7\u683c",
   "\u91c7\u8d2d\u4ef7",
   "\u603b\u5e93\u5b58",
-  "\u72b6\u6001",
+  "\u53ef\u552e\u5e93\u5b58",
   "\u94fe\u63a5\u6587\u5b57",
   "\u89c4\u683c",
   "\u989c\u8272",
   "\u7ec4\u5408\u9500\u552e",
   "\u91cd\u91cf",
+  "\u72b6\u6001",
 ] as const;
 
 type SourceRowInput = {
@@ -93,13 +99,15 @@ function buildSourceRow(input: SourceRowInput) {
     },
     input.productName,
     input.priceYuan,
+    input.priceYuan,
     String(input.quantity),
-    input.status === "NOT_SELLABLE" ? "\u4e0d\u53ef\u552e" : "\u53ef\u552e",
+    String(input.quantity),
     input.productUrl,
     input.specification,
     input.color,
     input.combination,
     input.weight,
+    input.status === "NOT_SELLABLE" ? "\u4e0d\u53ef\u552e" : "\u53ef\u552e",
   ];
 }
 
@@ -365,5 +373,37 @@ describe("Feishu source preflight protection", () => {
     expect(fake.calls.downloadMedia).toEqual([]);
     expect(fake.calls.writeRange).toBe(0);
     expect(await db.select().from(feishuCargoMigrationRuns)).toEqual([]);
+  });
+
+  test("confirmation writes only PostgreSQL and never queues or invokes a Feishu writer", async () => {
+    assetRoot = await mkdtemp(join(tmpdir(), "feishu-confirm-protection-"));
+    const actor = await createSuperAdminActor();
+    const dataset = await buildValidSourceValues(1);
+    const fake = createFakeSourceClient({
+      downloads: dataset.downloads,
+      values: dataset.values,
+    });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const preflight = await service.createCargoPreflight({
+      actor,
+      client: fake.client as FeishuSourcePort,
+      config: createConfig(),
+    });
+    if (!("runId" in preflight)) throw new Error("expected persisted preflight");
+
+    await service.confirmCargoMigration({
+      actor,
+      client: fake.client as FeishuSourcePort,
+      config: createConfig({ cargoImportEnabled: true }),
+      runId: preflight.runId,
+    });
+
+    expect(fake.calls.writeRange).toBe(0);
+    expect(fake.calls.writeImage).toBe(0);
+    expect(fake.calls.setRangeStyle).toBe(0);
+    expect(fake.calls.updateDimension).toBe(0);
+    expect(fake.calls.createFilter).toBe(0);
+    expect(fake.calls.sendTextMessage).toBe(0);
+    expect(await db.select().from(integrationOutbox)).toEqual([]);
   });
 });

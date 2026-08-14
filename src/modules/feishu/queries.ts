@@ -7,6 +7,7 @@ import {
   catalogAssets,
   feishuCargoMigrationRuns,
   integrationOutbox,
+  products,
   skus,
 } from "@/db/schema";
 
@@ -220,11 +221,40 @@ export async function findActiveSuperAdminMirrorId(
   return mirror.id;
 }
 
-export async function countSkus(database: DatabaseLike) {
-  const [row] = await database
-    .select({ count: sql<number>`count(*)::int` })
-    .from(skus);
-  return row?.count ?? 0;
+export async function findProductBySourceSequence(
+  database: DatabaseLike,
+  sourceSequence: string,
+) {
+  const [product] = await database
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.sourceSequence, sourceSequence))
+    .limit(1);
+  return product ?? null;
+}
+
+export async function findSkuByCode(database: DatabaseLike, skuCode: string) {
+  const [sku] = await database
+    .select({
+      id: skus.id,
+      productId: skus.productId,
+      productSourceSequence: products.sourceSequence,
+    })
+    .from(skus)
+    .innerJoin(products, eq(products.id, skus.productId))
+    .where(eq(skus.skuCode, skuCode))
+    .limit(1);
+  return sku ?? null;
+}
+
+export async function findSkuCodesByProductId(
+  database: DatabaseLike,
+  productId: string,
+) {
+  return await database
+    .select({ skuCode: skus.skuCode })
+    .from(skus)
+    .where(eq(skus.productId, productId));
 }
 
 export async function findMigrationRunForUpdate(

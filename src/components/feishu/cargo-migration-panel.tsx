@@ -159,7 +159,6 @@ export function CargoMigrationPanel({
   const syncSubmitLabel = targetSyncState.canRetry
     ? "重试目标同步"
     : "重新同步目标测试表";
-  const targetWriteControlsDisabled = targetConfigured && !cargoWritesEnabled;
   const preflightSubmitLabel = preflightPending
     ? "正在执行只读预检"
     : !sourceConfigured
@@ -177,10 +176,9 @@ export function CargoMigrationPanel({
         label="预检状态"
         value={latestMigrationRun?.statusLabel ?? "尚未执行只读预检"}
       />
-      <Field
-        label="目标同步状态"
-        value={targetSyncState.statusLabel}
-      />
+      {cargoWritesEnabled ? (
+        <Field label="目标同步状态" value={targetSyncState.statusLabel} />
+      ) : null}
       <Field
         label="源工作表"
         value={latestMigrationRun?.sourceSheetId ?? "等待选择"}
@@ -207,8 +205,8 @@ export function CargoMigrationPanel({
     actorKind === "SUPER_ADMIN" && !imported ? (
       <WorkspacePanel>
         <WorkspacePanelHeader
-          description="先完成只读预检，再用精确语句确认首批导入。"
-          title="首批迁移控制"
+          description="先完成只读预检，再用精确语句确认写入本系统数据库。"
+          title="数据回填控制"
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
           <form action={preflightFormAction} className="space-y-3">
@@ -273,7 +271,7 @@ export function CargoMigrationPanel({
             <ConfirmedActionForm
               action={confirmAction}
               className="space-y-4"
-              confirmDescription="确认后会把预检通过的首批商品、SKU 和图片正式写入系统。"
+              confirmDescription="确认后只会把预检通过的商品元数据、SKU 元数据和图片写入本系统数据库；现有库存余额保持不变。"
               confirmLabel={`确认导入 ${skuCount} 个SKU`}
               confirmTitle={`确认导入 ${skuCount} 个SKU`}
               disabled={!canConfirm || confirmationPhrase !== expectedPhrase}
@@ -308,24 +306,19 @@ export function CargoMigrationPanel({
     <div className="space-y-4">
       <WorkspacePanel>
         <WorkspacePanelHeader
-          description="源业务货盘始终只读，迁移确认和目标同步是两条独立链路。"
+          description="只读预检读取飞书；确认后只写入本系统数据库。"
           title="迁移状态总览"
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
-          {targetWriteControlsDisabled ? (
-            <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
-              只读发布：已配置目标测试表，但 FEISHU_CARGO_WRITES_ENABLED 未显式设为 true。当前只允许连接验证和源货盘只读预检。
-            </div>
-          ) : null}
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
-            原业务货盘受保护，系统不会写入。
+            飞书源货盘始终只读。确认只会写入本系统数据库；现有 SKU 仅更新元数据和图片，库存余额保持不变。
           </div>
           {showMetricSummary ? (
             <MetricStrip
               items={[
                 {
-                  label: "商品数",
-                  value: String(latestMigrationRun?.summary.productCount ?? 0),
+                  label: "来源序号",
+                  value: String(latestMigrationRun?.summary.sourceSequenceCount ?? 0),
                 },
                 {
                   label: "SKU 数",
@@ -350,12 +343,14 @@ export function CargoMigrationPanel({
             >
               {latestMigrationRun?.statusLabel ?? "尚无预检记录"}
             </Badge>
-            <Badge
-              className={badgeToneClass(targetSyncState.tone)}
-              variant="secondary"
-            >
-              {targetSyncState.statusLabel}
-            </Badge>
+            {cargoWritesEnabled ? (
+              <Badge
+                className={badgeToneClass(targetSyncState.tone)}
+                variant="secondary"
+              >
+                {targetSyncState.statusLabel}
+              </Badge>
+            ) : null}
             {latestMigrationRun?.importedAtLabel ? (
               <span className="text-xs text-muted-foreground">
                 导入时间：{latestMigrationRun.importedAtLabel}
@@ -374,10 +369,19 @@ export function CargoMigrationPanel({
 
       <WorkspacePanel>
         <WorkspacePanelHeader
-          description="连接验证只读执行；目标测试表重试或重跑只影响派生同步。"
-          title="连接与目标同步"
+          description={
+            cargoWritesEnabled
+              ? "连接验证只读执行；目标测试表重试或重跑只影响派生同步。"
+              : "连接验证只读取飞书源货盘，不会修改任何飞书数据。"
+          }
+          title={cargoWritesEnabled ? "连接与目标同步" : "只读连接"}
         />
-        <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-2">
+        <div
+          className={cn(
+            "grid gap-4 px-4 py-4 sm:px-5",
+            cargoWritesEnabled && "lg:grid-cols-2",
+          )}
+        >
           <ActionForm
             action={testFeishuConnectionAction}
             className="space-y-3"
@@ -400,35 +404,37 @@ export function CargoMigrationPanel({
             </div>
           </ActionForm>
 
-          <ActionForm
-            action={retryFeishuCargoSyncAction}
-            className="space-y-3"
-            submitDisabled={targetWriteControlsDisabled || !targetConfigured}
-            submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
-            submitLabel={syncSubmitLabel}
-          >
-            <div className="space-y-2 text-sm text-muted-foreground">
-              <p>
-                {targetConfigured
-                  ? targetSyncState.canRetry
-                    ? "仅重试目标测试表的失败同步，不会反向改动源业务货盘。"
-                    : "按需重新同步目标测试表，不会反向改动源业务货盘。"
-                  : "目标测试表尚未配置，当前只能保留只读预检结果。"}
-              </p>
-              {targetSyncState.rowCount != null ? (
-                <p>最近同步行数：{targetSyncState.rowCount}</p>
-              ) : null}
-              {targetSyncState.imageCount != null ? (
-                <p>最近同步图片数：{targetSyncState.imageCount}</p>
-              ) : null}
-              {targetSyncState.lastUpdatedLabel ? (
-                <p>最近同步时间：{targetSyncState.lastUpdatedLabel}</p>
-              ) : null}
-              {targetSyncState.canRetry && targetSyncState.lastErrorMessage ? (
-                <p>最近失败原因：{targetSyncState.lastErrorMessage}</p>
-              ) : null}
-            </div>
-          </ActionForm>
+          {cargoWritesEnabled ? (
+            <ActionForm
+              action={retryFeishuCargoSyncAction}
+              className="space-y-3"
+              submitDisabled={!targetConfigured}
+              submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
+              submitLabel={syncSubmitLabel}
+            >
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  {targetConfigured
+                    ? targetSyncState.canRetry
+                      ? "仅重试目标测试表的失败同步，不会反向改动源业务货盘。"
+                      : "按需重新同步目标测试表，不会反向改动源业务货盘。"
+                    : "目标测试表尚未配置，当前只能保留只读预检结果。"}
+                </p>
+                {targetSyncState.rowCount != null ? (
+                  <p>最近同步行数：{targetSyncState.rowCount}</p>
+                ) : null}
+                {targetSyncState.imageCount != null ? (
+                  <p>最近同步图片数：{targetSyncState.imageCount}</p>
+                ) : null}
+                {targetSyncState.lastUpdatedLabel ? (
+                  <p>最近同步时间：{targetSyncState.lastUpdatedLabel}</p>
+                ) : null}
+                {targetSyncState.canRetry && targetSyncState.lastErrorMessage ? (
+                  <p>最近失败原因：{targetSyncState.lastErrorMessage}</p>
+                ) : null}
+              </div>
+            </ActionForm>
+          ) : null}
         </div>
       </WorkspacePanel>
 

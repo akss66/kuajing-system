@@ -1,7 +1,7 @@
 # 飞书货盘只读迁移上线手册
 
 日期：2026-08-14
-适用范围：`tongzhouxing-shop` 首批飞书货盘迁移到 PostgreSQL
+适用范围：`tongzhouxing-shop` 飞书货盘只读预检及 PostgreSQL 元数据回填
 
 ## 1. 永久安全边界
 
@@ -9,14 +9,14 @@
 - 不配置目标 spreadsheet/sheet，不创建飞书镜像表。
 - `compose.production.yaml` 必须把 `FEISHU_CARGO_WRITES_ENABLED` 硬编码为 `false`，环境文件不能覆盖。
 - `FEISHU_CARGO_IMPORT_ENABLED` 只控制“已确认的预检快照写入 PostgreSQL”，不控制飞书远程写入。
-- 只有超级管理员可以执行只读预检和一次性数据库导入。
+- 只有超级管理员可以执行只读预检和数据库回填确认。
 - 没有新鲜的 `PREFLIGHT_READY` 结果、数据库备份或数量核验时，禁止打开数据库导入开关。
 
 ## 2. 本次源表解释规则
 
 - “74”是源表商品序号数量，不是 SKU 数量。
 - SKU 按 `TZX-数字` 的商品编号分组，例如 `TZX-034-1/2/3` 同属商品 34，但仍是 3 个独立 SKU。
-- 预期只读预检应得到 76 个商品、140 个 SKU、140 张图片；以真实预检结果和问题明细为最终依据。
+- 预期只读预检应得到 74 个来源序号、140 个 SKU、140 张图片；以真实预检结果和问题明细为最终依据。
 - `TZX-077` 是末尾未完成草稿，本次跳过并显示警告；中间缺资料行仍然阻断。
 - 单价以“厘”（人民币千分之一元）精确保留：`0.325`→325 厘、`1.366`→1366 厘。
 - `0.58/6PCS` 和 `0.35/5PCS` 分别是一个整包 SKU 的价格，不按 PCS 拆分。
@@ -67,7 +67,7 @@ docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
 2. 选择源 sheet，点击“开始只读预检”。
 3. 记录 source revision、source digest、商品数、SKU 数、图片数、总库存、阻断数和警告明细。
 4. 核对商品编号分组、全部 140 个 SKU、图片、精确价格、重量和链接转换。
-5. 确认预检后业务表仍为空：`products=0`、`skus=0`、`inventory_balances=0`。
+5. 确认预检没有改动 `products`、`skus`、`inventory_balances`、预占、客户价或订单数据；已有目录不要求为空。
 
 若状态不是 `PREFLIGHT_READY`、数量不符、存在未知转换或 revision/digest 变化，立即停止，不导入。
 
@@ -92,26 +92,33 @@ ls -lh "$BACKUP_DIR/postgres-$BACKUP_STAMP.dump" \
 
 任何一步失败都必须停止。
 
-## 7. 一次性写入 PostgreSQL
+## 7. 幂等写入 PostgreSQL
 
 仅在第 5、6 节全部通过后：
 
 1. 把 `FEISHU_CARGO_IMPORT_ENABLED` 临时改为 `true`。
 2. 只重建 Web/Worker，确认飞书写入开关仍为 `false`。
-3. 超级管理员对刚刚核验的 ready run 输入页面给出的动态确认语句（应按真实 SKU 数生成，例如 `确认迁移140个SKU`）。
+3. 超级管理员对刚刚核验的 ready run 输入页面给出的动态确认语句（应按真实 SKU 数生成，例如 `确认迁移140个SKU`）。确认只写入本系统数据库，不会排队或调用飞书目标写入。
 4. 导入成功后立即把 `FEISHU_CARGO_IMPORT_ENABLED` 改回 `false`，再次重建 Web/Worker。
+
+回填规则：
+
+- 按来源序号更新或创建商品元数据，按 SKU code 更新或创建 SKU 元数据，并按内容摘要复用图片资产。
+- 已有 SKU 的库存余额、库存流水、有效预占、客户价和订单数据保持不变。
+- 只有真正缺失的新 SKU 才创建一次初始余额；初始数量大于 0 时再创建一次期初库存流水。
+- 同一个已导入 run 再次确认返回同一摘要且不产生商品、SKU、余额、流水、资产、审计或 outbox 新记录。
 
 任何时候都不得设置 `FEISHU_CARGO_WRITES_ENABLED=true`。
 
 ## 8. 导入后核验
 
-- `products`、`skus`、`inventory_balances`、`catalog_assets` 数量与 ready run 一致。
-- 每个 SKU 恰好一个图片资产和一个库存余额。
+- `products.source_sequence` 非空去重后为 74，`skus` 为 140，140 个 SKU 均有关联图片。
+- 已有 SKU 的库存余额、有效预占和客户价与回填前快照一致；新 SKU 才有一次初始余额和必要的期初流水。
 - `0.325`、`1.366` 等价格在后台和客户货盘中按真实精度显示。
 - 订单使用精确厘价计算，最终行金额按分四舍五入。
-- 库存总和与预检一致，0 库存 SKU 为不可售。
+- 手工销售状态与可用库存分别核验：`SELLABLE` 且可用库存为 0 时显示售罄，`NOT_SELLABLE` 保持可见但不可下单。
 - 导入审计存在且不含 App Secret、token、file token 或收件人隐私。
-- `integration_outbox` 没有飞书目标写入成功记录，源 revision 没有被应用改变。
+- `integration_outbox` 没有本次确认产生的飞书目标写入事件，源 revision 没有被应用改变。
 - Web/Worker 健康，两个生产开关最终都为 `false`。
 
 ## 9. 恢复

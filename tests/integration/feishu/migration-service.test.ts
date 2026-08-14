@@ -15,10 +15,13 @@ import {
   auditLogs,
   authUsers,
   catalogAssets,
+  customers,
+  customerSkuPrices,
   feishuCargoMigrationRuns,
   integrationOutbox,
   inventoryBalances,
   inventoryMovements,
+  inventoryReservations,
   products,
   skus,
 } from "@/db/schema";
@@ -32,20 +35,23 @@ import type {
   FeishuSourceSelectionRequired,
 } from "@/modules/feishu/source-reader";
 import type { SuperAdminPrincipal } from "@/modules/identity/principal";
+import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field-aligned-cargo-source";
 
 const HEADER_ROW = [
   "\u5e8f\u53f7",
   "sku",
   "\u56fe\u7247",
   "\u540d\u79f0",
+  "\u8d27\u54c1\u4ef7\u683c",
   "\u91c7\u8d2d\u4ef7",
   "\u603b\u5e93\u5b58",
-  "\u72b6\u6001",
+  "\u53ef\u552e\u5e93\u5b58",
   "\u94fe\u63a5\u6587\u5b57",
   "\u89c4\u683c",
   "\u989c\u8272",
   "\u7ec4\u5408\u9500\u552e",
   "\u91cd\u91cf",
+  "\u72b6\u6001",
 ] as const;
 
 type DownloadRecord = {
@@ -64,13 +70,28 @@ function createConfig(input?: Partial<FeishuIntegrationConfig>): FeishuIntegrati
     appId: "test-app-id",
     appSecret: "test-app-secret",
     cargoImportEnabled: true,
-    cargoWritesEnabled: true,
+    cargoWritesEnabled: false,
     sourceSheetId: "sheet-primary",
     sourceWikiToken: "wiki-source-token",
     targetSheetId: "target-sheet",
     targetSpreadsheetToken: "target-spreadsheet-token",
     ...input,
   };
+}
+
+async function buildFieldAlignedSourceDataset(): Promise<SourceDataset> {
+  const values = buildFieldAlignedCargoSourceFixture().value;
+  const downloads = new Map<string, DownloadRecord>();
+  for (let index = 1; index < values.length; index += 1) {
+    const image = values[index][2] as { fileToken: string };
+    const skuCode = String(values[index][1]);
+    downloads.set(image.fileToken, {
+      bytes: await createImageBuffer(index),
+      contentType: "image/png",
+      fileName: `${skuCode}.png`,
+    });
+  }
+  return { downloads, values };
 }
 
 function expectPreflightReady(
@@ -140,13 +161,15 @@ function buildRow(input: {
     },
     input.productName,
     input.priceYuan,
+    input.priceYuan,
     String(input.quantity),
-    input.status === "NOT_SELLABLE" ? "\u4e0d\u53ef\u552e" : "\u53ef\u552e",
+    String(input.quantity),
     input.productUrl,
     input.specification,
     input.color,
     input.combination,
     input.weight,
+    input.status === "NOT_SELLABLE" ? "\u4e0d\u53ef\u552e" : "\u53ef\u552e",
   ];
 }
 
@@ -409,7 +432,7 @@ describe("Feishu cargo migration service", () => {
     process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN = "wiki-source-token";
     process.env.FEISHU_CARGO_SOURCE_SHEET_ID = "sheet-primary";
     process.env.FEISHU_CARGO_IMPORT_ENABLED = "true";
-    process.env.FEISHU_CARGO_WRITES_ENABLED = "true";
+    process.env.FEISHU_CARGO_WRITES_ENABLED = "false";
     process.env.FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN = "target-spreadsheet-token";
     process.env.FEISHU_CARGO_TARGET_SHEET_ID = "target-sheet";
   });
@@ -496,9 +519,29 @@ describe("Feishu cargo migration service", () => {
   test("blocks preflight when parser emits a blocking issue and leaves staged assets empty", async () => {
     const actor = await createSuperAdminActor();
     const blockedDataset = cloneDataset(baseDataset);
-    blockedDataset.values[2][6] = "";
+    blockedDataset.values[2][13] = "";
     const fakeSource = createMutableSourceClient({ initialDataset: blockedDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const [existingProduct] = await db
+      .insert(products)
+      .values({ description: "must remain unchanged", name: "Existing product" })
+      .returning();
+    const [existingSku] = await db
+      .insert(skus)
+      .values({
+        defaultUnitPriceFen: 100,
+        defaultUnitPriceMilliYuan: 1_000,
+        name: "Existing SKU",
+        productId: existingProduct.id,
+        skuCode: "EXISTING-BLOCKED-SKU",
+      })
+      .returning();
+    await db.insert(inventoryBalances).values({ skuId: existingSku.id, totalQuantity: 23 });
+    const catalogBeforePreflight = {
+      balances: await db.select().from(inventoryBalances),
+      products: await db.select().from(products),
+      skus: await db.select().from(skus),
+    };
 
     const result = expectPreflightReady(await service.createCargoPreflight({
       actor,
@@ -528,10 +571,19 @@ describe("Feishu cargo migration service", () => {
         runId: result.runId,
       }),
     ).rejects.toMatchObject({ code: "MIGRATION_NOT_CONFIRMABLE" satisfies FeishuCargoMigrationError["code"] });
+    expect(await db.select().from(products)).toEqual(catalogBeforePreflight.products);
+    expect(await db.select().from(skus)).toEqual(catalogBeforePreflight.skus);
+    expect(await db.select().from(inventoryBalances)).toEqual(catalogBeforePreflight.balances);
+    expect(await db.select().from(catalogAssets)).toEqual([]);
+    expect(await db.select().from(inventoryMovements)).toEqual([]);
   });
 
   test("sanitizes permanent source image download failures as blocking preflight issues", async () => {
     const actor = await createSuperAdminActor();
+    const [existingProduct] = await db
+      .insert(products)
+      .values({ description: "source failure sentinel", name: "Sentinel product" })
+      .returning();
     const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
     fakeSource.setDownloadFailure(
       "file-token-SKU-001",
@@ -565,6 +617,10 @@ describe("Feishu cargo migration service", () => {
       ]),
     );
     expect(JSON.stringify(run?.issuesJson)).not.toContain("file-token-SKU-001");
+    expect(await db.select().from(products)).toEqual([existingProduct]);
+    expect(await db.select().from(skus)).toEqual([]);
+    expect(await db.select().from(inventoryBalances)).toEqual([]);
+    expect(await db.select().from(catalogAssets)).toEqual([]);
     expect(await listFilesRecursively(assetRoot)).toEqual([]);
   });
 
@@ -788,7 +844,13 @@ describe("Feishu cargo migration service", () => {
         },
         runId: readyRun.runId,
       }),
-    ).resolves.toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
+    ).resolves.toEqual({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+      sourceSequenceCount: 50,
+      totalQuantity: 317,
+    });
   });
 
   test("blocks confirmation when database import remains disabled", async () => {
@@ -814,9 +876,165 @@ describe("Feishu cargo migration service", () => {
     ).rejects.toThrow(/database import|数据库导入/i);
   });
 
-  test("blocks confirmation when catalog SKUs already exist", async () => {
+  test("does not adopt a legacy product that still owns an unrelated SKU", async () => {
     const actor = await createSuperAdminActor();
-    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const alignedDataset = await buildFieldAlignedSourceDataset();
+    const sourceRow = alignedDataset.values[1];
+    const singleRowDataset = {
+      downloads: alignedDataset.downloads,
+      values: [alignedDataset.values[0], sourceRow],
+    };
+    const fakeSource = createMutableSourceClient({ initialDataset: singleRowDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+    }));
+    const [legacyProduct] = await db
+      .insert(products)
+      .values({
+        description: "manual catalog description",
+        linkText: "manual catalog link",
+        name: "Manual catalog product",
+      })
+      .returning();
+    const [matchedSku, unrelatedSku] = await db
+      .insert(skus)
+      .values([
+        {
+          defaultUnitPriceFen: 500,
+          defaultUnitPriceMilliYuan: 5_000,
+          name: "Legacy matching SKU",
+          productId: legacyProduct.id,
+          skuCode: String(sourceRow[1]),
+        },
+        {
+          defaultUnitPriceFen: 600,
+          defaultUnitPriceMilliYuan: 6_000,
+          name: "Manual sibling SKU",
+          productId: legacyProduct.id,
+          skuCode: "MANUAL-SIBLING-SKU",
+        },
+      ])
+      .returning();
+
+    await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+
+    const [legacyProductAfter] = await db
+      .select()
+      .from(products)
+      .where(eq(products.id, legacyProduct.id));
+    const [matchedSkuAfter] = await db
+      .select()
+      .from(skus)
+      .where(eq(skus.id, matchedSku.id));
+    const [unrelatedSkuAfter] = await db
+      .select()
+      .from(skus)
+      .where(eq(skus.id, unrelatedSku.id));
+
+    expect(matchedSkuAfter.productId).not.toBe(legacyProduct.id);
+    expect(unrelatedSkuAfter.productId).toBe(legacyProduct.id);
+    expect(legacyProductAfter).toMatchObject({
+      description: "manual catalog description",
+      linkText: "manual catalog link",
+      name: "Manual catalog product",
+      sourceSequence: null,
+    });
+  });
+
+  test("initializes only the missing SKU once in a mixed existing group", async () => {
+    const actor = await createSuperAdminActor();
+    const alignedDataset = await buildFieldAlignedSourceDataset();
+    const sequenceRows = alignedDataset.values
+      .slice(1)
+      .filter((row) => String(row[1]).startsWith("TZX-034-"))
+      .map((row) => structuredClone(row));
+    expect(sequenceRows).toHaveLength(3);
+    sequenceRows[2][6] = "7";
+    sequenceRows[2][7] = "7";
+    const sequenceDataset = {
+      downloads: alignedDataset.downloads,
+      values: [alignedDataset.values[0], ...sequenceRows],
+    };
+    const fakeSource = createMutableSourceClient({ initialDataset: sequenceDataset });
+    const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
+    const readyRun = expectPreflightReady(await service.createCargoPreflight({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+    }));
+    const [legacyProduct] = await db
+      .insert(products)
+      .values({ description: "mixed group description", name: "Mixed group product" })
+      .returning();
+    const existingSkus = await db
+      .insert(skus)
+      .values(
+        sequenceRows.slice(0, 2).map((row, index) => ({
+          defaultUnitPriceFen: 700 + index,
+          defaultUnitPriceMilliYuan: 7_000 + index * 10,
+          name: `Existing group SKU ${index + 1}`,
+          productId: legacyProduct.id,
+          skuCode: String(row[1]),
+        })),
+      )
+      .returning();
+    await db.insert(inventoryBalances).values(
+      existingSkus.map((sku, index) => ({ skuId: sku.id, totalQuantity: 90 + index })),
+    );
+
+    const first = await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+    const second = await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig({ cargoImportEnabled: false }),
+      runId: readyRun.runId,
+    });
+    const groupSkuCodes = sequenceRows.map((row) => String(row[1]));
+    const groupSkus = (await db.select().from(skus)).filter((sku) =>
+      groupSkuCodes.includes(sku.skuCode),
+    );
+    const balances = await db.select().from(inventoryBalances);
+    const movements = await db.select().from(inventoryMovements);
+    const missingSku = groupSkus.find((sku) => sku.skuCode === String(sequenceRows[2][1]));
+    if (!missingSku) throw new Error("expected missing SKU to be inserted");
+
+    expect(second).toEqual(first);
+    expect(new Set(groupSkus.map((sku) => sku.productId))).toEqual(new Set([legacyProduct.id]));
+    expect(balances).toHaveLength(3);
+    expect(balances).toEqual(expect.arrayContaining([
+      expect.objectContaining({ skuId: existingSkus[0].id, totalQuantity: 90 }),
+      expect.objectContaining({ skuId: existingSkus[1].id, totalQuantity: 91 }),
+      expect.objectContaining({
+        skuId: missingSku.id,
+        totalQuantity: Number(sequenceRows[2][6]),
+      }),
+    ]));
+    expect(movements).toEqual([
+      expect.objectContaining({
+        afterQuantity: Number(sequenceRows[2][6]),
+        beforeQuantity: 0,
+        skuId: missingSku.id,
+      }),
+    ]);
+  });
+
+  test("backfills 74 source sequences across 140 existing SKUs without changing operational state", async () => {
+    const actor = await createSuperAdminActor();
+    const alignedDataset = await buildFieldAlignedSourceDataset();
+    const fakeSource = createMutableSourceClient({ initialDataset: alignedDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
     const readyRun = expectPreflightReady(await service.createCargoPreflight({
       actor,
@@ -824,22 +1042,134 @@ describe("Feishu cargo migration service", () => {
       config: createConfig(),
     }));
 
-    const [product] = await db.insert(products).values({ name: "Existing product" }).returning();
-    await db.insert(skus).values({
-      defaultUnitPriceFen: 100,
-      name: "Existing sku",
-      productId: product.id,
-      skuCode: "EXISTING-SKU",
+    const existingProducts = await db
+      .insert(products)
+      .values(
+        alignedDataset.values.slice(1).map((row, index) => ({
+          description: `preserved description ${index + 1}`,
+          name: `Legacy product ${index + 1}`,
+        })),
+      )
+      .returning({ id: products.id });
+    const existingSkus = await db
+      .insert(skus)
+      .values(
+        alignedDataset.values.slice(1).map((row, index) => ({
+          defaultUnitPriceFen: 999,
+          defaultUnitPriceMilliYuan: 9_990,
+          name: `Legacy SKU ${index + 1}`,
+          productId: existingProducts[index].id,
+          skuCode: String(row[1]),
+        })),
+      )
+      .returning({ id: skus.id, skuCode: skus.skuCode });
+    await db.insert(inventoryBalances).values(
+      existingSkus.map((sku, index) => ({
+        skuId: sku.id,
+        totalQuantity: 500 + index,
+      })),
+    );
+    const existingSku = existingSkus.find((sku) => sku.skuCode === "TZX-034-1");
+    if (!existingSku) throw new Error("expected TZX-034-1 seed");
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: "BACKFILL-CUSTOMER", name: "Backfill customer" })
+      .returning();
+    const [reservationBeforeBackfill] = await db
+      .insert(inventoryReservations)
+      .values({
+        quantity: 2,
+        referenceId: "backfill-reservation",
+        referenceType: "TEST",
+        skuId: existingSku.id,
+      })
+      .returning();
+    const [customerPriceBeforeBackfill] = await db
+      .insert(customerSkuPrices)
+      .values({
+        customerId: customer.id,
+        skuId: existingSku.id,
+        unitPriceFen: 123,
+        unitPriceMilliYuan: 1_230,
+      })
+      .returning();
+    const [balanceBeforeBackfill] = await db
+      .select()
+      .from(inventoryBalances)
+      .where(eq(inventoryBalances.skuId, existingSku.id));
+
+    const first = await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+    const sourceReadsAfterFirstConfirmation = fakeSource.calls.downloadMedia.length;
+    const second = await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig({ cargoImportEnabled: false }),
+      runId: readyRun.runId,
     });
 
-    await expect(
-      service.confirmCargoMigration({
-        actor,
-        client: fakeSource.client,
-        config: createConfig(),
-        runId: readyRun.runId,
-      }),
-    ).rejects.toMatchObject({ code: "CATALOG_NOT_EMPTY" satisfies FeishuCargoMigrationError["code"] });
+    const [counts] = await db.execute<{
+      imageCount: number;
+      skuCount: number;
+      sourceSequenceCount: number;
+    }>(sql`
+      select
+        count(distinct ${products.sourceSequence})::int as "sourceSequenceCount",
+        count(distinct ${skus.id})::int as "skuCount",
+        count(distinct ${skus.imageAssetId})::int as "imageCount"
+      from ${skus}
+      inner join ${products} on ${products.id} = ${skus.productId}
+    `);
+    const [balanceAfterBackfill] = await db
+      .select()
+      .from(inventoryBalances)
+      .where(eq(inventoryBalances.skuId, existingSku.id));
+    const [reservationAfterBackfill] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.id, reservationBeforeBackfill.id));
+    const [customerPriceAfterBackfill] = await db
+      .select()
+      .from(customerSkuPrices)
+      .where(eq(customerSkuPrices.id, customerPriceBeforeBackfill.id));
+    const [sequence34] = await db
+      .select()
+      .from(products)
+      .where(eq(products.sourceSequence, "34"));
+    const sequence34Skus = (await db.select().from(skus)).filter((sku) =>
+      ["TZX-034-1", "TZX-034-2", "TZX-034-3"].includes(sku.skuCode),
+    );
+
+    expect(first).toMatchObject({
+      imageCount: 140,
+      productCount: 74,
+      skuCount: 140,
+      sourceSequenceCount: 74,
+    });
+    expect(second).toEqual(first);
+    expect(fakeSource.calls.downloadMedia).toHaveLength(sourceReadsAfterFirstConfirmation);
+    expect(counts).toEqual({ imageCount: 140, skuCount: 140, sourceSequenceCount: 74 });
+    expect(await db.select().from(catalogAssets)).toHaveLength(140);
+    expect(balanceAfterBackfill).toEqual(balanceBeforeBackfill);
+    expect(reservationAfterBackfill).toEqual(reservationBeforeBackfill);
+    expect(customerPriceAfterBackfill).toEqual(customerPriceBeforeBackfill);
+    expect(sequence34).toMatchObject({
+      cargoUnitPriceMilliYuan: 1_366,
+      description: "preserved description 67",
+      linkText: "查看飞书商品",
+      sourceSequence: "34",
+    });
+    expect(sequence34Skus).toHaveLength(3);
+    expect(new Set(sequence34Skus.map((sku) => sku.productId))).toEqual(
+      new Set([sequence34.id]),
+    );
+    expect(await db.select().from(inventoryMovements)).toEqual([]);
+    expect(await db.select().from(integrationOutbox)).toEqual([]);
+    expect(await db.select().from(auditLogs)).toHaveLength(1);
   });
 
   test("blocks confirmation when another imported migration run already exists", async () => {
@@ -974,7 +1304,13 @@ describe("Feishu cargo migration service", () => {
         config: createConfig(),
         runId: readyRun.runId,
       }),
-    ).resolves.toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
+    ).resolves.toEqual({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+      sourceSequenceCount: 50,
+      totalQuantity: 317,
+    });
 
     expect(fakeSource.calls.downloadMedia).toHaveLength(148);
     expect(await listFilesRecursively(join(assetRoot, "temporary"))).toEqual([]);
@@ -1004,7 +1340,13 @@ describe("Feishu cargo migration service", () => {
         config: createConfig(),
         runId: readyRun.runId,
       }),
-    ).resolves.toEqual({ imageCount: 2, productCount: 2, skuCount: 2 });
+    ).resolves.toEqual({
+      imageCount: 2,
+      productCount: 2,
+      skuCount: 2,
+      sourceSequenceCount: 2,
+      totalQuantity: 5,
+    });
 
     const storedAssets = await db.select().from(catalogAssets);
     const storedSkus = await db.select().from(skus);
@@ -1015,12 +1357,14 @@ describe("Feishu cargo migration service", () => {
     );
   });
 
-  test("imports products, skus, assets, balances, movements, audit and one outbox sync exactly once", async () => {
+  test("imports new SKUs with opening inventory exactly once and no target outbox event", async () => {
     const actor = await createSuperAdminActor();
     const exactDataset = cloneDataset(baseDataset);
-    exactDataset.values[1][4] = "0.325";
+    exactDataset.values[1][5] = "0.325";
+    exactDataset.values[1][6] = "0";
     exactDataset.values[1][7] = "0";
-    exactDataset.values[1][11] = "12.5g";
+    exactDataset.values[1][8] = "0";
+    exactDataset.values[1][12] = "12.5g";
     const fakeSource = createMutableSourceClient({ initialDataset: exactDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
     const readyRun = expectPreflightReady(await service.createCargoPreflight({
@@ -1030,6 +1374,13 @@ describe("Feishu cargo migration service", () => {
     }));
 
     const result = await service.confirmCargoMigration({
+      actor,
+      client: fakeSource.client,
+      config: createConfig(),
+      runId: readyRun.runId,
+    });
+    const sourceReadsAfterFirstConfirmation = fakeSource.calls.downloadMedia.length;
+    const repeatedResult = await service.confirmCargoMigration({
       actor,
       client: fakeSource.client,
       config: createConfig(),
@@ -1047,14 +1398,22 @@ describe("Feishu cargo migration service", () => {
       .where(eq(feishuCargoMigrationRuns.id, readyRun.runId))
       .limit(1);
 
-    expect(result).toEqual({ imageCount: 74, productCount: 50, skuCount: 74 });
+    expect(result).toEqual({
+      imageCount: 74,
+      productCount: 50,
+      skuCount: 74,
+      sourceSequenceCount: 50,
+      totalQuantity: 315,
+    });
+    expect(repeatedResult).toEqual(result);
+    expect(fakeSource.calls.downloadMedia).toHaveLength(sourceReadsAfterFirstConfirmation);
     expect(run?.status).toBe("IMPORTED");
     expect(importedProducts).toHaveLength(50);
     expect(importedSkus).toHaveLength(74);
     expect(importedAssets).toHaveLength(74);
     expect(balances).toHaveLength(74);
     expect(movements).toHaveLength(
-      baseDataset.values.slice(1).filter((row) => Number.parseInt(String(row[5]), 10) > 0).length,
+      exactDataset.values.slice(1).filter((row) => Number.parseInt(String(row[6]), 10) > 0).length,
     );
     expect(importedSkus[0]).toMatchObject({
       imageUrl: `/api/catalog-assets/${importedSkus[0].imageAssetId}`,
@@ -1075,15 +1434,7 @@ describe("Feishu cargo migration service", () => {
         }),
       ]),
     );
-    expect(await db.select().from(integrationOutbox)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          aggregateId: "cargo-sheet",
-          eventType: "FEISHU_CARGO_SYNC",
-          target: "FEISHU_SHEET",
-        }),
-      ]),
-    );
+    expect(await db.select().from(integrationOutbox)).toEqual([]);
 
     const firstAsset = importedAssets[0];
     expect(firstAsset.storageKey).toMatch(/^sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\.png$/);
@@ -1092,7 +1443,7 @@ describe("Feishu cargo migration service", () => {
     );
   });
 
-  test("two concurrent confirm calls produce exactly one import and one deterministic conflict", async () => {
+  test("two concurrent confirm calls both return the same idempotent import result", async () => {
     const actor = await createSuperAdminActor();
     const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
@@ -1117,16 +1468,33 @@ describe("Feishu cargo migration service", () => {
       }),
     ]);
 
-    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    const rejected = settled.find((result) => result.status === "rejected");
-    expect(rejected).toMatchObject({
-      reason: expect.objectContaining({
-        code: "ALREADY_IMPORTED",
-      }),
-    });
+    expect(settled).toEqual([
+      {
+        status: "fulfilled",
+        value: {
+          imageCount: 74,
+          productCount: 50,
+          skuCount: 74,
+          sourceSequenceCount: 50,
+          totalQuantity: 317,
+        },
+      },
+      {
+        status: "fulfilled",
+        value: {
+          imageCount: 74,
+          productCount: 50,
+          skuCount: 74,
+          sourceSequenceCount: 50,
+          totalQuantity: 317,
+        },
+      },
+    ]);
     expect(await db.select().from(products)).toHaveLength(50);
     expect(await db.select().from(skus)).toHaveLength(74);
     expect(await db.select().from(catalogAssets)).toHaveLength(74);
+    expect(await db.select().from(auditLogs)).toHaveLength(1);
+    expect(await db.select().from(integrationOutbox)).toEqual([]);
   });
 
   test("does not hold the migration row lock while source revalidation downloads are in flight", async () => {
@@ -1166,6 +1534,8 @@ describe("Feishu cargo migration service", () => {
         imageCount: 74,
         productCount: 50,
         skuCount: 74,
+        sourceSequenceCount: 50,
+        totalQuantity: 317,
       });
     } finally {
       await delayedSource.releaseFirstDownload();

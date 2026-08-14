@@ -193,6 +193,8 @@ describe("feishu admin actions", () => {
       imageCount: 74,
       productCount: 50,
       skuCount: 74,
+      sourceSequenceCount: 50,
+      totalQuantity: 428,
     });
 
     const formData = new FormData();
@@ -232,9 +234,11 @@ describe("feishu admin actions", () => {
       targetSpreadsheetToken: undefined,
     });
     serviceMocks.confirmCargoMigration.mockResolvedValue({
-      imageCount: 74,
-      productCount: 50,
-      skuCount: 74,
+      imageCount: 140,
+      productCount: 74,
+      skuCount: 140,
+      sourceSequenceCount: 74,
+      totalQuantity: 312,
     });
 
     const formData = new FormData();
@@ -243,7 +247,10 @@ describe("feishu admin actions", () => {
 
     const result = await confirmCargoMigrationAction({ status: "idle" }, formData);
 
-    expect(result.status).toBe("success");
+    expect(result).toMatchObject({
+      message: expect.stringContaining("74 个来源序号、140 个SKU"),
+      status: "success",
+    });
     expect(serviceMocks.confirmCargoMigration).toHaveBeenCalledWith(
       expect.objectContaining({
         config: expect.objectContaining({

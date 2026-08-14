@@ -274,7 +274,7 @@ export async function confirmCargoMigrationAction(
     });
     revalidatePath(INTEGRATIONS_PATH);
     return {
-      message: `迁移已提交：${result.productCount} 个商品、${result.skuCount} 个SKU、${result.imageCount} 张图片已经导入系统。`,
+      message: `已写入本系统数据库：${result.sourceSequenceCount} 个来源序号、${result.skuCount} 个SKU、${result.imageCount} 张图片已完成回填。`,
       status: "success",
     };
   } catch (error) {

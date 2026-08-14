@@ -128,7 +128,7 @@ describe("CargoMigrationPanel", () => {
       />,
     );
 
-    expect(screen.getByText("原业务货盘受保护，系统不会写入。")).toBeVisible();
+    expect(screen.getByText(/飞书源货盘始终只读/)).toBeVisible();
     expect(screen.getByRole("button", { name: "验证只读连接" })).toBeVisible();
     expect(screen.getByRole("button", { name: "重新同步目标测试表" })).toBeVisible();
     expect(screen.queryByRole("combobox", { name: "源工作表" })).not.toBeInTheDocument();
@@ -183,7 +183,7 @@ describe("CargoMigrationPanel", () => {
 
     const headings = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
     const summaryIndex = headings.indexOf("迁移状态总览");
-    const setupIndex = headings.indexOf("首批迁移控制");
+    const setupIndex = headings.indexOf("数据回填控制");
     const connectionIndex = headings.indexOf("连接与目标同步");
     const detailIndex = headings.indexOf("只读预检明细");
 
@@ -193,7 +193,7 @@ describe("CargoMigrationPanel", () => {
     expect(detailIndex).toBeGreaterThan(connectionIndex);
 
     const setupPanel = screen
-      .getByRole("heading", { name: "首批迁移控制", level: 2 })
+      .getByRole("heading", { name: "数据回填控制", level: 2 })
       .closest("section");
     expect(setupPanel).not.toBeNull();
     expect(within(setupPanel!).getByRole("combobox", { name: "源工作表" })).toBeVisible();
@@ -277,7 +277,7 @@ describe("CargoMigrationPanel", () => {
     ).toBeVisible();
   });
 
-  it("shows a read-only rollout message and disables write controls while the gate is off", () => {
+  it("shows database-write semantics without offering disabled target-write controls", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
@@ -289,16 +289,16 @@ describe("CargoMigrationPanel", () => {
       />,
     );
 
-    expect(screen.getByText(/只读发布/i)).toBeVisible();
+    expect(screen.getAllByText(/写入本系统数据库/).length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("button", { name: "确认迁移 74 个SKU" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "重新同步目标测试表" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "重新同步目标测试表" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "开始只读预检" }),
     ).toBeEnabled();
-    expect(screen.getByText(/FEISHU_CARGO_WRITES_ENABLED/)).toBeVisible();
+    expect(screen.queryByText(/FEISHU_CARGO_WRITES_ENABLED/)).not.toBeInTheDocument();
   });
 });
