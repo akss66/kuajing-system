@@ -276,6 +276,33 @@ function isBlankRow(row: unknown[]) {
   return row.every((cell) => extractDisplayText(cell).length === 0);
 }
 
+function isStructurallyBlankCell(value: unknown) {
+  return (
+    extractDisplayText(value).length === 0 &&
+    collectFileTokens(value).length === 0 &&
+    collectLinkTargets(value).length === 0
+  );
+}
+
+function isTrailingSkuOnlyDraft(input: {
+  headerMap: HeaderMap;
+  offset: number;
+  row: unknown[];
+  values: unknown[][];
+}) {
+  const remainingRowsAreBlank = input.values
+    .slice(input.offset + 1)
+    .every((row) => row.every((cell) => isStructurallyBlankCell(cell)));
+  if (!remainingRowsAreBlank) return false;
+
+  return input.row.every((cell, index) => {
+    if (index === input.headerMap.sequence || index === input.headerMap.sku) {
+      return true;
+    }
+    return isStructurallyBlankCell(cell);
+  });
+}
+
 function isBlankLinkCell(value: unknown) {
   return (
     extractDisplayText(value).length === 0 &&
@@ -431,6 +458,16 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           sourceRowNumber,
         }),
       );
+      continue;
+    }
+
+    if (isTrailingSkuOnlyDraft({ headerMap, offset, row, values })) {
+      issues.push({
+        code: "CARGO_TRAILING_SKU_DRAFT_SKIPPED",
+        message: `\u672b\u5c3e SKU ${skuCode} \u4ec5\u6709\u7f16\u53f7\u4e14\u8d44\u6599\u672a\u5b8c\u6210\uff0c\u672c\u6b21\u8fc1\u79fb\u5df2\u8df3\u8fc7`,
+        severity: "WARNING",
+        sourceRowNumber,
+      });
       continue;
     }
 

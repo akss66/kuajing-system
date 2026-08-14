@@ -86,13 +86,42 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
-  test("does not inherit product fields when the SKU starts a new inferred group", () => {
+  test("skips a trailing SKU-only draft without inheriting the previous product", () => {
     const values = sampleRows();
     values.push(["", "TZX-077", "", "", "", "", "", "", "", "", "", "", ""]);
 
     const result = parseLegacyCargoSheet(values);
 
     expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-077");
+    expect(result.issues).toContainEqual({
+      code: "CARGO_TRAILING_SKU_DRAFT_SKIPPED",
+      message: "末尾 SKU TZX-077 仅有编号且资料未完成，本次迁移已跳过",
+      severity: "WARNING",
+      sourceRowNumber: 6,
+    });
+  });
+
+  test("does not skip an incomplete SKU-only row in the middle of the sheet", () => {
+    const values = sampleRows();
+    values.push(["", "TZX-077", "", "", "", "", "", "", "", "", "", "", ""]);
+    values.push([
+      "78",
+      "TZX-078",
+      { fileToken: "file-token-tzx-078" },
+      "Complete product",
+      "1.00",
+      "1",
+      "1",
+      { text: "Complete product", link: "https://example.test/products/tzx-078" },
+      "Standard",
+      "Gray",
+      "1pc",
+      "10g",
+      "可售",
+    ]);
+
+    const result = parseLegacyCargoSheet(values);
+
     expect(result.issues).toContainEqual({
       code: "CARGO_MISSING_PRODUCT_NAME",
       message: "名称不能为空",
