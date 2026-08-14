@@ -29,6 +29,27 @@ import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 import { CatalogSaleStatusFilterControl } from "./catalog-sale-status-filter";
 
+type CustomerCatalogGroupableItem = CustomerCatalogItem & { sourceSequence: null };
+
+function customerVariantSearchValues(item: CustomerCatalogItem) {
+  return [
+    item.skuCode,
+    item.specification,
+    item.color,
+    item.combination,
+    item.weightGrams === null ? null : String(item.weightGrams),
+    item.weightGrams === null ? null : `重量：${item.weightGrams} 克`,
+    item.linkText,
+    item.productUrl,
+  ];
+}
+
+function toCustomerCatalogGroupableItem(
+  item: CustomerCatalogItem,
+): CustomerCatalogGroupableItem {
+  return { ...item, sourceSequence: null };
+}
+
 function CatalogImage({ item }: { item: CustomerCatalogItem }) {
   if (item.imageUrl) {
     return (
@@ -151,7 +172,11 @@ function CatalogProductLink({ item }: { item: CustomerCatalogItem }) {
   );
 }
 
-function ProductGroupHeader({ group }: { group: CatalogProductGroup<CustomerCatalogItem> }) {
+function ProductGroupHeader({
+  group,
+}: {
+  group: CatalogProductGroup<CustomerCatalogGroupableItem>;
+}) {
   return (
     <header className="min-w-0 border-b border-border px-4 py-3 sm:px-5">
       <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
@@ -164,7 +189,11 @@ function ProductGroupHeader({ group }: { group: CatalogProductGroup<CustomerCata
   );
 }
 
-function CustomerCatalogTable({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
+function CustomerCatalogTable({
+  groups,
+}: {
+  groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
+}) {
   const productNameCounts = new Map<string, number>();
   for (const group of groups) {
     productNameCounts.set(
@@ -239,7 +268,11 @@ function CustomerCatalogTable({ groups }: { groups: CatalogProductGroup<Customer
   );
 }
 
-function CustomerCatalogCards({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
+function CustomerCatalogCards({
+  groups,
+}: {
+  groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
+}) {
   return (
     <ul
       aria-label="客户货盘卡片列表"
@@ -311,7 +344,11 @@ function CustomerCatalogCards({ groups }: { groups: CatalogProductGroup<Customer
   );
 }
 
-function CustomerCatalogResults({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
+function CustomerCatalogResults({
+  groups,
+}: {
+  groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
+}) {
   return (
     <div data-testid="customer-catalog-results">
       <CustomerCatalogTable groups={groups} />
@@ -328,21 +365,15 @@ export function CustomerCatalogWorkspace({
   query: string;
 }) {
   const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const [draftQuery, setDraftQuery] = useState(query);
   const [searchQuery, setSearchQuery] = useState(query);
-  const [searchTerm, setSearchTerm] = useState(query);
-  const searchedGroups = filterCatalogGroups(
-    groupCatalogItems(items).map((group) => ({ ...group, sourceSequence: null })),
-    searchQuery,
-    (item) => [
-      item.skuCode,
-      item.specification,
-      item.color,
-      item.combination,
-      item.weightGrams === null ? null : String(item.weightGrams),
-      item.weightGrams === null ? null : `重量：${item.weightGrams} 克`,
-      item.linkText,
-      item.productUrl,
-    ],
+  const groupedItems = useMemo(
+    () => groupCatalogItems(items.map(toCustomerCatalogGroupableItem)),
+    [items],
+  );
+  const searchedGroups = useMemo(
+    () => filterCatalogGroups(groupedItems, searchQuery, customerVariantSearchValues),
+    [groupedItems, searchQuery],
   );
   const filteredGroups = useMemo(
     () =>
@@ -357,7 +388,7 @@ export function CustomerCatalogWorkspace({
   const resetFilters = () => {
     setSaleStatus("ALL");
     setSearchQuery("");
-    setSearchTerm("");
+    setDraftQuery("");
   };
 
   return (
@@ -373,7 +404,7 @@ export function CustomerCatalogWorkspace({
             method="get"
             onSubmit={(event) => {
               event.preventDefault();
-              setSearchQuery(searchTerm);
+              setSearchQuery(draftQuery);
             }}
           >
             <label className="relative min-w-0">
@@ -386,10 +417,10 @@ export function CustomerCatalogWorkspace({
                 aria-label="搜索 SKU、商品、规格或链接文字"
                 className="min-h-11 pl-10"
                 name="q"
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) => setDraftQuery(event.target.value)}
                 placeholder="搜索 SKU、商品、规格或链接文字"
                 type="search"
-                value={searchTerm}
+                value={draftQuery}
               />
             </label>
             <Button className="min-h-11" type="submit">

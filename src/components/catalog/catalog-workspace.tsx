@@ -52,6 +52,8 @@ function adminVariantSearchValues(variant: AdminCatalogItem) {
 export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const hasQuery = query.length > 0;
+  const hasStatusFilter = saleStatus !== "ALL";
   const groups = useMemo(() => groupCatalogItems(rows), [rows]);
   const searchedGroups = useMemo(
     () => filterCatalogGroups(groups, query, adminVariantSearchValues),
@@ -69,6 +71,10 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
     (count, group) => count + group.variants.length,
     0,
   );
+  const resetFilters = () => {
+    setQuery("");
+    setSaleStatus("ALL");
+  };
 
   return (
     <div className="min-w-0 space-y-6" data-admin-catalog-workspace>
@@ -94,10 +100,24 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
         <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold text-foreground">SKU 货盘</h2><p className="text-sm tabular-nums text-muted-foreground">{filteredGroups.length} 个商品 / {filteredSkuCount} 个 SKU</p></div>
         {filteredGroups.length > 0 ? <CatalogResults groups={filteredGroups} /> : (
           <ActionableEmptyState
-            action={saleStatus !== "ALL" ? <Button className="min-h-11" onClick={() => setSaleStatus("ALL")} type="button" variant="outline">显示全部 SKU</Button> : query ? <Button className="min-h-11" onClick={() => setQuery("")} type="button" variant="outline">清除搜索</Button> : undefined}
-            description={saleStatus !== "ALL" ? "当前销售状态下没有结果，请切换销售状态。" : query ? "当前搜索条件下没有结果，请调整关键词。" : "创建首个标准 SKU 后，客户货盘和库存会在这里建立关联。"}
-            kind={saleStatus !== "ALL" || query ? "filtered" : "initial"}
-            title={saleStatus !== "ALL" || query ? "没有符合条件的 SKU" : "暂无 SKU"}
+            action={
+              hasQuery && hasStatusFilter ? (
+                <Button className="min-h-11" onClick={resetFilters} type="button" variant="outline">
+                  清除筛选
+                </Button>
+              ) : hasStatusFilter ? (
+                <Button className="min-h-11" onClick={() => setSaleStatus("ALL")} type="button" variant="outline">
+                  显示全部 SKU
+                </Button>
+              ) : hasQuery ? (
+                <Button className="min-h-11" onClick={() => setQuery("")} type="button" variant="outline">
+                  清除搜索
+                </Button>
+              ) : undefined
+            }
+            description={hasStatusFilter ? "当前销售状态下没有结果，请切换销售状态。" : hasQuery ? "当前搜索条件下没有结果，请调整关键词。" : "创建首个标准 SKU 后，客户货盘和库存会在这里建立关联。"}
+            kind={hasStatusFilter || hasQuery ? "filtered" : "initial"}
+            title={hasStatusFilter || hasQuery ? "没有符合条件的 SKU" : "暂无 SKU"}
           />
         )}
       </section>

@@ -12,6 +12,7 @@ import {
 } from "@/components/catalog/catalog-workspace";
 import type { AdminCatalogItem } from "@/modules/catalog/admin-catalog";
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
+import * as productGroups from "@/modules/catalog/product-groups";
 import type { ManagedAction } from "@/shared/action-state";
 
 vi.mock("next/image", () => ({
@@ -115,7 +116,6 @@ const customerRows: CustomerCatalogItem[] = [
     sellable: true,
     skuCode: "TZX-CUSTOMER-001",
     skuName: "SKU 名称不能冒充规格",
-    sourceSequence: "1",
     specification: longSpecification,
     weightGrams: 480,
   },
@@ -137,7 +137,6 @@ const customerRows: CustomerCatalogItem[] = [
     sellable: false,
     skuCode: "TZX-CUSTOMER-002",
     skuName: "错误的人工不可售规格",
-    sourceSequence: "2",
     specification: "白色 20 件装",
     weightGrams: null,
   },
@@ -159,7 +158,6 @@ const customerRows: CustomerCatalogItem[] = [
     sellable: false,
     skuCode: "TZX-CUSTOMER-003",
     skuName: "错误的售罄规格",
-    sourceSequence: "3",
     specification: "轻量单件装",
     weightGrams: 120,
   },
@@ -264,6 +262,33 @@ describe("catalog workspaces", () => {
     fireEvent.click(within(statusFilter).getByRole("button", { name: "只看不可售 SKU" }));
     expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
     expect(screen.queryByText("TZX-001-1")).not.toBeInTheDocument();
+  });
+
+  it("clears combined administrator query and sale-status filters locally from the empty state", () => {
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={[adminRows[0]!]}
+        stores={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "no admin SKU matches this query" } });
+    fireEvent.click(screen.getByRole("button", { name: "只看不可售 SKU" }));
+
+    expect(screen.getByRole("heading", { name: "没有符合条件的 SKU" })).toBeVisible();
+
+    const clearFilters = screen.getByRole("button", { name: "清除筛选" });
+    fireEvent.click(clearFilters);
+
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
+    expect(screen.getAllByText("TZX-034-2")).toHaveLength(2);
   });
 
   it("keeps catalog mutations out of the resource list until their drawers open", async () => {
@@ -603,6 +628,26 @@ describe("catalog workspaces", () => {
     expect(within(screen.getByTestId("customer-catalog-results")).getAllByText("可售")).toHaveLength(2);
   });
 
+  it("does not rebuild customer grouping and search results until the draft query is submitted", () => {
+    const groupSpy = vi.spyOn(productGroups, "groupCatalogItems");
+    const searchSpy = vi.spyOn(productGroups, "filterCatalogGroups");
+
+    render(<CustomerCatalogWorkspace items={customerRows} query="" />);
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "draft only" } });
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索货盘" }));
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("gives duplicate customer product names distinct table names without exposing source sequence", () => {
     render(
       <CustomerCatalogWorkspace
@@ -669,7 +714,6 @@ describe("catalog workspaces", () => {
             sellable: true,
             skuCode: "TZX-DEMO-001",
             skuName: "Black 10-pack",
-            sourceSequence: "1",
             specification: "Black",
             weightGrams: null,
           },

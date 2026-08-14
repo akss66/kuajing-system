@@ -9,7 +9,7 @@ import {
   skus,
 } from "@/db/schema";
 
-export type CustomerCatalogItem = {
+export type CustomerCatalogRecord = {
   id: string;
   productId: string;
   sourceSequence: string | null;
@@ -35,6 +35,8 @@ export type CustomerCatalogItem = {
   sellable: boolean;
 };
 
+export type CustomerCatalogItem = Omit<CustomerCatalogRecord, "sourceSequence">;
+
 export function resolveCatalogAvailability(
   saleStatus: "SELLABLE" | "NOT_SELLABLE",
   availableQuantity: number,
@@ -49,6 +51,16 @@ export function resolveCatalogAvailability(
     return { availabilityReason: "SOLD_OUT" as const, orderable: false };
   }
   return { availabilityReason: "AVAILABLE" as const, orderable: true };
+}
+
+export function toCustomerCatalogItems(
+  rows: readonly CustomerCatalogRecord[],
+): CustomerCatalogItem[] {
+  return rows.map((row) => {
+    const { sourceSequence, ...safeRow } = row;
+    void sourceSequence;
+    return safeRow;
+  });
 }
 
 export async function listCustomerCatalog(
@@ -110,7 +122,7 @@ export async function listCustomerCatalog(
     .where(eq(products.status, "ACTIVE"))
     .orderBy(asc(skus.skuCode));
 
-  return rows.map((row) => {
+  return toCustomerCatalogItems(rows.map((row) => {
     const availability = resolveCatalogAvailability(
       row.saleStatus,
       row.availableQuantity,
@@ -120,5 +132,5 @@ export async function listCustomerCatalog(
       ...availability,
       sellable: availability.orderable,
     };
-  });
+  }));
 }

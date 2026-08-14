@@ -200,7 +200,6 @@ describe("audience-separated catalog queries", () => {
       productId: fixture.product.id,
       productUrl: "https://example.com/products/34-a",
       saleStatus: "SELLABLE",
-      sourceSequence: "34",
       specification: "55 厘米长款",
       weightGrams: 480,
     });
@@ -216,10 +215,11 @@ describe("audience-separated catalog queries", () => {
       saleStatus: "SELLABLE",
     });
     expect(otherCustomerRows[0].actualUnitPriceMilliYuan).toBe(999);
-    expect(
-      customerRows.map((row) => [row.productId, row.sourceSequence]),
-    ).toEqual(adminRows.map((row) => [row.productId, row.sourceSequence]));
+    expect(customerRows.map((row) => row.productId)).toEqual(
+      adminRows.map((row) => row.productId),
+    );
     for (const row of customerRows) {
+      expect(row).not.toHaveProperty("sourceSequence");
       expect(row).not.toHaveProperty("cargoUnitPriceMilliYuan");
       expect(row).not.toHaveProperty("defaultUnitPriceMilliYuan");
       expect(row).not.toHaveProperty("totalQuantity");
