@@ -13,7 +13,6 @@ export type CatalogProductGroup<T extends CatalogGroupableItem> = {
   productName: string;
   sourceSequence: string | null;
   linkText: string | null;
-  productUrl: string | null;
   variants: T[];
 };
 
@@ -58,7 +57,6 @@ export function groupCatalogItems<T extends CatalogGroupableItem>(
       linkText: item.linkText,
       productId: item.productId,
       productName: item.productName,
-      productUrl: item.productUrl,
       sourceSequence: item.sourceSequence,
       variants: [item],
     });
@@ -91,7 +89,6 @@ export function filterCatalogGroups<T extends CatalogGroupableItem>(
       includesQuery(group.productName, normalizedQuery) ||
       includesQuery(group.sourceSequence, normalizedQuery) ||
       includesQuery(group.linkText, normalizedQuery) ||
-      includesQuery(group.productUrl, normalizedQuery) ||
       group.variants.some((variant) =>
         variantSearchValues(variant).some((value) =>
           includesQuery(value, normalizedQuery),

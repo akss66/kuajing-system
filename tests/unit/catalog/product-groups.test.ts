@@ -65,6 +65,27 @@ describe("groupCatalogItems", () => {
       "product-b",
     ]);
   });
+
+  it("preserves distinct sibling product links on variants", () => {
+    const groups = groupCatalogItems([
+      item({
+        id: "sku-1",
+        productUrl: "https://example.com/products/first-variant",
+        skuCode: "TZX-001-1",
+      }),
+      item({
+        id: "sku-2",
+        productUrl: "https://example.com/products/second-variant",
+        skuCode: "TZX-001-2",
+      }),
+    ]);
+
+    expect(groups[0]).not.toHaveProperty("productUrl");
+    expect(groups[0].variants.map((variant) => variant.productUrl)).toEqual([
+      "https://example.com/products/first-variant",
+      "https://example.com/products/second-variant",
+    ]);
+  });
 });
 
 describe("filterCatalogGroups", () => {
@@ -92,5 +113,29 @@ describe("filterCatalogGroups", () => {
 
     expect(filterCatalogGroups(groups, "special", () => [])).toHaveLength(1);
     expect(filterCatalogGroups(groups, "34", () => [])).toHaveLength(1);
+  });
+
+  it("matches a non-first sibling link through variant search values", () => {
+    const groups = groupCatalogItems([
+      item({
+        id: "sku-1",
+        productUrl: "https://example.com/products/first-variant",
+        skuCode: "TZX-001-1",
+      }),
+      item({
+        id: "sku-2",
+        productUrl: "https://example.com/products/second-variant",
+        skuCode: "TZX-001-2",
+      }),
+    ]);
+
+    const filtered = filterCatalogGroups(
+      groups,
+      "second-variant",
+      (variant) => [variant.productUrl],
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].variants).toHaveLength(2);
   });
 });
