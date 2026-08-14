@@ -30,6 +30,7 @@ const HEADER_ALIASES = {
 const REQUIRED_HEADER_FIELDS = [
   "sku",
   "name",
+  "cargoPrice",
   "price",
   "quantity",
   "status",
@@ -675,17 +676,12 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       continue;
     }
 
-    const hasCargoPriceColumn = headerMap.cargoPrice >= 0;
-    const explicitCargoPrice = hasCargoPriceColumn
-      ? parseYuanPrice(row[headerMap.cargoPrice])
-      : null;
+    const explicitCargoPrice = parseYuanPrice(row[headerMap.cargoPrice]);
     const cargoUnitPriceMilliYuan =
-      hasCargoPriceColumn
-        ? (explicitCargoPrice?.unitPriceMilliYuan ??
-          (typeof context.cargoPrice?.value === "number"
-            ? context.cargoPrice.value
-            : null))
-        : defaultUnitPriceMilliYuan;
+      explicitCargoPrice?.unitPriceMilliYuan ??
+      (typeof context.cargoPrice?.value === "number"
+        ? context.cargoPrice.value
+        : null);
     if (explicitCargoPrice !== null) {
       context.cargoPrice = {
         rowNumber: sourceRowNumber,
@@ -696,7 +692,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       context.cargoPrice
     ) {
       inheritedFrom.cargoPrice = context.cargoPrice.rowNumber;
-    } else if (hasCargoPriceColumn) {
+    } else {
       issues.push(
         buildIssue({
           code: "CARGO_INVALID_CARGO_PRICE",

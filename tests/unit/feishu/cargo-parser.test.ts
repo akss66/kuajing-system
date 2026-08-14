@@ -5,11 +5,20 @@ import { parseLegacyCargoSheet } from "@/modules/feishu/cargo-parser";
 import { describe, expect, test } from "vitest";
 
 function sampleRows() {
-  return structuredClone((cargoSourceValues as unknown[][]).slice(0, 5));
+  return withCargoPriceColumn(
+    structuredClone((cargoSourceValues as unknown[][]).slice(0, 5)),
+  );
 }
 
 function fullFixture() {
-  return structuredClone(cargoSourceValues as unknown[][]);
+  return withCargoPriceColumn(structuredClone(cargoSourceValues as unknown[][]));
+}
+
+function withCargoPriceColumn(values: unknown[][]) {
+  return values.map((row, index) => [
+    ...row,
+    index === 0 ? "货品价格" : row[4],
+  ]);
 }
 
 describe("parseLegacyCargoSheet", () => {
@@ -48,28 +57,97 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.issues).toEqual([]);
   });
 
-  test("preserves field-aligned source sequences, cargo prices, and manual sale status", () => {
+  test("counts source sequences independently from SKU rows", () => {
     const parsed = parseLegacyCargoSheet(
       buildFieldAlignedCargoSourceFixture().value,
     );
 
     expect(parsed.summary).toMatchObject({
+      productCount: 74,
       skuCount: 140,
       sourceSequenceCount: 74,
     });
+  });
+
+  test("keeps every field-aligned SKU code unique", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
     expect(new Set(parsed.rows.map((row) => row.skuCode)).size).toBe(140);
+  });
+
+  test("keeps every field-aligned image token unique", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
+    expect(new Set(parsed.rows.map((row) => row.imageFileToken)).size).toBe(140);
+  });
+
+  test("inherits source sequence 34 across all of its SKUs", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
     expect(
       parsed.rows
         .filter((row) => row.sourceSequence === "34")
         .map((row) => row.skuCode),
     ).toEqual(["TZX-034-1", "TZX-034-2", "TZX-034-3"]);
+  });
+
+  test("keeps cargo price independent from the SKU default price", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
     expect(
       parsed.rows.find((row) => row.skuCode === "TZX-034-1"),
     ).toMatchObject({
       cargoUnitPriceMilliYuan: 1366,
       defaultUnitPriceMilliYuan: 325,
+    });
+  });
+
+  test("keeps a manually sellable zero-stock SKU sellable", () => {
+    const parsed = parseLegacyCargoSheet(
+      buildFieldAlignedCargoSourceFixture().value,
+    );
+
+    expect(parsed.rows.find((row) => row.skuCode === "TZX-034-1")).toMatchObject({
       saleStatus: "SELLABLE",
       totalQuantity: 0,
+    });
+  });
+
+  test("blocks a field-aligned source without the exact cargo price header", () => {
+    const values = buildFieldAlignedCargoSourceFixture().value;
+    values[0] = values[0].filter((header) => header !== "货品价格");
+
+    const parsed = parseLegacyCargoSheet(values);
+
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.issues).toContainEqual({
+      code: "CARGO_HEADER_NOT_FOUND",
+      message: "未找到旧飞书货盘表头",
+      severity: "BLOCKING",
+    });
+  });
+
+  test("blocks a malformed field-aligned cargo price", () => {
+    const values = buildFieldAlignedCargoSourceFixture().value;
+    const cargoPriceIndex = values[0].indexOf("货品价格");
+    values[1][cargoPriceIndex] = "not-a-price";
+
+    const parsed = parseLegacyCargoSheet(values);
+
+    expect(parsed.rows.map((row) => row.skuCode)).not.toContain("TZX-001-1");
+    expect(parsed.issues).toContainEqual({
+      code: "CARGO_INVALID_CARGO_PRICE",
+      message: "货品价格必须是合法人民币金额",
+      severity: "BLOCKING",
+      sourceRowNumber: 2,
     });
   });
 
@@ -100,6 +178,7 @@ describe("parseLegacyCargoSheet", () => {
       "1pc",
       "140g",
       "可售",
+      "4.50",
     ]);
 
     const result = parseLegacyCargoSheet(values);
@@ -146,6 +225,7 @@ describe("parseLegacyCargoSheet", () => {
       "1pc",
       "10g",
       "可售",
+      "1.00",
     ]);
 
     const result = parseLegacyCargoSheet(values);
@@ -602,6 +682,7 @@ describe("parseLegacyCargoSheet", () => {
         "组合销售",
         "重量",
         "状态",
+        "货品价格",
       ],
       [
         "1",
@@ -617,6 +698,7 @@ describe("parseLegacyCargoSheet", () => {
         "单个",
         "1g",
         "可售",
+        "1.00",
       ],
       [
         "2",
@@ -632,6 +714,7 @@ describe("parseLegacyCargoSheet", () => {
         "单个",
         "1g",
         "可售",
+        "1.00",
       ],
     ]);
 

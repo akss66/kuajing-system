@@ -93,6 +93,16 @@ test("0019 persists independent Feishu fields and rejects a negative cargo price
         values (-1, '非法货品价格', 'negative-price')
       `,
     ).rejects.toThrow();
+    await expect(
+      sql`
+        insert into products (name, source_sequence)
+        values ('重复源序号商品', '34')
+      `,
+    ).rejects.toThrow();
+    await sql`
+      insert into products (name)
+      values ('手动商品一'), ('手动商品二')
+    `;
   } finally {
     if (sql) await sql.end({ timeout: 5 });
     await admin`
