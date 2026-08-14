@@ -1,6 +1,6 @@
 "use client";
 
-import { ImageIcon, Search } from "lucide-react";
+import { ExternalLink, ImageIcon, Search } from "lucide-react";
 import Image from "next/image";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -19,156 +19,253 @@ import {
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
-function CatalogImage({
-  imageUrl,
-  label,
-}: {
-  imageUrl: string | null;
-  label: string;
-}) {
-  if (imageUrl) {
+function CatalogImage({ item }: { item: CustomerCatalogItem }) {
+  if (item.imageUrl) {
     return (
       <Image
-        alt={label}
-        className="size-11 rounded-[var(--radius-control)] border border-border object-cover"
-        src={imageUrl}
+        alt={`${item.productName} 商品图片`}
+        className="size-12 shrink-0 rounded-[var(--radius-control)] border border-border object-cover"
+        height={48}
+        sizes="48px"
+        src={item.imageUrl}
         unoptimized
-        width={44}
-        height={44}
-        sizes="44px"
+        width={48}
       />
     );
   }
 
   return (
-    <span className="flex size-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-surface text-muted-foreground">
+    <span
+      aria-label={`${item.productName} 图片缺失`}
+      className="flex size-12 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-surface text-muted-foreground"
+      role="img"
+    >
       <ImageIcon aria-hidden="true" className="size-4" />
     </span>
+  );
+}
+
+function ProductIdentity({ item }: { item: CustomerCatalogItem }) {
+  return (
+    <div className="flex min-w-0 items-start gap-3">
+      <CatalogImage item={item} />
+      <div className="min-w-0">
+        <p className="line-clamp-2 whitespace-normal break-words font-medium text-foreground">
+          {item.productName}
+        </p>
+        <p className="mt-1 truncate text-xs font-semibold tabular-nums text-muted-foreground">
+          {item.skuCode}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CatalogAttributes({ item }: { item: CustomerCatalogItem }) {
+  const attributes = [
+    item.color ? `颜色：${item.color}` : null,
+    item.combination ? `组合销售：${item.combination}` : null,
+    item.weightGrams !== null ? `重量：${item.weightGrams} 克` : null,
+  ].filter((value): value is string => value !== null);
+
+  return (
+    <div className="min-w-0">
+      <p
+        className="line-clamp-2 whitespace-normal break-words leading-5 text-foreground"
+        title={item.specification ?? undefined}
+      >
+        {item.specification ?? "规格未提供"}
+      </p>
+      {attributes.length > 0 ? (
+        <ul aria-label={`${item.skuCode} 属性`} className="mt-1 space-y-0.5">
+          {attributes.map((attribute) => (
+            <li
+              className="whitespace-normal break-words text-xs leading-4 text-muted-foreground"
+              key={attribute}
+            >
+              {attribute}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function availabilityLabel(reason: CustomerCatalogItem["availabilityReason"]) {
+  if (reason === "AVAILABLE") return "可售";
+  if (reason === "MANUALLY_UNAVAILABLE") return "不可售";
+  return "售罄";
+}
+
+function availabilityClassName(reason: CustomerCatalogItem["availabilityReason"]) {
+  if (reason === "AVAILABLE") return "bg-success/10 text-success";
+  if (reason === "SOLD_OUT") return "bg-warning/10 text-warning";
+  return "bg-secondary text-secondary-foreground";
+}
+
+function CatalogStatus({ item }: { item: CustomerCatalogItem }) {
+  return (
+    <Badge className={availabilityClassName(item.availabilityReason)} variant="secondary">
+      {availabilityLabel(item.availabilityReason)}
+    </Badge>
+  );
+}
+
+function safeAbsoluteHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function CatalogProductLink({ item }: { item: CustomerCatalogItem }) {
+  if (!item.productUrl) {
+    return <span className="text-sm text-muted-foreground">暂无链接</span>;
+  }
+
+  const safeUrl = safeAbsoluteHttpUrl(item.productUrl);
+  if (!safeUrl) {
+    return <span className="text-sm text-muted-foreground">链接不可用</span>;
+  }
+
+  return (
+    <a
+      className="inline-flex min-h-11 min-w-0 items-center gap-1.5 whitespace-normal break-words text-sm font-medium text-primary underline-offset-4 hover:underline xl:min-h-0"
+      href={safeUrl}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      <span className="line-clamp-2">{item.linkText?.trim() || "查看商品详情"}</span>
+      <ExternalLink aria-hidden="true" className="size-3.5 shrink-0" />
+    </a>
+  );
+}
+
+function CustomerCatalogTable({ items }: { items: CustomerCatalogItem[] }) {
+  return (
+    <div className="hidden min-w-0 xl:block" data-customer-catalog-table>
+      <Table aria-label="客户货盘列表" className="w-full table-fixed">
+        <colgroup>
+          <col className="w-[24%]" />
+          <col className="w-[29%]" />
+          <col className="w-[13%]" />
+          <col className="w-[11%]" />
+          <col className="w-[10%]" />
+          <col className="w-[13%]" />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead>商品</TableHead>
+            <TableHead>规格/属性</TableHead>
+            <TableHead className="text-right">实际拿货价</TableHead>
+            <TableHead className="text-right">可售库存</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead>链接</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((item) => (
+            <TableRow
+              aria-disabled={item.orderable ? undefined : true}
+              data-testid={`catalog-${item.id}`}
+              key={item.id}
+            >
+              <TableCell className="min-w-0 whitespace-normal align-top">
+                <ProductIdentity item={item} />
+              </TableCell>
+              <TableCell className="min-w-0 whitespace-normal align-top">
+                <CatalogAttributes item={item} />
+              </TableCell>
+              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+              </TableCell>
+              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                {item.availableQuantity}
+              </TableCell>
+              <TableCell className="whitespace-normal align-top">
+                <CatalogStatus item={item} />
+              </TableCell>
+              <TableCell className="min-w-0 whitespace-normal align-top">
+                <CatalogProductLink item={item} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function CustomerCatalogCards({ items }: { items: CustomerCatalogItem[] }) {
+  return (
+    <ul
+      aria-label="客户货盘卡片列表"
+      className="space-y-3 xl:hidden"
+      data-customer-catalog-cards
+    >
+      {items.map((item) => (
+        <li
+          aria-disabled={item.orderable ? undefined : true}
+          className="min-w-0 rounded-[var(--radius-surface)] border border-border bg-background p-4"
+          data-testid={`catalog-${item.id}`}
+          key={item.id}
+        >
+          <div data-customer-catalog-section="identity">
+            <ProductIdentity item={item} />
+          </div>
+          <div
+            className="mt-4 border-t border-border pt-3"
+            data-customer-catalog-section="attributes"
+          >
+            <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
+            <CatalogAttributes item={item} />
+          </div>
+          <dl
+            className="mt-4 border-t border-border pt-3"
+            data-customer-catalog-section="price"
+          >
+            <dt className="text-xs font-medium text-muted-foreground">实际拿货价</dt>
+            <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+              {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+            </dd>
+          </dl>
+          <dl
+            className="mt-4 border-t border-border pt-3"
+            data-customer-catalog-section="inventory"
+          >
+            <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
+            <dd className="mt-1 font-semibold tabular-nums text-foreground">
+              {item.availableQuantity}
+            </dd>
+          </dl>
+          <div
+            className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
+            data-customer-catalog-section="status"
+          >
+            <span className="text-xs font-medium text-muted-foreground">状态</span>
+            <CatalogStatus item={item} />
+          </div>
+          <div
+            className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
+            data-customer-catalog-section="link"
+          >
+            <span className="text-xs font-medium text-muted-foreground">链接</span>
+            <CatalogProductLink item={item} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 function CustomerCatalogResults({ items }: { items: CustomerCatalogItem[] }) {
   return (
     <div data-testid="customer-catalog-results">
-      <div className="hidden md:block" data-customer-catalog-table>
-        <Table aria-label="客户货盘列表" className="table-fixed min-w-[720px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>商品</TableHead>
-              <TableHead>规格</TableHead>
-              <TableHead className="text-right">实际拿货价</TableHead>
-              <TableHead className="text-right">可售库存</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow data-testid={`catalog-${item.id}`} key={item.id}>
-                <TableCell className="font-semibold tabular-nums">
-                  {item.skuCode}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <CatalogImage
-                      imageUrl={item.imageUrl}
-                      label={`${item.productName} ${item.skuName}`}
-                    />
-                    <span>{item.productName}</span>
-                  </div>
-                </TableCell>
-                <TableCell>{item.skuName}</TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {formatMilliYuan(item.actualUnitPriceMilliYuan)}
-                </TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {item.availableQuantity}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    className={
-                      item.sellable
-                        ? "bg-success/10 text-success"
-                        : "bg-destructive/10 text-destructive"
-                    }
-                    variant="secondary"
-                  >
-                    {item.sellable ? `可售 ${item.availableQuantity}` : "不可售"}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <ul
-        aria-label="客户货盘列表"
-        className="space-y-3 md:hidden"
-        data-customer-catalog-cards
-      >
-        {items.map((item) => (
-          <li
-            className="rounded-[var(--radius-surface)] border border-border bg-background p-4"
-            data-testid={`catalog-${item.id}`}
-            key={item.id}
-          >
-            <div className="flex min-w-0 items-start gap-3">
-              <CatalogImage
-                imageUrl={item.imageUrl}
-                label={`${item.productName} ${item.skuName}`}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <p className="truncate font-semibold tabular-nums text-foreground">
-                    {item.skuCode}
-                  </p>
-                  <Badge
-                    className={
-                      item.sellable
-                        ? "bg-success/10 text-success"
-                        : "bg-destructive/10 text-destructive"
-                    }
-                    variant="secondary"
-                  >
-                    {item.sellable ? "可售" : "不可售"}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-sm font-medium text-foreground">
-                  {item.productName}
-                </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {item.skuName}
-                </p>
-              </div>
-            </div>
-            <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-3">
-              <div>
-                <dt className="text-xs font-medium text-muted-foreground">
-                  实际拿货价
-                </dt>
-                <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                  {formatMilliYuan(item.actualUnitPriceMilliYuan)}
-                </dd>
-              </div>
-              <div className="text-right">
-                <dt className="text-xs font-medium text-muted-foreground">
-                  可售库存
-                </dt>
-                <dd
-                  className={
-                    item.sellable
-                      ? "mt-1 text-sm font-semibold tabular-nums text-success"
-                      : "mt-1 text-sm font-semibold text-destructive"
-                  }
-                >
-                  {item.sellable ? `可售 ${item.availableQuantity}` : "不可售"}
-                </dd>
-              </div>
-            </dl>
-          </li>
-        ))}
-      </ul>
+      <CustomerCatalogTable items={items} />
+      <CustomerCatalogCards items={items} />
     </div>
   );
 }
@@ -192,21 +289,21 @@ export function CustomerCatalogWorkspace({
           method="get"
         >
           <label className="relative min-w-0">
-            <span className="sr-only">搜索 SKU 或商品名称</span>
+            <span className="sr-only">搜索 SKU、商品、规格或链接文字</span>
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              aria-label="搜索 SKU 或商品名称"
+              aria-label="搜索 SKU、商品、规格或链接文字"
               className="min-h-11 pl-10"
               defaultValue={query}
               name="q"
-              placeholder="搜索 SKU 或商品名称"
+              placeholder="搜索 SKU、商品、规格或链接文字"
               type="search"
             />
           </label>
-          <Button className="min-h-11 bg-primary-hover" type="submit">
+          <Button className="min-h-11" type="submit">
             搜索货盘
           </Button>
         </form>
@@ -214,9 +311,7 @@ export function CustomerCatalogWorkspace({
       <section aria-label="客户货盘结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">可选货盘</h2>
-          <p className="text-sm tabular-nums text-muted-foreground">
-            {items.length} 个结果
-          </p>
+          <p className="text-sm tabular-nums text-muted-foreground">{items.length} 个结果</p>
         </div>
         {items.length > 0 ? (
           <CustomerCatalogResults items={items} />

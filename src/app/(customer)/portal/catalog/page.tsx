@@ -1,4 +1,4 @@
-import { CustomerCatalogWorkspace } from "@/components/catalog/catalog-workspace";
+import { CustomerCatalogWorkspace } from "@/components/catalog/customer-catalog-workspace";
 import { listCustomerCatalog } from "@/modules/catalog/customer-catalog";
 import { getCurrentPrincipal } from "@/modules/identity/principal";
 
@@ -12,7 +12,8 @@ export default async function CustomerCatalogPage({ searchParams }: { searchPara
       !query ||
       item.skuCode.toLocaleLowerCase("zh-CN").includes(query) ||
       item.productName.toLocaleLowerCase("zh-CN").includes(query) ||
-      item.skuName.toLocaleLowerCase("zh-CN").includes(query),
+      item.specification?.toLocaleLowerCase("zh-CN").includes(query) ||
+      item.linkText?.toLocaleLowerCase("zh-CN").includes(query),
   );
 
   return <CustomerCatalogWorkspace items={items} query={query} />;
