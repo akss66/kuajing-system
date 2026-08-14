@@ -219,6 +219,8 @@ describe("catalog workspaces", () => {
     ["JavaScript scheme", "javascript:alert(document.domain)"],
     ["FTP scheme", "ftp://example.test/products/34"],
     ["relative URL", "/products/34"],
+    ["malformed value", "not a url"],
+    ["structurally invalid HTTPS URL", "https://"],
   ])("does not render an unsafe %s product link", (_case, productUrl) => {
     render(
       <CatalogWorkspace

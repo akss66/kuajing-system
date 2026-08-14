@@ -117,3 +117,16 @@ npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
 
 - Test files: 1 passed (1).
 - Tests: 11 passed (11).
+
+## Fix round 2: malformed URL characterization coverage
+
+The unsafe-link parameterized test now also supplies `not a url` and the structurally invalid `https://`. Both values exercise the URL parser's exception path and prove that the rendering boundary fails closed: neither table nor card emits an anchor, and both display `链接不可用`. This is characterization coverage of the Fix Round 1 guard; no production code changed.
+
+Focused verification (exit 0):
+
+```powershell
+npm.cmd test -- tests/unit/catalog/catalog-workspace.test.tsx
+```
+
+- Test files: 1 passed (1).
+- Tests: 13 passed (13).
