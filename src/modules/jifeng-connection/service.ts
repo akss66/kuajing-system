@@ -400,7 +400,6 @@ export async function authorizeJifengConnection(input: {
   const port = input.port ?? authorizationPort();
 
   let tokenSet: JifengTokenSet;
-  let discovery: JifengResourceDiscovery;
   try {
     const authorization = await port.authorize({
       baseUrl: developer.baseUrl,
@@ -414,16 +413,6 @@ export async function authorizeJifengConnection(input: {
       baseUrl: developer.baseUrl,
       clientId: developer.clientId,
       clientSecret: developer.clientSecret,
-    });
-    discovery = await port.discoverResources({
-      accessToken: tokenSet.accessToken,
-      baseUrl: developer.baseUrl,
-      clientId: developer.clientId,
-      clientSecret: developer.clientSecret,
-      logisticsId: null,
-      refreshToken: tokenSet.refreshToken,
-      userId: tokenSet.userId,
-      warehouseCode: null,
     });
   } catch (error) {
     await recordAuthorizationFailure({
@@ -448,7 +437,31 @@ export async function authorizeJifengConnection(input: {
     });
     connectionError("AUTHORIZATION_FAILED", "极风授权失败，请重新获取一次性令牌");
   }
-  const selected = selectAutomaticResources(discovery);
+  let discoveryErrorCategory: string | null = null;
+  let selected: {
+    logistics: JifengOfflineLogistics | null;
+    status: "AUTHORIZED" | "RESOURCE_SELECTION_REQUIRED" | "READY_DISABLED";
+    warehouse: JifengWarehouse | null;
+  } = {
+    logistics: null,
+    status: "AUTHORIZED",
+    warehouse: null,
+  };
+  try {
+    const discovery = await port.discoverResources({
+      accessToken: tokenSet.accessToken,
+      baseUrl: developer.baseUrl,
+      clientId: developer.clientId,
+      clientSecret: developer.clientSecret,
+      logisticsId: null,
+      refreshToken: tokenSet.refreshToken,
+      userId: tokenSet.userId,
+      warehouseCode: null,
+    });
+    selected = selectAutomaticResources(discovery);
+  } catch (error) {
+    discoveryErrorCategory = safeErrorCategory(error);
+  }
 
   await db.transaction(async (tx) => {
     await tx
@@ -470,8 +483,10 @@ export async function authorizeJifengConnection(input: {
         fulfillmentEnabledAt: null,
         fulfillmentEnabledByAdminUserId: null,
         lastDiagnosticAt: null,
-        lastErrorCode: null,
-        lastErrorSummary: null,
+        lastErrorCode: discoveryErrorCategory,
+        lastErrorSummary: discoveryErrorCategory
+          ? "极风授权已完成，资源发现失败，请重新发现"
+          : null,
         logisticsId: selected.logistics?.id ?? null,
         logisticsName: selected.logistics?.name ?? null,
         refreshTokenEncrypted,
@@ -493,13 +508,16 @@ export async function authorizeJifengConnection(input: {
       actorType: "ADMIN",
       afterJson: {
         logisticsId: selected.logistics?.id ?? null,
+        resourceDiscoveryErrorCode: discoveryErrorCategory,
         status: selected.status,
         warehouseCode: selected.warehouse?.code ?? null,
       },
       beforeJson: { status: before.status },
       entityId: PRIMARY_KEY,
       entityType: "JIFENG_CONNECTION",
-      reason: "极风授权成功并完成只读资源发现",
+      reason: discoveryErrorCategory
+        ? "极风授权成功，资源发现待重试"
+        : "极风授权成功并完成只读资源发现",
     });
   });
   return getJifengConnectionAdminView();
@@ -912,6 +930,8 @@ async function applyDiscovery(input: {
         fulfillmentEnabledAt: null,
         fulfillmentEnabledByAdminUserId: null,
         lastDiagnosticAt: null,
+        lastErrorCode: null,
+        lastErrorSummary: null,
         logisticsId: selected.logistics?.id ?? null,
         logisticsName: selected.logistics?.name ?? null,
         status: selected.status,

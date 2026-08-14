@@ -97,6 +97,7 @@ function authorizationPort(input?: {
     logistics: JifengOfflineLogistics[];
     warehouses: JifengWarehouse[];
   };
+  discoveryError?: Error;
   exchangeError?: Error;
   tokens?: JifengTokenSet;
 }) {
@@ -108,6 +109,7 @@ function authorizationPort(input?: {
     },
     async discoverResources() {
       calls.push("discover");
+      if (input?.discoveryError) throw input.discoveryError;
       return (
         input?.discovery ?? {
           logistics: [logistics(7)],
@@ -219,6 +221,74 @@ describe("Jifeng connection lifecycle", () => {
     );
     const databaseDump = JSON.stringify({ attempts, audits });
     expect(databaseDump).not.toMatch(
+      /owner@example|one-time-token|authorization-code|access-one|refresh-one/i,
+    );
+  });
+
+  test("keeps successful authorization when initial resource discovery returns an invalid response", async () => {
+    const admin = await createAdmin("discovery-failure");
+    const providerError = Object.assign(
+      new Error("provider response shape changed"),
+      { code: "INVALID_RESPONSE" },
+    );
+
+    const { calls, view } = await authorizeFixture(admin.authUserId, {
+      discoveryError: providerError,
+    });
+
+    expect(calls).toEqual(["authorize", "exchange", "discover"]);
+    expect(view).toMatchObject({
+      fulfillmentEnabled: false,
+      lastError: { code: "INVALID_RESPONSE" },
+      logistics: null,
+      status: "AUTHORIZED",
+      warehouse: null,
+    });
+
+    const [stored] = await db.select().from(jifengConnections);
+    expect(stored).toMatchObject({
+      lastErrorCode: "INVALID_RESPONSE",
+      status: "AUTHORIZED",
+      userId: "user-one",
+    });
+    expect(
+      decryptJifengSecret(stored.accessTokenEncrypted!, encryptionKey),
+    ).toBe("access-one");
+    expect(
+      decryptJifengSecret(stored.refreshTokenEncrypted!, encryptionKey),
+    ).toBe("refresh-one");
+
+    const [attempt] = await db.select().from(jifengAuthorizationAttempts);
+    expect(attempt).toMatchObject({ errorCategory: null, result: "SUCCEEDED" });
+
+    await discoverJifengResources({
+      actor: actor(admin.authUserId),
+      now: new Date(startedAt.getTime() + 1_000),
+      port: {
+        async discoverResources(credentials) {
+          expect(credentials).toMatchObject({
+            accessToken: "access-one",
+            refreshToken: "refresh-one",
+            userId: "user-one",
+          });
+          return {
+            logistics: [logistics(7)],
+            warehouses: [warehouse("CA-1")],
+          };
+        },
+      },
+    });
+    expect(await getJifengConnectionAdminView()).toMatchObject({
+      lastError: null,
+      status: "READY_DISABLED",
+    });
+
+    const persisted = JSON.stringify({
+      attempts: await db.select().from(jifengAuthorizationAttempts),
+      audits: await db.select().from(auditLogs),
+      connection: await db.select().from(jifengConnections),
+    });
+    expect(persisted).not.toMatch(
       /owner@example|one-time-token|authorization-code|access-one|refresh-one/i,
     );
   });
