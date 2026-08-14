@@ -241,20 +241,27 @@ describe("catalog workspaces", () => {
     );
 
     const statusFilter = screen.getByRole("group", { name: "销售状态筛选" });
-    for (const label of ["全部", "可售", "不可售"]) {
-      expect(within(statusFilter).getByRole("button", { name: label })).toBeVisible();
+    for (const [name, label, pressed] of [
+      ["查看全部 SKU", "全部", "true"],
+      ["只看可售 SKU", "可售", "false"],
+      ["只看不可售 SKU", "不可售", "false"],
+    ] as const) {
+      const button = within(statusFilter).getByRole("button", { name });
+      expect(button).toBeVisible();
+      expect(button).toHaveTextContent(label);
+      expect(button).toHaveAttribute("aria-pressed", pressed);
     }
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "TZX-001-1" } });
     expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
     expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
 
-    fireEvent.click(within(statusFilter).getByRole("button", { name: "可售" }));
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "只看可售 SKU" }));
     expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
     expect(screen.queryByText("TZX-001-2")).not.toBeInTheDocument();
     expect(screen.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
 
-    fireEvent.click(within(statusFilter).getByRole("button", { name: "不可售" }));
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "只看不可售 SKU" }));
     expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
     expect(screen.queryByText("TZX-001-1")).not.toBeInTheDocument();
   });

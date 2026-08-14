@@ -2,12 +2,13 @@ import { Button } from "@/components/ui/button";
 import type { CatalogSaleStatusFilter } from "@/modules/catalog/product-groups";
 
 const saleStatusOptions: Array<{
+  accessibleName: string;
   label: string;
   value: CatalogSaleStatusFilter;
 }> = [
-  { label: "全部", value: "ALL" },
-  { label: "可售", value: "SELLABLE" },
-  { label: "不可售", value: "NOT_SELLABLE" },
+  { accessibleName: "查看全部 SKU", label: "全部", value: "ALL" },
+  { accessibleName: "只看可售 SKU", label: "可售", value: "SELLABLE" },
+  { accessibleName: "只看不可售 SKU", label: "不可售", value: "NOT_SELLABLE" },
 ];
 
 export function CatalogSaleStatusFilterControl({
@@ -25,7 +26,7 @@ export function CatalogSaleStatusFilterControl({
           const selected = option.value === value;
           return (
             <Button
-              aria-label={option.label}
+              aria-label={option.accessibleName}
               aria-pressed={selected}
               className={selected ? "min-h-11 border-primary-hover bg-primary-soft font-semibold text-primary-hover hover:bg-primary-soft" : "min-h-11 border-dashed font-medium"}
               key={option.value}

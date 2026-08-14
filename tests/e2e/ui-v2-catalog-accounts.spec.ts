@@ -96,47 +96,47 @@ test("admin catalog groups source products across desktop search and mobile vari
 
   const search = page.getByRole("searchbox", { name: "搜索商品与 SKU" });
   const saleStatusFilter = page.getByRole("group", { name: "销售状态筛选" });
-  for (const label of ["全部", "可售", "不可售"]) {
-    const control = saleStatusFilter.getByRole("button", { name: label, exact: true });
+  for (const name of ["查看全部 SKU", "只看可售 SKU", "只看不可售 SKU"]) {
+    const control = saleStatusFilter.getByRole("button", { name, exact: true });
     await expect(control).toBeVisible();
     expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
 
   await search.fill("");
-  await saleStatusFilter.getByRole("button", { name: "可售", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "只看可售 SKU", exact: true }).click();
   await expect(table.getByText("TZX-001-1", { exact: true })).toBeVisible();
   await expect(table.getByText("TZX-001-3", { exact: true })).toBeVisible();
   await expect(table.getByText("TZX-001-2", { exact: true })).toHaveCount(0);
   await expect(page.getByText("2 个商品 / 3 个 SKU")).toBeVisible();
 
-  await saleStatusFilter.getByRole("button", { name: "不可售", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "只看不可售 SKU", exact: true }).click();
   await expect(table.getByText("TZX-001-2", { exact: true })).toBeVisible();
   await expect(table.getByText("TZX-001-1", { exact: true })).toHaveCount(0);
   await expect(page.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
 
-  await saleStatusFilter.getByRole("button", { name: "全部", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "查看全部 SKU", exact: true }).click();
   await search.fill("TZX-001-1");
   for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
     await expect(table.getByText(skuCode, { exact: true })).toBeVisible();
   }
-  await saleStatusFilter.getByRole("button", { name: "不可售", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "只看不可售 SKU", exact: true }).click();
   await expect(table.getByText("TZX-001-2", { exact: true })).toBeVisible();
   await expect(table.getByText("TZX-001-1", { exact: true })).toHaveCount(0);
 
   await page.setViewportSize({ height: 844, width: 390 });
   const cards = page.getByRole("list", { name: "商品与 SKU 卡片列表" });
   await expect(cards).toBeVisible();
-  for (const label of ["全部", "可售", "不可售"]) {
+  for (const name of ["查看全部 SKU", "只看可售 SKU", "只看不可售 SKU"]) {
     expect(
-      (await saleStatusFilter.getByRole("button", { name: label, exact: true }).boundingBox())?.height,
+      (await saleStatusFilter.getByRole("button", { name, exact: true }).boundingBox())?.height,
     ).toBeGreaterThanOrEqual(44);
   }
   await search.fill("");
-  await saleStatusFilter.getByRole("button", { name: "可售", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "只看可售 SKU", exact: true }).click();
   await expect(cards.getByText("TZX-001-1", { exact: true })).toBeVisible();
   await expect(cards.getByText("TZX-001-3", { exact: true })).toBeVisible();
   await expect(cards.getByText("TZX-001-2", { exact: true })).toHaveCount(0);
-  await saleStatusFilter.getByRole("button", { name: "不可售", exact: true }).click();
+  await saleStatusFilter.getByRole("button", { name: "只看不可售 SKU", exact: true }).click();
   await expect(cards.getByText("TZX-001-2", { exact: true })).toBeVisible();
   await expect(cards.getByText("TZX-001-1", { exact: true })).toHaveCount(0);
   const groupedCard = cards.getByRole("listitem").filter({ hasText: "分组测试货品" });
