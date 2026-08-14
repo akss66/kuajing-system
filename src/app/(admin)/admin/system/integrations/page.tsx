@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 
 import { CargoMigrationPanel } from "@/components/feishu/cargo-migration-panel";
+import { JifengConnectionCard } from "@/components/integrations/jifeng-connection-card";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { EntityDrawer } from "@/components/management/entity-drawer";
@@ -24,6 +25,7 @@ import {
   readFeishuApiBaseUrl,
   readFeishuConfig,
 } from "@/integrations/feishu/config";
+import { inspectJifengConfiguration } from "@/integrations/jifeng/config";
 import {
   confirmCargoMigrationAction,
   createCargoPreflightAction,
@@ -36,14 +38,24 @@ import {
 } from "@/modules/feishu/queries";
 import { discoverFeishuSourceSheets } from "@/modules/feishu/source-reader";
 import { requireAdmin } from "@/modules/identity/guards";
+import {
+  getJifengConnectionAdminView,
+  getJifengConnectionPublicStatus,
+  type JifengConnectionAdminView,
+} from "@/modules/jifeng-connection/queries";
 
 function configured(names: string[]) {
-  return names.every((name) => Boolean(process.env[name]));
+  return names.every((name) => Boolean(process.env[name]?.trim()));
 }
 
-function integrationTargetLabel(
-  target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT",
-) {
+function maskIdentifier(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.length <= 4) return "****";
+  return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+}
+
+function integrationTargetLabel(target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT") {
   if (target === "JIFENG") return "极风仓储";
   if (target === "FEISHU_SHEET") return "飞书货盘";
   return "飞书机器人";
@@ -59,7 +71,7 @@ function integrationEventLabel(eventType: string) {
 function safeErrorLabel(errorCode: string | null) {
   if (errorCode === "REMOTE_TIMEOUT") return "第三方响应超时";
   if (errorCode === "AUTH_FAILED") return "授权校验失败";
-  return "任务执行未完成，请按原业务路径重试。";
+  return "任务未完成，请按原业务路径重试";
 }
 
 async function loadSourceSheetDiscovery(
@@ -82,52 +94,32 @@ async function loadSourceSheetDiscovery(
   });
   const discovery = await discoverFeishuSourceSheets({
     client,
-    config: {
-      sourceWikiToken: config.sourceWikiToken,
-    },
+    config: { sourceWikiToken: config.sourceWikiToken },
   });
 
-  if (discovery.status === "ERROR") {
-    return {
-      message: discovery.message,
-      status: "error" as const,
-      sourceSheetOptions: discovery.sheetOptions,
-    };
-  }
-
   return {
-    message: null,
-    status: "ready" as const,
+    message: discovery.status === "ERROR" ? discovery.message : null,
+    status: discovery.status === "ERROR" ? ("error" as const) : ("ready" as const),
     sourceSheetOptions: discovery.sheetOptions,
   };
 }
 
 export default async function IntegrationsPage() {
   const principal = await requireAdmin();
-
-  const jifengConfigured = configured([
-    "JIFENG_ACCESS_TOKEN",
-    "JIFENG_BASE_URL",
-    "JIFENG_CLIENT_ID",
-    "JIFENG_CLIENT_SECRET",
-    "JIFENG_LOGISTICS_ID",
-    "JIFENG_USER_ID",
-    "JIFENG_WAREHOUSE_CODE",
-  ]);
+  const canManageJifeng = principal.kind === "SUPER_ADMIN";
   const feishuConfigured = configured([
     "FEISHU_APP_ID",
     "FEISHU_APP_SECRET",
     "FEISHU_CARGO_SOURCE_WIKI_TOKEN",
   ]);
-
   const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
-  const targetConfigured = feishuConfig
-    ? hasFeishuCargoTargetConfig(feishuConfig)
-    : false;
-  const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
-  const cargoImportEnabled = feishuConfig ? canImportFeishuCargo(feishuConfig) : false;
-  const [recent, latestMigrationRun, sourceSheetDiscovery, targetSyncState] =
+  const jifengConfiguration = inspectJifengConfiguration();
+
+  const [connection, recent, latestMigrationRun, sourceSheetDiscovery, targetSyncState] =
     await Promise.all([
+      canManageJifeng
+        ? getJifengConnectionAdminView()
+        : getJifengConnectionPublicStatus(),
       db
         .select({
           eventType: integrationOutbox.eventType,
@@ -145,6 +137,15 @@ export default async function IntegrationsPage() {
       getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
     ]);
 
+  const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
+  const cargoImportEnabled = feishuConfig ? canImportFeishuCargo(feishuConfig) : false;
+  const targetConfigured = feishuConfig
+    ? hasFeishuCargoTargetConfig(feishuConfig)
+    : false;
+  const adminConnection = canManageJifeng
+    ? (connection as JifengConnectionAdminView)
+    : null;
+  const jifengConfigured = jifengConfiguration.developer.configured;
   const jifengDegraded = recent.some((item) => item.target === "JIFENG");
   const feishuDegraded = recent.some((item) => item.target !== "JIFENG");
   const integrationStatus = (isConfigured: boolean, degraded: boolean) =>
@@ -184,11 +185,11 @@ export default async function IntegrationsPage() {
           <article className="border-b border-border pb-5 lg:border lg:p-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary">
-                  <PlugZap />
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+                  <PlugZap aria-hidden="true" />
                 </div>
                 <div>
-                  <h2 className="font-semibold text-ink">极风 WMS</h2>
+                  <h3 className="font-semibold text-ink">极风 WMS</h3>
                   <p className="mt-1 text-sm text-muted">
                     用于自动推单、加拿大邮政运单和发货状态同步。
                   </p>
@@ -203,36 +204,37 @@ export default async function IntegrationsPage() {
             </div>
             <div className="mt-5 flex items-center gap-2 text-sm text-muted">
               {jifengConfigured ? (
-                <CheckCircle2 className="size-4 text-success" />
+                <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
               ) : (
-                <CircleDashed className="size-4" />
+                <CircleDashed aria-hidden="true" className="size-4" />
               )}
               <span>
                 {jifengConfigured
-                  ? "凭证字段完整，真实订单会由后台任务联调。"
-                  : "仍需配置仓库域名、授权凭证、仓库编码与物流渠道。"}
+                  ? "开发者配置已就绪；实际授权与履约状态见下方连接卡。"
+                  : "仍需配置开发者凭证，之后由超级管理员完成官方授权。"}
               </span>
             </div>
             <Link
               className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary-hover underline-offset-4 hover:underline"
               href="https://s.apifox.cn/25bf1c44-f535-4c37-9bf4-7244130a67ce"
+              rel="noreferrer"
               target="_blank"
             >
               查看极风接口文档
-              <ExternalLink className="size-3.5" />
+              <ExternalLink aria-hidden="true" className="size-3.5" />
             </Link>
           </article>
 
           <article className="border-b border-border pb-5 lg:border lg:p-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary">
-                  <RefreshCcw />
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+                  <RefreshCcw aria-hidden="true" />
                 </div>
                 <div>
-                  <h2 className="font-semibold text-ink">飞书货盘与机器人</h2>
+                  <h3 className="font-semibold text-ink">飞书货盘与机器人</h3>
                   <p className="mt-1 text-sm text-muted">
-                    源 wiki 只用于只读预检；目标测试表与机器人通知按需独立启用。
+                    源 wiki 只用于只读预检；数据库导入和派生同步分开控制。
                   </p>
                 </div>
               </div>
@@ -261,7 +263,7 @@ export default async function IntegrationsPage() {
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}
                   latestMigrationRun={latestMigrationRun}
-                  readOnlyConnectionMessage="源货盘和目标测试表的连接验证全程只读，系统不会向原业务表写入。"
+                  readOnlyConnectionMessage="源货盘连接验证全程只读，系统不会向原业务表写入。"
                   retryFeishuCargoSyncAction={retryFeishuCargoSyncAction}
                   selectedSourceSheetId={feishuConfig?.sourceSheetId ?? null}
                   sourceConfigured={feishuConfigured}
@@ -277,6 +279,24 @@ export default async function IntegrationsPage() {
           </article>
         </div>
       </section>
+
+      <JifengConnectionCard
+        canManage={canManageJifeng}
+        connection={connection}
+        details={
+          adminConnection
+            ? {
+                authorizedAt: adminConnection.authorizedAt,
+                developerIdMasked: maskIdentifier(process.env.JIFENG_CLIENT_ID),
+                lastError: adminConnection.lastError,
+                lastRefreshedAt: adminConnection.lastRefreshedAt,
+                logistics: adminConnection.logistics,
+                userIdMasked: adminConnection.userIdMasked,
+                warehouse: adminConnection.warehouse,
+              }
+            : undefined
+        }
+      />
 
       <section aria-labelledby="failed-integration-title" className="space-y-3">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-3">

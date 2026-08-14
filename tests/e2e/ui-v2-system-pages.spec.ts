@@ -110,9 +110,14 @@ test("integrations show safe configuration and degraded states without secrets",
   await resetAndLogin(page, "UI V2 integrations");
   await page.goto("/admin/system/integrations");
 
-  await expect(page.getByRole("heading", { name: "集成运行状态" })).toBeVisible();
-  await expect(page.getByText("未配置", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("已配置", { exact: true })).toHaveCount(1);
+  const integrationStatus = page.locator(
+    'section[aria-labelledby="integration-status-title"]',
+  );
+  await expect(
+    integrationStatus.getByRole("heading", { name: "集成运行状态" }),
+  ).toBeVisible();
+  await expect(integrationStatus.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(integrationStatus.getByText("已配置", { exact: true })).toHaveCount(1);
   await expect(page.getByRole("status", { name: "当前没有失败任务" })).toContainText(
     "查看系统健康",
   );

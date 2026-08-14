@@ -110,22 +110,29 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1786599876451,
-      "tag": "0015_feishu_cargo_migration",
+      "when": 1786606366016,
+      "tag": "0015_jifeng_oauth_connection",
       "breakpoints": true
     },
     {
       "idx": 16,
       "version": "7",
-      "when": 1786673427803,
-      "tag": "0016_easy_hiroim",
+      "when": 1786599876451,
+      "tag": "0016_feishu_cargo_migration",
       "breakpoints": true
     },
     {
       "idx": 17,
       "version": "7",
+      "when": 1786673427803,
+      "tag": "0017_exact_sku_price",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
       "when": 1786675212691,
-      "tag": "0017_slow_iron_fist",
+      "tag": "0018_feishu_exact_price_snapshot",
       "breakpoints": true
     }
   ]

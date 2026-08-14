@@ -43,7 +43,6 @@ export function formatMilliYuan(unitPriceMilliYuan: number) {
   assertNonNegativeSafeInteger(unitPriceMilliYuan);
   const value = (unitPriceMilliYuan / 1_000)
     .toFixed(3)
-    .replace(/0+$/, "")
-    .replace(/\.$/, "");
+    .replace(/0$/, "");
   return `¥${value}`;
 }

@@ -3,10 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { JifengClient } from "@/integrations/jifeng/client";
-import { readJifengConfig } from "@/integrations/jifeng/config";
 import { requireAdmin } from "@/modules/identity/guards";
 import { resolveAdminUserId } from "@/modules/identity/admin-profile";
+import { getEnabledJifengWriteClient } from "@/modules/jifeng-connection/provider";
 import type { ActionState } from "@/shared/action-state";
 
 import { retryJifengShipment } from "./dispatch";
@@ -109,10 +108,10 @@ export async function cancelJifengShipmentAction(
   const orderId = String(formData.get("orderId") ?? "");
   if (!parsed.success) return { status: "error", message: "包裹或取消原因无效。" };
   try {
-    const config = readJifengConfig();
+    const { client } = await getEnabledJifengWriteClient();
     await cancelJifengShipment({
       actorUserId: principal.userId,
-      client: new JifengClient({ credentials: config }),
+      client,
       reason: parsed.data.reason,
       shipmentId: parsed.data.shipmentId,
     });

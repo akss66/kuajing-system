@@ -47,7 +47,7 @@ export type JifengCreateOrderPort = {
   getOrder?(input: { erpNo: string }): Promise<JifengOrderDetail>;
 };
 
-type DispatchConfig = {
+export type DispatchConfig = {
   logisticsId: number;
   warehouseCode: string;
 };

@@ -135,7 +135,7 @@ describe("catalog workspaces", () => {
     );
 
     expect(screen.getByRole("searchbox")).toBeVisible();
-    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("¥7.6");
+    expect(screen.getAllByText("¥7.60")).toHaveLength(2);
     expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("6");
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();

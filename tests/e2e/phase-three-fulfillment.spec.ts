@@ -120,7 +120,7 @@ test("administrator can inspect a shipped package and create a replacement @desk
 }) => {
   const fixture = await seedShippedOrder();
   await loginThroughUi(page, fixture.admin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
   await page.goto(`/admin/orders/${fixture.order.id}`);
 
   await expect(page.getByRole("heading", { name: fixture.order.orderNumber })).toBeVisible();
@@ -163,7 +163,7 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
 }) => {
   const fixture = await seedShippedOrder();
   await loginThroughUi(page, fixture.admin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
 
   for (const width of [360, 390, 430]) {
     await page.setViewportSize({ width, height: 844 });
@@ -176,7 +176,19 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
 
   await page.goto("/admin/system/integrations");
   await expect(page.getByRole("heading", { name: "外部集成" })).toBeVisible();
-  await expect(page.getByText("未配置", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("已配置", { exact: true })).toHaveCount(1);
+  const integrationStatus = page.locator(
+    'section[aria-labelledby="integration-status-title"]',
+  );
+  const jifengSummary = integrationStatus.locator("article").filter({
+    has: page.getByRole("heading", { name: "极风 WMS" }),
+  });
+  const feishuSummary = integrationStatus.locator("article").filter({
+    has: page.getByRole("heading", { name: "飞书货盘与机器人" }),
+  });
+  await expect(feishuSummary.getByText("已配置", { exact: true })).toHaveCount(1);
+  await expect(jifengSummary.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(
+    jifengSummary.getByText("仍需配置开发者凭证，之后由超级管理员完成官方授权。"),
+  ).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });

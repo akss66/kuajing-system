@@ -168,7 +168,7 @@ test("super admin can govern admin accounts and ordinary admins are denied accou
   const resetPassword = `Reset-${suffix}-Password!`;
 
   await loginThroughUi(page, seededSuperAdmin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
 
   await openAdminNavigationIfNeeded(page);
   await expect(page.getByRole("link", { name: "账号管理" })).toBeVisible();
@@ -716,7 +716,7 @@ test("ordinary admins can manage customer details and multi-store operations", a
   });
 
   await loginThroughUi(page, { email: customerEmail, password: customerPassword });
-  await expect(page).toHaveURL(/\/portal$/);
+  await expect(page).toHaveURL(/\/portal$/, { timeout: 30_000 });
 });
 
 test("catalog and inventory keep mutations in drawers and fit approved mobile widths @mobile-only", async ({

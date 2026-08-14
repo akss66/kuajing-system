@@ -26,7 +26,7 @@ async function applyMigrationFile(sql: postgres.Sql, fileName: string) {
   }
 }
 
-test("0017 backfills exact milli-yuan values in existing Feishu preflight rows", async () => {
+test("0018 backfills exact milli-yuan values in existing Feishu preflight rows", async () => {
   const databaseName = `tzx_exact_price_${randomUUID().replaceAll("-", "")}`;
   const adminUrl = new URL(baseDatabaseUrl);
   adminUrl.pathname = "/postgres";
@@ -56,8 +56,9 @@ test("0017 backfills exact milli-yuan values in existing Feishu preflight rows",
       "0012_settlement_timeout_review.sql",
       "0013_jifeng_reconciliation_claim.sql",
       "0014_account_governance.sql",
-      "0015_feishu_cargo_migration.sql",
-      "0016_easy_hiroim.sql",
+      "0015_jifeng_oauth_connection.sql",
+      "0016_feishu_cargo_migration.sql",
+      "0017_exact_sku_price.sql",
     ];
     for (const migration of migrations) {
       await applyMigrationFile(sql, migration);
@@ -109,7 +110,7 @@ test("0017 backfills exact milli-yuan values in existing Feishu preflight rows",
       )
     `;
 
-    await applyMigrationFile(sql, "0017_slow_iron_fist.sql");
+    await applyMigrationFile(sql, "0018_feishu_exact_price_snapshot.sql");
 
     const [run] = await sql<{ normalizedRows: Array<Record<string, unknown>> }[]>`
       select normalized_rows_json as "normalizedRows"

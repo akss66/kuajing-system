@@ -1,6 +1,6 @@
 {
-  "id": "71b397d1-ce5d-4ad5-b0c2-a4832dd3f945",
-  "prevId": "1de4b0d9-48b3-471f-bf9c-01ea400abe00",
+  "id": "1de4b0d9-48b3-471f-bf9c-01ea400abe00",
+  "prevId": "201e4d29-3ec6-4451-ae50-d9cfc336bd7f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -595,13 +595,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "unit_price_milli_yuan": {
-          "name": "unit_price_milli_yuan",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "unit_price_fen": {
           "name": "unit_price_fen",
           "type": "integer",
@@ -685,17 +678,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "customer_sku_prices_unit_price_milli_yuan_non_negative": {
-          "name": "customer_sku_prices_unit_price_milli_yuan_non_negative",
-          "value": "\"customer_sku_prices\".\"unit_price_milli_yuan\" >= 0"
-        },
         "customer_sku_prices_unit_price_non_negative": {
           "name": "customer_sku_prices_unit_price_non_negative",
           "value": "\"customer_sku_prices\".\"unit_price_fen\" >= 0"
-        },
-        "customer_sku_prices_unit_price_fen_matches_milli_yuan": {
-          "name": "customer_sku_prices_unit_price_fen_matches_milli_yuan",
-          "value": "\"customer_sku_prices\".\"unit_price_fen\" = ((\"customer_sku_prices\".\"unit_price_milli_yuan\"::bigint + 5) / 10)"
         }
       },
       "isRLSEnabled": false
@@ -949,13 +934,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "default_unit_price_milli_yuan": {
-          "name": "default_unit_price_milli_yuan",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "default_unit_price_fen": {
           "name": "default_unit_price_fen",
           "type": "integer",
@@ -1036,17 +1014,9 @@
           "name": "skus_weight_non_negative",
           "value": "\"skus\".\"weight_grams\" >= 0"
         },
-        "skus_default_price_milli_yuan_non_negative": {
-          "name": "skus_default_price_milli_yuan_non_negative",
-          "value": "\"skus\".\"default_unit_price_milli_yuan\" >= 0"
-        },
         "skus_default_price_non_negative": {
           "name": "skus_default_price_non_negative",
           "value": "\"skus\".\"default_unit_price_fen\" >= 0"
-        },
-        "skus_default_price_fen_matches_milli_yuan": {
-          "name": "skus_default_price_fen_matches_milli_yuan",
-          "value": "\"skus\".\"default_unit_price_fen\" = ((\"skus\".\"default_unit_price_milli_yuan\"::bigint + 5) / 10)"
         },
         "skus_declaration_price_non_negative": {
           "name": "skus_declaration_price_non_negative",
@@ -4169,13 +4139,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "unit_price_milli_yuan": {
-          "name": "unit_price_milli_yuan",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "unit_price_fen": {
           "name": "unit_price_fen",
           "type": "integer",
@@ -4342,21 +4305,13 @@
           "name": "order_lines_quantity_positive",
           "value": "\"order_lines\".\"quantity\" > 0"
         },
-        "order_lines_unit_price_milli_yuan_non_negative": {
-          "name": "order_lines_unit_price_milli_yuan_non_negative",
-          "value": "\"order_lines\".\"unit_price_milli_yuan\" >= 0"
-        },
         "order_lines_unit_price_non_negative": {
           "name": "order_lines_unit_price_non_negative",
           "value": "\"order_lines\".\"unit_price_fen\" >= 0"
         },
-        "order_lines_unit_price_fen_matches_milli_yuan": {
-          "name": "order_lines_unit_price_fen_matches_milli_yuan",
-          "value": "\"order_lines\".\"unit_price_fen\" = ((\"order_lines\".\"unit_price_milli_yuan\"::bigint + 5) / 10)"
-        },
-        "order_lines_amount_matches_exact_price": {
-          "name": "order_lines_amount_matches_exact_price",
-          "value": "\"order_lines\".\"line_amount_fen\" = ((((\"order_lines\".\"quantity\")::bigint * (\"order_lines\".\"unit_price_milli_yuan\")::bigint) + 5) / 10)"
+        "order_lines_amount_matches_quantity": {
+          "name": "order_lines_amount_matches_quantity",
+          "value": "\"order_lines\".\"line_amount_fen\" = \"order_lines\".\"quantity\" * \"order_lines\".\"unit_price_fen\""
         }
       },
       "isRLSEnabled": false
@@ -5856,6 +5811,272 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.jifeng_authorization_attempts": {
+      "name": "jifeng_authorization_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "admin_user_id": {
+          "name": "admin_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "jifeng_authorization_result",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "error_category": {
+          "name": "error_category",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempted_at": {
+          "name": "attempted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "jifeng_authorization_attempts_admin_user_id_admin_users_id_fk": {
+          "name": "jifeng_authorization_attempts_admin_user_id_admin_users_id_fk",
+          "tableFrom": "jifeng_authorization_attempts",
+          "tableTo": "admin_users",
+          "columnsFrom": [
+            "admin_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.jifeng_connections": {
+      "name": "jifeng_connections",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "connection_key": {
+          "name": "connection_key",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "jifeng_connection_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DISCONNECTED'"
+        },
+        "access_token_encrypted": {
+          "name": "access_token_encrypted",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_encrypted": {
+          "name": "refresh_token_encrypted",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_token_expires_at": {
+          "name": "access_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warehouse_code": {
+          "name": "warehouse_code",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warehouse_name": {
+          "name": "warehouse_name",
+          "type": "varchar(240)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logistics_id": {
+          "name": "logistics_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "logistics_name": {
+          "name": "logistics_name",
+          "type": "varchar(240)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "authorized_by_admin_user_id": {
+          "name": "authorized_by_admin_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "authorized_at": {
+          "name": "authorized_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_refreshed_at": {
+          "name": "last_refreshed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_diagnostic_at": {
+          "name": "last_diagnostic_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_summary": {
+          "name": "last_error_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fulfillment_enabled_at": {
+          "name": "fulfillment_enabled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fulfillment_enabled_by_admin_user_id": {
+          "name": "fulfillment_enabled_by_admin_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "jifeng_connections_authorized_by_admin_user_id_admin_users_id_fk": {
+          "name": "jifeng_connections_authorized_by_admin_user_id_admin_users_id_fk",
+          "tableFrom": "jifeng_connections",
+          "tableTo": "admin_users",
+          "columnsFrom": [
+            "authorized_by_admin_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "jifeng_connections_fulfillment_enabled_by_admin_user_id_admin_users_id_fk": {
+          "name": "jifeng_connections_fulfillment_enabled_by_admin_user_id_admin_users_id_fk",
+          "tableFrom": "jifeng_connections",
+          "tableTo": "admin_users",
+          "columnsFrom": [
+            "fulfillment_enabled_by_admin_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "jifeng_connections_connection_key_unique": {
+          "name": "jifeng_connections_connection_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "connection_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "jifeng_connections_primary_key_check": {
+          "name": "jifeng_connections_primary_key_check",
+          "value": "\"jifeng_connections\".\"connection_key\" = 'PRIMARY'"
+        },
+        "jifeng_connections_authorization_provenance_pair_check": {
+          "name": "jifeng_connections_authorization_provenance_pair_check",
+          "value": "(\"jifeng_connections\".\"authorized_at\" is null) = (\"jifeng_connections\".\"authorized_by_admin_user_id\" is null)"
+        },
+        "jifeng_connections_enablement_provenance_pair_check": {
+          "name": "jifeng_connections_enablement_provenance_pair_check",
+          "value": "(\"jifeng_connections\".\"fulfillment_enabled_at\" is null) = (\"jifeng_connections\".\"fulfillment_enabled_by_admin_user_id\" is null)"
+        },
+        "jifeng_connections_authorized_status_provenance_check": {
+          "name": "jifeng_connections_authorized_status_provenance_check",
+          "value": "\"jifeng_connections\".\"status\" not in ('AUTHORIZED', 'RESOURCE_SELECTION_REQUIRED', 'READY_DISABLED', 'ENABLED', 'REFRESH_REQUIRED') or (\"jifeng_connections\".\"authorized_at\" is not null and \"jifeng_connections\".\"authorized_by_admin_user_id\" is not null)"
+        },
+        "jifeng_connections_enabled_status_provenance_check": {
+          "name": "jifeng_connections_enabled_status_provenance_check",
+          "value": "\"jifeng_connections\".\"status\" <> 'ENABLED' or (\"jifeng_connections\".\"authorized_at\" is not null and \"jifeng_connections\".\"authorized_by_admin_user_id\" is not null and \"jifeng_connections\".\"fulfillment_enabled_at\" is not null and \"jifeng_connections\".\"fulfillment_enabled_by_admin_user_id\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -6112,6 +6333,27 @@
         "ADMIN_DEBIT",
         "ORDER_DEBIT",
         "ORDER_REFUND"
+      ]
+    },
+    "public.jifeng_authorization_result": {
+      "name": "jifeng_authorization_result",
+      "schema": "public",
+      "values": [
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "public.jifeng_connection_status": {
+      "name": "jifeng_connection_status",
+      "schema": "public",
+      "values": [
+        "DISCONNECTED",
+        "AUTHORIZED",
+        "RESOURCE_SELECTION_REQUIRED",
+        "READY_DISABLED",
+        "ENABLED",
+        "REFRESH_REQUIRED",
+        "ERROR"
       ]
     }
   },

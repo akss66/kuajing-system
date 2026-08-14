@@ -37,8 +37,13 @@ export function LoginForm() {
     const user = response.data?.user as
       | { customerId?: string | null; role?: string | null }
       | undefined;
-    router.replace(user?.role?.split(",").includes("admin") ? "/admin" : "/portal");
-    router.refresh();
+    const roles = user?.role
+      ?.split(",")
+      .map((role) => role.trim())
+      .filter(Boolean);
+    const isAdministrator =
+      roles?.includes("admin") || roles?.includes("super_admin");
+    router.replace(isAdministrator ? "/admin" : "/portal");
   }
 
   return (

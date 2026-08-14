@@ -33,6 +33,7 @@ describe("exact unit price arithmetic", () => {
     [325, "¥0.325"],
     [1_366, "¥1.366"],
     [2_930, "¥2.93"],
+    [7_600, "¥7.60"],
   ])("formats %i milli-yuan without losing meaningful precision", (value, expected) => {
     expect(formatMilliYuan(value)).toBe(expected);
   });

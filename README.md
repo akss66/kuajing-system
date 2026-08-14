@@ -49,6 +49,19 @@ npm.cmd run lint
 npm.cmd run build
 ```
 
+## 极风授权与安全上线
+
+生产环境只配置极风 API 根地址、开发者 ID、开发者密钥和独立的 token 加密密钥；不要配置旧版静态 access/refresh token、用户 ID、仓库或物流变量，也不要设置旧版写入开关。一次性授权 token 只由超级管理员在“外部集成”页面按次输入，不进入环境文件、日志或审计。
+
+安全上线顺序：
+
+1. 在受控 secret 管理中配置 `JIFENG_BASE_URL`、`JIFENG_CLIENT_ID`、`JIFENG_CLIENT_SECRET` 和 `JIFENG_TOKEN_ENCRYPTION_KEY`，运行迁移并重启 Web/Worker。新部署没有数据库连接状态，自动履约保持关闭。
+2. 超级管理员从极风 OMS 获取一次性 token，在后台完成授权；系统只保存加密后的 access/refresh token。确认发现的加拿大仓库和 Canada Post 渠道，资源不唯一时必须显式选择。
+3. 运行“只读诊断”。该诊断只查询不存在的订单，不创建、取消或修改订单；检查页面、应用日志和审计均无邮箱、一次性 token、授权码或 access/refresh token。
+4. 诊断通过后连接仍为“已就绪，未启用”。保持该状态完成观察与业务复核；只有业务负责人明确接受真实订单将进入仓库履约的后果时，才填写原因并在二次确认框中启用自动履约。
+
+授权失败或 token 已消费时，获取新的单次 token 重试，不复用或记录旧值。普通管理员只能查看脱敏状态，所有连接变更仍由 Server Action 独立校验超级管理员权限。
+
 ## 文档
 
 - [生产运行手册](docs/operations/production-runbook.md)
