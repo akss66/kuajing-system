@@ -160,6 +160,14 @@ function ProductGroupHeader({ group }: { group: CatalogProductGroup<CustomerCata
 }
 
 function CustomerCatalogTable({ groups }: { groups: CatalogProductGroup<CustomerCatalogItem>[] }) {
+  const productNameCounts = new Map<string, number>();
+  for (const group of groups) {
+    productNameCounts.set(
+      group.productName,
+      (productNameCounts.get(group.productName) ?? 0) + 1,
+    );
+  }
+
   return (
     <div className="hidden min-w-0 space-y-3 xl:block" data-customer-catalog-table>
       {groups.map((group) => (
@@ -169,7 +177,14 @@ function CustomerCatalogTable({ groups }: { groups: CatalogProductGroup<Customer
           key={group.productId}
         >
           <ProductGroupHeader group={group} />
-          <Table aria-label="客户货盘列表" className="w-full table-fixed">
+          <Table
+            aria-label={
+              productNameCounts.get(group.productName) === 1
+                ? `${group.productName} 的 SKU 列表`
+                : `${group.productName}（${group.variants[0]!.skuCode} 至 ${group.variants.at(-1)!.skuCode}）的 SKU 列表`
+            }
+            className="w-full table-fixed"
+          >
             <colgroup>
               <col className="w-[19%]" />
               <col className="w-[28%]" />

@@ -418,7 +418,15 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
     await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(2);
     await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
     if (viewport.kind === "desktop") {
-      await expect(page.getByRole("table", { name: "客户货盘列表" })).toHaveCount(2);
+      const productTables = page.getByRole("table");
+      await expect(productTables).toHaveCount(2);
+      const productTableNames = await productTables.evaluateAll((tables) =>
+        tables.map((table) => table.getAttribute("aria-label")),
+      );
+      expect(new Set(productTableNames).size).toBe(productTableNames.length);
+      await expect(
+        page.getByRole("table", { name: `${fixture.productName} 的 SKU 列表` }),
+      ).toBeVisible();
       await expect(page.locator("[data-customer-catalog-cards]")).not.toBeVisible();
     } else {
       await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();

@@ -419,7 +419,9 @@ describe("catalog workspaces", () => {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
 
-    const desktopTable = screen.getAllByRole("table", { name: "客户货盘列表" })[0]!;
+    const desktopTable = screen.getByRole("table", {
+      name: "冬季运输防护袋 的 SKU 列表",
+    });
     expect(
       within(desktopTable)
         .getAllByRole("columnheader")
@@ -480,7 +482,9 @@ describe("catalog workspaces", () => {
       .find((element) => element.tagName === "SECTION");
     expect(desktopGroup).toBeDefined();
     expect(within(desktopGroup!).getByRole("heading", { name: "三规格客户货品" })).toBeVisible();
-    const desktopTable = within(desktopGroup!).getByRole("table", { name: "客户货盘列表" });
+    const desktopTable = within(desktopGroup!).getByRole("table", {
+      name: "三规格客户货品 的 SKU 列表",
+    });
     for (const skuCode of [
       "TZX-CUSTOMER-GROUP-001",
       "TZX-CUSTOMER-GROUP-002",
@@ -493,6 +497,30 @@ describe("catalog workspaces", () => {
     expect(desktopGroup!.textContent).not.toContain("采购价");
     expect(desktopGroup!.textContent).not.toContain("总库存");
     expect(desktopGroup!.textContent).not.toContain("货品价格");
+  });
+
+  it("gives duplicate customer product names distinct table names without exposing source sequence", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          ...groupedCustomerRows,
+          {
+            ...customerRows[1]!,
+            productId: "customer-group-product-duplicate-name",
+            productName: "三规格客户货品",
+            skuCode: "TZX-CUSTOMER-GROUP-004",
+          },
+        ]}
+        query=""
+      />,
+    );
+
+    const tableNames = screen
+      .getAllByRole("table")
+      .map((table) => table.getAttribute("aria-label"));
+    expect(tableNames).toHaveLength(2);
+    expect(new Set(tableNames).size).toBe(2);
+    expect(tableNames.join(" ")).not.toContain("sourceSequence");
   });
 
   it.each([
@@ -508,7 +536,7 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    const desktopTable = screen.getByRole("table", { name: "客户货盘列表" });
+    const desktopTable = screen.getByRole("table", { name: "冬季运输防护袋 的 SKU 列表" });
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
     expect(within(desktopTable).queryByRole("link")).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link")).not.toBeInTheDocument();
