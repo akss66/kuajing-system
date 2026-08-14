@@ -84,6 +84,19 @@ const adminRows: AdminCatalogItem[] = [
   },
 ];
 
+const groupedAdminRows: AdminCatalogItem[] = [
+  "1",
+  "2",
+  "3",
+].map((variant) => ({
+  ...adminRows[0]!,
+  id: `sku-001-${variant}`,
+  productId: "product-001",
+  productName: "三规格货品",
+  skuCode: `TZX-001-${variant}`,
+  sourceSequence: "1",
+}));
+
 const customerRows: CustomerCatalogItem[] = [
   {
     actualUnitPriceFen: 760,
@@ -158,6 +171,46 @@ afterEach(() => {
 });
 
 describe("catalog workspaces", () => {
+  it("groups source product variants and keeps every sibling when one SKU matches search", () => {
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={groupedAdminRows}
+        stores={[]}
+      />,
+    );
+
+    expect(screen.getAllByText("序号 1")).toHaveLength(1);
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+    expect(screen.getByText("1 个商品 / 3 个 SKU")).toBeVisible();
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "TZX-001-2" },
+    });
+
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "重量：480" },
+    });
+
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+  });
+
   it("keeps catalog mutations out of the resource list until their drawers open", async () => {
     render(
       <CatalogWorkspace
@@ -208,14 +261,15 @@ describe("catalog workspaces", () => {
         .map((header) => header.textContent),
     ).toEqual([
       "序号",
-      "商品",
+      "来源商品",
+      "SKU",
       "规格/属性",
       "采购价",
       "总库存",
       "可售库存",
       "货品价格",
       "状态",
-      "链接",
+      "SKU 链接",
     ]);
     expect(within(desktopTable).getByText("¥0.325")).toBeVisible();
     expect(within(desktopTable).getByText("¥1.366")).toBeVisible();
@@ -254,18 +308,9 @@ describe("catalog workspaces", () => {
 
     const cards = screen.getByRole("list", { name: "商品与 SKU 卡片列表" });
     const firstCard = within(cards).getAllByRole("listitem")[0]!;
-    expect(
-      Array.from(firstCard.querySelectorAll("[data-catalog-section]")).map(
-        (section) => section.getAttribute("data-catalog-section"),
-      ),
-    ).toEqual([
-      "identity",
-      "attributes",
-      "prices",
-      "inventory",
-      "status",
-      "link",
-    ]);
+    expect(within(firstCard).getByRole("list", {
+      name: "冬季运输防护袋 的 SKU 列表",
+    })).toBeVisible();
   });
 
   it.each([

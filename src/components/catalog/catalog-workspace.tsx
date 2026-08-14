@@ -8,6 +8,7 @@ import { ActionableEmptyState } from "@/components/management/actionable-empty-s
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AdminCatalogItem } from "@/modules/catalog/admin-catalog";
+import { filterCatalogGroups, groupCatalogItems } from "@/modules/catalog/product-groups";
 import type { ManagedAction } from "@/shared/action-state";
 
 import { AliasDrawer, CreateSkuDrawer, CustomerPriceDrawer } from "./catalog-mutation-drawers";
@@ -30,15 +31,24 @@ export type CatalogWorkspaceProps = {
 
 export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWorkspaceProps) {
   const [query, setQuery] = useState("");
-  const filteredRows = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase("zh-CN");
-    if (!normalized) return rows;
-    return rows.filter((row) =>
-      [row.sourceSequence, row.productName, row.specification, row.skuCode].some(
-        (value) => value?.toLocaleLowerCase("zh-CN").includes(normalized),
-      ),
-    );
-  }, [query, rows]);
+  const groups = useMemo(() => groupCatalogItems(rows), [rows]);
+  const filteredGroups = useMemo(() => {
+    return filterCatalogGroups(groups, query, (variant) => [
+      variant.skuCode,
+      variant.specification,
+      variant.color,
+      variant.combination,
+      variant.color ? `颜色：${variant.color}` : null,
+      variant.combination ? `组合销售：${variant.combination}` : null,
+      variant.weightGrams !== null ? `重量：${variant.weightGrams} 克` : null,
+      variant.linkText,
+      variant.productUrl,
+    ]);
+  }, [groups, query]);
+  const filteredSkuCount = filteredGroups.reduce(
+    (count, group) => count + group.variants.length,
+    0,
+  );
 
   return (
     <div className="min-w-0 space-y-6" data-admin-catalog-workspace>
@@ -60,8 +70,8 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
         </div>
       </section>
       <section aria-label="商品与 SKU 结果" className="min-w-0 space-y-3">
-        <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold text-foreground">SKU 货盘</h2><p className="text-sm tabular-nums text-muted-foreground">{filteredRows.length} 个结果</p></div>
-        {filteredRows.length > 0 ? <CatalogResults rows={filteredRows} /> : (
+        <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold text-foreground">SKU 货盘</h2><p className="text-sm tabular-nums text-muted-foreground">{filteredGroups.length} 个商品 / {filteredSkuCount} 个 SKU</p></div>
+        {filteredGroups.length > 0 ? <CatalogResults groups={filteredGroups} /> : (
           <ActionableEmptyState
             action={query ? <Button className="min-h-11" onClick={() => setQuery("")} type="button" variant="outline">清除搜索</Button> : undefined}
             description={query ? "当前搜索条件下没有结果，请调整关键词。" : "创建首个标准 SKU 后，客户货盘和库存会在这里建立关联。"}
