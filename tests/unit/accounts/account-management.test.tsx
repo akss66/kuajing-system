@@ -78,6 +78,18 @@ const accountsFixture = [
   },
 ] as const;
 
+function accountDetailTrigger(displayName: string) {
+  return screen.getAllByRole("button", { name: `查看 ${displayName}` })[0];
+}
+
+async function findAccountDetailTrigger(displayName: string) {
+  return (await screen.findAllByRole("button", { name: `查看 ${displayName}` }))[0];
+}
+
+function queryAccountDetailTriggers(displayName: string) {
+  return screen.queryAllByRole("button", { name: `查看 ${displayName}` });
+}
+
 describe("AccountsPage", () => {
   beforeEach(() => {
     guardMocks.requireAdmin.mockReset();
@@ -108,7 +120,7 @@ describe("AccountsPage", () => {
     expect(screen.queryByRole("button", { name: "保存资料" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("管理员姓名")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    fireEvent.click(accountDetailTrigger("Operations Admin"));
 
     const dialog = await screen.findByRole("dialog", { name: "Operations Admin" });
     expect(within(dialog).getByRole("region", { name: "基本资料" })).toBeVisible();
@@ -132,8 +144,8 @@ describe("AccountsPage", () => {
 
     const search = screen.getByRole("searchbox", { name: "搜索账号" });
     fireEvent.change(search, { target: { value: "ops-admin@test.local" } });
-    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
+    expect(accountDetailTrigger("Operations Admin")).toBeVisible();
+    expect(queryAccountDetailTriggers("Bootstrap Super Admin")).toHaveLength(0);
 
     fireEvent.change(screen.getByRole("combobox", { name: "角色筛选" }), {
       target: { value: "SUPER_ADMIN" },
@@ -151,7 +163,7 @@ describe("AccountsPage", () => {
       button: 0,
       ctrlKey: false,
     });
-    expect(await screen.findByRole("button", { name: "查看 Customer Owner" })).toBeVisible();
+    expect(await findAccountDetailTrigger("Customer Owner")).toBeVisible();
   });
 
   it("scopes a customer-detail deep link to the matching customer account with a removable filter", async () => {
@@ -176,9 +188,9 @@ describe("AccountsPage", () => {
     expect(
       within(activeFilters).getByRole("link", { name: "移除筛选：客户 华北客户" }),
     ).toHaveAttribute("href", "/admin/accounts");
-    expect(screen.getByRole("button", { name: "查看 Customer Owner" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "查看 Operations Admin" })).not.toBeInTheDocument();
+    expect(accountDetailTrigger("Customer Owner")).toBeVisible();
+    expect(queryAccountDetailTriggers("Bootstrap Super Admin")).toHaveLength(0);
+    expect(queryAccountDetailTriggers("Operations Admin")).toHaveLength(0);
   });
 
   it("ignores an ambiguous customerId query instead of applying an unsafe partial match", async () => {
@@ -195,8 +207,8 @@ describe("AccountsPage", () => {
     );
 
     expect(screen.queryByLabelText("已启用筛选")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
+    expect(accountDetailTrigger("Bootstrap Super Admin")).toBeVisible();
+    expect(accountDetailTrigger("Operations Admin")).toBeVisible();
   });
 
   it("keeps a valid but unmatched customerId scoped to an empty result until the filter is removed", async () => {
@@ -220,8 +232,8 @@ describe("AccountsPage", () => {
     const activeFilters = screen.getByLabelText("已启用筛选");
     expect(within(activeFilters).getByText("指定客户", { exact: true })).toBeVisible();
     expect(screen.getByText("没有符合条件的账号")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "查看 Bootstrap Super Admin" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "查看 Operations Admin" })).not.toBeInTheDocument();
+    expect(queryAccountDetailTriggers("Bootstrap Super Admin")).toHaveLength(0);
+    expect(queryAccountDetailTriggers("Operations Admin")).toHaveLength(0);
   });
 
   it("ignores a malformed customerId query and preserves the normal full account view", async () => {
@@ -238,11 +250,11 @@ describe("AccountsPage", () => {
     );
 
     expect(screen.queryByLabelText("已启用筛选")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
+    expect(accountDetailTrigger("Bootstrap Super Admin")).toBeVisible();
+    expect(accountDetailTrigger("Operations Admin")).toBeVisible();
   });
 
-  it("renders one fixed native account table with aligned desktop columns and responsive cards", async () => {
+  it("renders a fixed native account table only at the desktop breakpoint", async () => {
     guardMocks.requireAdmin.mockResolvedValue({
       kind: "SUPER_ADMIN",
       userId: "super-admin-auth-user",
@@ -253,7 +265,7 @@ describe("AccountsPage", () => {
 
     const table = screen.getByRole("table", { name: "账号列表" });
     expect(table.tagName).toBe("TABLE");
-    expect(table).toHaveClass("table-fixed", "xl:table");
+    expect(table).toHaveClass("hidden", "table-fixed", "xl:table");
     expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
       "姓名",
       "邮箱",
@@ -271,14 +283,34 @@ describe("AccountsPage", () => {
     expect(columnGroups[0].querySelector("[data-account-column='actions']")).toHaveClass("w-28");
 
     const operationsRow = within(table).getByRole("row", { name: /Operations Admin/ });
-    expect(operationsRow).toHaveAttribute("data-account-card");
-    expect(operationsRow).toHaveClass("grid", "xl:table-row");
+    expect(operationsRow).not.toHaveAttribute("data-account-card");
     const cells = within(operationsRow).getAllByRole("cell");
     expect(cells).toHaveLength(8);
     expect(cells[0]).toHaveTextContent("Operations Admin");
     expect(cells[1]).toHaveTextContent("ops-admin@test.local");
     expect(cells[2]).toHaveTextContent("普通管理员");
     expect(cells[5]).toHaveTextContent("启用中");
+  });
+
+  it("renders mobile and tablet account cards as a separate surface hidden at xl", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(await AccountsPage());
+
+    const table = screen.getByRole("table", { name: "账号列表" });
+    const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-account-card]"));
+    expect(cards).toHaveLength(2);
+    expect(cards[0].tagName).toBe("LI");
+    expect(cards[0]).toHaveClass("xl:hidden");
+    expect(table.contains(cards[0])).toBe(false);
+    expect(within(cards[0]).getByText("Bootstrap Super Admin")).toBeVisible();
+    expect(within(cards[0]).getByText("超级管理员", { exact: true })).toBeVisible();
+    expect(within(cards[0]).getByText("启用中", { exact: true })).toBeVisible();
+    expect(within(cards[1]).getByText("ops-admin@test.local")).toBeVisible();
   });
 
   it("wraps a long email anywhere without widening the action column", async () => {
@@ -329,7 +361,7 @@ describe("AccountsPage", () => {
 
     render(await AccountsPage());
 
-    fireEvent.click(screen.getByRole("button", { name: "查看 Bootstrap Super Admin" }));
+    fireEvent.click(accountDetailTrigger("Bootstrap Super Admin"));
     const protectedDialog = await screen.findByRole("dialog", { name: "Bootstrap Super Admin" });
     expect(within(protectedDialog).getByText("受保护")).toBeVisible();
     expect(within(protectedDialog).getByText(/系统初始化的超级管理员/)).toBeVisible();
@@ -342,7 +374,7 @@ describe("AccountsPage", () => {
       button: 0,
       ctrlKey: false,
     });
-    fireEvent.click(await screen.findByRole("button", { name: "查看 Customer Owner" }));
+    fireEvent.click(await findAccountDetailTrigger("Customer Owner"));
 
     const customerDialog = await screen.findByRole("dialog", { name: "Customer Owner" });
     expect(within(customerDialog).getByText("3 家店铺")).toBeVisible();
@@ -394,7 +426,7 @@ describe("AccountsPage", () => {
     render(await AccountsPage());
 
     expect(screen.queryByRole("button", { name: "停用账号" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    fireEvent.click(accountDetailTrigger("Operations Admin"));
     const accountDialog = await screen.findByRole("dialog", { name: "Operations Admin" });
     fireEvent.click(within(accountDialog).getByRole("button", { name: "停用账号" }));
 
@@ -414,7 +446,7 @@ describe("AccountsPage", () => {
 
     render(await AccountsPage());
 
-    fireEvent.click(screen.getByRole("button", { name: "查看 Operations Admin" }));
+    fireEvent.click(accountDetailTrigger("Operations Admin"));
     const accountDialog = await screen.findByRole("dialog", { name: "Operations Admin" });
     const resetTrigger = within(accountDialog).getByRole("button", { name: "重置密码" });
     const statusTrigger = within(accountDialog).getByRole("button", { name: "停用账号" });

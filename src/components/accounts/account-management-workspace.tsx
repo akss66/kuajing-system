@@ -49,73 +49,152 @@ function AccountDetailTrigger({ account }: { account: ManagedAccountSummary }) {
   );
 }
 
-function MobileFieldLabel({ children }: { children: string }) {
-  return <span className="text-xs font-medium text-muted-foreground xl:hidden">{children}</span>;
+function AccountIdentity({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="font-medium text-foreground">{account.displayName}</p>
+      {account.kind === "SUPER_ADMIN" ? (
+        <Badge className="gap-1 bg-primary-soft text-primary-hover" variant="secondary">
+          <LockKeyhole aria-hidden="true" />
+          受保护
+        </Badge>
+      ) : null}
+    </div>
+  );
 }
 
-function AccountSummaryRow({ account }: { account: ManagedAccountSummary }) {
+function AccountEmail({ account }: { account: ManagedAccountSummary }) {
   return (
-    <TableRow
-      className="grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 hover:bg-background xl:table-row xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-0 xl:hover:bg-muted/40"
-      data-account-card
-    >
-      <TableCell className="block h-auto min-w-0 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="font-medium text-foreground">{account.displayName}</p>
-          {account.kind === "SUPER_ADMIN" ? (
-            <Badge className="gap-1 bg-primary-soft text-primary-hover" variant="secondary">
-              <LockKeyhole aria-hidden="true" />
-              受保护
-            </Badge>
-          ) : null}
-        </div>
+    <p className="min-w-0 whitespace-normal text-sm text-muted-foreground [overflow-wrap:anywhere]">
+      {account.email}
+    </p>
+  );
+}
+
+function AccountRole({ account }: { account: ManagedAccountSummary }) {
+  return <span className="text-sm text-foreground">{accountKindLabel(account.kind)}</span>;
+}
+
+function AccountCustomer({ account }: { account: ManagedAccountSummary }) {
+  return <span className="text-sm text-foreground">{account.customerName ?? "—"}</span>;
+}
+
+function AccountStoreCount({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <span className="text-sm tabular-nums text-foreground">
+      {account.customerId ? `${account.storeCount} 家` : "—"}
+    </span>
+  );
+}
+
+function AccountStatus({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <Badge className={accountStatusTone(account.status)} variant="secondary">
+      {accountStatusLabel(account.status)}
+    </Badge>
+  );
+}
+
+function AccountLastLogin({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <span className="text-sm text-muted-foreground">
+      {formatAccountDateTime(account.lastLoginAt)}
+    </span>
+  );
+}
+
+function AccountTableRow({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <TableRow>
+      <TableCell className="min-w-0 whitespace-normal">
+        <AccountIdentity account={account} />
       </TableCell>
       <TableCell
-        className="block h-auto min-w-0 whitespace-normal p-0 text-sm text-muted-foreground [overflow-wrap:anywhere] xl:table-cell xl:h-14 xl:px-3 xl:py-2"
+        className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"
         data-account-email
       >
-        {account.email}
+        <AccountEmail account={account} />
       </TableCell>
-      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <MobileFieldLabel>角色</MobileFieldLabel>
-        <p className="text-sm text-foreground">{accountKindLabel(account.kind)}</p>
+      <TableCell className="whitespace-normal">
+        <AccountRole account={account} />
       </TableCell>
-      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <MobileFieldLabel>所属客户</MobileFieldLabel>
-        <p className="text-sm text-foreground">{account.customerName ?? "—"}</p>
+      <TableCell className="whitespace-normal">
+        <AccountCustomer account={account} />
       </TableCell>
-      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <MobileFieldLabel>店铺数</MobileFieldLabel>
-        <p className="text-sm tabular-nums text-foreground">
-          {account.customerId ? `${account.storeCount} 家` : "—"}
-        </p>
+      <TableCell className="whitespace-normal">
+        <AccountStoreCount account={account} />
       </TableCell>
-      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <MobileFieldLabel>状态</MobileFieldLabel>
-        <Badge className={accountStatusTone(account.status)} variant="secondary">
-          {accountStatusLabel(account.status)}
-        </Badge>
+      <TableCell className="whitespace-normal">
+        <AccountStatus account={account} />
       </TableCell>
-      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
-        <MobileFieldLabel>最近登录</MobileFieldLabel>
-        <p className="text-sm text-muted-foreground">{formatAccountDateTime(account.lastLoginAt)}</p>
+      <TableCell className="whitespace-normal">
+        <AccountLastLogin account={account} />
       </TableCell>
-      <TableCell className="block h-auto whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2 xl:text-right">
+      <TableCell className="whitespace-normal text-right">
         <AccountDetailTrigger account={account} />
       </TableCell>
     </TableRow>
   );
 }
 
+function MobileAccountField({
+  children,
+  label,
+}: {
+  children: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+function AccountSummaryCard({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <li
+      className="rounded-[var(--radius-surface)] border border-border bg-background p-4 xl:hidden"
+      data-account-card
+    >
+      <AccountIdentity account={account} />
+      <div className="mt-1">
+        <AccountEmail account={account} />
+      </div>
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3">
+        <MobileAccountField label="角色">
+          <AccountRole account={account} />
+        </MobileAccountField>
+        <MobileAccountField label="所属客户">
+          <AccountCustomer account={account} />
+        </MobileAccountField>
+        <MobileAccountField label="店铺数">
+          <AccountStoreCount account={account} />
+        </MobileAccountField>
+        <MobileAccountField label="状态">
+          <AccountStatus account={account} />
+        </MobileAccountField>
+        <MobileAccountField label="最近登录">
+          <AccountLastLogin account={account} />
+        </MobileAccountField>
+      </dl>
+      <div className="mt-4 border-t border-border pt-3">
+        <AccountDetailTrigger account={account} />
+      </div>
+    </li>
+  );
+}
+
 function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] }) {
   return (
-    <div className="xl:overflow-hidden xl:rounded-[var(--radius-surface)] xl:border xl:border-border xl:bg-background">
+    <>
       <table
         aria-label="账号列表"
-        className="block w-full table-fixed text-sm xl:table"
+        className="hidden w-full table-fixed overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background text-sm xl:table"
         data-account-table
       >
-        <colgroup className="hidden xl:table-column-group">
+        <colgroup>
           <col className="w-[14%]" />
           <col className="w-[18%]" />
           <col className="w-[10%]" />
@@ -125,7 +204,7 @@ function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] })
           <col className="w-[18%]" />
           <col className="w-28" data-account-column="actions" />
         </colgroup>
-        <TableHeader className="hidden xl:table-header-group">
+        <TableHeader>
           <TableRow>
             <TableHead scope="col">姓名</TableHead>
             <TableHead scope="col">邮箱</TableHead>
@@ -137,13 +216,18 @@ function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] })
             <TableHead className="text-right" scope="col">操作</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody className="block space-y-3 [&_tr:last-child]:border xl:table-row-group xl:space-y-0 xl:[&_tr:last-child]:border-0">
+        <TableBody>
           {accounts.map((account) => (
-            <AccountSummaryRow account={account} key={account.userId} />
+            <AccountTableRow account={account} key={account.userId} />
           ))}
         </TableBody>
       </table>
-    </div>
+      <ul aria-label="账号摘要卡片" className="space-y-3 xl:hidden">
+        {accounts.map((account) => (
+          <AccountSummaryCard account={account} key={account.userId} />
+        ))}
+      </ul>
+    </>
   );
 }
 

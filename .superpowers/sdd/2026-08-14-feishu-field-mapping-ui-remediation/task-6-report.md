@@ -63,3 +63,55 @@ Exit code: `0`; no whitespace errors. Git emitted only the repository's existing
 - No menu label, order, route, local-storage key, permission/action/audit behavior, drawer content, catalog, inventory, migration, global typography/style, or production configuration changed.
 - Unit tests prove DOM semantics and responsive utility contracts, but do not execute real media queries or measure page overflow. The approved plan assigns exact viewport, axe, console, hydration, and visual acceptance to Task 7.
 - Per the Task 6 brief, the final Impeccable detector and Task 7 were intentionally not run or started.
+
+## Fix Round 1: distinct responsive account surfaces
+
+Review found that the first implementation visually restyled one native table row as a mobile card. The fix restores two explicit surfaces while sharing the account identity, email, role, customer, store-count, status, latest-login, and detail-trigger renderers:
+
+- `[data-account-table]` is one native fixed-layout table with the exact eight headers and shared `colgroup`; it is `hidden` below `xl` and `xl:table` at desktop widths.
+- Each `[data-account-card]` is a separate summary-list `LI`, visible below `xl` and `xl:hidden` at desktop widths.
+- The existing drawer content and action/permission behavior remain unchanged. Navigation and tabs were not modified in this fix round.
+
+### Fix Round 1 RED
+
+```powershell
+npm.cmd test -- tests/unit/accounts/account-management.test.tsx
+```
+
+Exit code: `1`. Result: `2 failed | 12 passed`. The failures directly reproduced the review finding: the table lacked its mobile-hidden contract, and `[data-account-card]` resolved to a table `TR` instead of a separate `LI`.
+
+### Fix Round 1 GREEN
+
+```powershell
+npm.cmd test -- tests/unit/accounts/account-management.test.tsx
+```
+
+Exit code: `0`. Result: `1 passed` file, `14 passed` tests.
+
+```powershell
+npm.cmd test -- tests/unit/accounts/account-management.test.tsx tests/unit/ui/merchant-shell.test.tsx tests/unit/ui/management-primitives.test.tsx
+```
+
+Exit code: `0`. Result: `3 passed` files, `27 passed` tests.
+
+```powershell
+npm.cmd run typecheck
+```
+
+Exit code: `0` (`tsc --noEmit`).
+
+```powershell
+git diff --check
+```
+
+Exit code: `0`; no whitespace errors.
+
+### Browser acceptance attempt
+
+The existing mobile Playwright test directly asserts that `[data-account-card]` is visible, `[data-account-table]` is not visible, and document horizontal overflow is at most 1px. It was invoked with:
+
+```powershell
+npm.cmd run test:e2e -- tests/e2e/admin-management.spec.ts --project=mobile-chromium --grep 'super admin can govern admin accounts and ordinary admins are denied account governance'
+```
+
+The Next 16 test server and `mobile-chromium` worker started successfully, but the test failed before navigation or selector evaluation while resetting the E2E database: PostgreSQL reported `relation "jifeng_authorization_attempts" does not exist`. No product assertion failed. The focused unit test directly covers both existing E2E selectors and their breakpoint visibility classes until the E2E schema baseline is available.
