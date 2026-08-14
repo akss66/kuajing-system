@@ -10,6 +10,7 @@ import { EntityDrawer } from "@/components/management/entity-drawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ManagedAccountSummary } from "@/modules/accounts/queries";
 
@@ -27,9 +28,6 @@ const tabs: { label: string; value: AccountTab }[] = [
   { label: "已停用", value: "disabled" },
 ];
 
-const desktopColumns =
-  "lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.35fr)_minmax(0,.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,.7fr)_minmax(0,1fr)_auto]";
-
 function accountStatusTone(status: ManagedAccountSummary["status"]) {
   return status === "ACTIVE" ? "bg-success/10 text-success" : "bg-warning/10 text-warning";
 }
@@ -41,7 +39,7 @@ function AccountDetailTrigger({ account }: { account: ManagedAccountSummary }) {
       size="lg"
       title={account.displayName}
       trigger={
-        <Button className="min-h-11 w-full lg:min-h-9 lg:w-auto" variant="outline">
+        <Button className="min-h-11 w-full xl:min-h-9 xl:w-auto" variant="outline">
           查看 {account.displayName}
         </Button>
       }
@@ -52,83 +50,100 @@ function AccountDetailTrigger({ account }: { account: ManagedAccountSummary }) {
 }
 
 function MobileFieldLabel({ children }: { children: string }) {
-  return <span className="text-xs font-medium text-muted-foreground lg:hidden">{children}</span>;
+  return <span className="text-xs font-medium text-muted-foreground xl:hidden">{children}</span>;
+}
+
+function AccountSummaryRow({ account }: { account: ManagedAccountSummary }) {
+  return (
+    <TableRow
+      className="grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 hover:bg-background xl:table-row xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-0 xl:hover:bg-muted/40"
+      data-account-card
+    >
+      <TableCell className="block h-auto min-w-0 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium text-foreground">{account.displayName}</p>
+          {account.kind === "SUPER_ADMIN" ? (
+            <Badge className="gap-1 bg-primary-soft text-primary-hover" variant="secondary">
+              <LockKeyhole aria-hidden="true" />
+              受保护
+            </Badge>
+          ) : null}
+        </div>
+      </TableCell>
+      <TableCell
+        className="block h-auto min-w-0 whitespace-normal p-0 text-sm text-muted-foreground [overflow-wrap:anywhere] xl:table-cell xl:h-14 xl:px-3 xl:py-2"
+        data-account-email
+      >
+        {account.email}
+      </TableCell>
+      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <MobileFieldLabel>角色</MobileFieldLabel>
+        <p className="text-sm text-foreground">{accountKindLabel(account.kind)}</p>
+      </TableCell>
+      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <MobileFieldLabel>所属客户</MobileFieldLabel>
+        <p className="text-sm text-foreground">{account.customerName ?? "—"}</p>
+      </TableCell>
+      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <MobileFieldLabel>店铺数</MobileFieldLabel>
+        <p className="text-sm tabular-nums text-foreground">
+          {account.customerId ? `${account.storeCount} 家` : "—"}
+        </p>
+      </TableCell>
+      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <MobileFieldLabel>状态</MobileFieldLabel>
+        <Badge className={accountStatusTone(account.status)} variant="secondary">
+          {accountStatusLabel(account.status)}
+        </Badge>
+      </TableCell>
+      <TableCell className="block h-auto space-y-1 whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2">
+        <MobileFieldLabel>最近登录</MobileFieldLabel>
+        <p className="text-sm text-muted-foreground">{formatAccountDateTime(account.lastLoginAt)}</p>
+      </TableCell>
+      <TableCell className="block h-auto whitespace-normal p-0 xl:table-cell xl:h-14 xl:px-3 xl:py-2 xl:text-right">
+        <AccountDetailTrigger account={account} />
+      </TableCell>
+    </TableRow>
+  );
 }
 
 function AccountSummaryList({ accounts }: { accounts: ManagedAccountSummary[] }) {
   return (
-    <section aria-label="账号列表" className="space-y-3" role="table">
-      <div
-        className={`hidden min-h-10 items-center border-b border-border bg-[var(--merchant-table-header)] px-3 text-xs font-semibold text-muted-foreground lg:grid ${desktopColumns}`}
+    <div className="xl:overflow-hidden xl:rounded-[var(--radius-surface)] xl:border xl:border-border xl:bg-background">
+      <table
+        aria-label="账号列表"
+        className="block w-full table-fixed text-sm xl:table"
         data-account-table
-        role="row"
       >
-        <span role="columnheader">姓名</span>
-        <span role="columnheader">邮箱</span>
-        <span role="columnheader">角色</span>
-        <span role="columnheader">所属客户</span>
-        <span role="columnheader">店铺数</span>
-        <span role="columnheader">状态</span>
-        <span role="columnheader">最近登录</span>
-        <span role="columnheader">操作</span>
-      </div>
-      <ul
-        className="space-y-3 lg:space-y-0 lg:overflow-hidden lg:rounded-[var(--radius-surface)] lg:border lg:border-border lg:bg-background"
-        data-account-list
-        role="rowgroup"
-      >
-        {accounts.map((account) => (
-          <li
-            className={`grid gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 lg:min-h-14 lg:items-center lg:gap-2 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:px-3 lg:py-2 lg:last:border-b-0 ${desktopColumns}`}
-            data-account-card
-            key={account.userId}
-            role="row"
-          >
-            <div className="min-w-0" role="cell">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium text-foreground">{account.displayName}</p>
-                {account.kind === "SUPER_ADMIN" ? (
-                  <Badge className="gap-1 bg-primary-soft text-primary-hover" variant="secondary">
-                    <LockKeyhole aria-hidden="true" />
-                    受保护
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-            <p className="min-w-0 break-all text-sm text-muted-foreground" role="cell">
-              {account.email}
-            </p>
-            <div className="space-y-1" role="cell">
-              <MobileFieldLabel>角色</MobileFieldLabel>
-              <p className="text-sm text-foreground">{accountKindLabel(account.kind)}</p>
-            </div>
-            <div className="space-y-1" role="cell">
-              <MobileFieldLabel>所属客户</MobileFieldLabel>
-              <p className="text-sm text-foreground">{account.customerName ?? "—"}</p>
-            </div>
-            <div className="space-y-1" role="cell">
-              <MobileFieldLabel>店铺数</MobileFieldLabel>
-              <p className="text-sm tabular-nums text-foreground">
-                {account.customerId ? `${account.storeCount} 家` : "—"}
-              </p>
-            </div>
-            <div className="space-y-1" role="cell">
-              <MobileFieldLabel>状态</MobileFieldLabel>
-              <Badge className={accountStatusTone(account.status)} variant="secondary">
-                {accountStatusLabel(account.status)}
-              </Badge>
-            </div>
-            <div className="space-y-1" role="cell">
-              <MobileFieldLabel>最近登录</MobileFieldLabel>
-              <p className="text-sm text-muted-foreground">{formatAccountDateTime(account.lastLoginAt)}</p>
-            </div>
-            <div className="lg:justify-self-end" role="cell">
-              <AccountDetailTrigger account={account} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+        <colgroup className="hidden xl:table-column-group">
+          <col className="w-[14%]" />
+          <col className="w-[18%]" />
+          <col className="w-[10%]" />
+          <col className="w-[13%]" />
+          <col className="w-[7%]" />
+          <col className="w-[8%]" />
+          <col className="w-[18%]" />
+          <col className="w-28" data-account-column="actions" />
+        </colgroup>
+        <TableHeader className="hidden xl:table-header-group">
+          <TableRow>
+            <TableHead scope="col">姓名</TableHead>
+            <TableHead scope="col">邮箱</TableHead>
+            <TableHead scope="col">角色</TableHead>
+            <TableHead scope="col">所属客户</TableHead>
+            <TableHead scope="col">店铺数</TableHead>
+            <TableHead scope="col">状态</TableHead>
+            <TableHead scope="col">最近登录</TableHead>
+            <TableHead className="text-right" scope="col">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody className="block space-y-3 [&_tr:last-child]:border xl:table-row-group xl:space-y-0 xl:[&_tr:last-child]:border-0">
+          {accounts.map((account) => (
+            <AccountSummaryRow account={account} key={account.userId} />
+          ))}
+        </TableBody>
+      </table>
+    </div>
   );
 }
 
@@ -218,7 +233,7 @@ export function AccountManagementWorkspace({
       />
 
       <Tabs onValueChange={(value) => setTab(value as AccountTab)} value={tab}>
-        <TabsList className="min-h-11 w-full justify-start overflow-x-auto" variant="line">
+        <TabsList className="min-h-11 w-full justify-start" variant="line">
           {tabs.map((item) => (
             <TabsTrigger className="min-h-11 flex-none px-3 sm:min-h-9" key={item.value} value={item.value}>
               {item.label} <span className="tabular-nums">{counts[item.value]}</span>

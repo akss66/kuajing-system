@@ -177,6 +177,40 @@ describe("merchant shells", () => {
     );
   });
 
+  it("semantically marks and strengthens only the group containing the current route", () => {
+    navigationState.pathname = "/admin/system/health";
+
+    render(
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
+        <div>内容</div>
+      </AdminShell>,
+    );
+
+    const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
+    const currentGroup = within(navigation)
+      .getByRole("button", { name: "系统管理" })
+      .closest("[data-navigation-section]");
+    const inactiveGroup = within(navigation)
+      .getByRole("button", { name: "客户与货品" })
+      .closest("[data-navigation-section]");
+
+    expect(currentGroup).toHaveAttribute("data-current-group", "true");
+    expect(within(currentGroup as HTMLElement).getByRole("button", { name: "系统管理" })).toHaveClass(
+      "border-border",
+      "bg-[var(--merchant-nav-hover)]",
+      "text-foreground",
+    );
+    expect(inactiveGroup).toHaveAttribute("data-current-group", "false");
+    expect(within(inactiveGroup as HTMLElement).getByRole("button", { name: "客户与货品" })).not.toHaveClass(
+      "border-border",
+      "bg-[var(--merchant-nav-hover)]",
+    );
+    expect(within(currentGroup as HTMLElement).getByRole("link", { name: "系统健康" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("keeps the mobile account menu compact without leaking admin-only navigation into the customer shell", () => {
     navigationState.pathname = "/portal";
 

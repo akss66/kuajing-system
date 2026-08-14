@@ -88,15 +88,23 @@ export function NavigationSection({
   }
 
   return (
-    <section className="space-y-1" data-navigation-section={id}>
+    <section
+      className="space-y-1"
+      data-current-group={containsCurrentPage}
+      data-navigation-section={id}
+    >
       <h2>
         <button
           aria-controls={contentId}
           aria-expanded={open}
           className={cn(
-            "flex w-full items-center justify-between rounded-md px-3 text-left text-[11px] font-semibold tracking-[0.06em] text-muted-foreground transition-colors hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
+            "flex w-full items-center justify-between rounded-md border px-3 text-left text-[11px] font-semibold tracking-[0.06em] transition-colors hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
+            containsCurrentPage
+              ? "border-border bg-[var(--merchant-nav-hover)] text-foreground"
+              : "border-transparent text-muted-foreground",
             mobile ? "min-h-11" : "min-h-8",
           )}
+          data-current-group={containsCurrentPage}
           onClick={toggleSection}
           type="button"
         >

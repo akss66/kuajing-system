@@ -242,7 +242,7 @@ describe("AccountsPage", () => {
     expect(screen.getByRole("button", { name: "查看 Operations Admin" })).toBeVisible();
   });
 
-  it("exposes account summaries as a labelled table with associated row cells", async () => {
+  it("renders one fixed native account table with aligned desktop columns and responsive cards", async () => {
     guardMocks.requireAdmin.mockResolvedValue({
       kind: "SUPER_ADMIN",
       userId: "super-admin-auth-user",
@@ -252,17 +252,70 @@ describe("AccountsPage", () => {
     render(await AccountsPage());
 
     const table = screen.getByRole("table", { name: "账号列表" });
-    for (const header of ["姓名", "邮箱", "角色", "所属客户", "店铺数", "状态", "最近登录", "操作"]) {
-      expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
-    }
+    expect(table.tagName).toBe("TABLE");
+    expect(table).toHaveClass("table-fixed", "xl:table");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "姓名",
+      "邮箱",
+      "角色",
+      "所属客户",
+      "店铺数",
+      "状态",
+      "最近登录",
+      "操作",
+    ]);
+
+    const columnGroups = table.querySelectorAll("colgroup");
+    expect(columnGroups).toHaveLength(1);
+    expect(columnGroups[0].querySelectorAll("col")).toHaveLength(8);
+    expect(columnGroups[0].querySelector("[data-account-column='actions']")).toHaveClass("w-28");
 
     const operationsRow = within(table).getByRole("row", { name: /Operations Admin/ });
+    expect(operationsRow).toHaveAttribute("data-account-card");
+    expect(operationsRow).toHaveClass("grid", "xl:table-row");
     const cells = within(operationsRow).getAllByRole("cell");
     expect(cells).toHaveLength(8);
     expect(cells[0]).toHaveTextContent("Operations Admin");
     expect(cells[1]).toHaveTextContent("ops-admin@test.local");
     expect(cells[2]).toHaveTextContent("普通管理员");
     expect(cells[5]).toHaveTextContent("启用中");
+  });
+
+  it("wraps a long email anywhere without widening the action column", async () => {
+    const longEmail =
+      "warehouse-operations-and-customer-success-for-northern-region@accounts.test.local";
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue([
+      {
+        ...accountsFixture[1],
+        email: longEmail,
+      },
+    ]);
+
+    render(await AccountsPage());
+
+    const table = screen.getByRole("table", { name: "账号列表" });
+    const emailCell = within(table).getByText(longEmail).closest("td");
+    expect(emailCell).toHaveClass("[overflow-wrap:anywhere]", "whitespace-normal");
+    expect(table.querySelector("[data-account-column='actions']")).toHaveClass("w-28");
+  });
+
+  it("allows account tabs to scroll only below the desktop breakpoint", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+    queryMocks.listManagedAccounts.mockResolvedValue(accountsFixture);
+
+    render(await AccountsPage());
+
+    expect(screen.getByRole("tablist")).toHaveClass(
+      "overflow-x-auto",
+      "xl:overflow-x-visible",
+    );
   });
 
   it("keeps the bootstrap super admin protected and links customer accounts to business details", async () => {
