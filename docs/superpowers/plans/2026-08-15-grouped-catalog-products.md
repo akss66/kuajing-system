@@ -128,10 +128,12 @@ git commit -m "feat: model catalog product groups"
 - Create: `drizzle/meta/0022_snapshot.json`
 - Modify: `drizzle/meta/_journal.json`
 - Create: `src/modules/feishu/catalog-field-refresh.ts`
+- Modify: `src/modules/feishu/cargo-parser.ts`
 - Create: `scripts/refresh-feishu-catalog-fields.ts`
 - Modify: `package.json`
 - Create: `tests/integration/schema/feishu-field-backfill.test.ts`
 - Create: `tests/integration/feishu/catalog-field-refresh.test.ts`
+- Modify: `tests/unit/feishu/cargo-parser.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -170,6 +172,7 @@ export function createCatalogFieldRefreshService(database?: typeof db): {
 ```
 
 - The read port deliberately omits all Feishu mutation methods and media download.
+- The parser must recognize the production header form `货品价格（采购价+头程+打包材料…）` as the cargo-price column while continuing to distinguish it from `采购价`; normalize whitespace and accept the `货品价格` prefix with either Chinese or ASCII parentheses.
 - `apply` reads and parses before opening the PostgreSQL transaction, then locks the catalog with an advisory transaction lock.
 - Exact preconditions: 74 distinct source sequences, 140 distinct source SKU codes, no blocking parser issue, and exact equality between the source SKU set and the existing database SKU set.
 - For each source sequence, choose the existing product containing the greatest number of that sequence’s SKUs (stable tie-break by product ID), update its parent fields, and reassign every group SKU to it. Do not delete orphan product rows in this repair.
@@ -199,19 +202,22 @@ it("leaves PostgreSQL unchanged when source and database SKU sets differ", async
 });
 ```
 
+Add a parser regression using an actual-shaped header cell such as `货品价格\n（采购价+头程+打包材料+人工费）`; assert one row parses with its independent `cargoUnitPriceMilliYuan` and `defaultUnitPriceMilliYuan` values preserved separately.
+
 - [ ] **Step 3: Run RED**
 
 Run:
 
 ```powershell
+npm.cmd test -- tests/unit/feishu/cargo-parser.test.ts
 npm.cmd run test:integration -- tests/integration/schema/feishu-field-backfill.test.ts tests/integration/feishu/catalog-field-refresh.test.ts
 ```
 
-Expected: FAIL because the migration and refresh service are missing or do not understand the legacy snapshot shape.
+Expected: FAIL because the migration and refresh service are missing or do not understand the legacy snapshot shape, and the current parser rejects the production long-form cargo-price header.
 
 - [ ] **Step 4: Implement 0022 and refresh service**
 
-0022 uses `COALESCE(row_data->>'sourceSequence', row_data->>'productGroupKey')` for the legacy parent sequence, only fills null product fields, rejects partial sibling matches, and treats absent legacy cargo price as null. The service reads the live source with `readFeishuSourceSnapshot`, parses with `parseLegacyCargoSheet`, performs the exact-set checks, then updates local database rows only.
+0022 uses `COALESCE(row_data->>'sourceSequence', row_data->>'productGroupKey')` for the legacy parent sequence, only fills null product fields, rejects partial sibling matches, and treats absent legacy cargo price as null. Update header matching so the production long-form `货品价格` heading maps only to `cargoPrice`. The service reads the live source with `readFeishuSourceSnapshot`, parses with `parseLegacyCargoSheet`, performs the exact-set checks, then updates local database rows only.
 
 - [ ] **Step 5: Add the guarded operations command**
 
@@ -237,6 +243,7 @@ It resolves the configured or latest imported source sheet and the single active
 Run:
 
 ```powershell
+npm.cmd test -- tests/unit/feishu/cargo-parser.test.ts
 npm.cmd run test:integration -- tests/integration/schema/feishu-field-backfill.test.ts tests/integration/feishu/catalog-field-refresh.test.ts
 rg -n "writeRange|formatRange|updateDimension|batchUpdate" src/modules/feishu/catalog-field-refresh.ts scripts/refresh-feishu-catalog-fields.ts
 npm.cmd run typecheck
@@ -248,7 +255,7 @@ Expected: tests pass; the write-method scan has no matches; typecheck and lint p
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add drizzle/0022_backfill_feishu_product_fields.sql drizzle/meta/0022_snapshot.json drizzle/meta/_journal.json src/modules/feishu/catalog-field-refresh.ts scripts/refresh-feishu-catalog-fields.ts package.json tests/integration/schema/feishu-field-backfill.test.ts tests/integration/feishu/catalog-field-refresh.test.ts
+git add drizzle/0022_backfill_feishu_product_fields.sql drizzle/meta/0022_snapshot.json drizzle/meta/_journal.json src/modules/feishu/catalog-field-refresh.ts src/modules/feishu/cargo-parser.ts scripts/refresh-feishu-catalog-fields.ts package.json tests/integration/schema/feishu-field-backfill.test.ts tests/integration/feishu/catalog-field-refresh.test.ts tests/unit/feishu/cargo-parser.test.ts
 git commit -m "fix: regroup imported Feishu catalog products"
 ```
 
