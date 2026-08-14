@@ -56,6 +56,51 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows).toHaveLength(4);
   });
 
+  test("uses the TZX product number when a repeated source sequence points at a new product", () => {
+    const values = sampleRows();
+    values.push([
+      "1",
+      "TZX-003",
+      { fileToken: "file-token-tzx-003" },
+      "Third product",
+      "4.50",
+      "8",
+      "8",
+      { text: "Third product", link: "https://example.test/products/tzx-003" },
+      "Standard",
+      "Gray",
+      "1pc",
+      "140g",
+      "可售",
+    ]);
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.at(-1)?.productGroupKey).toBe("3");
+    expect(result.summary.productCount).toBe(3);
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SEQUENCE_SKU_MISMATCH",
+      message: "序号 1 与 SKU 商品编号 3 不一致，迁移按 SKU 商品编号 3 分组",
+      severity: "WARNING",
+      sourceRowNumber: 6,
+    });
+  });
+
+  test("does not inherit product fields when the SKU starts a new inferred group", () => {
+    const values = sampleRows();
+    values.push(["", "TZX-077", "", "", "", "", "", "", "", "", "", "", ""]);
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-077");
+    expect(result.issues).toContainEqual({
+      code: "CARGO_MISSING_PRODUCT_NAME",
+      message: "名称不能为空",
+      severity: "BLOCKING",
+      sourceRowNumber: 6,
+    });
+  });
+
   test("accepts the production inventory header with the unit in parentheses", () => {
     const values = sampleRows();
     values[0][5] = "总库存(份)";

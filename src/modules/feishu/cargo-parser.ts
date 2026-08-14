@@ -297,6 +297,20 @@ function createEmptyContext(): GroupContext {
   };
 }
 
+function resetGroupContext(context: GroupContext) {
+  Object.assign(context, createEmptyContext());
+}
+
+function normalizeProductGroupKey(value: string) {
+  if (!/^\d+$/.test(value)) return value;
+  return String(Number.parseInt(value, 10));
+}
+
+function deriveTzxProductGroupKey(skuCode: string) {
+  const match = /^TZX-(\d+)(?:-|$)/i.exec(skuCode);
+  return match ? normalizeProductGroupKey(match[1]) : null;
+}
+
 function buildSkuName(input: {
   color: null | string;
   combination: null | string;
@@ -401,42 +415,12 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
   for (let offset = headerRowIndex + 1; offset < values.length; offset += 1) {
     const row = values[offset] ?? [];
     if (isBlankRow(row)) {
-      const reset = createEmptyContext();
-      context.combination = reset.combination;
-      context.image = reset.image;
-      context.price = reset.price;
-      context.productGroupKey = reset.productGroupKey;
-      context.productName = reset.productName;
-      context.productUrl = reset.productUrl;
-      context.specification = reset.specification;
-      context.saleStatus = reset.saleStatus;
-      context.weight = reset.weight;
+      resetGroupContext(context);
       continue;
     }
 
     const sourceRowNumber = offset + 1;
     const inheritedFrom: Partial<Record<CargoInheritedField, number>> = {};
-
-    const explicitGroupKey = extractDisplayText(row[headerMap.sequence]);
-    const productGroupKey =
-      explicitGroupKey ||
-      (typeof context.productGroupKey?.value === "string"
-        ? context.productGroupKey.value
-        : "");
-    if (explicitGroupKey) {
-      context.productGroupKey = { rowNumber: sourceRowNumber, value: explicitGroupKey };
-    } else if (context.productGroupKey) {
-      inheritedFrom.productGroupKey = context.productGroupKey.rowNumber;
-    } else {
-      issues.push(
-        buildIssue({
-          code: "CARGO_MISSING_PRODUCT_GROUP_KEY",
-          message: "\u5e8f\u53f7\u4e0d\u80fd\u4e3a\u7a7a",
-          sourceRowNumber,
-        }),
-      );
-      continue;
-    }
 
     const skuCode = extractDisplayText(row[headerMap.sku]);
     if (skuCode.length === 0) {
@@ -444,6 +428,50 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         buildIssue({
           code: "CARGO_MISSING_SKU",
           message: "SKU \u4e0d\u80fd\u4e3a\u7a7a",
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    const explicitGroupText = extractDisplayText(row[headerMap.sequence]);
+    const explicitGroupKey = explicitGroupText
+      ? normalizeProductGroupKey(explicitGroupText)
+      : "";
+    const skuProductGroupKey = deriveTzxProductGroupKey(skuCode);
+    if (
+      explicitGroupKey &&
+      skuProductGroupKey &&
+      explicitGroupKey !== skuProductGroupKey
+    ) {
+      issues.push({
+        code: "CARGO_SEQUENCE_SKU_MISMATCH",
+        message: `\u5e8f\u53f7 ${explicitGroupKey} \u4e0e SKU \u5546\u54c1\u7f16\u53f7 ${skuProductGroupKey} \u4e0d\u4e00\u81f4\uff0c\u8fc1\u79fb\u6309 SKU \u5546\u54c1\u7f16\u53f7 ${skuProductGroupKey} \u5206\u7ec4`,
+        severity: "WARNING",
+        sourceRowNumber,
+      });
+    }
+
+    const previousProductGroupKey =
+      typeof context.productGroupKey?.value === "string"
+        ? context.productGroupKey.value
+        : "";
+    const productGroupKey =
+      skuProductGroupKey || explicitGroupKey || previousProductGroupKey;
+
+    if (productGroupKey && previousProductGroupKey !== productGroupKey) {
+      resetGroupContext(context);
+    }
+
+    if (explicitGroupKey || (!context.productGroupKey && productGroupKey)) {
+      context.productGroupKey = { rowNumber: sourceRowNumber, value: productGroupKey };
+    } else if (context.productGroupKey) {
+      inheritedFrom.productGroupKey = context.productGroupKey.rowNumber;
+    } else {
+      issues.push(
+        buildIssue({
+          code: "CARGO_MISSING_PRODUCT_GROUP_KEY",
+          message: "\u5e8f\u53f7\u4e0d\u80fd\u4e3a\u7a7a",
           sourceRowNumber,
         }),
       );
