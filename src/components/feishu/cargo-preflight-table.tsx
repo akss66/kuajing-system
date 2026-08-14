@@ -150,14 +150,18 @@ export function CargoPreflightTable({
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">链接</p>
-                  <Link
-                    className="mt-1 block break-all text-sm text-primary underline-offset-4 hover:underline"
-                    href={row.productUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {row.productUrl}
-                  </Link>
+                  {row.productUrl ? (
+                    <Link
+                      className="mt-1 block break-all text-sm text-primary underline-offset-4 hover:underline"
+                      href={row.productUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {row.productUrl}
+                    </Link>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">无商品链接</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">继承字段</p>
@@ -217,14 +221,18 @@ export function CargoPreflightTable({
                     <p className="mt-1 text-muted-foreground">{row.weightLabel}</p>
                   </td>
                   <td className="border-b border-border px-3 py-3">
-                    <Link
-                      className="break-all text-primary underline-offset-4 hover:underline"
-                      href={row.productUrl}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {row.productUrl}
-                    </Link>
+                    {row.productUrl ? (
+                      <Link
+                        className="break-all text-primary underline-offset-4 hover:underline"
+                        href={row.productUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {row.productUrl}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">无商品链接</span>
+                    )}
                     <p className="mt-1 text-muted-foreground">{row.saleStatusLabel}</p>
                   </td>
                   <td className="border-b border-border px-3 py-3">

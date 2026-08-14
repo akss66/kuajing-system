@@ -27,6 +27,7 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows[2].weightGrams).toBe(218);
     expect(result.rows[3].saleStatus).toBe("NOT_SELLABLE");
     expect(result.rows[0].defaultUnitPriceFen).toBe(293);
+    expect(result.rows[0].defaultUnitPriceMilliYuan).toBe(2_930);
     expect(result.rows[0].productUrl).toBe("https://example.test/products/tzx-001");
     expect(result.rows[0].imageFileToken).toBe("file-token-tzx-001-1");
     expect(result.issues).toEqual([]);
@@ -269,6 +270,81 @@ describe("parseLegacyCargoSheet", () => {
       code: "CARGO_INVALID_PRICE",
       message: "采购价必须是合法人民币金额",
       severity: "BLOCKING",
+      sourceRowNumber: 2,
+    });
+  });
+
+  test.each([
+    { expectedFen: 33, expectedMilliYuan: 325, raw: "0.325" },
+    { expectedFen: 137, expectedMilliYuan: 1_366, raw: "1.366" },
+  ])("preserves exact milli-yuan price $raw", ({ expectedFen, expectedMilliYuan, raw }) => {
+    const values = sampleRows();
+    values[1][4] = raw;
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows[0]).toMatchObject({
+      defaultUnitPriceFen: expectedFen,
+      defaultUnitPriceMilliYuan: expectedMilliYuan,
+    });
+    expect(result.issues).toEqual([]);
+  });
+
+  test.each([
+    { raw: "0.58/6PCS", expectedFen: 58, expectedMilliYuan: 580 },
+    { raw: "0.35/5PCS", expectedFen: 35, expectedMilliYuan: 350 },
+  ])("treats $raw as the price of one packaged SKU", ({ expectedFen, expectedMilliYuan, raw }) => {
+    const values = sampleRows();
+    values[1][4] = raw;
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows[0]).toMatchObject({
+      defaultUnitPriceFen: expectedFen,
+      defaultUnitPriceMilliYuan: expectedMilliYuan,
+    });
+    expect(result.issues).toContainEqual({
+      code: "CARGO_PACK_PRICE_NORMALIZED",
+      message: `${raw} 按一个整包 SKU 的采购价导入，不按 PCS 拆分单价`,
+      severity: "WARNING",
+      sourceRowNumber: 2,
+    });
+  });
+
+  test.each([
+    { expected: 50, raw: "50g/包" },
+    { expected: 36, raw: "9g*4" },
+    { expected: 18, raw: "6g*3" },
+    { expected: 13, raw: "12.5g" },
+  ])("normalizes legacy weight $raw to $expected grams", ({ expected, raw }) => {
+    const values = sampleRows();
+    values[3][11] = raw;
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.find((row) => row.sourceRowNumber === 4)?.weightGrams).toBe(expected);
+    expect(result.issues).toContainEqual({
+      code: "CARGO_WEIGHT_NOTATION_NORMALIZED",
+      message: `${raw} 已按确认规则转换为 ${expected}g`,
+      severity: "WARNING",
+      sourceRowNumber: 4,
+    });
+  });
+
+  test("normalizes product link sentinel 0 to an inherited null link", () => {
+    const values = sampleRows();
+    values[1][7] = "0";
+    values[2][7] = "";
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows[0].productUrl).toBeNull();
+    expect(result.rows[1].productUrl).toBeNull();
+    expect(result.rows[1].inheritedFrom.productUrl).toBe(2);
+    expect(result.issues).toContainEqual({
+      code: "CARGO_PRODUCT_URL_SENTINEL_NORMALIZED",
+      message: "链接文字 0 按无商品链接导入",
+      severity: "WARNING",
       sourceRowNumber: 2,
     });
   });

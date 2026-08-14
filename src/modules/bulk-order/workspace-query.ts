@@ -9,6 +9,7 @@ import {
   orderLines,
   skus,
 } from "@/db/schema";
+import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
 
 import { getBulkDraft } from "./draft-service";
 import { validateBulkDraft } from "./validation-service";
@@ -76,13 +77,19 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
   const [defaultPrices, customerPrices] = await Promise.all([
     skuIds.length
       ? db
-          .select({ defaultUnitPriceFen: skus.defaultUnitPriceFen, id: skus.id })
+          .select({
+            defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
+            id: skus.id,
+          })
           .from(skus)
           .where(inArray(skus.id, skuIds))
       : Promise.resolve([]),
     skuIds.length
       ? db
-          .select({ skuId: customerSkuPrices.skuId, unitPriceFen: customerSkuPrices.unitPriceFen })
+          .select({
+            skuId: customerSkuPrices.skuId,
+            unitPriceMilliYuan: customerSkuPrices.unitPriceMilliYuan,
+          })
           .from(customerSkuPrices)
           .where(
             and(
@@ -93,8 +100,12 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           )
       : Promise.resolve([]),
   ]);
-  const priceBySku = new Map(defaultPrices.map((row) => [row.id, row.defaultUnitPriceFen]));
-  for (const row of customerPrices) priceBySku.set(row.skuId, row.unitPriceFen);
+  const priceBySku = new Map(
+    defaultPrices.map((row) => [row.id, row.defaultUnitPriceMilliYuan]),
+  );
+  for (const row of customerPrices) {
+    priceBySku.set(row.skuId, row.unitPriceMilliYuan);
+  }
 
   const allSubOrders = [...new Set(rows.flatMap((row) => (row.externalSubOrderNo ? [row.externalSubOrderNo] : [])))];
   const existingRows =
@@ -143,7 +154,10 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         ) {
           continue;
         }
-        totalAmountFen += (priceBySku.get(row.resolvedSkuId) ?? 0) * row.quantity;
+        totalAmountFen += calculateLineAmountFen(
+          row.quantity,
+          priceBySku.get(row.resolvedSkuId) ?? 0,
+        );
       }
 
       return {

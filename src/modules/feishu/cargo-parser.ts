@@ -4,6 +4,7 @@ import type {
   MigrationIssue,
   ParsedCargoRow,
 } from "@/modules/feishu/cargo-types";
+import { roundMilliYuanToFen } from "@/modules/catalog/unit-price";
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const HEADER_ALIASES = {
@@ -37,7 +38,7 @@ type HeaderMap = Record<keyof typeof HEADER_ALIASES, number>;
 
 type LinkValue = {
   text: string;
-  url: string;
+  url: string | null;
 };
 
 type LinkResolution =
@@ -56,7 +57,7 @@ type GroupContext = {
   price: GroupFieldState | null;
   productGroupKey: GroupFieldState | null;
   productName: GroupFieldState | null;
-  productUrl: ({ text: string; url: string } & { rowNumber: number }) | null;
+  productUrl: ({ text: string; url: string | null } & { rowNumber: number }) | null;
   specification: GroupFieldState | null;
   saleStatus: GroupFieldState | null;
   weight: GroupFieldState | null;
@@ -166,10 +167,18 @@ function parseScaledDecimal(raw: string, scale: number) {
   return scaled;
 }
 
-function parseYuanToFen(value: unknown) {
+function parseYuanPrice(value: unknown) {
   const text = extractDisplayText(value).replace(/^[\u00a5\uffe5]/, "");
   if (text.length === 0) return null;
-  return parseScaledDecimal(text, 100);
+  const packageMatch = /^(0\.58\/6PCS|0\.35\/5PCS)$/i.exec(text);
+  const amount = packageMatch ? text.slice(0, text.indexOf("/")) : text;
+  const unitPriceMilliYuan = parseScaledDecimal(amount, 1_000);
+  if (unitPriceMilliYuan === null) return null;
+  return {
+    packageNotation: packageMatch ? text : null,
+    unitPriceFen: roundMilliYuanToFen(unitPriceMilliYuan),
+    unitPriceMilliYuan,
+  };
 }
 
 function parseNonNegativeSafeInteger(value: unknown) {
@@ -188,21 +197,48 @@ function parseNonNegativeSafeInteger(value: unknown) {
 
 function parseWeightGrams(value: unknown) {
   if (typeof value === "number") {
-    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+    return Number.isSafeInteger(value) && value >= 0
+      ? { grams: value, normalizedNotation: null }
+      : null;
   }
 
   const raw = extractDisplayText(value);
   if (raw.length === 0) return null;
 
   const normalized = raw.replace(/\s+/g, "").toLowerCase();
+  const packagedMatch = /^(\d+)g\/包$/.exec(normalized);
+  if (packagedMatch) {
+    const grams = Number.parseInt(packagedMatch[1], 10);
+    return Number.isSafeInteger(grams)
+      ? { grams, normalizedNotation: raw }
+      : null;
+  }
+  const multipliedMatch = /^(\d+)g\*(\d+)$/.exec(normalized);
+  if (multipliedMatch) {
+    const grams = Number.parseInt(multipliedMatch[1], 10);
+    const count = Number.parseInt(multipliedMatch[2], 10);
+    const total = grams * count;
+    return Number.isSafeInteger(total) && total >= 0
+      ? { grams: total, normalizedNotation: raw }
+      : null;
+  }
   const match = /^(\d+(?:\.\d+)?)(kg|g|\u514b)$/.exec(normalized);
   if (!match) return null;
 
   const [, amount, unit] = match;
-  const grams =
-    unit === "kg" ? parseScaledDecimal(amount, 1000) : parseScaledDecimal(amount, 1);
-  if (grams === null || grams > MAX_SAFE_INTEGER) return null;
-  return grams;
+  if (unit === "kg") {
+    const grams = parseScaledDecimal(amount, 1_000);
+    return grams === null || grams > MAX_SAFE_INTEGER
+      ? null
+      : { grams, normalizedNotation: null };
+  }
+  const decigrams = parseScaledDecimal(amount, 10);
+  if (decigrams === null || decigrams > MAX_SAFE_INTEGER) return null;
+  const grams = Math.floor((decigrams + 5) / 10);
+  return {
+    grams,
+    normalizedNotation: decigrams % 10 === 0 ? null : raw,
+  };
 }
 
 function parseSaleStatus(value: unknown) {
@@ -225,6 +261,9 @@ function parseSaleStatus(value: unknown) {
 
 function resolveLink(value: unknown): LinkResolution {
   const text = extractDisplayText(value);
+  if (text === "0" && collectLinkTargets(value).length === 0) {
+    return { kind: "valid", value: { text: "", url: null } };
+  }
   const urls = [...new Set(collectLinkTargets(value))];
   if (urls.length === 1) {
     if (isAbsoluteHttpUrl(urls[0])) {
@@ -556,12 +595,23 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       continue;
     }
 
-    const explicitPriceFen = parseYuanToFen(row[headerMap.price]);
-    const defaultUnitPriceFen =
-      explicitPriceFen ??
+    const explicitPrice = parseYuanPrice(row[headerMap.price]);
+    const defaultUnitPriceMilliYuan =
+      explicitPrice?.unitPriceMilliYuan ??
       (typeof context.price?.value === "number" ? context.price.value : null);
-    if (explicitPriceFen !== null) {
-      context.price = { rowNumber: sourceRowNumber, value: explicitPriceFen };
+    if (explicitPrice !== null) {
+      context.price = {
+        rowNumber: sourceRowNumber,
+        value: explicitPrice.unitPriceMilliYuan,
+      };
+      if (explicitPrice.packageNotation) {
+        issues.push({
+          code: "CARGO_PACK_PRICE_NORMALIZED",
+          message: `${explicitPrice.packageNotation} 按一个整包 SKU 的采购价导入，不按 PCS 拆分单价`,
+          severity: "WARNING",
+          sourceRowNumber,
+        });
+      }
     } else if (extractDisplayText(row[headerMap.price]).length === 0 && context.price) {
       inheritedFrom.price = context.price.rowNumber;
     } else {
@@ -597,6 +647,14 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           : null;
     if (explicitLink.kind === "valid") {
       context.productUrl = { ...explicitLink.value, rowNumber: sourceRowNumber };
+      if (explicitLink.value.url === null) {
+        issues.push({
+          code: "CARGO_PRODUCT_URL_SENTINEL_NORMALIZED",
+          message: "链接文字 0 按无商品链接导入",
+          severity: "WARNING",
+          sourceRowNumber,
+        });
+      }
     } else if (isBlankLinkCell(linkCell) && context.productUrl) {
       inheritedFrom.productUrl = context.productUrl.rowNumber;
     } else if (explicitLink.kind === "invalid") {
@@ -645,12 +703,20 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const explicitWeight = parseWeightGrams(row[headerMap.weight]);
     const weightText = extractDisplayText(row[headerMap.weight]);
     const weightGrams =
-      explicitWeight ??
+      explicitWeight?.grams ??
       (weightText.length === 0 && typeof context.weight?.value === "number"
         ? context.weight.value
         : null);
     if (explicitWeight !== null) {
-      context.weight = { rowNumber: sourceRowNumber, value: explicitWeight };
+      context.weight = { rowNumber: sourceRowNumber, value: explicitWeight.grams };
+      if (explicitWeight.normalizedNotation) {
+        issues.push({
+          code: "CARGO_WEIGHT_NOTATION_NORMALIZED",
+          message: `${explicitWeight.normalizedNotation} 已按确认规则转换为 ${explicitWeight.grams}g`,
+          severity: "WARNING",
+          sourceRowNumber,
+        });
+      }
     } else if (weightText.length === 0 && context.weight) {
       inheritedFrom.weight = context.weight.rowNumber;
     } else if (weightText.length > 0) {
@@ -701,7 +767,8 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     rows.push({
       color: extractDisplayText(row[headerMap.color]) || null,
       combination,
-      defaultUnitPriceFen: defaultUnitPriceFen!,
+      defaultUnitPriceFen: roundMilliYuanToFen(defaultUnitPriceMilliYuan!),
+      defaultUnitPriceMilliYuan: defaultUnitPriceMilliYuan!,
       imageFileToken,
       inheritedFrom,
       linkText: resolvedLink!.text,

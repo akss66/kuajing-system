@@ -81,6 +81,7 @@ describe("AdminOrderDetailPage", () => {
               skuId: "sku-1",
               skuName: "订单商品",
               unitPriceFen: 500,
+              unitPriceMilliYuan: 5_000,
             },
           ],
           logisticsCurrency: "CAD",

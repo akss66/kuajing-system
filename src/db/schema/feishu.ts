@@ -77,6 +77,7 @@ const normalizedRowsJsonInvalidPath = `$[*] ? (
   @.type() != "object" ||
   ${invalidRequiredPositiveSafeInteger("@.sourceRowNumber")} ||
   ${invalidRequiredNonNegativeSafeInteger("@.defaultUnitPriceFen")} ||
+  ${invalidRequiredNonNegativeSafeInteger("@.defaultUnitPriceMilliYuan")} ||
   ${invalidRequiredNonNegativeSafeInteger("@.totalQuantity")} ||
   ${invalidRequiredNonNegativeSafeIntegerOrNull("@.weightGrams")} ||
   !exists(@.saleStatus) ||

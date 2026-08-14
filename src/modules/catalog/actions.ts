@@ -15,18 +15,20 @@ import {
 import { requireAdmin } from "@/modules/identity/guards";
 import { refreshActiveImportPreviewsForAlias } from "@/modules/order-import/service";
 import type { ActionState } from "@/shared/action-state";
+import { roundMilliYuanToFen } from "./unit-price";
 
 const moneySchema = z
   .string()
   .trim()
-  .regex(/^\d+(?:\.\d{1,2})?$/, "价格最多保留两位小数")
-  .transform((value) => Math.round(Number(value) * 100));
+  .regex(/^\d+(?:\.\d{1,3})?$/, "价格最多保留三位小数")
+  .transform((value) => Math.round(Number(value) * 1_000))
+  .refine(Number.isSafeInteger, "价格超出系统支持范围");
 
 const schema = z.object({
   skuCode: z.string().trim().min(2, "请填写标准 SKU").max(80),
   productName: z.string().trim().min(2, "请填写商品名称").max(200),
   skuName: z.string().trim().min(1, "请填写规格名称").max(200),
-  defaultPriceFen: moneySchema,
+  defaultPriceMilliYuan: moneySchema,
 });
 
 function validationError(error: z.ZodError): ActionState {
@@ -42,7 +44,7 @@ export async function createSkuAction(
 ): Promise<ActionState> {
   const principal = await requireAdmin();
   const parsed = schema.safeParse({
-    defaultPriceFen: formData.get("defaultPriceYuan"),
+    defaultPriceMilliYuan: formData.get("defaultPriceYuan"),
     productName: formData.get("productName"),
     skuCode: formData.get("skuCode"),
     skuName: formData.get("skuName"),
@@ -59,7 +61,8 @@ export async function createSkuAction(
     const [sku] = await tx
       .insert(skus)
       .values({
-        defaultUnitPriceFen: input.defaultPriceFen,
+        defaultUnitPriceFen: roundMilliYuanToFen(input.defaultPriceMilliYuan),
+        defaultUnitPriceMilliYuan: input.defaultPriceMilliYuan,
         name: input.skuName,
         productId: product.id,
         skuCode: input.skuCode,
@@ -70,7 +73,11 @@ export async function createSkuAction(
       action: "SKU_CREATED",
       actorId: principal.userId,
       actorType: "ADMIN",
-      afterJson: { defaultUnitPriceFen: input.defaultPriceFen, skuCode: input.skuCode },
+      afterJson: {
+        defaultUnitPriceFen: roundMilliYuanToFen(input.defaultPriceMilliYuan),
+        defaultUnitPriceMilliYuan: input.defaultPriceMilliYuan,
+        skuCode: input.skuCode,
+      },
       beforeJson: {},
       entityId: sku.id,
       entityType: "SKU",
@@ -90,7 +97,7 @@ export async function createSkuAction(
 const customerPriceSchema = z.object({
   customerId: z.string().uuid(),
   skuId: z.string().uuid(),
-  unitPriceFen: moneySchema,
+  unitPriceMilliYuan: moneySchema,
 });
 
 export async function setCustomerPriceAction(
@@ -101,7 +108,7 @@ export async function setCustomerPriceAction(
   const parsed = customerPriceSchema.safeParse({
     customerId: formData.get("customerId"),
     skuId: formData.get("skuId"),
-    unitPriceFen: formData.get("unitPriceYuan"),
+    unitPriceMilliYuan: formData.get("unitPriceYuan"),
   });
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
@@ -109,16 +116,30 @@ export async function setCustomerPriceAction(
     await db.transaction(async (tx) => {
     await tx
       .insert(customerSkuPrices)
-      .values(input)
+      .values({
+        customerId: input.customerId,
+        skuId: input.skuId,
+        unitPriceFen: roundMilliYuanToFen(input.unitPriceMilliYuan),
+        unitPriceMilliYuan: input.unitPriceMilliYuan,
+      })
       .onConflictDoUpdate({
-        set: { active: true, unitPriceFen: input.unitPriceFen, updatedAt: new Date() },
+        set: {
+          active: true,
+          unitPriceFen: roundMilliYuanToFen(input.unitPriceMilliYuan),
+          unitPriceMilliYuan: input.unitPriceMilliYuan,
+          updatedAt: new Date(),
+        },
         target: [customerSkuPrices.customerId, customerSkuPrices.skuId],
       });
     await tx.insert(auditLogs).values({
       action: "CUSTOMER_PRICE_SET",
       actorId: principal.userId,
       actorType: "ADMIN",
-      afterJson: { customerId: input.customerId, unitPriceFen: input.unitPriceFen },
+      afterJson: {
+        customerId: input.customerId,
+        unitPriceFen: roundMilliYuanToFen(input.unitPriceMilliYuan),
+        unitPriceMilliYuan: input.unitPriceMilliYuan,
+      },
       beforeJson: {},
       entityId: input.skuId,
       entityType: "SKU_PRICE",

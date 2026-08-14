@@ -16,6 +16,7 @@ export default async function CatalogPage() {
         id: skus.id,
         name: skus.name,
         price: skus.defaultUnitPriceFen,
+        priceMilliYuan: skus.defaultUnitPriceMilliYuan,
         productName: products.name,
         saleStatus: skus.saleStatus,
         skuCode: skus.skuCode,

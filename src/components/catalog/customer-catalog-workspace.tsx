@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
+import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 function CatalogImage({
   imageUrl,
@@ -78,7 +79,7 @@ function CustomerCatalogResults({ items }: { items: CustomerCatalogItem[] }) {
                 </TableCell>
                 <TableCell>{item.skuName}</TableCell>
                 <TableCell className="text-right font-semibold tabular-nums">
-                  ¥{(item.actualUnitPriceFen / 100).toFixed(2)}
+                  {formatMilliYuan(item.actualUnitPriceMilliYuan)}
                 </TableCell>
                 <TableCell className="text-right font-semibold tabular-nums">
                   {item.availableQuantity}
@@ -147,7 +148,7 @@ function CustomerCatalogResults({ items }: { items: CustomerCatalogItem[] }) {
                   实际拿货价
                 </dt>
                 <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                  ¥{(item.actualUnitPriceFen / 100).toFixed(2)}
+                  {formatMilliYuan(item.actualUnitPriceMilliYuan)}
                 </dd>
               </div>
               <div className="text-right">

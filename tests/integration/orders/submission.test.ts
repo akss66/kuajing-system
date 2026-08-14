@@ -94,6 +94,7 @@ async function createSku(input: {
   externalSku: string;
   totalQuantity: number;
   defaultPriceFen: number;
+  defaultPriceMilliYuan?: number;
   customerPriceFen?: number;
   saleStatus?: "SELLABLE" | "NOT_SELLABLE";
 }) {
@@ -105,6 +106,8 @@ async function createSku(input: {
     .insert(skus)
     .values({
       defaultUnitPriceFen: input.defaultPriceFen,
+      defaultUnitPriceMilliYuan:
+        input.defaultPriceMilliYuan ?? input.defaultPriceFen * 10,
       name: input.externalSku,
       productId: product.id,
       saleStatus: input.saleStatus,
@@ -125,6 +128,7 @@ async function createSku(input: {
       customerId: input.customerId,
       skuId: sku.id,
       unitPriceFen: input.customerPriceFen,
+      unitPriceMilliYuan: input.customerPriceFen * 10,
     });
   }
   return sku;
@@ -289,6 +293,49 @@ describe("atomic TEMU take-order submission", () => {
       .from(orderImportBatches)
       .where(eq(orderImportBatches.id, preview.batchId));
     expect(batch.status).toBe("PREVIEW");
+  });
+
+  test("rounds each order line only after multiplying an exact milli-yuan price", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 33,
+      defaultPriceMilliYuan: 325,
+      externalSku: "EXT-SKU-A",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [
+        { [TEMU_EXPORT_HEADERS[4]]: 2 },
+        {
+          [TEMU_EXPORT_HEADERS[3]]: "SUB-SUBMIT-2",
+          [TEMU_EXPORT_HEADERS[4]]: 3,
+        },
+      ],
+    });
+
+    const submitted = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+    });
+    const lines = await db
+      .select({
+        lineAmountFen: orderLines.lineAmountFen,
+        unitPriceFen: orderLines.unitPriceFen,
+        unitPriceMilliYuan: orderLines.unitPriceMilliYuan,
+      })
+      .from(orderLines)
+      .orderBy(orderLines.externalSubOrderNo);
+
+    expect(submitted.totalAmountFen).toBe(163);
+    expect(lines).toEqual([
+      { lineAmountFen: 65, unitPriceFen: 33, unitPriceMilliYuan: 325 },
+      { lineAmountFen: 98, unitPriceFen: 33, unitPriceMilliYuan: 325 },
+    ]);
   });
 
   test("rejects a manually not-sellable SKU even when stock is available", async () => {

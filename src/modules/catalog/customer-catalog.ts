@@ -17,6 +17,7 @@ export type CustomerCatalogItem = {
   imageUrl: string | null;
   specification: string | null;
   actualUnitPriceFen: number;
+  actualUnitPriceMilliYuan: number;
   availableQuantity: number;
   sellable: boolean;
 };
@@ -28,6 +29,7 @@ export async function listCustomerCatalog(
     db
       .select({
         defaultUnitPriceFen: skus.defaultUnitPriceFen,
+        defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
         id: skus.id,
         imageUrl: skus.imageUrl,
         productName: products.name,
@@ -41,7 +43,11 @@ export async function listCustomerCatalog(
         and(eq(skus.saleStatus, "SELLABLE"), eq(products.status, "ACTIVE")),
       ),
     db
-      .select({ skuId: customerSkuPrices.skuId, unitPriceFen: customerSkuPrices.unitPriceFen })
+      .select({
+        skuId: customerSkuPrices.skuId,
+        unitPriceFen: customerSkuPrices.unitPriceFen,
+        unitPriceMilliYuan: customerSkuPrices.unitPriceMilliYuan,
+      })
       .from(customerSkuPrices)
       .where(
         and(
@@ -62,7 +68,7 @@ export async function listCustomerCatalog(
       .groupBy(inventoryReservations.skuId),
   ]);
 
-  const prices = new Map(priceRows.map((row) => [row.skuId, row.unitPriceFen]));
+  const prices = new Map(priceRows.map((row) => [row.skuId, row]));
   const balances = new Map(balanceRows.map((row) => [row.skuId, row.totalQuantity]));
   const reservations = new Map(
     reservationRows.map((row) => [row.skuId, row.quantity]),
@@ -73,8 +79,11 @@ export async function listCustomerCatalog(
       0,
       (balances.get(row.id) ?? 0) - (reservations.get(row.id) ?? 0),
     );
+    const customerPrice = prices.get(row.id);
     return {
-      actualUnitPriceFen: prices.get(row.id) ?? row.defaultUnitPriceFen,
+      actualUnitPriceFen: customerPrice?.unitPriceFen ?? row.defaultUnitPriceFen,
+      actualUnitPriceMilliYuan:
+        customerPrice?.unitPriceMilliYuan ?? row.defaultUnitPriceMilliYuan,
       availableQuantity,
       id: row.id,
       imageUrl: row.imageUrl,

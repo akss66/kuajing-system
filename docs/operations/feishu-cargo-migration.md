@@ -1,40 +1,33 @@
-# 飞书货盘迁移上线手册
+# 飞书货盘只读迁移上线手册
 
-日期：2026-08-13  
-适用范围：`tongzhouxing-shop` 生产环境首批飞书货盘迁移  
-当前阶段：Phase A 只允许部署、连接验证、只读预检和证据记录；**不允许确认导入，不允许写测试表，不允许改写原业务货盘**
+日期：2026-08-14
+适用范围：`tongzhouxing-shop` 首批飞书货盘迁移到 PostgreSQL
 
-## 1. 操作边界
+## 1. 永久安全边界
 
-- 服务边界：`web`、`worker`、`postgres`、`tongzhouxing_shop_catalog_assets` 卷。
-- 数据边界：原业务飞书货盘只读；PostgreSQL 是导入目标；独立测试表只作为后续镜像展示目标。
-- 控制边界：只有超级管理员可以执行首批预检和确认；Phase A 到本文档的“停止点”为止。
+- 原业务飞书 Wiki/电子表格始终只读，禁止调用任何飞书写接口。
+- 不配置目标 spreadsheet/sheet，不创建飞书镜像表。
+- `compose.production.yaml` 必须把 `FEISHU_CARGO_WRITES_ENABLED` 硬编码为 `false`，环境文件不能覆盖。
+- `FEISHU_CARGO_IMPORT_ENABLED` 只控制“已确认的预检快照写入 PostgreSQL”，不控制飞书远程写入。
+- 只有超级管理员可以执行只读预检和一次性数据库导入。
+- 没有新鲜的 `PREFLIGHT_READY` 结果、数据库备份或数量核验时，禁止打开数据库导入开关。
 
-## 2. 变更前提
+## 2. 本次源表解释规则
 
-- 已准备一个**独立空白**飞书电子表格，名称固定为 `同舟行系统货盘测试表`。
-- 已把飞书应用 `同舟行跨境货盘同步` 添加为该测试表的可编辑协作者。
-- 已拿到：
-  - `FEISHU_APP_ID`
-  - `FEISHU_APP_SECRET`
-  - `FEISHU_CARGO_SOURCE_WIKI_TOKEN`
-  - `FEISHU_CARGO_SOURCE_SHEET_ID`
-  - `FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN`
-  - `FEISHU_CARGO_TARGET_SHEET_ID`
-- 已确认源 wiki token 与目标 spreadsheet token 不同；若相同，立即停止。
-- 已安排 10 到 20 分钟业务冻结窗口，用于最终只读复检和后续单独审批。
+- “74”是源表商品序号数量，不是 SKU 数量。
+- SKU 按 `TZX-数字` 的商品编号分组，例如 `TZX-034-1/2/3` 同属商品 34，但仍是 3 个独立 SKU。
+- 预期只读预检应得到 76 个商品、140 个 SKU、140 张图片；以真实预检结果和问题明细为最终依据。
+- `TZX-077` 是末尾未完成草稿，本次跳过并显示警告；中间缺资料行仍然阻断。
+- 单价以“厘”（人民币千分之一元）精确保留：`0.325`→325 厘、`1.366`→1366 厘。
+- `0.58/6PCS` 和 `0.35/5PCS` 分别是一个整包 SKU 的价格，不按 PCS 拆分。
+- 订单行金额在 `数量 × 精确厘价` 后，才四舍五入到分。
+- `50g/包`→50g，`9g*4`→36g，`6g*3`→18g，`12.5g`→13g。
+- 商品链接单元格只有 `0` 时写入数据库 `null`。
+- 所有上述旧格式转换都必须在预检里显示 `WARNING`，未知格式继续阻断。
 
-## 3. 密钥录入
+## 3. 生产配置
 
-在生产主机使用**交互式编辑器**写入 `/home/admin/tongzhouxing-shop/.env.production`。不要把密钥放到 shell 历史、工单、聊天或截图中。
-
-```bash
-cd /home/admin/tongzhouxing-shop
-cp -n .env.example /home/admin/tongzhouxing-shop/.env.production
-nano /home/admin/tongzhouxing-shop/.env.production
-```
-
-必须填写或核对：
+密钥只写入 `/home/admin/tongzhouxing-shop/secrets/.env.production`，不要放进 shell 历史、聊天或截图：
 
 ```dotenv
 FEISHU_APP_ID=
@@ -48,27 +41,44 @@ FEISHU_CARGO_TARGET_SHEET_ID=
 CATALOG_ASSET_DIR=/app/data/catalog-assets
 ```
 
-`FEISHU_CARGO_IMPORT_ENABLED` 与 `FEISHU_CARGO_WRITES_ENABLED` 是两条独立边界。前者只有精确值 `true` 时才允许把确认后的预检结果写入 PostgreSQL；后者控制独立飞书目标表写入，当前业务要求始终保持 `false`。生产 Compose 已把飞书写入值硬编码为 `false`，环境文件无法覆盖。开启数据库导入绝不会放开飞书写入。
+目标表两个变量必须留空。部署与预检期间两个开关都保持 `false`。
 
-保存后只做最小校验：
-
-```bash
-grep -E '^(FEISHU_APP_ID|FEISHU_CARGO_SOURCE_WIKI_TOKEN|FEISHU_CARGO_WRITES_ENABLED|FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN|CATALOG_ASSET_DIR)=' /home/admin/tongzhouxing-shop/.env.production
-```
-
-注意：上面的校验只确认键存在，不应回显真实 secret。
-
-## 4. 发布前备份
-
-先备份数据库，再备份图片卷。以下命令在生产主机执行：
+## 4. 部署只读版本
 
 ```bash
 cd /home/admin/tongzhouxing-shop
-export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
+export APP_ENV_FILE=/home/admin/tongzhouxing-shop/secrets/.env.production
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" config --quiet
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" build web worker
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d postgres
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" run --rm web npm run db:migrate
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker
+curl -fsS https://shop.tzxai.top/api/health
+docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
+```
+
+通过标准：迁移成功，Web/Worker 健康，`FEISHU_CARGO_IMPORT_ENABLED=false`，`FEISHU_CARGO_WRITES_ENABLED=false`，目标表配置为空。
+
+## 5. 只读预检
+
+超级管理员在 `系统 > 集成 > 飞书`：
+
+1. 验证只读连接。
+2. 选择源 sheet，点击“开始只读预检”。
+3. 记录 source revision、source digest、商品数、SKU 数、图片数、总库存、阻断数和警告明细。
+4. 核对商品编号分组、全部 140 个 SKU、图片、精确价格、重量和链接转换。
+5. 确认预检后业务表仍为空：`products=0`、`skus=0`、`inventory_balances=0`。
+
+若状态不是 `PREFLIGHT_READY`、数量不符、存在未知转换或 revision/digest 变化，立即停止，不导入。
+
+## 6. 导入前备份
+
+```bash
+cd /home/admin/tongzhouxing-shop
+export APP_ENV_FILE=/home/admin/tongzhouxing-shop/secrets/.env.production
 export BACKUP_DIR=/home/admin/backups/feishu-cargo-migration
 export BACKUP_STAMP="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d postgres
 docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" exec -T postgres \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-privileges \
   > "$BACKUP_DIR/postgres-$BACKUP_STAMP.dump"
@@ -76,129 +86,34 @@ docker run --rm \
   -v tongzhouxing_shop_catalog_assets:/from \
   -v "$BACKUP_DIR":/to \
   alpine sh -c "cd /from && tar -czf /to/catalog-assets-$BACKUP_STAMP.tar.gz ."
-ls -lh "$BACKUP_DIR"/postgres-"$BACKUP_STAMP".dump "$BACKUP_DIR"/catalog-assets-"$BACKUP_STAMP".tar.gz
+ls -lh "$BACKUP_DIR/postgres-$BACKUP_STAMP.dump" \
+  "$BACKUP_DIR/catalog-assets-$BACKUP_STAMP.tar.gz"
 ```
 
-若任一步失败，停止发布，不进入下一步。
+任何一步失败都必须停止。
 
-## 5. 部署与迁移
+## 7. 一次性写入 PostgreSQL
 
-```bash
-cd /home/admin/tongzhouxing-shop
-export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" config --quiet
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" build web worker
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d postgres
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" run --rm web npm run db:migrate
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker
-curl -fsS http://127.0.0.1:3000/api/health
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
-```
+仅在第 5、6 节全部通过后：
 
-部署当下不要把 `FEISHU_CARGO_WRITES_ENABLED` 改成 `true`。`compose.production.yaml` 会在变量缺失时把 web/worker 默认钉到 `false`，这样 Thursday, August 13, 2026 的 Phase A 首次上线仍然保持只读。
+1. 把 `FEISHU_CARGO_IMPORT_ENABLED` 临时改为 `true`。
+2. 只重建 Web/Worker，确认飞书写入开关仍为 `false`。
+3. 超级管理员对刚刚核验的 ready run 输入页面给出的动态确认语句（应按真实 SKU 数生成，例如 `确认迁移140个SKU`）。
+4. 导入成功后立即把 `FEISHU_CARGO_IMPORT_ENABLED` 改回 `false`，再次重建 Web/Worker。
 
-通过标准：
+任何时候都不得设置 `FEISHU_CARGO_WRITES_ENABLED=true`。
 
-- `config --quiet` 成功。
-- `db:migrate` 成功且无回滚动作。
-- `web` 与 `worker` 都是 `Up`。
-- `GET /api/health` 返回 `200`。
+## 8. 导入后核验
 
-## 6. 只读连接验证
+- `products`、`skus`、`inventory_balances`、`catalog_assets` 数量与 ready run 一致。
+- 每个 SKU 恰好一个图片资产和一个库存余额。
+- `0.325`、`1.366` 等价格在后台和客户货盘中按真实精度显示。
+- 订单使用精确厘价计算，最终行金额按分四舍五入。
+- 库存总和与预检一致，0 库存 SKU 为不可售。
+- 导入审计存在且不含 App Secret、token、file token 或收件人隐私。
+- `integration_outbox` 没有飞书目标写入成功记录，源 revision 没有被应用改变。
+- Web/Worker 健康，两个生产开关最终都为 `false`。
 
-使用超级管理员登录后台，只允许执行以下只读动作：
+## 9. 恢复
 
-1. 打开 `系统 > 集成 > 飞书`。
-2. 点击“验证只读连接”。
-3. 确认页面能读取源工作表和目标工作表元数据。
-4. 记录：
-   - 源工作表标题
-   - 源 sheet id
-   - 目标 spreadsheet token 对应的测试表标题
-
-禁止执行：
-
-- “确认迁移 74 个 SKU”
-- “重新同步目标测试表”
-- 任何会写测试表或触发 outbox 的操作
-
-## 7. 第一次只读预检
-
-仍然只允许超级管理员执行：
-
-1. 选择 `FEISHU_CARGO_SOURCE_SHEET_ID` 对应工作表。
-2. 点击“开始只读预检”。
-3. 等待预检结果稳定。
-4. 记录以下证据：
-   - 预检状态
-   - `sourceRevision`
-   - `sourceDigest`
-   - 商品数
-   - SKU 数
-   - 图片数
-   - 总库存
-   - 阻塞问题和警告问题数量
-
-Phase A 验证标准：
-
-- 原业务货盘内容、结构、修订号没有因为应用而变化。
-- 预检结果里看不到原始 token、file token 或 secret。
-- 目标测试表仍为空白，未被应用写入。
-
-## 8. 冻结窗口与最终复检
-
-在业务负责人宣布冻结窗口开始后，执行最终只读复检：
-
-1. 约束相关同事 10 到 20 分钟内不要编辑原业务货盘。
-2. 再次执行“开始只读预检”。
-3. 比较新旧两次预检：
-   - `sourceRevision` 必须一致，或若不一致则重新审阅差异后重新开始冻结窗口。
-   - `sourceDigest` 必须一致。
-   - 结果应仍为 74 个 SKU、74 张图片，且无阻塞问题。
-
-只要 revision 或 digest 变化，就视为源表已变更，必须重新预检，不能继续。
-
-## 9. Phase A 停止点
-
-做到这里必须停止，并向负责人提交证据。**不要继续执行下面这些动作：**
-
-- 不点击“确认迁移 74 个 SKU”
-- 不点击“重新同步目标测试表”
-- 不手工写测试表
-- 不切换客户查看入口
-- 不修改原业务货盘
-
-后续是否进入确认导入和目标表写入，必须在新的明确审批消息中单独授权。
-
-如果后续收到单独审批，放开写入的最小步骤只有：
-
-```bash
-cd /home/admin/tongzhouxing-shop
-export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
-nano "$APP_ENV_FILE"   # 把 FEISHU_CARGO_WRITES_ENABLED 改成 true
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker
-curl -fsS http://127.0.0.1:3000/api/health
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" ps
-```
-
-只改这一项并重启 `web`、`worker`；不要同时混入其他配置变更。
-
-## 10. 回滚与恢复
-
-Phase A 内如果部署后发现问题，但尚未确认迁移：
-
-```bash
-cd /home/admin/tongzhouxing-shop
-export APP_ENV_FILE=/home/admin/tongzhouxing-shop/.env.production
-nano "$APP_ENV_FILE"   # 先把 FEISHU_CARGO_WRITES_ENABLED 改回 false（或删掉）
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" down
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d postgres
-docker compose -f compose.production.yaml --env-file "$APP_ENV_FILE" up -d web worker
-```
-
-如果需要恢复到备份前状态：
-
-- 数据库：使用 `postgres-$BACKUP_STAMP.dump` 按既有恢复演练流程恢复到隔离库先验证，再由负责人批准恢复生产。
-- 图片卷：使用 `catalog-assets-$BACKUP_STAMP.tar.gz` 恢复。
-
-因为 Phase A 不确认导入，所以正常情况下不应出现业务数据写入；优先使用应用版本回退，而不是直接覆盖数据库。
+发现异常时先停止 Web/Worker 并保持 PostgreSQL 容器运行。使用备份恢复到隔离库核验后，再决定生产恢复；图片卷同样先在隔离位置验证。不要通过修改原飞书业务表来“修复”系统数据。

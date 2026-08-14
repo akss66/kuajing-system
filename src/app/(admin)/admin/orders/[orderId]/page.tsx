@@ -15,6 +15,7 @@ import {
   retryJifengShipmentAction,
 } from "@/modules/fulfillment/actions";
 import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
+import { formatMilliYuan } from "@/modules/catalog/unit-price";
 import { getAdminOrderDetail } from "@/modules/orders/queries";
 import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
@@ -130,7 +131,7 @@ export default async function AdminOrderDetailPage({
               <div className="p-4 sm:p-5">
                 <h3 className="text-sm font-semibold text-ink">包裹商品</h3>
                 <div className="mt-3 divide-y divide-border rounded-xl border border-border">
-                  {shipment.lines.map((line) => <div className="grid grid-cols-[1fr_auto] gap-4 px-3 py-3 text-sm sm:grid-cols-[1fr_0.7fr_auto]" key={line.id}><div><p className="font-medium text-ink">{line.skuCode}</p><p className="mt-0.5 text-xs text-muted">{line.skuName}</p></div><p className="hidden self-center text-muted sm:block">¥{(line.unitPriceFen / 100).toFixed(2)} / 件</p><p className="self-center font-semibold tabular-nums">× {line.quantity}</p></div>)}
+                  {shipment.lines.map((line) => <div className="grid grid-cols-[1fr_auto] gap-4 px-3 py-3 text-sm sm:grid-cols-[1fr_0.7fr_auto]" key={line.id}><div><p className="font-medium text-ink">{line.skuCode}</p><p className="mt-0.5 text-xs text-muted">{line.skuName}</p></div><p className="hidden self-center text-muted sm:block">{formatMilliYuan(line.unitPriceMilliYuan)} / 件</p><p className="self-center font-semibold tabular-nums">× {line.quantity}</p></div>)}
                 </div>
               </div>
 

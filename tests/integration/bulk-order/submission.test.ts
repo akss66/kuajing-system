@@ -83,6 +83,7 @@ async function createDraftFixture(groupNames: readonly string[]) {
 async function createSku(input: {
   code: string;
   defaultPriceFen?: number;
+  defaultPriceMilliYuan?: number;
   saleStatus?: "SELLABLE" | "NOT_SELLABLE";
   stock: number;
 }) {
@@ -94,6 +95,8 @@ async function createSku(input: {
     .insert(skus)
     .values({
       defaultUnitPriceFen: input.defaultPriceFen ?? 100,
+      defaultUnitPriceMilliYuan:
+        input.defaultPriceMilliYuan ?? (input.defaultPriceFen ?? 100) * 10,
       name: `规格-${input.code}`,
       productId: product.id,
       saleStatus: input.saleStatus,
@@ -405,6 +408,48 @@ describe("atomic partial bulk submission", () => {
     expect(JSON.stringify(await db.select().from(auditLogs))).not.toContain(
       "Sensitive Recipient",
     );
+  });
+
+  test("rounds a bulk order line only after multiplying an exact milli-yuan price", async () => {
+    const fixture = await createDraftFixture(["exact-price"]);
+    const sku = await createSku({
+      code: "EXACT-MILLI",
+      defaultPriceFen: 33,
+      defaultPriceMilliYuan: 325,
+      stock: 10,
+    });
+    const group = fixture.groups.get("exact-price")!;
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [
+        {
+          quantity: 3,
+          resolvedSkuId: sku.id,
+          rowNumber: 2,
+        },
+      ],
+      storeId: group.storeId,
+    });
+
+    const result = await submitBulkDraft({
+      actorUserId: "exact-price-customer",
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: "bulk-exact-milli-price",
+      requestedWalletFen: 0,
+      selectedGroupIds: [group.id],
+    });
+
+    expect(result.createdOrders).toHaveLength(1);
+    const [order] = await db.select().from(fulfillmentOrders);
+    const [line] = await db.select().from(orderLines);
+    expect(order.totalAmountFen).toBe(98);
+    expect(line).toMatchObject({
+      lineAmountFen: 98,
+      unitPriceFen: 33,
+      unitPriceMilliYuan: 325,
+    });
   });
 
   test("rejects reuse of a customer idempotency key with a different payload", async () => {

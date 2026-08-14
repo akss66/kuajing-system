@@ -82,6 +82,9 @@ export const skus = pgTable(
     color: varchar("color", { length: 160 }),
     combination: varchar("combination", { length: 160 }),
     weightGrams: integer("weight_grams"),
+    defaultUnitPriceMilliYuan: integer("default_unit_price_milli_yuan")
+      .default(0)
+      .notNull(),
     defaultUnitPriceFen: integer("default_unit_price_fen").notNull(),
     declarationUnitPriceFen: integer("declaration_unit_price_fen"),
     saleStatus: skuSaleStatus("sale_status").default("SELLABLE").notNull(),
@@ -90,8 +93,16 @@ export const skus = pgTable(
   (table) => [
     check("skus_weight_non_negative", sql`${table.weightGrams} >= 0`),
     check(
+      "skus_default_price_milli_yuan_non_negative",
+      sql`${table.defaultUnitPriceMilliYuan} >= 0`,
+    ),
+    check(
       "skus_default_price_non_negative",
       sql`${table.defaultUnitPriceFen} >= 0`,
+    ),
+    check(
+      "skus_default_price_fen_matches_milli_yuan",
+      sql`${table.defaultUnitPriceFen} = ((${table.defaultUnitPriceMilliYuan}::bigint + 5) / 10)`,
     ),
     check(
       "skus_declaration_price_non_negative",
@@ -110,6 +121,7 @@ export const customerSkuPrices = pgTable(
     skuId: uuid("sku_id")
       .notNull()
       .references(() => skus.id, { onDelete: "restrict" }),
+    unitPriceMilliYuan: integer("unit_price_milli_yuan").default(0).notNull(),
     unitPriceFen: integer("unit_price_fen").notNull(),
     active: boolean("active").default(true).notNull(),
     ...timestamps,
@@ -120,8 +132,16 @@ export const customerSkuPrices = pgTable(
       table.skuId,
     ),
     check(
+      "customer_sku_prices_unit_price_milli_yuan_non_negative",
+      sql`${table.unitPriceMilliYuan} >= 0`,
+    ),
+    check(
       "customer_sku_prices_unit_price_non_negative",
       sql`${table.unitPriceFen} >= 0`,
+    ),
+    check(
+      "customer_sku_prices_unit_price_fen_matches_milli_yuan",
+      sql`${table.unitPriceFen} = ((${table.unitPriceMilliYuan}::bigint + 5) / 10)`,
     ),
   ],
 );

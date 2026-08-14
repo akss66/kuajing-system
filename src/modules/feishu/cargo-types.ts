@@ -41,9 +41,10 @@ export type NormalizedCargoRow = {
   productName: string;
   skuName: string;
   defaultUnitPriceFen: number;
+  defaultUnitPriceMilliYuan: number;
   totalQuantity: number;
   linkText: string;
-  productUrl: string;
+  productUrl: string | null;
   specification: string | null;
   color: string | null;
   combination: string | null;

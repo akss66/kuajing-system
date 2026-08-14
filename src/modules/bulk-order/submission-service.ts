@@ -21,6 +21,7 @@ import {
   stores,
 } from "@/db/schema";
 import { resolveUnitPrice } from "@/modules/catalog/pricing";
+import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { reserveInventoryForGroups } from "@/modules/inventory/service";
 import {
@@ -190,18 +191,6 @@ function safeAdd(first: number, second: number) {
     result > 2_147_483_647
   ) {
     throw new BulkSubmissionError("INVALID_STATE", "订单金额或数量超出系统范围");
-  }
-  return result;
-}
-
-function safeMultiply(first: number, second: number) {
-  const result = first * second;
-  if (
-    !Number.isSafeInteger(result) ||
-    result < 0 ||
-    result > 2_147_483_647
-  ) {
-    throw new BulkSubmissionError("INVALID_STATE", "订单金额超出系统范围");
   }
   return result;
 }
@@ -939,7 +928,10 @@ export async function submitBulkDraft(
             .from(skus)
             .where(inArray(skus.id, skuIds));
     const skuById = new Map(skuRows.map((sku) => [sku.id, sku]));
-    const priceBySku = new Map<string, number>();
+    const priceBySku = new Map<
+      string,
+      Awaited<ReturnType<typeof resolveUnitPrice>>
+    >();
     for (const skuId of skuIds) {
       const sku = skuById.get(skuId);
       if (!sku || sku.saleStatus !== "SELLABLE") continue;
@@ -948,7 +940,12 @@ export async function submitBulkDraft(
           customerId: input.customerId,
           skuId,
         });
-        if (Number.isSafeInteger(price) && price >= 0) {
+        if (
+          Number.isSafeInteger(price.unitPriceFen) &&
+          price.unitPriceFen >= 0 &&
+          Number.isSafeInteger(price.unitPriceMilliYuan) &&
+          price.unitPriceMilliYuan >= 0
+        ) {
           priceBySku.set(skuId, price);
         }
       } catch {
@@ -983,7 +980,10 @@ export async function submitBulkDraft(
         totalQuantity = safeAdd(totalQuantity, row.quantity);
         totalAmountFen = safeAdd(
           totalAmountFen,
-          safeMultiply(row.quantity, priceBySku.get(row.resolvedSkuId)!),
+          calculateLineAmountFen(
+            row.quantity,
+            priceBySku.get(row.resolvedSkuId)!.unitPriceMilliYuan,
+          ),
         );
       }
       if (totalAmountFen <= 0) {
@@ -1074,11 +1074,14 @@ export async function submitBulkDraft(
       await tx.insert(orderLines).values(
         prepared.rows.map((row) => {
           const sku = skuById.get(row.resolvedSkuId)!;
-          const unitPriceFen = priceBySku.get(row.resolvedSkuId)!;
+          const price = priceBySku.get(row.resolvedSkuId)!;
           return {
             externalSku: row.externalSku,
             externalSubOrderNo: row.externalSubOrderNo,
-            lineAmountFen: safeMultiply(row.quantity, unitPriceFen),
+            lineAmountFen: calculateLineAmountFen(
+              row.quantity,
+              price.unitPriceMilliYuan,
+            ),
             orderId: prepared.orderId,
             quantity: row.quantity,
             shipmentId: shipmentIdByOrder.get(row.externalOrderNo)!,
@@ -1086,7 +1089,8 @@ export async function submitBulkDraft(
             skuId: sku.id,
             skuNameSnapshot: sku.name,
             storeId: prepared.group.storeId,
-            unitPriceFen,
+            unitPriceFen: price.unitPriceFen,
+            unitPriceMilliYuan: price.unitPriceMilliYuan,
           };
         }),
       );

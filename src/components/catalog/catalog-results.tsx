@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 
 import type { CatalogRow } from "./catalog-workspace";
+import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 function saleStatusLabel(status: string) {
   return status === "SELLABLE" ? "可售" : "不可售";
@@ -40,7 +41,7 @@ export function CatalogResults({ rows }: { rows: CatalogRow[] }) {
                 <TableCell className="font-semibold tabular-nums">{row.skuCode}</TableCell>
                 <TableCell>{row.productName}</TableCell>
                 <TableCell>{row.name}</TableCell>
-                <TableCell className="text-right font-medium tabular-nums">¥{(row.price / 100).toFixed(2)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{formatMilliYuan(row.priceMilliYuan)}</TableCell>
                 <TableCell>
                   <Badge className={saleStatusClassName(row.saleStatus)} variant="secondary">
                     {saleStatusLabel(row.saleStatus)}
@@ -67,7 +68,7 @@ export function CatalogResults({ rows }: { rows: CatalogRow[] }) {
             </div>
             <dl className="mt-4 border-t border-border pt-3">
               <dt className="text-xs font-medium text-muted-foreground">统一拿货价</dt>
-              <dd className="mt-1 text-base font-semibold tabular-nums text-foreground">¥{(row.price / 100).toFixed(2)}</dd>
+              <dd className="mt-1 text-base font-semibold tabular-nums text-foreground">{formatMilliYuan(row.priceMilliYuan)}</dd>
             </dl>
           </li>
         ))}

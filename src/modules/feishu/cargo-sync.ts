@@ -28,6 +28,7 @@ type CargoSnapshotRow = {
   specification: null | string;
   totalQuantity: number;
   unitPriceFen: number;
+  unitPriceMilliYuan: number;
   weightGrams: null | number;
 };
 
@@ -149,6 +150,7 @@ async function loadCargoSnapshotRows(): Promise<CargoSnapshotRow[]> {
       specification: skus.specification,
       totalQuantity: inventoryBalances.totalQuantity,
       unitPriceFen: skus.defaultUnitPriceFen,
+      unitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
       weightGrams: skus.weightGrams,
     })
     .from(skus)
@@ -182,6 +184,7 @@ async function loadCargoSnapshotRows(): Promise<CargoSnapshotRow[]> {
     specification: row.specification,
     totalQuantity: row.totalQuantity,
     unitPriceFen: row.unitPriceFen,
+    unitPriceMilliYuan: row.unitPriceMilliYuan,
     weightGrams: row.weightGrams,
   }));
 }
@@ -194,7 +197,7 @@ function toSnapshotValueRows(rows: CargoSnapshotRow[]): CargoCell[][] {
       row.skuCode,
       "",
       row.name,
-      row.unitPriceFen / 100,
+      row.unitPriceMilliYuan / 1_000,
       row.totalQuantity,
       row.availableQuantity,
       row.productUrl ?? "",

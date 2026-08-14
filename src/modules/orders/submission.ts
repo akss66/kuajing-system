@@ -12,6 +12,7 @@ import {
   skus,
 } from "@/db/schema";
 import { resolveUnitPrice } from "@/modules/catalog/pricing";
+import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
 import { reserveInventory } from "@/modules/inventory/service";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
@@ -274,7 +275,10 @@ export async function submitTemuImportBatch(input: {
       .from(skus)
       .where(inArray(skus.id, skuIds));
     const skuById = new Map(skuRows.map((sku) => [sku.id, sku]));
-    const priceBySkuId = new Map<string, number>();
+    const priceBySkuId = new Map<
+      string,
+      Awaited<ReturnType<typeof resolveUnitPrice>>
+    >();
     for (const skuId of skuIds) {
       const sku = skuById.get(skuId);
       if (!sku || sku.saleStatus !== "SELLABLE") {
@@ -298,13 +302,16 @@ export async function submitTemuImportBatch(input: {
     for (const row of readyRows) {
       const skuId = row.resolvedSkuId!;
       const quantity = row.quantity!;
-      const unitPriceFen = priceBySkuId.get(skuId)!;
+      const price = priceBySkuId.get(skuId)!;
       quantityBySkuId.set(
         skuId,
         safeAdd(quantityBySkuId.get(skuId) ?? 0, quantity),
       );
       totalQuantity = safeAdd(totalQuantity, quantity);
-      totalAmountFen = safeAdd(totalAmountFen, quantity * unitPriceFen);
+      totalAmountFen = safeAdd(
+        totalAmountFen,
+        calculateLineAmountFen(quantity, price.unitPriceMilliYuan),
+      );
     }
 
     const shipmentRows = new Map<
@@ -398,11 +405,14 @@ export async function submitTemuImportBatch(input: {
     await tx.insert(orderLines).values(
       readyRows.map((row) => {
         const sku = skuById.get(row.resolvedSkuId!)!;
-        const unitPriceFen = priceBySkuId.get(sku.id)!;
+        const price = priceBySkuId.get(sku.id)!;
         return {
           externalSku: row.externalSku!,
           externalSubOrderNo: row.externalSubOrderNo!,
-          lineAmountFen: row.quantity! * unitPriceFen,
+          lineAmountFen: calculateLineAmountFen(
+            row.quantity!,
+            price.unitPriceMilliYuan,
+          ),
           orderId,
           quantity: row.quantity!,
           shipmentId: shipmentIdByExternalOrder.get(row.externalOrderNo!)!,
@@ -410,7 +420,8 @@ export async function submitTemuImportBatch(input: {
           skuId: sku.id,
           skuNameSnapshot: sku.name,
           storeId: batch.storeId,
-          unitPriceFen,
+          unitPriceFen: price.unitPriceFen,
+          unitPriceMilliYuan: price.unitPriceMilliYuan,
         };
       }),
     );

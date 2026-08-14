@@ -48,6 +48,7 @@ describe("catalog workspaces", () => {
             id: "sku-1",
             name: "Black 10-pack",
             price: 690,
+            priceMilliYuan: 6_900,
             productName: "Demo Cable",
             saleStatus: "SELLABLE",
             skuCode: "TZX-DEMO-001",
@@ -84,6 +85,7 @@ describe("catalog workspaces", () => {
             id: "sku-1",
             name: "Black 10-pack",
             price: 690,
+            priceMilliYuan: 6_900,
             productName: "Demo Cable",
             saleStatus: "SELLABLE",
             skuCode: "TZX-DEMO-001",
@@ -92,6 +94,7 @@ describe("catalog workspaces", () => {
             id: "sku-2",
             name: "White 20-pack",
             price: 990,
+            priceMilliYuan: 9_900,
             productName: "Daily Hair Tie",
             saleStatus: "DISABLED",
             skuCode: "TZX-WHITE-002",
@@ -116,6 +119,7 @@ describe("catalog workspaces", () => {
         items={[
           {
             actualUnitPriceFen: 760,
+            actualUnitPriceMilliYuan: 7_600,
             availableQuantity: 6,
             id: "sku-1",
             imageUrl: null,
@@ -131,7 +135,7 @@ describe("catalog workspaces", () => {
     );
 
     expect(screen.getByRole("searchbox")).toBeVisible();
-    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("7.60");
+    expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("¥7.6");
     expect(screen.getByTestId("customer-catalog-results")).toHaveTextContent("6");
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
@@ -144,6 +148,7 @@ describe("catalog workspaces", () => {
         items={[
           {
             actualUnitPriceFen: 760,
+            actualUnitPriceMilliYuan: 7_600,
             availableQuantity: 6,
             id: "sku-1",
             imageUrl: "/api/catalog-assets/asset-1",

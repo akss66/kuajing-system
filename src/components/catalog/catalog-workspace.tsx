@@ -18,6 +18,7 @@ export type CatalogRow = {
   id: string;
   name: string;
   price: number;
+  priceMilliYuan: number;
   productName: string;
   saleStatus: string;
   skuCode: string;

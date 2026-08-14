@@ -981,7 +981,11 @@ describe("Feishu cargo migration service", () => {
 
   test("imports products, skus, assets, balances, movements, audit and one outbox sync exactly once", async () => {
     const actor = await createSuperAdminActor();
-    const fakeSource = createMutableSourceClient({ initialDataset: baseDataset });
+    const exactDataset = cloneDataset(baseDataset);
+    exactDataset.values[1][4] = "0.325";
+    exactDataset.values[1][7] = "0";
+    exactDataset.values[1][11] = "12.5g";
+    const fakeSource = createMutableSourceClient({ initialDataset: exactDataset });
     const service = createFeishuCargoMigrationService({ assetDir: assetRoot });
     const readyRun = expectPreflightReady(await service.createCargoPreflight({
       actor,
@@ -1019,6 +1023,12 @@ describe("Feishu cargo migration service", () => {
     expect(importedSkus[0]).toMatchObject({
       imageUrl: `/api/catalog-assets/${importedSkus[0].imageAssetId}`,
       name: "Spec 1 / Color 1 / Combo 1",
+    });
+    expect(importedSkus.find((sku) => sku.skuCode === "SKU-001")).toMatchObject({
+      defaultUnitPriceFen: 33,
+      defaultUnitPriceMilliYuan: 325,
+      productUrl: null,
+      weightGrams: 13,
     });
     expect(await db.select().from(auditLogs)).toEqual(
       expect.arrayContaining([

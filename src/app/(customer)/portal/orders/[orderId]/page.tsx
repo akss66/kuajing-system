@@ -10,6 +10,7 @@ import { OrderStatusPanel } from "@/components/orders/order-status-panel";
 import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
+import { formatMilliYuan } from "@/modules/catalog/unit-price";
 import { getCustomerOrderDetail } from "@/modules/orders/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -111,7 +112,7 @@ export default async function CustomerOrderDetailPage({
                 <p className="mt-1 break-all text-xs text-muted">子订单：{line.externalSubOrderNo}</p>
               </div>
               <p className="text-sm tabular-nums text-muted sm:text-right">
-                {line.quantity} × {money(line.unitPriceFen)}
+                {line.quantity} × {formatMilliYuan(line.unitPriceMilliYuan)}
               </p>
               <p className="font-semibold tabular-nums text-ink sm:text-right">{money(line.lineAmountFen)}</p>
             </article>

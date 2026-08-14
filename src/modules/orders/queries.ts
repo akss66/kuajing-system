@@ -109,6 +109,7 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
         skuCode: orderLines.skuCodeSnapshot,
         skuName: orderLines.skuNameSnapshot,
         unitPriceFen: orderLines.unitPriceFen,
+        unitPriceMilliYuan: orderLines.unitPriceMilliYuan,
       })
       .from(orderLines)
       .where(eq(orderLines.orderId, order.id))
@@ -320,6 +321,7 @@ export async function getAdminOrderDetail(orderId: string) {
         skuId: orderLines.skuId,
         skuName: orderLines.skuNameSnapshot,
         unitPriceFen: orderLines.unitPriceFen,
+        unitPriceMilliYuan: orderLines.unitPriceMilliYuan,
       })
       .from(orderLines)
       .where(eq(orderLines.orderId, orderId))

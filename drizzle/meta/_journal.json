@@ -113,6 +113,20 @@
       "when": 1786599876451,
       "tag": "0015_feishu_cargo_migration",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786673427803,
+      "tag": "0016_easy_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786675212691,
+      "tag": "0017_slow_iron_fist",
+      "breakpoints": true
     }
   ]
 }

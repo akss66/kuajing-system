@@ -35,6 +35,11 @@ function formatCurrencyFromFen(value: number) {
   return `¥${(value / 100).toFixed(2)}`;
 }
 
+function formatCurrencyFromMilliYuan(value: number) {
+  const yuan = (value / 1_000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  return `¥${yuan}`;
+}
+
 function formatDateTime(value: Date | null) {
   if (!value) return null;
   return new Intl.DateTimeFormat("zh-CN", {
@@ -106,7 +111,7 @@ export type CargoMigrationPanelRow = {
   issueLabels: string[];
   productGroupKey: string;
   productName: string;
-  productUrl: string;
+  productUrl: string | null;
   saleStatusLabel: string;
   skuCode: string;
   skuName: string;
@@ -323,7 +328,10 @@ export async function getLatestCargoMigrationRun() {
     importedAtLabel: formatDateTime(run.importedAt),
     issueCount: issues.length,
     rows: rows.map((row) => ({
-      defaultUnitPriceLabel: formatCurrencyFromFen(row.defaultUnitPriceFen),
+      defaultUnitPriceLabel:
+        typeof row.defaultUnitPriceMilliYuan === "number"
+          ? formatCurrencyFromMilliYuan(row.defaultUnitPriceMilliYuan)
+          : formatCurrencyFromFen(row.defaultUnitPriceFen),
       imageDigestLabel: formatSafeHash(row.imageContentSha256),
       imageStateLabel: run.status === "IMPORTED" ? "已导入" : "已暂存",
       inheritedFieldLabels: buildInheritedLabels(row),

@@ -79,7 +79,10 @@ describe("catalog price priority", () => {
       }),
     );
 
-    expect(actual).toBe(880);
+    expect(actual).toEqual({
+      unitPriceFen: 880,
+      unitPriceMilliYuan: 8_800,
+    });
   });
 
   test("uses an active customer price before the default price", async () => {
@@ -97,7 +100,10 @@ describe("catalog price priority", () => {
       }),
     );
 
-    expect(actual).toBe(760);
+    expect(actual).toEqual({
+      unitPriceFen: 760,
+      unitPriceMilliYuan: 7_600,
+    });
   });
 
   test("falls back to the SKU default price", async () => {
@@ -110,7 +116,10 @@ describe("catalog price priority", () => {
       }),
     );
 
-    expect(actual).toBe(690);
+    expect(actual).toEqual({
+      unitPriceFen: 690,
+      unitPriceMilliYuan: 6_900,
+    });
   });
 
   test.each([-1, 1.5, Number.NaN])(

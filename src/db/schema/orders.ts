@@ -763,6 +763,7 @@ export const orderLines = pgTable(
     skuCodeSnapshot: varchar("sku_code_snapshot", { length: 80 }).notNull(),
     skuNameSnapshot: varchar("sku_name_snapshot", { length: 200 }).notNull(),
     quantity: integer("quantity").notNull(),
+    unitPriceMilliYuan: integer("unit_price_milli_yuan").default(0).notNull(),
     unitPriceFen: integer("unit_price_fen").notNull(),
     lineAmountFen: integer("line_amount_fen").notNull(),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
@@ -785,12 +786,20 @@ export const orderLines = pgTable(
       .where(sql`${table.externalSubOrderNo} is not null`),
     check("order_lines_quantity_positive", sql`${table.quantity} > 0`),
     check(
+      "order_lines_unit_price_milli_yuan_non_negative",
+      sql`${table.unitPriceMilliYuan} >= 0`,
+    ),
+    check(
       "order_lines_unit_price_non_negative",
       sql`${table.unitPriceFen} >= 0`,
     ),
     check(
-      "order_lines_amount_matches_quantity",
-      sql`${table.lineAmountFen} = ${table.quantity} * ${table.unitPriceFen}`,
+      "order_lines_unit_price_fen_matches_milli_yuan",
+      sql`${table.unitPriceFen} = ((${table.unitPriceMilliYuan}::bigint + 5) / 10)`,
+    ),
+    check(
+      "order_lines_amount_matches_exact_price",
+      sql`${table.lineAmountFen} = ((((${table.quantity})::bigint * (${table.unitPriceMilliYuan})::bigint) + 5) / 10)`,
     ),
     index("order_lines_order_index").on(table.orderId),
     index("order_lines_sku_index").on(table.skuId),

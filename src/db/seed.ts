@@ -158,20 +158,36 @@ export async function seed() {
     .insert(skus)
     .values({
       defaultUnitPriceFen: 690,
+      defaultUnitPriceMilliYuan: 6_900,
       name: "黑色 10 件装",
       productId: product.id,
       skuCode: "TZX-DEMO-001",
     })
     .onConflictDoUpdate({
-      set: { defaultUnitPriceFen: 690, name: "黑色 10 件装", updatedAt: new Date() },
+      set: {
+        defaultUnitPriceFen: 690,
+        defaultUnitPriceMilliYuan: 6_900,
+        name: "黑色 10 件装",
+        updatedAt: new Date(),
+      },
       target: skus.skuCode,
     })
     .returning({ id: skus.id });
   await db
     .insert(customerSkuPrices)
-    .values({ customerId: customer.id, skuId: sku.id, unitPriceFen: 760 })
+    .values({
+      customerId: customer.id,
+      skuId: sku.id,
+      unitPriceFen: 760,
+      unitPriceMilliYuan: 7_600,
+    })
     .onConflictDoUpdate({
-      set: { active: true, unitPriceFen: 760, updatedAt: new Date() },
+      set: {
+        active: true,
+        unitPriceFen: 760,
+        unitPriceMilliYuan: 7_600,
+        updatedAt: new Date(),
+      },
       target: [customerSkuPrices.customerId, customerSkuPrices.skuId],
     });
   await db
