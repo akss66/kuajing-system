@@ -78,6 +78,25 @@ describe("Jifeng read-only resources", () => {
     ]);
   });
 
+  test("accepts nullable offline-logistics headers returned by production", () => {
+    expect(
+      parseJifengOfflineLogistics({
+        page: {
+          heads: null,
+          pageNo: 1,
+          pageSize: 300,
+          rows: [
+            { code: "carrier-code-from-api", id: 17, name: "Canada Post" },
+          ],
+          totalPage: 1,
+          totalSize: 1,
+        },
+      }),
+    ).toEqual([
+      { code: "carrier-code-from-api", id: 17, name: "Canada Post" },
+    ]);
+  });
+
   test.each(["Canada Post", " canada post ", "加拿大邮政"])(
     "recognizes the explicit Canada Post name %s",
     (name) => {

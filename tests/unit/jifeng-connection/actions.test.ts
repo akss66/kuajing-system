@@ -208,6 +208,24 @@ describe("Jifeng connection actions", () => {
     );
   });
 
+  it.each(["INVALID_RESPONSE", "NETWORK_ERROR", "TIMEOUT"])(
+    "keeps a %s resource-discovery failure inside the action UI",
+    async (code) => {
+      serviceMocks.discoverJifengResources.mockRejectedValueOnce({ code });
+
+      const result = await discoverJifengResourcesAction(
+        { status: "idle" },
+        form(),
+      );
+
+      expect(result).toEqual({
+        message: "极风资源读取失败，请稍后重新发现；现有授权不会丢失。",
+        status: "error",
+      });
+      expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a resource identifier that no longer appears in discovery", async () => {
     const result = await selectJifengResourcesAction(
       { status: "idle" },
