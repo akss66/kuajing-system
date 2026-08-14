@@ -103,6 +103,48 @@ describe("groupCatalogItems", () => {
     ]);
   });
 
+  it("treats case and leading-zero-equivalent group keys as equal and falls back to product ID", () => {
+    const groups = groupCatalogItems([
+      item({
+        productId: "product-b",
+        productName: "ABC",
+        sourceSequence: "01",
+      }),
+      item({
+        productId: "product-a",
+        productName: "abc",
+        sourceSequence: "1",
+      }),
+    ]);
+
+    expect(groups.map((group) => group.productId)).toEqual([
+      "product-a",
+      "product-b",
+    ]);
+  });
+
+  it("treats case and leading-zero-equivalent SKU codes as equal and falls back to variant ID", () => {
+    const groups = groupCatalogItems([
+      item({
+        id: "sku-b",
+        productId: "product-a",
+        productName: "Same",
+        skuCode: "SKU-2",
+      }),
+      item({
+        id: "sku-a",
+        productId: "product-a",
+        productName: "Same",
+        skuCode: "sku-02",
+      }),
+    ]);
+
+    expect(groups[0]!.variants.map((variant) => variant.id)).toEqual([
+      "sku-a",
+      "sku-b",
+    ]);
+  });
+
   it("preserves distinct sibling product links on variants", () => {
     const groups = groupCatalogItems([
       item({
@@ -131,6 +173,13 @@ describe("compareCatalogNaturally", () => {
     expect(compareCatalogNaturally("TZX-2", "TZX-10")).toBeLessThan(0);
     expect(compareCatalogNaturally("多店铺商品 64D135AB", "报表商品 5C73AE3B")).toBeLessThan(0);
     expect(compareCatalogNaturally("same", "same")).toBe(0);
+  });
+
+  it("treats ASCII case and numerically equal digit runs as equal", () => {
+    expect(compareCatalogNaturally("abc", "ABC")).toBe(0);
+    expect(compareCatalogNaturally("sku-2", "SKU-2")).toBe(0);
+    expect(compareCatalogNaturally("1", "01")).toBe(0);
+    expect(compareCatalogNaturally("A2", "A02")).toBe(0);
   });
 
   it("does not depend on ambient Intl.Collator availability at module load", async () => {

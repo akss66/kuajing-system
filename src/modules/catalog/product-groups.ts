@@ -22,6 +22,13 @@ function isAsciiDigit(character: string) {
   return character >= "0" && character <= "9";
 }
 
+function foldAsciiCase(character: string) {
+  if (character >= "A" && character <= "Z") {
+    return String.fromCharCode(character.charCodeAt(0) + 32);
+  }
+  return character;
+}
+
 function compareCodeUnits(left: string, right: string) {
   if (left === right) return 0;
   return left < right ? -1 : 1;
@@ -44,12 +51,7 @@ function compareNumericTokens(left: string, right: string) {
   if (normalizedComparison !== 0) {
     return normalizedComparison;
   }
-
-  if (left.length !== right.length) {
-    return left.length - right.length;
-  }
-
-  return compareCodeUnits(left, right);
+  return 0;
 }
 
 export function compareCatalogNaturally(left: string, right: string) {
@@ -81,8 +83,11 @@ export function compareCatalogNaturally(left: string, right: string) {
       continue;
     }
 
-    if (leftCharacter !== rightCharacter) {
-      return compareCodeUnits(leftCharacter, rightCharacter);
+    const foldedLeftCharacter = foldAsciiCase(leftCharacter);
+    const foldedRightCharacter = foldAsciiCase(rightCharacter);
+
+    if (foldedLeftCharacter !== foldedRightCharacter) {
+      return compareCodeUnits(foldedLeftCharacter, foldedRightCharacter);
     }
 
     leftIndex += 1;

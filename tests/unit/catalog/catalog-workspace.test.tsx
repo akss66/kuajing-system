@@ -500,7 +500,16 @@ describe("catalog workspaces", () => {
     ).toEqual(["SKU", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
-    const firstVariant = within(cards).getByTestId("catalog-customer-sku-available");
+    expect(
+      within(cards)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "人工暂停销售商品",
+      "冬季运输防护袋",
+      "暂时售罄商品",
+    ]);
+    const firstVariant = within(cards).getByTestId("catalog-customer-sku-manual");
     expect(
       Array.from(firstVariant.querySelectorAll("[data-customer-catalog-section]")).map(
         (section) => section.getAttribute("data-customer-catalog-section"),
