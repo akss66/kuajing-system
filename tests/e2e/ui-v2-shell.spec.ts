@@ -18,33 +18,42 @@ const accounts = {
   },
 } as const;
 
+const navigation = {
+  admin: {
+    drawerTitle: "管理员导航",
+    groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
+    label: "管理员主导航",
+  },
+  customer: {
+    drawerTitle: "客户导航",
+    groups: ["拿货", "订单与付款"],
+    label: "客户主导航",
+  },
+} as const;
+
 const audiences = [
   {
     account: accounts.admin,
-    drawerTitle: "管理员导航",
+    ...navigation.admin,
     genericAccountLabel: "管理员账号",
-    groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
     sectionCount: 5,
     identity: {
       displayName: "本地演示管理员",
       email: accounts.admin.email,
       role: "超级管理员",
     },
-    navigationName: "管理员主导航",
     path: "/admin",
   },
   {
     account: accounts.customer,
-    drawerTitle: "客户导航",
+    ...navigation.customer,
     genericAccountLabel: "客户账号",
-    groups: ["拿货", "订单与付款"],
     sectionCount: 3,
     identity: {
       displayName: "渥太华演示客户",
       email: accounts.customer.email,
       role: "合作客户",
     },
-    navigationName: "客户主导航",
     path: "/portal",
   },
 ] as const;
@@ -111,7 +120,7 @@ for (const audience of audiences) {
 
     const shell = page.getByTestId("merchant-shell");
     await expect(shell).toHaveAttribute("data-shell-version", "v2");
-    const desktopNavigation = page.getByRole("navigation", { name: audience.navigationName });
+    const desktopNavigation = page.getByRole("navigation", { name: audience.label });
     await expect(page.getByRole("button", { name: "帮助" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "消息" })).toHaveCount(0);
     await page.getByRole("button", { name: "打开账号菜单" }).click();
@@ -158,7 +167,9 @@ for (const audience of audiences) {
           );
           for (const group of audience.groups) {
             await expect(desktopNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
+            await expect(desktopNavigation.getByRole("button", { name: group })).toHaveCount(0);
           }
+          await expect(desktopNavigation.locator("[aria-expanded]")).toHaveCount(0);
         } else {
           const menuButton = page.getByRole("button", { name: "打开导航" });
           await menuButton.click();
@@ -166,9 +177,24 @@ for (const audience of audiences) {
           const drawer = page.getByRole("dialog", { name: audience.drawerTitle });
           await expect(drawer).toBeVisible();
           const mobileNavigation = drawer.getByRole("navigation", {
-            name: audience.navigationName,
+            name: audience.label,
           });
           await expect(mobileNavigation.locator('[aria-current="page"]')).toHaveCount(1);
+          await expect(mobileNavigation.locator("[data-navigation-section]")).toHaveCount(
+            audience.sectionCount,
+          );
+          for (const group of audience.groups) {
+            await expect(mobileNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
+            await expect(mobileNavigation.getByRole("button", { name: group })).toHaveCount(0);
+          }
+          await expect(mobileNavigation.locator("[aria-expanded]")).toHaveCount(0);
+          const mobileLinks = mobileNavigation.getByRole("link");
+          expect(await mobileLinks.count()).toBeGreaterThan(1);
+          for (const link of [mobileLinks.first(), mobileLinks.last()]) {
+            const box = await link.boundingBox();
+            expect(box).not.toBeNull();
+            expect(box!.height).toBeGreaterThanOrEqual(44);
+          }
           await expectNoPageOverflow(page);
           await expectNoSeriousAccessibilityViolations(page);
 

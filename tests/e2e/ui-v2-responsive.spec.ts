@@ -55,14 +55,19 @@ type AcceptanceRoute = {
 const navigation = {
   admin: {
     drawerTitle: "管理员导航",
-    groups: ["工作台", "客户与货品", "订单履约", "资金与数据", "系统管理"],
+    groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
     label: "管理员主导航",
   },
   customer: {
     drawerTitle: "客户导航",
-    groups: ["工作台", "拿货", "订单与付款"],
+    groups: ["拿货", "订单与付款"],
     label: "客户主导航",
   },
+} as const;
+
+const navigationSectionCounts = {
+  admin: 5,
+  customer: 3,
 } as const;
 
 function observeBrowserErrors(page: Page) {
@@ -159,10 +164,14 @@ async function expectShellAndNavigation(
 
     const desktopNavigation = page.getByRole("navigation", { name: nav.label });
     await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-    await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(nav.groups.length);
+    await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
+      navigationSectionCounts[audience],
+    );
     for (const group of nav.groups) {
-      await expect(desktopNavigation.getByRole("button", { name: group })).toBeVisible();
+      await expect(desktopNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
+      await expect(desktopNavigation.getByRole("button", { name: group })).toHaveCount(0);
     }
+    await expect(desktopNavigation.locator("[aria-expanded]")).toHaveCount(0);
     return;
   }
 
@@ -177,12 +186,20 @@ async function expectShellAndNavigation(
   await expect(drawer).toBeVisible();
   const mobileNavigation = drawer.getByRole("navigation", { name: nav.label });
   await expect(mobileNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(mobileNavigation.locator("[data-navigation-section]")).toHaveCount(nav.groups.length);
+  await expect(mobileNavigation.locator("[data-navigation-section]")).toHaveCount(
+    navigationSectionCounts[audience],
+  );
   for (const group of nav.groups) {
-    await expectAtLeast44Pixels(
-      mobileNavigation.getByRole("button", { name: group }),
-      `${context} navigation group ${group}`,
-    );
+    await expect(mobileNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
+    await expect(mobileNavigation.getByRole("button", { name: group })).toHaveCount(0);
+  }
+  await expect(mobileNavigation.locator("[aria-expanded]")).toHaveCount(0);
+  const mobileLinks = mobileNavigation.getByRole("link");
+  expect(await mobileLinks.count()).toBeGreaterThan(1);
+  for (const link of [mobileLinks.first(), mobileLinks.last()]) {
+    const box = await link.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   }
   await expectNoPageOverflow(page, `${context} with navigation drawer open`);
   await page.keyboard.press("Escape");

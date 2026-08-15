@@ -678,9 +678,10 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
     to: "2026-08-14",
   });
   await expect(page).toHaveURL(/sku=INV-E2E-LONG-SKU/);
+  // The fixed 2026-08-14 range includes the seeded audit row, not the movement created at runtime.
   await expect(
     page.getByRole("table", { name: "库存流水列表" }).locator("tbody tr"),
-  ).toHaveCount(2);
+  ).toHaveCount(1);
   await expectMovementFacts(
     page.getByRole("table", { name: "库存流水列表" }),
     false,

@@ -89,10 +89,7 @@ async function openAdminNavigationIfNeeded(page: Page) {
     await page.getByRole("button", { name: "打开导航" }).click();
   }
 
-  const systemSection = page.getByRole("button", { name: "系统管理" });
-  if ((await systemSection.getAttribute("aria-expanded")) === "false") {
-    await systemSection.click();
-  }
+  await expect(page.getByRole("heading", { level: 2, name: "系统管理" })).toBeVisible();
 }
 
 async function signOutThroughShell(page: Page) {
