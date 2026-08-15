@@ -402,11 +402,6 @@ function normalizeProductGroupKey(value: string) {
   return String(Number.parseInt(value, 10));
 }
 
-function deriveTzxProductGroupKey(skuCode: string) {
-  const match = /^TZX-(\d+)(?:-|$)/i.exec(skuCode);
-  return match ? normalizeProductGroupKey(match[1]) : null;
-}
-
 function buildSkuName(input: {
   color: null | string;
   combination: null | string;
@@ -509,7 +504,6 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     values,
   });
   const context = createEmptyContext();
-  const skuProductGroupBySourceSequence = new Map<string, string>();
 
   for (let offset = headerRowIndex + 1; offset < values.length; offset += 1) {
     const row = values[offset] ?? [];
@@ -548,40 +542,11 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const explicitGroupKey = explicitGroupText
       ? normalizeProductGroupKey(explicitGroupText)
       : "";
-    const skuProductGroupKey = deriveTzxProductGroupKey(skuCode);
-    if (
-      explicitGroupKey &&
-      skuProductGroupKey &&
-      explicitGroupKey !== skuProductGroupKey
-    ) {
-      issues.push({
-        code: "CARGO_SEQUENCE_SKU_MISMATCH",
-        message: `\u5e8f\u53f7 ${explicitGroupKey} \u4e0e SKU \u5546\u54c1\u7f16\u53f7 ${skuProductGroupKey} \u4e0d\u4e00\u81f4\uff0c\u8fc1\u79fb\u6309 SKU \u5546\u54c1\u7f16\u53f7 ${skuProductGroupKey} \u5206\u7ec4`,
-        severity: "WARNING",
-        sourceRowNumber,
-      });
-    }
-    if (explicitSourceSequence && skuProductGroupKey) {
-      const existingGroup = skuProductGroupBySourceSequence.get(explicitSourceSequence);
-      if (existingGroup && existingGroup !== skuProductGroupKey) {
-        issues.push(
-          buildIssue({
-            code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
-            message: `序号 ${explicitSourceSequence} 已用于 SKU 商品编号 ${existingGroup}，不能再用于 SKU 商品编号 ${skuProductGroupKey}`,
-            sourceRowNumber,
-          }),
-        );
-        continue;
-      }
-      skuProductGroupBySourceSequence.set(explicitSourceSequence, skuProductGroupKey);
-    }
-
     const previousProductGroupKey =
       typeof context.productGroupKey?.value === "string"
         ? context.productGroupKey.value
         : "";
-    const productGroupKey =
-      skuProductGroupKey || explicitGroupKey || previousProductGroupKey;
+    const productGroupKey = explicitGroupKey || previousProductGroupKey;
 
     if (productGroupKey && previousProductGroupKey !== productGroupKey) {
       resetGroupContext(context);

@@ -20,17 +20,33 @@ import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field
 const sourceWikiToken = "read-only-wiki-token";
 const sourceSheetId = "read-only-sheet";
 
-function createConflictingSourceSequenceValues() {
+function createRepeatedSourceSequenceValues() {
   const values = buildFieldAlignedCargoSourceFixture().value;
   const sequenceIndex = values[0].indexOf("序号");
   const skuIndex = values[0].indexOf("SKU");
-  const conflictingRow = values.find(
+  const cargoPriceIndex = values[0].indexOf("货品价格");
+  const repeatedRow = values.find(
     (row, index) => index > 0 && row[skuIndex] === "TZX-034-3",
   );
-  if (sequenceIndex === -1 || skuIndex === -1 || !conflictingRow) {
-    throw new Error("FIELD_ALIGNED_CONFLICT_FIXTURE_SETUP_FAILED");
+  const sequence74LeaderIndex = values.findIndex(
+    (row, index) => index > 0 && row[skuIndex] === "TZX-074-1",
+  );
+  if (
+    sequenceIndex === -1 ||
+    skuIndex === -1 ||
+    cargoPriceIndex === -1 ||
+    !repeatedRow ||
+    sequence74LeaderIndex === -1
+  ) {
+    throw new Error("FIELD_ALIGNED_REPEAT_FIXTURE_SETUP_FAILED");
   }
-  conflictingRow[sequenceIndex] = "74";
+  repeatedRow[sequenceIndex] = "74";
+  repeatedRow[cargoPriceIndex] = "";
+  values.splice(
+    sequence74LeaderIndex + 1,
+    0,
+    values.splice(values.indexOf(repeatedRow), 1)[0]!,
+  );
   return values;
 }
 
@@ -155,13 +171,18 @@ describe("catalog field refresh", () => {
     }).toEqual(beforeCatalogFacts);
   });
 
-  test("blocks preview when one source sequence points at multiple TZX product groups", async () => {
+  test("allows preview when one source sequence reuses different TZX product numbers", async () => {
     await seedCatalog();
     const service = createCatalogFieldRefreshService();
 
     await expect(service.preview({
-      client: createReadOnlyClient(createConflictingSourceSequenceValues()),
+      client: createReadOnlyClient(createRepeatedSourceSequenceValues()),
       ...validInput,
-    })).rejects.toThrow("PARSER_BLOCKING_ISSUES");
+    })).resolves.toMatchObject({
+      matchedSkuCount: 140,
+      productsToMerge: 1,
+      skuCount: 140,
+      sourceSequenceCount: 74,
+    });
   });
 });

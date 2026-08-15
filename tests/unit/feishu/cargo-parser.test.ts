@@ -176,7 +176,7 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows).toHaveLength(4);
   });
 
-  test("uses the TZX product number when a repeated source sequence points at a new product", () => {
+  test("keeps explicit source sequence grouping when TZX product numbers differ", () => {
     const values = sampleRows();
     values.push([
       "1",
@@ -194,22 +194,48 @@ describe("parseLegacyCargoSheet", () => {
       "可售",
       "4.50",
     ]);
+    values.push([
+      "1",
+      "TZX-004",
+      { fileToken: "file-token-tzx-004" },
+      "Fourth product",
+      "5.00",
+      "3",
+      "3",
+      { text: "Fourth product", link: "https://example.test/products/tzx-004" },
+      "Standard",
+      "Blue",
+      "1pc",
+      "150g",
+      "可售",
+      "",
+    ]);
 
     const result = parseLegacyCargoSheet(values);
 
-    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-003");
-    expect(result.issues).toContainEqual({
-      code: "CARGO_SEQUENCE_SKU_MISMATCH",
-      message: "序号 1 与 SKU 商品编号 3 不一致，迁移按 SKU 商品编号 3 分组",
-      severity: "WARNING",
-      sourceRowNumber: 6,
-    });
-    expect(result.issues).toContainEqual({
-      code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
-      message: "序号 1 已用于 SKU 商品编号 1，不能再用于 SKU 商品编号 3",
-      severity: "BLOCKING",
-      sourceRowNumber: 6,
-    });
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ code: "CARGO_SEQUENCE_SKU_MISMATCH" }),
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
+      }),
+    );
+    expect(result.rows.slice(-2)).toMatchObject([
+      {
+        cargoUnitPriceMilliYuan: 4_500,
+        productGroupKey: "1",
+        skuCode: "TZX-003",
+        sourceSequence: "1",
+      },
+      {
+        cargoUnitPriceMilliYuan: 4_500,
+        inheritedFrom: { cargoPrice: 6 },
+        productGroupKey: "1",
+        skuCode: "TZX-004",
+        sourceSequence: "1",
+      },
+    ]);
   });
 
   test("skips a trailing SKU-only draft without inheriting the previous product", () => {
@@ -249,9 +275,10 @@ describe("parseLegacyCargoSheet", () => {
 
     const result = parseLegacyCargoSheet(values);
 
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-077");
     expect(result.issues).toContainEqual({
-      code: "CARGO_MISSING_PRODUCT_NAME",
-      message: "名称不能为空",
+      code: "CARGO_INVALID_TOTAL_QUANTITY",
+      message: "总库存必须是非负安全整数",
       severity: "BLOCKING",
       sourceRowNumber: 6,
     });
