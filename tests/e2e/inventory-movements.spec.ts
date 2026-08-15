@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { DateTime } from "luxon";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -19,6 +20,7 @@ import {
   stores,
 } from "@/db/schema";
 import { seed } from "@/db/seed";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import { loginThroughUi } from "./support/managed-user";
 import {
@@ -68,6 +70,26 @@ const ids = {
 
 const movementId = (sequence: number) =>
   `40000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`;
+
+const acceptanceReferenceDate = DateTime.now()
+  .setZone(BUSINESS_TIME_ZONE)
+  .toISODate()!;
+
+function acceptanceDateTime(hour: number, minute = 0) {
+  return DateTime.fromISO(acceptanceReferenceDate, {
+    zone: BUSINESS_TIME_ZONE,
+  })
+    .set({ hour, minute })
+    .toJSDate();
+}
+
+function businessIsoDate(date: Date) {
+  return (
+    DateTime.fromJSDate(date, { zone: BUSINESS_TIME_ZONE })
+      .setZone(BUSINESS_TIME_ZONE)
+      .toISODate() ?? acceptanceReferenceDate
+  );
+}
 
 function observeBrowserFailures(page: Page) {
   const consoleErrors: string[] = [];
@@ -368,7 +390,7 @@ async function seedInventoryAcceptanceData() {
       actorType: "ADMIN",
       afterQuantity: 47,
       beforeQuantity: 50,
-      createdAt: new Date("2026-08-14T14:00:00.000Z"),
+      createdAt: acceptanceDateTime(14),
       delta: -3,
       id: movementId(904),
       movementType: "MANUAL_DECREASE",
@@ -611,6 +633,12 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
     referenceId: null,
     referenceType: null,
   });
+  const [offlineFulfillmentMovement] = await db
+    .select({ createdAt: inventoryMovements.createdAt })
+    .from(inventoryMovements)
+    .where(eq(inventoryMovements.remark, "E2E 线下发货补录"))
+    .orderBy(desc(inventoryMovements.createdAt))
+    .limit(1);
 
   await dialog.getByRole("button", { name: "设置为实际库存" }).click();
   const actual = dialog.getByLabel("盘点后实际总库存");
@@ -671,11 +699,11 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
 
   await submitMovementFilters(page, {
     actorId: acceptance.operatorId,
-    from: "2026-08-14",
+    from: acceptanceReferenceDate,
     movementType: "MANUAL_DECREASE",
     skuCode: acceptance.primarySkuCode,
     source: "ADMIN_OFFLINE_FULFILLMENT",
-    to: "2026-08-14",
+    to: businessIsoDate(offlineFulfillmentMovement!.createdAt),
   });
   await expect(page).toHaveURL(/sku=INV-E2E-LONG-SKU/);
   await expect(
