@@ -402,6 +402,11 @@ function normalizeProductGroupKey(value: string) {
   return String(Number.parseInt(value, 10));
 }
 
+function deriveTzxProductGroupKey(skuCode: string) {
+  const match = /^TZX-(\d+)(?:-|$)/i.exec(skuCode);
+  return match ? normalizeProductGroupKey(match[1]) : null;
+}
+
 function buildSkuName(input: {
   color: null | string;
   combination: null | string;
@@ -547,23 +552,40 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
         ? context.productGroupKey.value
         : "";
     const productGroupKey = explicitGroupKey || previousProductGroupKey;
-
-    if (productGroupKey && previousProductGroupKey !== productGroupKey) {
-      resetGroupContext(context);
-    }
-
     const sourceSequence =
       explicitSourceSequence ||
       (typeof context.sourceSequence?.value === "string"
         ? context.sourceSequence.value
         : "");
-    if (explicitSourceSequence) {
-      context.sourceSequence = {
-        rowNumber: sourceRowNumber,
-        value: explicitSourceSequence,
-      };
-    } else if (context.sourceSequence) {
-      inheritedFrom.sourceSequence = context.sourceSequence.rowNumber;
+
+    if (sourceSequence.length === 0) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_MISSING_SOURCE_SEQUENCE",
+          message: "序号不能为空",
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    const skuProductGroupKey = deriveTzxProductGroupKey(skuCode);
+    if (
+      skuProductGroupKey !== null &&
+      normalizeProductGroupKey(sourceSequence) !== skuProductGroupKey
+    ) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_SEQUENCE_SKU_MISMATCH",
+          message: `序号 ${sourceSequence} 与 TZX SKU 商品编号 ${skuProductGroupKey} 不一致`,
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    if (productGroupKey && previousProductGroupKey !== productGroupKey) {
+      resetGroupContext(context);
     }
 
     if (explicitGroupKey || (!context.productGroupKey && productGroupKey)) {
@@ -652,15 +674,13 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       continue;
     }
 
-    if (sourceSequence.length === 0) {
-      issues.push(
-        buildIssue({
-          code: "CARGO_MISSING_SOURCE_SEQUENCE",
-          message: "序号不能为空",
-          sourceRowNumber,
-        }),
-      );
-      continue;
+    if (explicitSourceSequence) {
+      context.sourceSequence = {
+        rowNumber: sourceRowNumber,
+        value: explicitSourceSequence,
+      };
+    } else if (context.sourceSequence) {
+      inheritedFrom.sourceSequence = context.sourceSequence.rowNumber;
     }
 
     const explicitCargoPrice = parseYuanPrice(row[headerMap.cargoPrice]);

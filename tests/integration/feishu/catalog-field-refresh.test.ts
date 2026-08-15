@@ -171,18 +171,13 @@ describe("catalog field refresh", () => {
     }).toEqual(beforeCatalogFacts);
   });
 
-  test("allows preview when one source sequence reuses different TZX product numbers", async () => {
+  test("blocks preview when one source sequence reuses a different TZX product number", async () => {
     await seedCatalog();
     const service = createCatalogFieldRefreshService();
 
     await expect(service.preview({
       client: createReadOnlyClient(createRepeatedSourceSequenceValues()),
       ...validInput,
-    })).resolves.toMatchObject({
-      matchedSkuCount: 140,
-      productsToMerge: 1,
-      skuCount: 140,
-      sourceSequenceCount: 74,
-    });
+    })).rejects.toThrow("PARSER_BLOCKING_ISSUES");
   });
 });

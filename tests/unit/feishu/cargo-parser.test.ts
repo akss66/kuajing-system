@@ -110,6 +110,41 @@ describe("parseLegacyCargoSheet", () => {
     });
   });
 
+  test("accepts matching TZX variants under one source sequence and inherits group fields", () => {
+    const values = buildFieldAlignedCargoSourceFixture().value.filter(
+      (row, index) => index === 0 || row[0] === "16" || row[1] === "TZX-016-2",
+    );
+
+    const parsed = parseLegacyCargoSheet(values);
+
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.rows).toMatchObject([
+      {
+        cargoUnitPriceMilliYuan: 16366,
+        productGroupKey: "16",
+        skuCode: "TZX-016-1",
+        sourceSequence: "16",
+      },
+      {
+        cargoUnitPriceMilliYuan: 16366,
+        inheritedFrom: {
+          cargoPrice: 2,
+          price: 2,
+          productGroupKey: 2,
+          productName: 2,
+          productUrl: 2,
+          saleStatus: 2,
+          sourceSequence: 2,
+          specification: 2,
+          weight: 2,
+        },
+        productGroupKey: "16",
+        skuCode: "TZX-016-2",
+        sourceSequence: "16",
+      },
+    ]);
+  });
+
   test("recognizes the production long-form cargo price header without confusing it with purchase price", () => {
     const values = buildFieldAlignedCargoSourceFixture().value;
     const cargoPriceIndex = values[0].indexOf("货品价格");
@@ -176,7 +211,7 @@ describe("parseLegacyCargoSheet", () => {
     expect(result.rows).toHaveLength(4);
   });
 
-  test("keeps explicit source sequence grouping when TZX product numbers differ", () => {
+  test("blocks an explicit source sequence that mismatches the TZX product number", () => {
     const values = sampleRows();
     values.push([
       "1",
@@ -194,48 +229,100 @@ describe("parseLegacyCargoSheet", () => {
       "可售",
       "4.50",
     ]);
+
+    const result = parseLegacyCargoSheet(values);
+
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-003");
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SEQUENCE_SKU_MISMATCH",
+      message: "序号 1 与 TZX SKU 商品编号 3 不一致",
+      severity: "BLOCKING",
+      sourceRowNumber: 6,
+    });
+  });
+
+  test("blocks an inherited source sequence that mismatches the TZX product number", () => {
+    const values = sampleRows();
     values.push([
-      "1",
-      "TZX-004",
-      { fileToken: "file-token-tzx-004" },
-      "Fourth product",
-      "5.00",
-      "3",
-      "3",
-      { text: "Fourth product", link: "https://example.test/products/tzx-004" },
+      "",
+      "TZX-003",
+      { fileToken: "file-token-tzx-003" },
+      "",
+      "",
+      "8",
+      "8",
+      "",
       "Standard",
-      "Blue",
+      "Gray",
       "1pc",
-      "150g",
+      "140g",
       "可售",
       "",
     ]);
 
     const result = parseLegacyCargoSheet(values);
 
-    expect(result.issues).not.toContainEqual(
-      expect.objectContaining({ code: "CARGO_SEQUENCE_SKU_MISMATCH" }),
-    );
-    expect(result.issues).not.toContainEqual(
-      expect.objectContaining({
-        code: "CARGO_SOURCE_SEQUENCE_MULTIPLE_PRODUCT_GROUPS",
-      }),
-    );
-    expect(result.rows.slice(-2)).toMatchObject([
-      {
-        cargoUnitPriceMilliYuan: 4_500,
-        productGroupKey: "1",
-        skuCode: "TZX-003",
-        sourceSequence: "1",
-      },
-      {
-        cargoUnitPriceMilliYuan: 4_500,
-        inheritedFrom: { cargoPrice: 6 },
-        productGroupKey: "1",
-        skuCode: "TZX-004",
-        sourceSequence: "1",
-      },
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-003");
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SEQUENCE_SKU_MISMATCH",
+      message: "序号 2 与 TZX SKU 商品编号 3 不一致",
+      severity: "BLOCKING",
+      sourceRowNumber: 6,
+    });
+  });
+
+  test("does not let a blocked mismatching row poison later inherited variants", () => {
+    const values = sampleRows();
+    values.push([
+      "2",
+      "TZX-999-1",
+      { fileToken: "file-token-blocked" },
+      "Blocked product name",
+      "99.98",
+      "8",
+      "8",
+      { text: "Blocked product", link: "https://example.test/blocked" },
+      "Blocked specification",
+      "Blocked color",
+      "1pc",
+      "999g",
+      "可售",
+      "99.98",
     ]);
+    values.push([
+      "",
+      "TZX-002-2",
+      "",
+      "",
+      "",
+      "7",
+      "7",
+      "",
+      "Second variant",
+      "Blue",
+      "1pc",
+      "120g",
+      "可售",
+      "",
+    ]);
+
+    const result = parseLegacyCargoSheet(values);
+    const inheritedVariant = result.rows.find(
+      (row) => row.skuCode === "TZX-002-2",
+    );
+
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-999-1");
+    expect(inheritedVariant).toMatchObject({
+      cargoUnitPriceMilliYuan: 4500,
+      defaultUnitPriceMilliYuan: 4500,
+      productGroupKey: "2",
+      productName: "旅行收纳袋",
+      skuCode: "TZX-002-2",
+      sourceSequence: "2",
+    });
+    expect(inheritedVariant?.imageFileToken).not.toBe("file-token-blocked");
+    expect(inheritedVariant?.inheritedFrom.productName).toBe(5);
+    expect(inheritedVariant?.inheritedFrom.price).toBe(5);
   });
 
   test("skips a trailing SKU-only draft without inheriting the previous product", () => {
@@ -255,7 +342,7 @@ describe("parseLegacyCargoSheet", () => {
 
   test("does not skip an incomplete SKU-only row in the middle of the sheet", () => {
     const values = sampleRows();
-    values.push(["", "TZX-077", "", "", "", "", "", "", "", "", "", "", ""]);
+    values.push(["", "TZX-002-3", "", "", "", "", "", "", "", "", "", "", ""]);
     values.push([
       "78",
       "TZX-078",
@@ -275,7 +362,7 @@ describe("parseLegacyCargoSheet", () => {
 
     const result = parseLegacyCargoSheet(values);
 
-    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-077");
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-002-3");
     expect(result.issues).toContainEqual({
       code: "CARGO_INVALID_TOTAL_QUANTITY",
       message: "总库存必须是非负安全整数",
@@ -301,11 +388,11 @@ describe("parseLegacyCargoSheet", () => {
     const values = sampleRows();
     const blankRow = Array.from({ length: 13 }, () => "");
     values.splice(3, 0, blankRow);
-    values[4] = ["2", "TZX-900-1", "", "", "", "5", "5", "", "", "", "", "", "可售"];
+    values[4] = ["2", "TZX-002-9", "", "", "", "5", "5", "", "", "", "", "", "可售"];
 
     const result = parseLegacyCargoSheet(values);
 
-    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-900-1");
+    expect(result.rows.map((row) => row.skuCode)).not.toContain("TZX-002-9");
     expect(result.issues).toContainEqual({
       code: "CARGO_MISSING_PRODUCT_NAME",
       message: "名称不能为空",
