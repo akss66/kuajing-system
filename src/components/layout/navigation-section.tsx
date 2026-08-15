@@ -1,11 +1,17 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 
 import { SheetClose } from "@/components/ui/sheet";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
 export type NavigationItem = {
@@ -17,24 +23,11 @@ export type NavigationItem = {
 
 export type NavigationSectionProps = {
   id: string;
-  label: string;
+  label?: string;
   items: NavigationItem[];
-  defaultOpen: boolean;
   activePath: string;
   mobile?: boolean;
 };
-
-const navigationStateEvent = "merchant-navigation-state";
-
-function subscribeToNavigationState(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener(navigationStateEvent, callback);
-
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener(navigationStateEvent, callback);
-  };
-}
 
 function matchesPath(item: NavigationItem, activePath: string) {
   if (item.exact) return activePath === item.href;
@@ -54,95 +47,58 @@ function activeHref(items: NavigationItem[], activePath: string) {
 }
 
 export function NavigationSection({
-  id,
-  label,
-  items,
-  defaultOpen,
   activePath,
+  id,
+  items,
+  label,
   mobile = false,
 }: NavigationSectionProps) {
   const currentHref = useMemo(() => activeHref(items, activePath), [activePath, items]);
   const containsCurrentPage = currentHref !== undefined;
-  const storageKey = `merchant-navigation-section:${id}`;
-  const contentId = `${id}-${mobile ? "mobile" : "desktop"}-items`;
-  const persistedState = useSyncExternalStore(
-    subscribeToNavigationState,
-    () => window.localStorage.getItem(storageKey),
-    () => null,
-  );
-  const [localState, setLocalState] = useState<{
-    activePath: string;
-    open: boolean;
-  } | null>(null);
-  const persistedOpen = persistedState === null ? defaultOpen : persistedState === "true";
-  const open =
-    localState?.activePath === activePath
-      ? localState.open
-      : containsCurrentPage || persistedOpen;
-
-  function toggleSection() {
-    const nextOpen = !open;
-    setLocalState({ activePath, open: nextOpen });
-    window.localStorage.setItem(storageKey, String(nextOpen));
-    window.dispatchEvent(new Event(navigationStateEvent));
-  }
 
   return (
-    <section
-      className="space-y-1"
+    <SidebarGroup
+      className={cn("p-0", label ? "mt-5 first:mt-0" : "")}
       data-current-group={containsCurrentPage}
       data-navigation-section={id}
     >
-      <h2>
-        <button
-          aria-controls={contentId}
-          aria-expanded={open}
-          className={cn(
-            "flex w-full items-center justify-between rounded-md border px-3 text-left text-[11px] font-semibold tracking-[0.06em] transition-colors hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
-            containsCurrentPage
-              ? "border-border bg-[var(--merchant-nav-hover)] text-foreground"
-              : "border-transparent text-muted-foreground",
-            mobile ? "min-h-11" : "min-h-8",
-          )}
-          data-current-group={containsCurrentPage}
-          onClick={toggleSection}
-          type="button"
+      {label ? (
+        <SidebarGroupLabel
+          asChild
+          className="h-auto rounded-none px-3 pb-2 pt-0 text-xs font-medium tracking-normal text-muted-foreground"
         >
-          <span>{label}</span>
-          <ChevronDown
-            aria-hidden="true"
-            className={cn("size-3.5 transition-transform", open ? "rotate-0" : "-rotate-90")}
-          />
-        </button>
-      </h2>
+          <h2>{label}</h2>
+        </SidebarGroupLabel>
+      ) : null}
+      <SidebarGroupContent>
+        <SidebarMenu className="gap-1">
+          {items.map((item) => {
+            const active = item.href === currentHref;
+            const link = (
+              <Link
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative flex items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm font-medium transition-colors before:absolute before:left-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:rounded-full",
+                  mobile ? "min-h-11" : "min-h-10",
+                  active
+                    ? "bg-[var(--merchant-nav-active)] text-[var(--merchant-nav-active-foreground)] before:w-0.5 before:bg-[var(--merchant-nav-active-foreground)]"
+                    : "text-muted-foreground before:w-0 hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
+                )}
+                href={item.href}
+              >
+                <item.icon aria-hidden="true" className="size-[18px] shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              </Link>
+            );
 
-      <ul className="space-y-0.5" hidden={!open} id={contentId}>
-        {items.map((item) => {
-          const active = item.href === currentHref;
-          const link = (
-            <Link
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm font-medium transition-colors",
-                mobile ? "min-h-11" : "min-h-10",
-                active
-                  ? "bg-[var(--merchant-nav-active)] text-[var(--merchant-nav-active-foreground)]"
-                  : "text-muted-foreground hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
-              )}
-              href={item.href}
-            >
-              <item.icon aria-hidden="true" className="size-[18px] shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            </Link>
-          );
-
-          return (
-            <li key={item.href}>
-              {mobile ? <SheetClose asChild>{link}</SheetClose> : link}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+            return (
+              <SidebarMenuItem key={item.href}>
+                {mobile ? <SheetClose asChild>{link}</SheetClose> : link}
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }

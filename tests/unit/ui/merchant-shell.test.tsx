@@ -3,7 +3,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigationState = vi.hoisted(() => ({
@@ -88,7 +88,6 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "客户与店铺" })).toBeVisible();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
-    fireEvent.click(within(navigation).getByRole("button", { name: "系统管理" }));
     expect(within(navigation).getByRole("link", { name: "账号管理" })).toBeVisible();
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
     const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
@@ -115,7 +114,6 @@ describe("merchant shells", () => {
     const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
-    fireEvent.click(within(navigation).getByRole("button", { name: "系统管理" }));
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
     const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
@@ -125,37 +123,26 @@ describe("merchant shells", () => {
     expect(within(accountMenu!).getByText("普通管理员", { exact: true })).toBeVisible();
   });
 
-  it("persists navigation section collapse state in the current browser", async () => {
-    const firstRender = render(
-      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
-        <div>内容</div>
-      </AdminShell>,
-    );
-
-    const firstNavigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
-    const ordersSection = within(firstNavigation).getByRole("button", { name: "订单履约" });
-    expect(ordersSection).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(ordersSection);
-    expect(ordersSection).toHaveAttribute("aria-expanded", "false");
-
-    firstRender.unmount();
+  it("renders static navigation labels with every route visible and no collapse state", () => {
     render(
       <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
         <div>内容</div>
       </AdminShell>,
     );
 
-    const secondNavigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
-    await waitFor(() =>
-      expect(within(secondNavigation).getByRole("button", { name: "订单履约" })).toHaveAttribute(
-        "aria-expanded",
-        "false",
-      ),
-    );
+    const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
+    for (const label of ["客户与货品", "订单履约", "资金与数据", "系统管理"]) {
+      expect(within(navigation).getByRole("heading", { level: 2, name: label })).toBeVisible();
+      expect(within(navigation).queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+    expect(within(navigation).queryByText("工作台")).not.toBeInTheDocument();
+    expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
+    expect(within(navigation).getByRole("link", { name: "系统健康" })).toBeVisible();
+    expect(navigation.querySelector("[aria-expanded]")).toBeNull();
+    expect(window.localStorage.length).toBe(0);
   });
 
-  it("automatically opens the collapsed group containing the current route", async () => {
-    window.localStorage.setItem("merchant-navigation-section:admin-system", "false");
+  it("marks the current route with aria-current and a non-color active rail", () => {
     navigationState.pathname = "/admin/system/health";
 
     render(
@@ -165,50 +152,9 @@ describe("merchant shells", () => {
     );
 
     const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
-    await waitFor(() =>
-      expect(within(navigation).getByRole("button", { name: "系统管理" })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      ),
-    );
-    expect(within(navigation).getByRole("link", { name: "系统健康" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
-
-  it("semantically marks and strengthens only the group containing the current route", () => {
-    navigationState.pathname = "/admin/system/health";
-
-    render(
-      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
-        <div>内容</div>
-      </AdminShell>,
-    );
-
-    const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
-    const currentGroup = within(navigation)
-      .getByRole("button", { name: "系统管理" })
-      .closest("[data-navigation-section]");
-    const inactiveGroup = within(navigation)
-      .getByRole("button", { name: "客户与货品" })
-      .closest("[data-navigation-section]");
-
-    expect(currentGroup).toHaveAttribute("data-current-group", "true");
-    expect(within(currentGroup as HTMLElement).getByRole("button", { name: "系统管理" })).toHaveClass(
-      "border-border",
-      "bg-[var(--merchant-nav-hover)]",
-      "text-foreground",
-    );
-    expect(inactiveGroup).toHaveAttribute("data-current-group", "false");
-    expect(within(inactiveGroup as HTMLElement).getByRole("button", { name: "客户与货品" })).not.toHaveClass(
-      "border-border",
-      "bg-[var(--merchant-nav-hover)]",
-    );
-    expect(within(currentGroup as HTMLElement).getByRole("link", { name: "系统健康" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    const current = within(navigation).getByRole("link", { name: "系统健康" });
+    expect(current).toHaveAttribute("aria-current", "page");
+    expect(current).toHaveClass("before:w-0.5", "before:bg-[var(--merchant-nav-active-foreground)]");
   });
 
   it("keeps the mobile account menu compact without leaking admin-only navigation into the customer shell", () => {

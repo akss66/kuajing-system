@@ -11,12 +11,11 @@ import { NavigationSection, type NavigationItem } from "./navigation-section";
 
 const customerNavigation: Array<{
   id: string;
-  label: string;
+  label?: string;
   items: NavigationItem[];
 }> = [
   {
-    id: "customer-workbench",
-    label: "工作台",
+    id: "customer-overview",
     items: [{ href: "/portal", icon: LayoutDashboard, label: "客户首页", exact: true }],
   },
   {
@@ -55,7 +54,6 @@ function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
       {customerNavigation.map((group) => (
         <NavigationSection
           activePath={activePath}
-          defaultOpen
           id={group.id}
           items={group.items}
           key={group.id}

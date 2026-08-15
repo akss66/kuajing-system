@@ -28,23 +28,19 @@ type AdminPrincipalKind = "ADMIN" | "SUPER_ADMIN";
 
 type AdminNavigationGroup = {
   id: string;
-  label: string;
-  defaultOpen: boolean;
+  label?: string;
   items: NavigationItem[];
 };
 
 function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGroup[] {
   return [
     {
-      id: "admin-workbench",
-      label: "工作台",
-      defaultOpen: true,
+      id: "admin-overview",
       items: [{ href: "/admin", icon: LayoutDashboard, label: "运营总览", exact: true }],
     },
     {
       id: "admin-customers-products",
       label: "客户与货品",
-      defaultOpen: true,
       items: [
         { href: "/admin/customers", icon: Building2, label: "客户与店铺" },
         { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
@@ -54,7 +50,6 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
     {
       id: "admin-order-fulfillment",
       label: "订单履约",
-      defaultOpen: true,
       items: [
         { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
         { href: "/admin/bulk-orders", icon: FileSearch, label: "批量草稿诊断" },
@@ -64,7 +59,6 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
     {
       id: "admin-funds-data",
       label: "资金与数据",
-      defaultOpen: true,
       items: [
         { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
         { href: "/admin/settlement-batches", icon: WalletCards, label: "统一结算批次" },
@@ -74,7 +68,6 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
     {
       id: "admin-system",
       label: "系统管理",
-      defaultOpen: false,
       items: [
         ...(principalKind === "SUPER_ADMIN"
           ? [{ href: "/admin/accounts", icon: Settings2, label: "账号管理" } satisfies NavigationItem]
@@ -102,7 +95,6 @@ function AdminNavigation({
       {navigationForRole(principalKind).map((group) => (
         <NavigationSection
           activePath={pathname}
-          defaultOpen={group.defaultOpen}
           id={group.id}
           items={group.items}
           key={group.id}
