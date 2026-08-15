@@ -159,6 +159,19 @@ describe("JifengConnectionCard", () => {
     },
   );
 
+  it("formats connection timestamps in the business timezone", () => {
+    render(
+      <JifengConnectionCard
+        canManage
+        connection={connection("READY_DISABLED")}
+        details={details}
+      />,
+    );
+
+    expect(screen.getByText("2026年8月12日 04:00")).toBeVisible();
+    expect(screen.getByText("2026年8月13日 04:00")).toBeVisible();
+  });
+
   it.each([
     [
       "DISCONNECTED",

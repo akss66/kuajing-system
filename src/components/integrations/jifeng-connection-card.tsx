@@ -26,6 +26,7 @@ import {
 } from "@/modules/jifeng-connection/actions";
 import type { JifengConnectionStatus } from "@/modules/jifeng-connection/types";
 import { INITIAL_ACTION_STATE } from "@/shared/action-state";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 type ConnectionSummary = {
   fulfillmentEnabled: boolean;
@@ -122,6 +123,7 @@ function formatDate(value: Date | null) {
     ? new Intl.DateTimeFormat("zh-CN", {
         dateStyle: "medium",
         timeStyle: "short",
+        timeZone: BUSINESS_TIME_ZONE,
       }).format(value)
     : "暂无";
 }
