@@ -1,12 +1,18 @@
 import type {
+  AppliedCargoPricePlaceholder,
   CargoInheritedField,
   CargoParseResult,
+  CargoPricePlaceholder,
   MigrationIssue,
   ParsedCargoRow,
 } from "@/modules/feishu/cargo-types";
 import { roundMilliYuanToFen } from "@/modules/catalog/unit-price";
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+const AUDITED_CARGO_PRICE_PLACEHOLDER = {
+  skuCode: "TZX-076",
+  unitPriceMilliYuan: 99_000,
+} as const;
 const HEADER_ALIASES = {
   combination: ["\u7ec4\u5408\u9500\u552e"],
   color: ["\u989c\u8272"],
@@ -478,10 +484,14 @@ function buildSummary(rows: ParsedCargoRow[]) {
   };
 }
 
-export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
+export function parseLegacyCargoSheet(
+  values: unknown[][],
+  options: { cargoPricePlaceholders?: readonly CargoPricePlaceholder[] } = {},
+): CargoParseResult {
   const headerRowIndex = findHeaderRow(values);
   if (headerRowIndex === -1) {
     return {
+      appliedCargoPricePlaceholders: [],
       headerRowNumber: 0,
       issues: [
         {
@@ -503,11 +513,39 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
 
   const headerMap = createHeaderMap(values[headerRowIndex] ?? []);
   const rows: ParsedCargoRow[] = [];
+  const appliedCargoPricePlaceholders: AppliedCargoPricePlaceholder[] = [];
+  const cargoPricePlaceholdersBySku = new Map<
+    string,
+    Array<{ declarationIndex: number; placeholder: CargoPricePlaceholder }>
+  >();
+  for (const [declarationIndex, placeholder] of (
+    options.cargoPricePlaceholders ?? []
+  ).entries()) {
+    if (
+      placeholder.skuCode !== AUDITED_CARGO_PRICE_PLACEHOLDER.skuCode ||
+      placeholder.unitPriceMilliYuan !==
+        AUDITED_CARGO_PRICE_PLACEHOLDER.unitPriceMilliYuan
+    ) {
+      continue;
+    }
+    const declarations = cargoPricePlaceholdersBySku.get(placeholder.skuCode) ?? [];
+    declarations.push({ declarationIndex, placeholder });
+    cargoPricePlaceholdersBySku.set(placeholder.skuCode, declarations);
+  }
+  const appliedCargoPricePlaceholderDeclarationIndexes = new Set<number>();
   const issues: MigrationIssue[] = collectDuplicateSkuIssues({
     headerMap,
     headerRowIndex,
     values,
   });
+  const preExistingBlockingIssueRows = new Set(
+    issues
+      .filter(
+        (issue) =>
+          issue.severity === "BLOCKING" && issue.sourceRowNumber !== undefined,
+      )
+      .map((issue) => issue.sourceRowNumber),
+  );
   const context = createEmptyContext();
 
   for (let offset = headerRowIndex + 1; offset < values.length; offset += 1) {
@@ -518,7 +556,9 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     }
 
     const sourceRowNumber = offset + 1;
+    const rowIssueStartIndex = issues.length;
     const inheritedFrom: Partial<Record<CargoInheritedField, number>> = {};
+    const rowContext: GroupContext = { ...context };
 
     const skuCode = extractDisplayText(row[headerMap.sku]);
     if (skuCode.length === 0) {
@@ -548,14 +588,14 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       ? normalizeProductGroupKey(explicitGroupText)
       : "";
     const previousProductGroupKey =
-      typeof context.productGroupKey?.value === "string"
-        ? context.productGroupKey.value
+      typeof rowContext.productGroupKey?.value === "string"
+        ? rowContext.productGroupKey.value
         : "";
     const productGroupKey = explicitGroupKey || previousProductGroupKey;
     const sourceSequence =
       explicitSourceSequence ||
-      (typeof context.sourceSequence?.value === "string"
-        ? context.sourceSequence.value
+      (typeof rowContext.sourceSequence?.value === "string"
+        ? rowContext.sourceSequence.value
         : "");
 
     if (sourceSequence.length === 0) {
@@ -585,13 +625,13 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     }
 
     if (productGroupKey && previousProductGroupKey !== productGroupKey) {
-      resetGroupContext(context);
+      resetGroupContext(rowContext);
     }
 
-    if (explicitGroupKey || (!context.productGroupKey && productGroupKey)) {
-      context.productGroupKey = { rowNumber: sourceRowNumber, value: productGroupKey };
-    } else if (context.productGroupKey) {
-      inheritedFrom.productGroupKey = context.productGroupKey.rowNumber;
+    if (explicitGroupKey || (!rowContext.productGroupKey && productGroupKey)) {
+      rowContext.productGroupKey = { rowNumber: sourceRowNumber, value: productGroupKey };
+    } else if (rowContext.productGroupKey) {
+      inheritedFrom.productGroupKey = rowContext.productGroupKey.rowNumber;
     } else {
       issues.push(
         buildIssue({
@@ -606,13 +646,13 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const explicitProductName = extractDisplayText(row[headerMap.name]);
     const productName =
       explicitProductName ||
-      (typeof context.productName?.value === "string"
-        ? context.productName.value
+      (typeof rowContext.productName?.value === "string"
+        ? rowContext.productName.value
         : "");
     if (explicitProductName) {
-      context.productName = { rowNumber: sourceRowNumber, value: explicitProductName };
-    } else if (context.productName) {
-      inheritedFrom.productName = context.productName.rowNumber;
+      rowContext.productName = { rowNumber: sourceRowNumber, value: explicitProductName };
+    } else if (rowContext.productName) {
+      inheritedFrom.productName = rowContext.productName.rowNumber;
     } else {
       issues.push(
         buildIssue({
@@ -627,11 +667,11 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const explicitImageToken = resolveImageToken(row[headerMap.image]);
     const imageFileToken =
       explicitImageToken ||
-      (typeof context.image?.value === "string" ? context.image.value : "");
+      (typeof rowContext.image?.value === "string" ? rowContext.image.value : "");
     if (explicitImageToken) {
-      context.image = { rowNumber: sourceRowNumber, value: explicitImageToken };
-    } else if (context.image) {
-      inheritedFrom.image = context.image.rowNumber;
+      rowContext.image = { rowNumber: sourceRowNumber, value: explicitImageToken };
+    } else if (rowContext.image) {
+      inheritedFrom.image = rowContext.image.rowNumber;
     } else {
       issues.push(
         buildIssue({
@@ -647,9 +687,9 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const explicitPrice = parseYuanPrice(row[headerMap.price]);
     const defaultUnitPriceMilliYuan =
       explicitPrice?.unitPriceMilliYuan ??
-      (typeof context.price?.value === "number" ? context.price.value : null);
+      (typeof rowContext.price?.value === "number" ? rowContext.price.value : null);
     if (explicitPrice !== null) {
-      context.price = {
+      rowContext.price = {
         rowNumber: sourceRowNumber,
         value: explicitPrice.unitPriceMilliYuan,
       };
@@ -661,8 +701,8 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           sourceRowNumber,
         });
       }
-    } else if (extractDisplayText(row[headerMap.price]).length === 0 && context.price) {
-      inheritedFrom.price = context.price.rowNumber;
+    } else if (extractDisplayText(row[headerMap.price]).length === 0 && rowContext.price) {
+      inheritedFrom.price = rowContext.price.rowNumber;
     } else {
       issues.push(
         buildIssue({
@@ -675,30 +715,58 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     }
 
     if (explicitSourceSequence) {
-      context.sourceSequence = {
+      rowContext.sourceSequence = {
         rowNumber: sourceRowNumber,
         value: explicitSourceSequence,
       };
-    } else if (context.sourceSequence) {
-      inheritedFrom.sourceSequence = context.sourceSequence.rowNumber;
+    } else if (rowContext.sourceSequence) {
+      inheritedFrom.sourceSequence = rowContext.sourceSequence.rowNumber;
     }
 
-    const explicitCargoPrice = parseYuanPrice(row[headerMap.cargoPrice]);
+    const cargoPriceCell = row[headerMap.cargoPrice];
+    const cargoPriceText = extractDisplayText(cargoPriceCell);
+    const placeholderDeclarations =
+      cargoPricePlaceholdersBySku.get(skuCode) ?? [];
+    const explicitCargoPrice = parseYuanPrice(cargoPriceCell);
+    if (placeholderDeclarations.length > 0 && explicitCargoPrice !== null) {
+      issues.push(
+        buildIssue({
+          code: "CARGO_PRICE_PLACEHOLDER_NOT_NEEDED",
+          message: `SKU ${skuCode} 的货品价格已有来源值，无需占位`,
+          sourceRowNumber,
+        }),
+      );
+      continue;
+    }
+
+    const placeholder =
+      cargoPriceText.length === 0 ? placeholderDeclarations[0] : undefined;
+    const placeholderCargoPrice = placeholder
+      ? {
+          unitPriceMilliYuan: placeholder.placeholder.unitPriceMilliYuan,
+        }
+      : null;
     const cargoUnitPriceMilliYuan =
       explicitCargoPrice?.unitPriceMilliYuan ??
-      (typeof context.cargoPrice?.value === "number"
-        ? context.cargoPrice.value
+      placeholderCargoPrice?.unitPriceMilliYuan ??
+      (typeof rowContext.cargoPrice?.value === "number"
+        ? rowContext.cargoPrice.value
         : null);
     if (explicitCargoPrice !== null) {
-      context.cargoPrice = {
+      rowContext.cargoPrice = {
         rowNumber: sourceRowNumber,
         value: explicitCargoPrice.unitPriceMilliYuan,
       };
+    } else if (placeholderCargoPrice !== null) {
+      rowContext.cargoPrice = {
+        rowNumber: sourceRowNumber,
+        value: placeholderCargoPrice.unitPriceMilliYuan,
+      };
     } else if (
-      extractDisplayText(row[headerMap.cargoPrice]).length === 0 &&
-      context.cargoPrice
+      cargoPriceText.length === 0 &&
+      rowContext.cargoPrice
     ) {
-      inheritedFrom.cargoPrice = context.cargoPrice.rowNumber;
+      inheritedFrom.cargoPrice = rowContext.cargoPrice.rowNumber;
     } else {
       issues.push(
         buildIssue({
@@ -727,11 +795,11 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const resolvedLink =
       explicitLink.kind === "valid"
         ? explicitLink.value
-        : isBlankLinkCell(linkCell) && context.productUrl
-          ? { text: context.productUrl.text, url: context.productUrl.url }
+        : isBlankLinkCell(linkCell) && rowContext.productUrl
+          ? { text: rowContext.productUrl.text, url: rowContext.productUrl.url }
           : null;
     if (explicitLink.kind === "valid") {
-      context.productUrl = { ...explicitLink.value, rowNumber: sourceRowNumber };
+      rowContext.productUrl = { ...explicitLink.value, rowNumber: sourceRowNumber };
       if (explicitLink.value.url === null) {
         issues.push({
           code: "CARGO_PRODUCT_URL_SENTINEL_NORMALIZED",
@@ -740,8 +808,8 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           sourceRowNumber,
         });
       }
-    } else if (isBlankLinkCell(linkCell) && context.productUrl) {
-      inheritedFrom.productUrl = context.productUrl.rowNumber;
+    } else if (isBlankLinkCell(linkCell) && rowContext.productUrl) {
+      inheritedFrom.productUrl = rowContext.productUrl.rowNumber;
     } else if (explicitLink.kind === "invalid") {
       issues.push({
         code: "CARGO_INVALID_PRODUCT_URL",
@@ -764,36 +832,36 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     const specificationText = extractDisplayText(row[headerMap.specification]);
     const specification =
       specificationText ||
-      (typeof context.specification?.value === "string"
-        ? context.specification.value
+      (typeof rowContext.specification?.value === "string"
+        ? rowContext.specification.value
         : null);
     if (specificationText) {
-      context.specification = { rowNumber: sourceRowNumber, value: specificationText };
-    } else if (context.specification) {
-      inheritedFrom.specification = context.specification.rowNumber;
+      rowContext.specification = { rowNumber: sourceRowNumber, value: specificationText };
+    } else if (rowContext.specification) {
+      inheritedFrom.specification = rowContext.specification.rowNumber;
     }
 
     const combinationText = extractDisplayText(row[headerMap.combination]);
     const combination =
       combinationText ||
-      (typeof context.combination?.value === "string"
-        ? context.combination.value
+      (typeof rowContext.combination?.value === "string"
+        ? rowContext.combination.value
         : null);
     if (combinationText) {
-      context.combination = { rowNumber: sourceRowNumber, value: combinationText };
-    } else if (context.combination) {
-      inheritedFrom.combination = context.combination.rowNumber;
+      rowContext.combination = { rowNumber: sourceRowNumber, value: combinationText };
+    } else if (rowContext.combination) {
+      inheritedFrom.combination = rowContext.combination.rowNumber;
     }
 
     const explicitWeight = parseWeightGrams(row[headerMap.weight], combination);
     const weightText = extractDisplayText(row[headerMap.weight]);
     const weightGrams =
       explicitWeight?.grams ??
-      (weightText.length === 0 && typeof context.weight?.value === "number"
-        ? context.weight.value
+      (weightText.length === 0 && typeof rowContext.weight?.value === "number"
+        ? rowContext.weight.value
         : null);
     if (explicitWeight !== null) {
-      context.weight = { rowNumber: sourceRowNumber, value: explicitWeight.grams };
+      rowContext.weight = { rowNumber: sourceRowNumber, value: explicitWeight.grams };
       if (explicitWeight.normalizedNotation) {
         issues.push({
           code: "CARGO_WEIGHT_NOTATION_NORMALIZED",
@@ -802,8 +870,8 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           sourceRowNumber,
         });
       }
-    } else if (weightText.length === 0 && context.weight) {
-      inheritedFrom.weight = context.weight.rowNumber;
+    } else if (weightText.length === 0 && rowContext.weight) {
+      inheritedFrom.weight = rowContext.weight.rowNumber;
     } else if (weightText.length > 0) {
       issues.push(
         buildIssue({
@@ -819,16 +887,16 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
     let parsedSaleStatus: "SELLABLE" | "NOT_SELLABLE" | null = null;
     if (explicitStatus.kind === "value") {
       parsedSaleStatus = explicitStatus.value;
-      context.saleStatus = {
+      rowContext.saleStatus = {
         rowNumber: sourceRowNumber,
         value: explicitStatus.value,
       };
     } else if (
       explicitStatus.kind === "missing" &&
-      typeof context.saleStatus?.value === "string"
+      typeof rowContext.saleStatus?.value === "string"
     ) {
-      parsedSaleStatus = context.saleStatus.value as "SELLABLE" | "NOT_SELLABLE";
-      inheritedFrom.saleStatus = context.saleStatus.rowNumber;
+      parsedSaleStatus = rowContext.saleStatus.value as "SELLABLE" | "NOT_SELLABLE";
+      inheritedFrom.saleStatus = rowContext.saleStatus.rowNumber;
     } else if (explicitStatus.kind === "missing") {
       issues.push(
         buildIssue({
@@ -846,6 +914,15 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
           sourceRowNumber,
         }),
       );
+      continue;
+    }
+
+    const hasBlockingIssue =
+      preExistingBlockingIssueRows.has(sourceRowNumber) ||
+      issues
+        .slice(rowIssueStartIndex)
+        .some((issue) => issue.severity === "BLOCKING");
+    if (hasBlockingIssue) {
       continue;
     }
 
@@ -875,6 +952,35 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
       totalQuantity: quantity,
       weightGrams,
     });
+    if (placeholderCargoPrice !== null) {
+      appliedCargoPricePlaceholderDeclarationIndexes.add(
+        placeholder!.declarationIndex,
+      );
+      appliedCargoPricePlaceholders.push({
+        skuCode,
+        sourceRowNumber,
+        unitPriceMilliYuan: placeholderCargoPrice.unitPriceMilliYuan,
+      });
+      issues.push({
+        code: "CARGO_PRICE_PLACEHOLDER_APPLIED",
+        message: `SKU ${skuCode} 的货品价格已使用审计占位值`,
+        severity: "WARNING",
+        sourceRowNumber,
+      });
+    }
+    Object.assign(context, rowContext);
+  }
+
+  for (const [declarationIndex, placeholder] of (
+    options.cargoPricePlaceholders ?? []
+  ).entries()) {
+    if (!appliedCargoPricePlaceholderDeclarationIndexes.has(declarationIndex)) {
+      issues.push({
+        code: "CARGO_PRICE_PLACEHOLDER_UNUSED",
+        message: `SKU ${placeholder.skuCode} 的货品价格占位未使用`,
+        severity: "BLOCKING",
+      });
+    }
   }
 
   const { overflowed, summary } = buildSummary(rows);
@@ -887,6 +993,7 @@ export function parseLegacyCargoSheet(values: unknown[][]): CargoParseResult {
   }
 
   return {
+    appliedCargoPricePlaceholders,
     headerRowNumber: headerRowIndex + 1,
     issues,
     rows,

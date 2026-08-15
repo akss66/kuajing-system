@@ -21,6 +21,44 @@ function withCargoPriceColumn(values: unknown[][]) {
   ]);
 }
 
+function cargoPricePlaceholderRows() {
+  return [
+    [
+      "序号",
+      "SKU",
+      "图片",
+      "名称",
+      "货品价格",
+      "采购价",
+      "总库存",
+      "可售库存",
+      "链接文字",
+      "规格",
+      "颜色",
+      "组合销售",
+      "重量",
+      "状态",
+    ],
+    ...Array.from({ length: 139 }, () => []),
+    [
+      "76",
+      "TZX-076",
+      { fileToken: "file-token-tzx-076" },
+      "占位货品",
+      "",
+      "99.00",
+      "1",
+      "1",
+      { text: "占位货品", link: "https://example.test/products/tzx-076" },
+      "标准款",
+      "黑色",
+      "单个",
+      "100g",
+      "可售",
+    ],
+  ];
+}
+
 describe("parseLegacyCargoSheet", () => {
   test("parses merged rows into strict parsed cargo rows", () => {
     const result = parseLegacyCargoSheet(sampleRows());
@@ -198,6 +236,80 @@ describe("parseLegacyCargoSheet", () => {
       severity: "BLOCKING",
       sourceRowNumber: 2,
     });
+  });
+
+  test("applies an audited cargo price placeholder only to its blank source price", () => {
+    const values = cargoPricePlaceholderRows();
+
+    expect(parseLegacyCargoSheet(values).issues).toContainEqual(
+      expect.objectContaining({ code: "CARGO_INVALID_CARGO_PRICE" }),
+    );
+
+    const parsed = parseLegacyCargoSheet(values, {
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+    });
+
+    expect(parsed.appliedCargoPricePlaceholders).toEqual([
+      {
+        skuCode: "TZX-076",
+        sourceRowNumber: 141,
+        unitPriceMilliYuan: 99_000,
+      },
+    ]);
+    expect(parsed.issues).toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_PRICE_PLACEHOLDER_APPLIED",
+        severity: "WARNING",
+      }),
+    );
+  });
+
+  test("blocks a cargo price placeholder when the source price is present", () => {
+    const values = cargoPricePlaceholderRows();
+    values[140][4] = "99.00";
+
+    const parsed = parseLegacyCargoSheet(values, {
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+    });
+
+    expect(parsed.issues).toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_PRICE_PLACEHOLDER_NOT_NEEDED",
+        severity: "BLOCKING",
+      }),
+    );
+  });
+
+  test("blocks an unused cargo price placeholder", () => {
+    const parsed = parseLegacyCargoSheet(sampleRows(), {
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+    });
+
+    expect(parsed.issues).toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_PRICE_PLACEHOLDER_UNUSED",
+        severity: "BLOCKING",
+      }),
+    );
+  });
+
+  test("does not apply a cargo price placeholder outside the audited allowance", () => {
+    const parsed = parseLegacyCargoSheet(cargoPricePlaceholderRows(), {
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_001 },
+      ],
+    });
+
+    expect(parsed.appliedCargoPricePlaceholders).toEqual([]);
+    expect(parsed.issues).toContainEqual(
+      expect.objectContaining({ code: "CARGO_INVALID_CARGO_PRICE" }),
+    );
   });
 
   test("finds the header row within the first twenty rows", () => {

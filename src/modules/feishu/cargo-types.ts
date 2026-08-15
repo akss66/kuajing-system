@@ -63,7 +63,17 @@ export type ParsedCargoRow = Omit<
   "imageContentSha256" | "imageTemporaryKey"
 > & { imageFileToken: string };
 
+export type CargoPricePlaceholder = {
+  skuCode: string;
+  unitPriceMilliYuan: number;
+};
+
+export type AppliedCargoPricePlaceholder = CargoPricePlaceholder & {
+  sourceRowNumber: number;
+};
+
 export type CargoParseResult = {
+  appliedCargoPricePlaceholders: AppliedCargoPricePlaceholder[];
   headerRowNumber: number;
   rows: ParsedCargoRow[];
   issues: MigrationIssue[];
