@@ -19,6 +19,8 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
     ["--cargo-price-placeholder=TZX-076:0.00"],
     ["--cargo-price-placeholder=TZX-076:-1.00"],
     ["--cargo-price-placeholder=TZ-076:99.00"],
+    ["--cargo-price-placeholder=TZX-999:99.00"],
+    ["--cargo-price-placeholder=TZX-076-1:99.00"],
     ["--cargo-price-placeholder=TZX-076:99.00", "--cargo-price-placeholder=TZX-076:99.00"],
   ])("rejects an invalid cargo price placeholder", (...argumentsList) => {
     expect(() => parseCatalogFieldRefreshCliArguments(argumentsList))

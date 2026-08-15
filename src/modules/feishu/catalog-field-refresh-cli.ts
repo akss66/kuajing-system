@@ -1,5 +1,9 @@
 export const REQUIRED_SOURCE_SEQUENCE_COUNT = 76;
 export const REQUIRED_SKU_COUNT = 140;
+const AUDITED_CARGO_PRICE_PLACEHOLDER = {
+  skuCode: "TZX-076",
+  unitPriceMilliYuan: 99_000,
+} as const;
 
 export type CatalogFieldRefreshCliArguments = {
   apply: boolean;
@@ -44,6 +48,12 @@ function parseCargoPricePlaceholders(argumentsList: readonly string[]) {
       10,
     );
     if (!Number.isSafeInteger(unitPriceMilliYuan) || unitPriceMilliYuan <= 0) {
+      throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
+    }
+    if (
+      skuCode !== AUDITED_CARGO_PRICE_PLACEHOLDER.skuCode ||
+      unitPriceMilliYuan !== AUDITED_CARGO_PRICE_PLACEHOLDER.unitPriceMilliYuan
+    ) {
       throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
     }
     return { skuCode, unitPriceMilliYuan };
