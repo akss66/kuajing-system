@@ -93,7 +93,7 @@ export function CreateCustomerDrawer({ first = false }: { first?: boolean }) {
       size="lg"
       title="新建客户"
       trigger={
-        <Button className="min-h-11" variant={first ? "outline" : "default"}>
+        <Button className="h-10 px-4 max-sm:min-h-11" variant={first ? "outline" : "default"}>
           <Plus aria-hidden="true" />
           {first ? "新建第一位客户" : "新建客户"}
         </Button>

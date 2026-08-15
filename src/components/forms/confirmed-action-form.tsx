@@ -89,7 +89,9 @@ export function ConfirmedActionForm({
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
+            aria-busy={pending}
             className="min-h-11 px-4"
+            data-loading={pending || undefined}
             disabled={disabled || pending}
             type="button"
             variant={variant}
@@ -108,15 +110,11 @@ export function ConfirmedActionForm({
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-11">返回检查</AlertDialogCancel>
             <AlertDialogAction
-              className={cn(
-                "min-h-11",
-                variant === "destructive"
-                  ? "!bg-[rgb(123_20_25)] !text-white hover:!bg-[rgb(102_17_21)]"
-                  : undefined,
-              )}
+              className="min-h-11"
+              data-variant={variant}
               form={formId}
               type="submit"
-              variant={variant}
+              variant={variant === "destructive" ? "destructiveSolid" : variant}
             >
               {confirmLabel}
             </AlertDialogAction>

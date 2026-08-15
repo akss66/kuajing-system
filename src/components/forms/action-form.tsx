@@ -58,7 +58,9 @@ export function ActionForm({
         </div>
       ) : null}
       <Button
+        aria-busy={pending}
         className={cn("min-h-11 px-4", submitClassName)}
+        data-loading={pending || undefined}
         disabled={pending || submitDisabled}
         type="submit"
       >

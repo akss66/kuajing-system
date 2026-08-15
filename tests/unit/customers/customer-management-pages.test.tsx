@@ -86,7 +86,11 @@ describe("customer management pages", () => {
     render(await CustomersPage());
 
     expect(screen.getByRole("heading", { name: "客户与店铺" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "新建客户" })).toBeVisible();
+    const createCustomer = screen.getByRole("button", { name: "新建客户" });
+    expect(createCustomer).toBeVisible();
+    expect(createCustomer).toHaveAttribute("data-variant", "default");
+    expect(createCustomer.querySelector("svg")).not.toBeNull();
+    expect(createCustomer.className).not.toMatch(/shadow|translate-y/);
     expect(screen.queryByLabelText("客户编号")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("登录邮箱")).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "搜索客户" })).toBeVisible();
