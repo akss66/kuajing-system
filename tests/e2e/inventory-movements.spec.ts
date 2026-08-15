@@ -71,23 +71,24 @@ const ids = {
 const movementId = (sequence: number) =>
   `40000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`;
 
-const acceptanceReferenceDate = DateTime.now()
+const fixedAcceptanceReferenceDate = "2026-08-14";
+const currentBusinessDate = DateTime.now()
   .setZone(BUSINESS_TIME_ZONE)
   .toISODate()!;
 
-function acceptanceDateTime(hour: number, minute = 0) {
-  return DateTime.fromISO(acceptanceReferenceDate, {
+function acceptanceDateTime(referenceDate: string, hour: number, minute = 0) {
+  return DateTime.fromISO(referenceDate, {
     zone: BUSINESS_TIME_ZONE,
   })
     .set({ hour, minute })
     .toJSDate();
 }
 
-function businessIsoDate(date: Date) {
+function businessIsoDate(date: Date, fallbackDate = currentBusinessDate) {
   return (
     DateTime.fromJSDate(date, { zone: BUSINESS_TIME_ZONE })
       .setZone(BUSINESS_TIME_ZONE)
-      .toISODate() ?? acceptanceReferenceDate
+      .toISODate() ?? fallbackDate
   );
 }
 
@@ -198,7 +199,8 @@ async function expectNoOverlap(left: Locator, right: Locator, context: string) {
   expect(overlapWidth * overlapHeight, `${context} overlap area`).toBeLessThanOrEqual(1);
 }
 
-async function seedInventoryAcceptanceData() {
+async function seedInventoryAcceptanceData(input: { referenceDate?: string } = {}) {
+  const referenceDate = input.referenceDate ?? fixedAcceptanceReferenceDate;
   const [admin] = await db
     .select({ id: adminUsers.id })
     .from(adminUsers)
@@ -390,7 +392,7 @@ async function seedInventoryAcceptanceData() {
       actorType: "ADMIN",
       afterQuantity: 47,
       beforeQuantity: 50,
-      createdAt: acceptanceDateTime(14),
+      createdAt: acceptanceDateTime(referenceDate, 10),
       delta: -3,
       id: movementId(904),
       movementType: "MANUAL_DECREASE",
@@ -444,7 +446,7 @@ async function seedInventoryAcceptanceData() {
   ]);
 }
 
-async function resetInventoryAcceptanceBaseline() {
+async function resetInventoryAcceptanceBaseline(input: { referenceDate?: string } = {}) {
   await resetE2EDatabaseToSeedState({
     context: "inventory movement E2E reset",
     database: db,
@@ -452,7 +454,7 @@ async function resetInventoryAcceptanceBaseline() {
   });
   await assertCurrentE2ETestDatabase(db, "inventory movement E2E fixture");
   await db.delete(inventoryStocktakeBatches);
-  await seedInventoryAcceptanceData();
+  await seedInventoryAcceptanceData(input);
 }
 
 async function loginAndOpenInventory(page: Page) {
@@ -534,7 +536,7 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
   page,
 }) => {
   const failures = observeBrowserFailures(page);
-  await resetInventoryAcceptanceBaseline();
+  await resetInventoryAcceptanceBaseline({ referenceDate: currentBusinessDate });
   await loginAndOpenInventory(page);
 
   const tabs = page.getByRole("tablist", { name: "库存视图" }).getByRole("tab");
@@ -699,11 +701,11 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
 
   await submitMovementFilters(page, {
     actorId: acceptance.operatorId,
-    from: acceptanceReferenceDate,
+    from: currentBusinessDate,
     movementType: "MANUAL_DECREASE",
     skuCode: acceptance.primarySkuCode,
     source: "ADMIN_OFFLINE_FULFILLMENT",
-    to: businessIsoDate(offlineFulfillmentMovement!.createdAt),
+    to: businessIsoDate(offlineFulfillmentMovement!.createdAt, currentBusinessDate),
   });
   await expect(page).toHaveURL(/sku=INV-E2E-LONG-SKU/);
   await expect(
