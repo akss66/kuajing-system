@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { DateTime } from "luxon";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -19,6 +20,7 @@ import {
   stores,
 } from "@/db/schema";
 import { seed } from "@/db/seed";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import { loginThroughUi } from "./support/managed-user";
 import {
@@ -68,6 +70,27 @@ const ids = {
 
 const movementId = (sequence: number) =>
   `40000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`;
+
+const fixedAcceptanceReferenceDate = "2026-08-14";
+const currentBusinessDate = DateTime.now()
+  .setZone(BUSINESS_TIME_ZONE)
+  .toISODate()!;
+
+function acceptanceDateTime(referenceDate: string, hour: number, minute = 0) {
+  return DateTime.fromISO(referenceDate, {
+    zone: BUSINESS_TIME_ZONE,
+  })
+    .set({ hour, minute })
+    .toJSDate();
+}
+
+function businessIsoDate(date: Date, fallbackDate = currentBusinessDate) {
+  return (
+    DateTime.fromJSDate(date, { zone: BUSINESS_TIME_ZONE })
+      .setZone(BUSINESS_TIME_ZONE)
+      .toISODate() ?? fallbackDate
+  );
+}
 
 function observeBrowserFailures(page: Page) {
   const consoleErrors: string[] = [];
@@ -176,7 +199,8 @@ async function expectNoOverlap(left: Locator, right: Locator, context: string) {
   expect(overlapWidth * overlapHeight, `${context} overlap area`).toBeLessThanOrEqual(1);
 }
 
-async function seedInventoryAcceptanceData() {
+async function seedInventoryAcceptanceData(input: { referenceDate?: string } = {}) {
+  const referenceDate = input.referenceDate ?? fixedAcceptanceReferenceDate;
   const [admin] = await db
     .select({ id: adminUsers.id })
     .from(adminUsers)
@@ -368,7 +392,7 @@ async function seedInventoryAcceptanceData() {
       actorType: "ADMIN",
       afterQuantity: 47,
       beforeQuantity: 50,
-      createdAt: new Date("2026-08-14T14:00:00.000Z"),
+      createdAt: acceptanceDateTime(referenceDate, 10),
       delta: -3,
       id: movementId(904),
       movementType: "MANUAL_DECREASE",
@@ -422,7 +446,7 @@ async function seedInventoryAcceptanceData() {
   ]);
 }
 
-async function resetInventoryAcceptanceBaseline() {
+async function resetInventoryAcceptanceBaseline(input: { referenceDate?: string } = {}) {
   await resetE2EDatabaseToSeedState({
     context: "inventory movement E2E reset",
     database: db,
@@ -430,7 +454,7 @@ async function resetInventoryAcceptanceBaseline() {
   });
   await assertCurrentE2ETestDatabase(db, "inventory movement E2E fixture");
   await db.delete(inventoryStocktakeBatches);
-  await seedInventoryAcceptanceData();
+  await seedInventoryAcceptanceData(input);
 }
 
 async function loginAndOpenInventory(page: Page) {
@@ -512,7 +536,7 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
   page,
 }) => {
   const failures = observeBrowserFailures(page);
-  await resetInventoryAcceptanceBaseline();
+  await resetInventoryAcceptanceBaseline({ referenceDate: currentBusinessDate });
   await loginAndOpenInventory(page);
 
   const tabs = page.getByRole("tablist", { name: "库存视图" }).getByRole("tab");
@@ -611,6 +635,12 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
     referenceId: null,
     referenceType: null,
   });
+  const [offlineFulfillmentMovement] = await db
+    .select({ createdAt: inventoryMovements.createdAt })
+    .from(inventoryMovements)
+    .where(eq(inventoryMovements.remark, "E2E 线下发货补录"))
+    .orderBy(desc(inventoryMovements.createdAt))
+    .limit(1);
 
   await dialog.getByRole("button", { name: "设置为实际库存" }).click();
   const actual = dialog.getByLabel("盘点后实际总库存");
@@ -671,17 +701,16 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
 
   await submitMovementFilters(page, {
     actorId: acceptance.operatorId,
-    from: "2026-08-14",
+    from: currentBusinessDate,
     movementType: "MANUAL_DECREASE",
     skuCode: acceptance.primarySkuCode,
     source: "ADMIN_OFFLINE_FULFILLMENT",
-    to: "2026-08-14",
+    to: businessIsoDate(offlineFulfillmentMovement!.createdAt, currentBusinessDate),
   });
   await expect(page).toHaveURL(/sku=INV-E2E-LONG-SKU/);
-  // The fixed 2026-08-14 range includes the seeded audit row, not the movement created at runtime.
   await expect(
     page.getByRole("table", { name: "库存流水列表" }).locator("tbody tr"),
-  ).toHaveCount(1);
+  ).toHaveCount(2);
   await expectMovementFacts(
     page.getByRole("table", { name: "库存流水列表" }),
     false,

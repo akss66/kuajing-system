@@ -6,13 +6,13 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { createElement, type ImgHTMLAttributes } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { matchesCustomerCatalogQuery } from "@/app/(customer)/portal/catalog/page";
 import {
   CatalogWorkspace,
   CustomerCatalogWorkspace,
 } from "@/components/catalog/catalog-workspace";
 import type { AdminCatalogItem } from "@/modules/catalog/admin-catalog";
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
+import * as productGroups from "@/modules/catalog/product-groups";
 import type { ManagedAction } from "@/shared/action-state";
 
 vi.mock("next/image", () => ({
@@ -53,6 +53,7 @@ const adminRows: AdminCatalogItem[] = [
     id: "sku-34-2",
     imageUrl: "/api/catalog-assets/asset-34-2",
     linkText: "查看飞书商品",
+    productId: "product-34",
     productName: "冬季运输防护袋",
     productUrl: "https://example.test/products/34",
     saleStatus: "SELLABLE",
@@ -71,6 +72,7 @@ const adminRows: AdminCatalogItem[] = [
     id: "sku-77-1",
     imageUrl: null,
     linkText: null,
+    productId: "product-77",
     productName: "日常发圈",
     productUrl: null,
     saleStatus: "NOT_SELLABLE",
@@ -81,6 +83,19 @@ const adminRows: AdminCatalogItem[] = [
     weightGrams: null,
   },
 ];
+
+const groupedAdminRows: AdminCatalogItem[] = [
+  "1",
+  "2",
+  "3",
+].map((variant) => ({
+  ...adminRows[0]!,
+  id: `sku-001-${variant}`,
+  productId: "product-001",
+  productName: "三规格货品",
+  skuCode: `TZX-001-${variant}`,
+  sourceSequence: "1",
+}));
 
 const customerRows: CustomerCatalogItem[] = [
   {
@@ -94,6 +109,7 @@ const customerRows: CustomerCatalogItem[] = [
     imageUrl: "/api/catalog-assets/asset-available",
     linkText: "查看商品详情",
     orderable: true,
+    productId: "customer-product-available",
     productName: "冬季运输防护袋",
     productUrl: "https://example.test/products/available",
     saleStatus: "SELLABLE",
@@ -114,6 +130,7 @@ const customerRows: CustomerCatalogItem[] = [
     imageUrl: null,
     linkText: "人工不可售商品",
     orderable: false,
+    productId: "customer-product-manual",
     productName: "人工暂停销售商品",
     productUrl: "https://example.test/products/manual",
     saleStatus: "NOT_SELLABLE",
@@ -134,6 +151,7 @@ const customerRows: CustomerCatalogItem[] = [
     imageUrl: null,
     linkText: null,
     orderable: false,
+    productId: "customer-product-sold-out",
     productName: "暂时售罄商品",
     productUrl: null,
     saleStatus: "SELLABLE",
@@ -145,11 +163,134 @@ const customerRows: CustomerCatalogItem[] = [
   },
 ];
 
+const groupedCustomerRows: CustomerCatalogItem[] = ["1", "2", "3"].map(
+  (variant) => ({
+    ...customerRows[0]!,
+    id: `customer-group-sku-${variant}`,
+    productId: "customer-group-product",
+    productName: "三规格客户货品",
+    productUrl: `https://example.test/products/customer-group-${variant}`,
+    skuCode: `TZX-CUSTOMER-GROUP-00${variant}`,
+  }),
+);
+
 afterEach(() => {
   cleanup();
 });
 
 describe("catalog workspaces", () => {
+  it("groups source product variants and keeps every sibling when one SKU matches search", () => {
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={groupedAdminRows}
+        stores={[]}
+      />,
+    );
+
+    expect(screen.getAllByText("序号 1")).toHaveLength(1);
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+    expect(screen.getByText("1 个商品 / 3 个 SKU")).toBeVisible();
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "TZX-001-2" },
+    });
+
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "重量：480" },
+    });
+
+    for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
+      expect(screen.getAllByText(skuCode)).toHaveLength(2);
+      for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();
+    }
+  });
+
+  it("filters administrator catalog variants by sale status after preserving search siblings", () => {
+    const mixedStatusRows: AdminCatalogItem[] = [
+      { ...adminRows[0]!, id: "sku-001-1", productId: "product-001", productName: "混合状态货品", skuCode: "TZX-001-1", sourceSequence: "1", saleStatus: "SELLABLE" },
+      { ...adminRows[0]!, id: "sku-001-2", productId: "product-001", productName: "混合状态货品", skuCode: "TZX-001-2", sourceSequence: "1", saleStatus: "NOT_SELLABLE" },
+      { ...adminRows[1]!, id: "sku-002", productId: "product-002", productName: "仅不可售货品", skuCode: "TZX-002", sourceSequence: "2", saleStatus: "NOT_SELLABLE" },
+    ];
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={mixedStatusRows}
+        stores={[]}
+      />,
+    );
+
+    const statusFilter = screen.getByRole("group", { name: "销售状态筛选" });
+    for (const [name, label, pressed] of [
+      ["查看全部 SKU", "全部", "true"],
+      ["只看可售 SKU", "可售", "false"],
+      ["只看不可售 SKU", "不可售", "false"],
+    ] as const) {
+      const button = within(statusFilter).getByRole("button", { name });
+      expect(button).toBeVisible();
+      expect(button).toHaveTextContent(label);
+      expect(button).toHaveAttribute("aria-pressed", pressed);
+    }
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "TZX-001-1" } });
+    expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
+    expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
+
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "只看可售 SKU" }));
+    expect(screen.getAllByText("TZX-001-1")).toHaveLength(2);
+    expect(screen.queryByText("TZX-001-2")).not.toBeInTheDocument();
+    expect(screen.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
+
+    fireEvent.click(within(statusFilter).getByRole("button", { name: "只看不可售 SKU" }));
+    expect(screen.getAllByText("TZX-001-2")).toHaveLength(2);
+    expect(screen.queryByText("TZX-001-1")).not.toBeInTheDocument();
+  });
+
+  it("clears combined administrator query and sale-status filters locally from the empty state", () => {
+    render(
+      <CatalogWorkspace
+        actions={{
+          createAlias: successfulAction,
+          createSku: successfulAction,
+          setCustomerPrice: successfulAction,
+        }}
+        customers={[]}
+        rows={[adminRows[0]!]}
+        stores={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "no admin SKU matches this query" } });
+    fireEvent.click(screen.getByRole("button", { name: "只看不可售 SKU" }));
+
+    expect(screen.getByRole("heading", { name: "没有符合条件的 SKU" })).toBeVisible();
+
+    const clearFilters = screen.getByRole("button", { name: "清除筛选" });
+    fireEvent.click(clearFilters);
+
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.getByText("1 个商品 / 1 个 SKU")).toBeVisible();
+    expect(screen.getAllByText("TZX-034-2")).toHaveLength(2);
+  });
+
   it("keeps catalog mutations out of the resource list until their drawers open", async () => {
     render(
       <CatalogWorkspace
@@ -200,14 +341,15 @@ describe("catalog workspaces", () => {
         .map((header) => header.textContent),
     ).toEqual([
       "序号",
-      "商品",
+      "来源商品",
+      "SKU",
       "规格/属性",
       "采购价",
       "总库存",
       "可售库存",
       "货品价格",
       "状态",
-      "链接",
+      "SKU 链接",
     ]);
     expect(within(desktopTable).getByText("¥0.325")).toBeVisible();
     expect(within(desktopTable).getByText("¥1.366")).toBeVisible();
@@ -246,18 +388,9 @@ describe("catalog workspaces", () => {
 
     const cards = screen.getByRole("list", { name: "商品与 SKU 卡片列表" });
     const firstCard = within(cards).getAllByRole("listitem")[0]!;
-    expect(
-      Array.from(firstCard.querySelectorAll("[data-catalog-section]")).map(
-        (section) => section.getAttribute("data-catalog-section"),
-      ),
-    ).toEqual([
-      "identity",
-      "attributes",
-      "prices",
-      "inventory",
-      "status",
-      "link",
-    ]);
+    expect(within(firstCard).getByRole("list", {
+      name: "冬季运输防护袋 的 SKU 列表",
+    })).toBeVisible();
   });
 
   it.each([
@@ -326,10 +459,11 @@ describe("catalog workspaces", () => {
     );
 
     expect(screen.getByRole("searchbox")).toBeVisible();
-    expect(screen.getAllByText("¥7.60")).toHaveLength(2);
-    expect(screen.getAllByText("可售")).toHaveLength(2);
-    expect(screen.getAllByText("不可售")).toHaveLength(2);
-    expect(screen.getAllByText("售罄")).toHaveLength(2);
+    const results = within(screen.getByTestId("customer-catalog-results"));
+    expect(results.getAllByText("¥7.60")).toHaveLength(2);
+    expect(results.getAllByText("可售")).toHaveLength(2);
+    expect(results.getAllByText("不可售")).toHaveLength(2);
+    expect(results.getAllByText("售罄")).toHaveLength(2);
     expect(screen.getAllByText(longSpecification)).toHaveLength(2);
     expect(screen.queryByText("SKU 名称不能冒充规格")).not.toBeInTheDocument();
     expect(screen.getAllByText("颜色：炭黑")).toHaveLength(2);
@@ -356,17 +490,28 @@ describe("catalog workspaces", () => {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
 
-    const desktopTable = screen.getByRole("table", { name: "客户货盘列表" });
+    const desktopTable = screen.getByRole("table", {
+      name: "冬季运输防护袋 的 SKU 列表",
+    });
     expect(
       within(desktopTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual(["商品", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
+    ).toEqual(["SKU", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
-    const firstCard = within(cards).getAllByRole("listitem")[0]!;
     expect(
-      Array.from(firstCard.querySelectorAll("[data-customer-catalog-section]")).map(
+      within(cards)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "人工暂停销售商品",
+      "冬季运输防护袋",
+      "暂时售罄商品",
+    ]);
+    const firstVariant = within(cards).getByTestId("catalog-customer-sku-manual");
+    expect(
+      Array.from(firstVariant.querySelectorAll("[data-customer-catalog-section]")).map(
         (section) => section.getAttribute("data-customer-catalog-section"),
       ),
     ).toEqual(["identity", "attributes", "price", "inventory", "status", "link"]);
@@ -394,29 +539,145 @@ describe("catalog workspaces", () => {
     ).not.toBeInTheDocument();
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 
-  it("matches customer catalog search only against normalized safe fields", () => {
-    const item = {
-      ...customerRows[0]!,
-      cargoUnitPriceMilliYuan: 1_366,
-      defaultUnitPriceMilliYuan: 325,
-      linkText: "SAFE-LINK-TEXT",
-      productName: "Demo Cable",
-      sourceSequence: "ADMIN-SOURCE-34",
-      specification: "WINTER SPEC VALUE",
-      totalQuantity: 99,
-    };
+  it("groups customer SKU variants and retains sibling variants for a one-SKU search", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          ...groupedCustomerRows,
+          { ...customerRows[1]!, productName: "另一件客户货品" },
+        ]}
+        query="TZX-CUSTOMER-GROUP-002"
+      />,
+    );
 
-    expect(matchesCustomerCatalogQuery(item, "  tzx-customer-001  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  demo cable  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  winter spec  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "  safe-link  ")).toBe(true);
-    expect(matchesCustomerCatalogQuery(item, "SKU 名称不能冒充规格")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "ADMIN-SOURCE-34")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "1366")).toBe(false);
-    expect(matchesCustomerCatalogQuery(item, "99")).toBe(false);
+    expect(screen.getByText("1 个商品 / 3 个 SKU")).toBeVisible();
+    expect(screen.queryByText("另一件客户货品")).not.toBeInTheDocument();
+
+    const desktopGroup = screen
+      .getAllByTestId("catalog-product-customer-group-product")
+      .find((element) => element.tagName === "SECTION");
+    expect(desktopGroup).toBeDefined();
+    expect(within(desktopGroup!).getByRole("heading", { name: "三规格客户货品" })).toBeVisible();
+    const desktopTable = within(desktopGroup!).getByRole("table", {
+      name: "三规格客户货品 的 SKU 列表",
+    });
+    for (const skuCode of [
+      "TZX-CUSTOMER-GROUP-001",
+      "TZX-CUSTOMER-GROUP-002",
+      "TZX-CUSTOMER-GROUP-003",
+    ]) {
+      expect(within(desktopTable).getByText(skuCode)).toBeVisible();
+    }
+
+    expect(desktopGroup!.textContent).not.toContain("sourceSequence");
+    expect(desktopGroup!.textContent).not.toContain("采购价");
+    expect(desktopGroup!.textContent).not.toContain("总库存");
+    expect(desktopGroup!.textContent).not.toContain("货品价格");
+  });
+
+  it("filters customer catalog variants by availability while retaining detailed unavailable reasons", () => {
+    const mixedAvailabilityRows: CustomerCatalogItem[] = [
+      {
+        ...customerRows[0]!,
+        id: "customer-availability-available",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-1",
+      },
+      {
+        ...customerRows[1]!,
+        id: "customer-availability-manual",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-2",
+      },
+      {
+        ...customerRows[2]!,
+        id: "customer-availability-sold-out",
+        productId: "customer-availability-product",
+        productName: "客户可售状态货品",
+        skuCode: "TZX-034-3",
+      },
+    ];
+
+    render(<CustomerCatalogWorkspace items={mixedAvailabilityRows} query="" />);
+
+    expect(screen.getByRole("group", { name: "销售状态筛选" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "只看不可售 SKU" }));
+
+    expect(screen.queryByText("TZX-034-1")).not.toBeInTheDocument();
+    expect(screen.getAllByText("TZX-034-2")).toHaveLength(2);
+    expect(screen.getAllByText("TZX-034-3")).toHaveLength(2);
+    expect(screen.getByText("1 个商品 / 2 个 SKU")).toBeVisible();
+    const results = within(screen.getByTestId("customer-catalog-results"));
+    expect(results.getAllByText("不可售")).toHaveLength(2);
+    expect(results.getAllByText("售罄")).toHaveLength(2);
+
+    for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
+      expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
+    }
+  });
+
+  it("clears a no-result customer query and availability filter locally", () => {
+    render(<CustomerCatalogWorkspace items={customerRows} query="no customer SKU matches this query" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "只看可售 SKU" }));
+    expect(screen.getByRole("heading", { name: "没有符合条件的 SKU" })).toBeVisible();
+
+    const clearFilters = screen.getByRole("button", { name: "清除筛选" });
+    expect(clearFilters.closest("a")).toBeNull();
+    fireEvent.click(clearFilters);
+
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.getByText("3 个商品 / 3 个 SKU")).toBeVisible();
+    expect(within(screen.getByTestId("customer-catalog-results")).getAllByText("可售")).toHaveLength(2);
+  });
+
+  it("does not rebuild customer grouping and search results until the draft query is submitted", () => {
+    const groupSpy = vi.spyOn(productGroups, "groupCatalogItems");
+    const searchSpy = vi.spyOn(productGroups, "filterCatalogGroups");
+
+    render(<CustomerCatalogWorkspace items={customerRows} query="" />);
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "draft only" } });
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索货盘" }));
+
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(searchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives duplicate customer product names distinct table names without exposing source sequence", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          ...groupedCustomerRows,
+          {
+            ...customerRows[1]!,
+            productId: "customer-group-product-duplicate-name",
+            productName: "三规格客户货品",
+            skuCode: "TZX-CUSTOMER-GROUP-004",
+          },
+        ]}
+        query=""
+      />,
+    );
+
+    const tableNames = screen
+      .getAllByRole("table")
+      .map((table) => table.getAttribute("aria-label"));
+    expect(tableNames).toHaveLength(2);
+    expect(new Set(tableNames).size).toBe(2);
+    expect(tableNames.join(" ")).not.toContain("sourceSequence");
   });
 
   it.each([
@@ -432,7 +693,7 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    const desktopTable = screen.getByRole("table", { name: "客户货盘列表" });
+    const desktopTable = screen.getByRole("table", { name: "冬季运输防护袋 的 SKU 列表" });
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
     expect(within(desktopTable).queryByRole("link")).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link")).not.toBeInTheDocument();
@@ -454,6 +715,7 @@ describe("catalog workspaces", () => {
             imageUrl: "/api/catalog-assets/asset-1",
             linkText: null,
             orderable: true,
+            productId: "demo-product",
             productName: "Demo Cable",
             productUrl: null,
             saleStatus: "SELLABLE",

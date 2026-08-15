@@ -16,6 +16,7 @@ import {
   products,
   skus,
 } from "@/db/schema";
+import { listAdminCatalog } from "@/modules/catalog/admin-catalog";
 import { listCustomerCatalog } from "@/modules/catalog/customer-catalog";
 
 type AuthModule = typeof import("@/modules/identity/auth").auth;
@@ -153,7 +154,7 @@ async function createQueryFixture() {
     },
   ]);
 
-  return { customer, otherCustomer };
+  return { customer, otherCustomer, product };
 }
 
 afterEach(async () => {
@@ -182,6 +183,7 @@ describe("audience-separated catalog queries", () => {
 
     const customerRows = await listCustomerCatalog(fixture.customer.id);
     const otherCustomerRows = await listCustomerCatalog(fixture.otherCustomer.id);
+    const adminRows = await listAdminCatalog();
 
     expect(customerRows.map((row) => [row.skuCode, row.availabilityReason])).toEqual([
       ["TZX-034-1", "AVAILABLE"],
@@ -195,6 +197,7 @@ describe("audience-separated catalog queries", () => {
       combination: "单件装",
       linkText: "查看货品详情",
       orderable: true,
+      productId: fixture.product.id,
       productUrl: "https://example.com/products/34-a",
       saleStatus: "SELLABLE",
       specification: "55 厘米长款",
@@ -212,18 +215,19 @@ describe("audience-separated catalog queries", () => {
       saleStatus: "SELLABLE",
     });
     expect(otherCustomerRows[0].actualUnitPriceMilliYuan).toBe(999);
+    expect(customerRows.map((row) => row.productId)).toEqual(
+      adminRows.map((row) => row.productId),
+    );
     for (const row of customerRows) {
+      expect(row).not.toHaveProperty("sourceSequence");
       expect(row).not.toHaveProperty("cargoUnitPriceMilliYuan");
       expect(row).not.toHaveProperty("defaultUnitPriceMilliYuan");
-      expect(row).not.toHaveProperty("sourceSequence");
       expect(row).not.toHaveProperty("totalQuantity");
     }
   });
 
   test("returns complete admin facts without conflating active reservations with total inventory", async () => {
     await createQueryFixture();
-    const { listAdminCatalog } = await import("@/modules/catalog/admin-catalog");
-
     const adminRows = await listAdminCatalog();
 
     expect(adminRows).toHaveLength(3);

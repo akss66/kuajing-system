@@ -10,9 +10,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { CatalogProductGroup } from "@/modules/catalog/product-groups";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 import type { CatalogRow } from "./catalog-workspace";
+
+type CatalogGroup = CatalogProductGroup<CatalogRow>;
 
 function saleStatusLabel(status: CatalogRow["saleStatus"]) {
   return status === "SELLABLE" ? "可售" : "不可售";
@@ -50,18 +53,13 @@ function CatalogImage({ row }: { row: CatalogRow }) {
   );
 }
 
-function CatalogProductIdentity({ row }: { row: CatalogRow }) {
+function CatalogSkuIdentity({ row }: { row: CatalogRow }) {
   return (
     <div className="flex min-w-0 items-start gap-3">
       <CatalogImage row={row} />
-      <div className="min-w-0">
-        <p className="line-clamp-2 whitespace-normal break-words font-medium text-foreground">
-          {row.productName}
-        </p>
-        <p className="mt-1 truncate text-xs font-semibold tabular-nums text-muted-foreground">
-          {row.skuCode}
-        </p>
-      </div>
+      <p className="min-w-0 break-words pt-1 text-sm font-semibold tabular-nums text-foreground">
+        {row.skuCode}
+      </p>
     </div>
   );
 }
@@ -145,167 +143,175 @@ function PriceValue({ value }: { value: number | null }) {
   );
 }
 
-function CatalogTable({ rows }: { rows: CatalogRow[] }) {
+function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
   return (
     <div className="hidden min-w-0 xl:block" data-admin-catalog-table>
       <Table aria-label="商品与 SKU 列表" className="w-full table-fixed">
         <colgroup>
           <col className="w-[6%]" />
-          <col className="w-[22%]" />
-          <col className="w-[20%]" />
+          <col className="w-[12%]" />
+          <col className="w-[18%]" />
+          <col className="w-[18%]" />
           <col className="w-[8%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
           <col className="w-[8%]" />
-          <col className="w-[8%]" />
+          <col className="w-[7%]" />
           <col className="w-[9%]" />
-          <col className="w-[8%]" />
-          <col className="w-[11%]" />
         </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead className="text-right">序号</TableHead>
-            <TableHead>商品</TableHead>
+            <TableHead>来源商品</TableHead>
+            <TableHead>SKU</TableHead>
             <TableHead>规格/属性</TableHead>
             <TableHead className="text-right">采购价</TableHead>
             <TableHead className="text-right">总库存</TableHead>
             <TableHead className="text-right">可售库存</TableHead>
             <TableHead className="text-right">货品价格</TableHead>
             <TableHead>状态</TableHead>
-            <TableHead>链接</TableHead>
+            <TableHead>SKU 链接</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id}>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                {row.sourceSequence ?? "—"}
-              </TableCell>
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <CatalogProductIdentity row={row} />
-              </TableCell>
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <CatalogAttributes row={row} />
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                <PriceValue value={row.defaultUnitPriceMilliYuan} />
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                {row.totalQuantity}
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                {row.availableQuantity}
-              </TableCell>
-              <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                <PriceValue value={row.cargoUnitPriceMilliYuan} />
-              </TableCell>
-              <TableCell className="whitespace-normal align-top">
-                <CatalogStatus row={row} />
-              </TableCell>
-              <TableCell className="min-w-0 whitespace-normal align-top">
-                <CatalogProductLink row={row} />
-              </TableCell>
-            </TableRow>
-          ))}
+          {groups.flatMap((group) =>
+            group.variants.map((row, index) => (
+              <TableRow
+                className={index === 0 ? "border-t-2 border-border" : undefined}
+                key={row.id}
+              >
+                {index === 0 ? (
+                  <TableCell
+                    className="whitespace-normal text-right align-top font-semibold tabular-nums"
+                    rowSpan={group.variants.length}
+                  >
+                    {group.sourceSequence === null ? "—" : `序号 ${group.sourceSequence}`}
+                  </TableCell>
+                ) : null}
+                {index === 0 ? (
+                  <TableCell
+                    className="min-w-0 whitespace-normal align-top font-medium text-foreground"
+                    rowSpan={group.variants.length}
+                  >
+                    <p className="line-clamp-3 break-words">{group.productName}</p>
+                  </TableCell>
+                ) : null}
+                <TableCell className="min-w-0 whitespace-normal align-top">
+                  <CatalogSkuIdentity row={row} />
+                </TableCell>
+                <TableCell className="min-w-0 whitespace-normal align-top">
+                  <CatalogAttributes row={row} />
+                </TableCell>
+                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                  <PriceValue value={row.defaultUnitPriceMilliYuan} />
+                </TableCell>
+                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                  {row.totalQuantity}
+                </TableCell>
+                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                  {row.availableQuantity}
+                </TableCell>
+                {index === 0 ? (
+                  <TableCell
+                    className="whitespace-normal text-right align-top font-semibold tabular-nums"
+                    rowSpan={group.variants.length}
+                  >
+                    <PriceValue value={group.variants[0]!.cargoUnitPriceMilliYuan} />
+                  </TableCell>
+                ) : null}
+                <TableCell className="whitespace-normal align-top">
+                  <CatalogStatus row={row} />
+                </TableCell>
+                <TableCell className="min-w-0 whitespace-normal align-top">
+                  <CatalogProductLink row={row} />
+                </TableCell>
+              </TableRow>
+            )),
+          )}
         </TableBody>
       </Table>
     </div>
   );
 }
 
-function CatalogCards({ rows }: { rows: CatalogRow[] }) {
+function CatalogCards({ groups }: { groups: CatalogGroup[] }) {
   return (
     <ul
       aria-label="商品与 SKU 卡片列表"
       className="space-y-3 xl:hidden"
       data-admin-catalog-cards
     >
-      {rows.map((row) => (
+      {groups.map((group) => (
         <li
           className="min-w-0 rounded-[var(--radius-surface)] border border-border bg-background p-4"
-          key={row.id}
+          key={group.productId}
         >
-          <div
-            className="flex min-w-0 items-start justify-between gap-3"
-            data-catalog-section="identity"
-          >
-            <CatalogProductIdentity row={row} />
-            <p className="shrink-0 text-right text-xs text-muted-foreground">
-              序号
-              <span className="mt-0.5 block font-semibold tabular-nums text-foreground">
-                {row.sourceSequence ?? "—"}
-              </span>
-            </p>
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="line-clamp-2 break-words font-medium text-foreground">
+                {group.productName}
+              </p>
+              <p className="mt-1 text-xs font-semibold tabular-nums text-muted-foreground">
+                来源序号 {group.sourceSequence ?? "—"}
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-xs font-medium text-muted-foreground">货品价格</p>
+              <p className="mt-1 font-semibold tabular-nums text-foreground">
+                <PriceValue value={group.variants[0]!.cargoUnitPriceMilliYuan} />
+              </p>
+            </div>
           </div>
 
-          <div
-            className="mt-4 border-t border-border pt-3"
-            data-catalog-section="attributes"
+          <ul
+            aria-label={`${group.productName} 的 SKU 列表`}
+            className="mt-4 space-y-3 border-t border-border pt-3"
           >
-            <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
-            <CatalogAttributes row={row} />
-          </div>
+            {group.variants.map((row) => (
+              <li className="min-w-0 border-b border-border/70 pb-3 last:border-b-0 last:pb-0" key={row.id}>
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <CatalogSkuIdentity row={row} />
+                  <CatalogStatus row={row} />
+                </div>
 
-          <dl
-            className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-3"
-            data-catalog-section="prices"
-          >
-            <div>
-              <dt className="text-xs font-medium text-muted-foreground">采购价</dt>
-              <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                <PriceValue value={row.defaultUnitPriceMilliYuan} />
-              </dd>
-            </div>
-            <div className="text-right">
-              <dt className="text-xs font-medium text-muted-foreground">货品价格</dt>
-              <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                <PriceValue value={row.cargoUnitPriceMilliYuan} />
-              </dd>
-            </div>
-          </dl>
+                <div className="mt-3" data-catalog-section="attributes">
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
+                  <CatalogAttributes row={row} />
+                </div>
 
-          <dl
-            className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-3"
-            data-catalog-section="inventory"
-          >
-            <div>
-              <dt className="text-xs font-medium text-muted-foreground">总库存</dt>
-              <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                {row.totalQuantity}
-              </dd>
-            </div>
-            <div className="text-right">
-              <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
-              <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                {row.availableQuantity}
-              </dd>
-            </div>
-          </dl>
+                <dl className="mt-3 grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
+                  <div>
+                    <dt className="text-xs font-medium text-muted-foreground">采购价</dt>
+                    <dd className="mt-1 font-semibold tabular-nums text-foreground">
+                      <PriceValue value={row.defaultUnitPriceMilliYuan} />
+                    </dd>
+                  </div>
+                  <div className="text-right">
+                    <dt className="text-xs font-medium text-muted-foreground">库存</dt>
+                    <dd className="mt-1 font-semibold tabular-nums text-foreground">
+                      {row.totalQuantity} / {row.availableQuantity}
+                    </dd>
+                  </div>
+                </dl>
 
-          <div
-            className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
-            data-catalog-section="status"
-          >
-            <span className="text-xs font-medium text-muted-foreground">状态</span>
-            <CatalogStatus row={row} />
-          </div>
-
-          <div
-            className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
-            data-catalog-section="link"
-          >
-            <span className="text-xs font-medium text-muted-foreground">链接</span>
-            <CatalogProductLink row={row} />
-          </div>
+                <div className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border/70 pt-3">
+                  <span className="text-xs font-medium text-muted-foreground">SKU 链接</span>
+                  <CatalogProductLink row={row} />
+                </div>
+              </li>
+            ))}
+          </ul>
         </li>
       ))}
     </ul>
   );
 }
 
-export function CatalogResults({ rows }: { rows: CatalogRow[] }) {
+export function CatalogResults({ groups }: { groups: CatalogGroup[] }) {
   return (
     <>
-      <CatalogTable rows={rows} />
-      <CatalogCards rows={rows} />
+      <CatalogTable groups={groups} />
+      <CatalogCards groups={groups} />
     </>
   );
 }

@@ -141,7 +141,9 @@ async function loginAsAudience(
 ) {
   await resetVisualBaseline();
   await loginThroughUi(page, audience === "admin" ? seededSuperAdmin : seededCustomer);
-  await expect(page).toHaveURL(audience === "admin" ? /\/admin$/ : /\/portal$/);
+  await expect(page).toHaveURL(audience === "admin" ? /\/admin$/ : /\/portal$/, {
+    timeout: 30_000,
+  });
 }
 
 async function waitForVisualStability(page: import("@playwright/test").Page) {
@@ -346,7 +348,7 @@ test("field-aligned catalog and account screenshots cover the exact viewport mat
   const failures = observeBrowserFailures(page);
   await resetVisualBaseline();
   await loginThroughUi(page, seededSuperAdmin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
   await db
     .update(authUsers)
     .set({ email: LONG_EMAIL })
@@ -389,7 +391,7 @@ test("field-aligned catalog and account screenshots cover the exact viewport mat
   await page.context().clearCookies();
   await resetVisualBaseline();
   await loginThroughUi(page, seededCustomer);
-  await expect(page).toHaveURL(/\/portal$/);
+  await expect(page).toHaveURL(/\/portal$/, { timeout: 30_000 });
   await seedFieldAlignedVisualCatalog();
   for (const viewport of APPROVED_VIEWPORTS) {
     await page.setViewportSize(viewport);

@@ -10,6 +10,7 @@ import {
 
 export type AdminCatalogItem = {
   id: string;
+  productId: string;
   sourceSequence: string | null;
   skuCode: string;
   imageUrl: string | null;
@@ -54,6 +55,7 @@ export async function listAdminCatalog(): Promise<AdminCatalogItem[]> {
       id: skus.id,
       imageUrl: skus.imageUrl,
       linkText: products.linkText,
+      productId: products.id,
       productName: products.name,
       productUrl: skus.productUrl,
       saleStatus: skus.saleStatus,

@@ -432,7 +432,9 @@ async function runApprovedViewportAcceptance(
           }
           if (route.path === "/portal/catalog") {
             if (viewport.kind === "desktop") {
-              await expect(page.getByRole("table", { name: "客户货盘列表" })).toBeVisible();
+              await expect(
+                page.getByRole("table", { name: /的 SKU 列表$/ }).first(),
+              ).toBeVisible();
             } else {
               await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
             }
