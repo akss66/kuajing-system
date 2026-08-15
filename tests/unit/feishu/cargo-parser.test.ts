@@ -266,6 +266,40 @@ describe("parseLegacyCargoSheet", () => {
     );
   });
 
+  test("does not inherit an audited placeholder cargo price into a blank follower", () => {
+    const values = cargoPricePlaceholderRows();
+    values.push([
+      "",
+      "TZX-076-2",
+      "",
+      "",
+      "",
+      "",
+      "1",
+      "1",
+      "",
+      "",
+      "黑色",
+      "",
+      "",
+      "",
+    ]);
+
+    const parsed = parseLegacyCargoSheet(values, {
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+    });
+
+    expect(parsed.rows.map((row) => row.skuCode)).toEqual(["TZX-076"]);
+    expect(parsed.issues).toContainEqual(
+      expect.objectContaining({
+        code: "CARGO_INVALID_CARGO_PRICE",
+        sourceRowNumber: 142,
+      }),
+    );
+  });
+
   test("blocks a cargo price placeholder when the source price is present", () => {
     const values = cargoPricePlaceholderRows();
     values[140][4] = "99.00";
@@ -299,16 +333,21 @@ describe("parseLegacyCargoSheet", () => {
     );
   });
 
-  test("does not apply a cargo price placeholder outside the audited allowance", () => {
-    const parsed = parseLegacyCargoSheet(cargoPricePlaceholderRows(), {
+  test("blocks an unaudited placeholder declaration before parsing a nonblank source price", () => {
+    const values = cargoPricePlaceholderRows();
+    values[140][4] = "99.00";
+
+    const parsed = parseLegacyCargoSheet(values, {
       cargoPricePlaceholders: [
         { skuCode: "TZX-076", unitPriceMilliYuan: 99_001 },
       ],
     });
 
-    expect(parsed.appliedCargoPricePlaceholders).toEqual([]);
     expect(parsed.issues).toContainEqual(
-      expect.objectContaining({ code: "CARGO_INVALID_CARGO_PRICE" }),
+      expect.objectContaining({
+        code: "CARGO_PRICE_PLACEHOLDER_INVALID",
+        severity: "BLOCKING",
+      }),
     );
   });
 

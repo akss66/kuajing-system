@@ -514,30 +514,38 @@ export function parseLegacyCargoSheet(
   const headerMap = createHeaderMap(values[headerRowIndex] ?? []);
   const rows: ParsedCargoRow[] = [];
   const appliedCargoPricePlaceholders: AppliedCargoPricePlaceholder[] = [];
-  const cargoPricePlaceholdersBySku = new Map<
-    string,
-    Array<{ declarationIndex: number; placeholder: CargoPricePlaceholder }>
-  >();
-  for (const [declarationIndex, placeholder] of (
-    options.cargoPricePlaceholders ?? []
-  ).entries()) {
-    if (
-      placeholder.skuCode !== AUDITED_CARGO_PRICE_PLACEHOLDER.skuCode ||
-      placeholder.unitPriceMilliYuan !==
-        AUDITED_CARGO_PRICE_PLACEHOLDER.unitPriceMilliYuan
-    ) {
-      continue;
-    }
-    const declarations = cargoPricePlaceholdersBySku.get(placeholder.skuCode) ?? [];
-    declarations.push({ declarationIndex, placeholder });
-    cargoPricePlaceholdersBySku.set(placeholder.skuCode, declarations);
-  }
-  const appliedCargoPricePlaceholderDeclarationIndexes = new Set<number>();
   const issues: MigrationIssue[] = collectDuplicateSkuIssues({
     headerMap,
     headerRowIndex,
     values,
   });
+  const cargoPricePlaceholdersBySku = new Map<
+    string,
+    Array<{
+      declarationIndex: number;
+      isAudited: boolean;
+      placeholder: CargoPricePlaceholder;
+    }>
+  >();
+  for (const [declarationIndex, placeholder] of (
+    options.cargoPricePlaceholders ?? []
+  ).entries()) {
+    const isAudited =
+      placeholder.skuCode === AUDITED_CARGO_PRICE_PLACEHOLDER.skuCode &&
+      placeholder.unitPriceMilliYuan ===
+        AUDITED_CARGO_PRICE_PLACEHOLDER.unitPriceMilliYuan;
+    if (!isAudited) {
+      issues.push({
+        code: "CARGO_PRICE_PLACEHOLDER_INVALID",
+        message: `SKU ${placeholder.skuCode} 的货品价格占位未获审计批准`,
+        severity: "BLOCKING",
+      });
+    }
+    const declarations = cargoPricePlaceholdersBySku.get(placeholder.skuCode) ?? [];
+    declarations.push({ declarationIndex, isAudited, placeholder });
+    cargoPricePlaceholdersBySku.set(placeholder.skuCode, declarations);
+  }
+  const appliedCargoPricePlaceholderDeclarationIndexes = new Set<number>();
   const preExistingBlockingIssueRows = new Set(
     issues
       .filter(
@@ -740,7 +748,9 @@ export function parseLegacyCargoSheet(
     }
 
     const placeholder =
-      cargoPriceText.length === 0 ? placeholderDeclarations[0] : undefined;
+      cargoPriceText.length === 0
+        ? placeholderDeclarations.find((declaration) => declaration.isAudited)
+        : undefined;
     const placeholderCargoPrice = placeholder
       ? {
           unitPriceMilliYuan: placeholder.placeholder.unitPriceMilliYuan,
@@ -757,17 +767,13 @@ export function parseLegacyCargoSheet(
         rowNumber: sourceRowNumber,
         value: explicitCargoPrice.unitPriceMilliYuan,
       };
-    } else if (placeholderCargoPrice !== null) {
-      rowContext.cargoPrice = {
-        rowNumber: sourceRowNumber,
-        value: placeholderCargoPrice.unitPriceMilliYuan,
-      };
     } else if (
+      placeholderCargoPrice === null &&
       cargoPriceText.length === 0 &&
       rowContext.cargoPrice
     ) {
       inheritedFrom.cargoPrice = rowContext.cargoPrice.rowNumber;
-    } else {
+    } else if (placeholderCargoPrice === null) {
       issues.push(
         buildIssue({
           code: "CARGO_INVALID_CARGO_PRICE",
