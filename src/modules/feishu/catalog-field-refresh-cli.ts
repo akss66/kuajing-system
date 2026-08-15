@@ -4,6 +4,7 @@ const AUDITED_CARGO_PRICE_PLACEHOLDER = {
   skuCode: "TZX-076",
   unitPriceMilliYuan: 99_000,
 } as const;
+const AUDITED_CARGO_PRICE_PLACEHOLDER_PAYLOAD = "TZX-076:99.00";
 
 export type CatalogFieldRefreshCliArguments = {
   apply: boolean;
@@ -31,9 +32,11 @@ function parseCargoPricePlaceholders(argumentsList: readonly string[]) {
   const skuCodes = new Set<string>();
 
   return values.map((argument) => {
-    const match = /^(TZX-\d+(?:-\d+)?):(\d+\.\d{2})$/.exec(
-      argument.slice(prefix.length),
-    );
+    const payload = argument.slice(prefix.length);
+    if (payload !== AUDITED_CARGO_PRICE_PLACEHOLDER_PAYLOAD) {
+      throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
+    }
+    const match = /^(TZX-\d+(?:-\d+)?):(\d+\.\d{2})$/.exec(payload);
     if (!match) throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
 
     const [, skuCode, yuanText] = match;
