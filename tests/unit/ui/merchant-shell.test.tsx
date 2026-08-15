@@ -77,6 +77,14 @@ describe("merchant shells", () => {
 
     expect(screen.getByTestId("merchant-shell")).toHaveAttribute("data-shell-version", "v2");
     expect(screen.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "admin");
+    const brand = document.querySelector<HTMLElement>("[data-merchant-brand]");
+    const sidebar = document.querySelector<HTMLElement>("[data-merchant-sidebar]");
+    const topbar = screen.getByRole("banner");
+
+    expect(brand).not.toHaveClass("border-r", "border-white/12");
+    expect(sidebar).toHaveClass("border-r", "border-border");
+    expect(topbar).toHaveClass("border-b");
+    expect(brand).toHaveClass("w-[var(--merchant-sidebar-width)]");
     expect(screen.getByText("客户与货品")).toBeVisible();
     expect(screen.getByText("订单履约")).toBeVisible();
     expect(screen.getByText("资金与数据")).toBeVisible();

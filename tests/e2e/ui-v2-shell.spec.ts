@@ -23,7 +23,8 @@ const audiences = [
     account: accounts.admin,
     drawerTitle: "管理员导航",
     genericAccountLabel: "管理员账号",
-    groups: ["工作台", "客户与货品", "订单履约", "资金与数据", "系统管理"],
+    groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
+    sectionCount: 5,
     identity: {
       displayName: "本地演示管理员",
       email: accounts.admin.email,
@@ -36,7 +37,8 @@ const audiences = [
     account: accounts.customer,
     drawerTitle: "客户导航",
     genericAccountLabel: "客户账号",
-    groups: ["工作台", "拿货", "订单与付款"],
+    groups: ["拿货", "订单与付款"],
+    sectionCount: 3,
     identity: {
       displayName: "渥太华演示客户",
       email: accounts.customer.email,
@@ -143,12 +145,19 @@ for (const audience of audiences) {
           expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });
           expect(brand).toMatchObject({ x: 0, y: 0, width: 224, height: 56 });
           expect(sidebar).toMatchObject({ x: 0, y: 56, width: 224 });
+          await expect(page.locator("[data-merchant-brand]")).toHaveCSS("border-right-width", "0px");
+          await expect(page.locator("[data-merchant-sidebar]")).toHaveCSS("border-right-width", "1px");
+
+          const brandRight = brand!.x + brand!.width;
+          const sidebarRight = sidebar!.x + sidebar!.width;
+          expect(brandRight).toBe(224);
+          expect(sidebarRight).toBe(224);
           await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
           await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
-            audience.groups.length,
+            audience.sectionCount,
           );
           for (const group of audience.groups) {
-            await expect(desktopNavigation.getByRole("button", { name: group })).toBeVisible();
+            await expect(desktopNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
           }
         } else {
           const menuButton = page.getByRole("button", { name: "打开导航" });

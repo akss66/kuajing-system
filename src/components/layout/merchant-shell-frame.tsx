@@ -62,12 +62,12 @@ export function MerchantShellFrame({
       data-testid="merchant-shell"
     >
       <header
-        className="fixed inset-x-0 top-0 z-40 flex h-[var(--merchant-header-height)] border-b border-white/12 bg-[var(--merchant-topbar)] text-[var(--merchant-topbar-foreground)]"
+        className="fixed inset-x-0 top-0 z-40 flex h-[var(--merchant-header-height)] border-b border-[color-mix(in_oklch,var(--merchant-topbar),white_14%)] bg-[var(--merchant-topbar)] text-[var(--merchant-topbar-foreground)]"
         data-merchant-topbar={audience}
       >
         <MerchantBrand
           audience={audience}
-          className="hidden w-[var(--merchant-sidebar-width)] border-r border-white/12 lg:flex"
+          className="hidden w-[var(--merchant-sidebar-width)] lg:flex"
         />
         <div className="min-w-0 flex-1">{topbar}</div>
       </header>
