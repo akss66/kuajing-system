@@ -3,6 +3,28 @@ import { describe, expect, test } from "vitest";
 import { parseCatalogFieldRefreshCliArguments } from "@/modules/feishu/catalog-field-refresh-cli";
 
 describe("parseCatalogFieldRefreshCliArguments", () => {
+  test("parses an audited cargo price placeholder without floating-point rounding", () => {
+    expect(parseCatalogFieldRefreshCliArguments([
+      "--cargo-price-placeholder=TZX-076:99.00",
+    ])).toMatchObject({
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+    });
+  });
+
+  test.each([
+    ["--cargo-price-placeholder=TZX-076:99.0"],
+    ["--cargo-price-placeholder=TZX-076:99.001"],
+    ["--cargo-price-placeholder=TZX-076:0.00"],
+    ["--cargo-price-placeholder=TZX-076:-1.00"],
+    ["--cargo-price-placeholder=TZ-076:99.00"],
+    ["--cargo-price-placeholder=TZX-076:99.00", "--cargo-price-placeholder=TZX-076:99.00"],
+  ])("rejects an invalid cargo price placeholder", (...argumentsList) => {
+    expect(() => parseCatalogFieldRefreshCliArguments(argumentsList))
+      .toThrow("INVALID_CARGO_PRICE_PLACEHOLDER");
+  });
+
   test("requires an explicit source-sequence count when applying", () => {
     expect(() => parseCatalogFieldRefreshCliArguments([
       "--apply", "--expected-skus=140", "--reason=confirmed repair",
@@ -41,6 +63,7 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
       "--apply", "--expected-source-sequences=76", "--expected-skus=140", "--reason=confirmed repair",
     ])).toEqual({
       apply: true,
+      cargoPricePlaceholders: [],
       expectedSkuCount: 140,
       expectedSourceSequenceCount: 76,
       reason: "confirmed repair",
@@ -50,6 +73,7 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
   test("uses preview defaults without requiring a reason", () => {
     expect(parseCatalogFieldRefreshCliArguments([])).toEqual({
       apply: false,
+      cargoPricePlaceholders: [],
       expectedSkuCount: 140,
       expectedSourceSequenceCount: 76,
       reason: "",

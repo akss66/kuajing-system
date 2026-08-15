@@ -57,6 +57,7 @@ async function main() {
   };
   const service = createCatalogFieldRefreshService();
   const baseInput = {
+    cargoPricePlaceholders: options.cargoPricePlaceholders,
     client,
     expectedSkuCount: options.expectedSkuCount,
     expectedSourceSequenceCount: options.expectedSourceSequenceCount,
@@ -72,6 +73,7 @@ async function main() {
     : await service.preview(baseInput);
 
   console.info(JSON.stringify({
+    cargoPricePlaceholders: result.cargoPricePlaceholders,
     matchedSkuCount: result.matchedSkuCount,
     mode: options.apply ? "apply" : "preview",
     productsToMerge: result.productsToMerge,

@@ -3,6 +3,10 @@ export const REQUIRED_SKU_COUNT = 140;
 
 export type CatalogFieldRefreshCliArguments = {
   apply: boolean;
+  cargoPricePlaceholders: Array<{
+    skuCode: string;
+    unitPriceMilliYuan: number;
+  }>;
   expectedSkuCount: number;
   expectedSourceSequenceCount: number;
   reason: string;
@@ -12,6 +16,38 @@ function optionValue(argumentsList: readonly string[], name: string) {
   const prefix = `--${name}=`;
   const value = argumentsList.find((argument) => argument.startsWith(prefix));
   return value === undefined ? undefined : value.slice(prefix.length);
+}
+
+function parseCargoPricePlaceholders(argumentsList: readonly string[]) {
+  const optionName = "--cargo-price-placeholder";
+  const prefix = `${optionName}=`;
+  const values = argumentsList.filter(
+    (argument) => argument === optionName || argument.startsWith(prefix),
+  );
+  const skuCodes = new Set<string>();
+
+  return values.map((argument) => {
+    const match = /^(TZX-\d+(?:-\d+)?):(\d+\.\d{2})$/.exec(
+      argument.slice(prefix.length),
+    );
+    if (!match) throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
+
+    const [, skuCode, yuanText] = match;
+    if (skuCodes.has(skuCode)) {
+      throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
+    }
+    skuCodes.add(skuCode);
+
+    const [wholeYuan, fractionalYuan] = yuanText.split(".");
+    const unitPriceMilliYuan = Number.parseInt(
+      `${wholeYuan}${fractionalYuan}0`,
+      10,
+    );
+    if (!Number.isSafeInteger(unitPriceMilliYuan) || unitPriceMilliYuan <= 0) {
+      throw new Error("INVALID_CARGO_PRICE_PLACEHOLDER");
+    }
+    return { skuCode, unitPriceMilliYuan };
+  });
 }
 
 export function parseCatalogFieldRefreshCliArguments(
@@ -24,6 +60,7 @@ export function parseCatalogFieldRefreshCliArguments(
   );
   const expectedSkuText = optionValue(argumentsList, "expected-skus");
   const reasonText = optionValue(argumentsList, "reason");
+  const cargoPricePlaceholders = parseCargoPricePlaceholders(argumentsList);
   const expectedSourceSequenceCount = Number(
     expectedSourceSequenceText ?? REQUIRED_SOURCE_SEQUENCE_COUNT,
   );
@@ -50,5 +87,11 @@ export function parseCatalogFieldRefreshCliArguments(
     throw new Error("APPLY_REASON_REQUIRED");
   }
 
-  return { apply, expectedSkuCount, expectedSourceSequenceCount, reason };
+  return {
+    apply,
+    cargoPricePlaceholders,
+    expectedSkuCount,
+    expectedSourceSequenceCount,
+    reason,
+  };
 }

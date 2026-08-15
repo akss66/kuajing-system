@@ -15,6 +15,7 @@ import {
   type CatalogFieldRefreshReadPort,
 } from "@/modules/feishu/catalog-field-refresh";
 import { parseLegacyCargoSheet } from "@/modules/feishu/cargo-parser";
+import type { CargoPricePlaceholder } from "@/modules/feishu/cargo-types";
 import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field-aligned-cargo-source";
 
 const sourceWikiToken = "read-only-wiki-token";
@@ -50,6 +51,28 @@ function createRepeatedSourceSequenceValues() {
   return values;
 }
 
+function createCargoPricePlaceholderValues() {
+  const values = buildFieldAlignedCargoSourceFixture().value;
+  const sequenceIndex = values[0].indexOf("序号");
+  const skuIndex = values[0].indexOf("SKU");
+  const cargoPriceIndex = values[0].indexOf("货品价格");
+  const placeholderRow = values.find(
+    (row, index) => index > 0 && row[skuIndex] === "TZX-074-1",
+  );
+  if (
+    sequenceIndex === -1 ||
+    skuIndex === -1 ||
+    cargoPriceIndex === -1 ||
+    !placeholderRow
+  ) {
+    throw new Error("FIELD_ALIGNED_PLACEHOLDER_FIXTURE_SETUP_FAILED");
+  }
+  placeholderRow[sequenceIndex] = "76";
+  placeholderRow[skuIndex] = "TZX-076";
+  placeholderRow[cargoPriceIndex] = "";
+  return values;
+}
+
 function createReadOnlyClient(
   values: unknown[][] = buildFieldAlignedCargoSourceFixture().value,
 ): CatalogFieldRefreshReadPort {
@@ -66,9 +89,12 @@ function createReadOnlyClient(
   };
 }
 
-async function seedCatalog() {
-  const parsed = parseLegacyCargoSheet(buildFieldAlignedCargoSourceFixture().value);
-  expect(parsed.issues).toEqual([]);
+async function seedCatalog(
+  values: unknown[][] = buildFieldAlignedCargoSourceFixture().value,
+  cargoPricePlaceholders: readonly CargoPricePlaceholder[] = [],
+) {
+  const parsed = parseLegacyCargoSheet(values, { cargoPricePlaceholders });
+  expect(parsed.issues.filter((issue) => issue.severity === "BLOCKING")).toEqual([]);
   const canonicalSequence = "34";
   const rowsBySequence = Map.groupBy(parsed.rows, (row) => row.sourceSequence);
   const skuIdByCode = new Map<string, string>();
@@ -136,6 +162,47 @@ afterEach(async () => {
 });
 
 describe("catalog field refresh", () => {
+  test("returns and audits only the parser-applied cargo price placeholder", async () => {
+    const values = createCargoPricePlaceholderValues();
+    const cargoPricePlaceholders = [
+      { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+    ];
+    const appliedCargoPricePlaceholders = [
+      {
+        skuCode: "TZX-076",
+        sourceRowNumber: 141,
+        unitPriceMilliYuan: 99_000,
+      },
+    ];
+    await seedCatalog(values, cargoPricePlaceholders);
+    const client = createReadOnlyClient(values);
+    const service = createCatalogFieldRefreshService();
+
+    await expect(service.preview({
+      client,
+      cargoPricePlaceholders,
+      ...validInput,
+    })).resolves.toMatchObject({ cargoPricePlaceholders: appliedCargoPricePlaceholders });
+
+    await expect(service.apply({
+      actorUserId: "refresh-actor",
+      client,
+      cargoPricePlaceholders,
+      ...validInput,
+    })).resolves.toMatchObject({ cargoPricePlaceholders: appliedCargoPricePlaceholders });
+
+    const [parentProductId] = await productIdsFor(["TZX-076"]);
+    const [parent] = await db.select({ cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan })
+      .from(products).where(eq(products.id, parentProductId));
+    expect(parent).toEqual({ cargoUnitPriceMilliYuan: 99_000 });
+
+    const [auditLog] = await db.select({ afterJson: auditLogs.afterJson }).from(auditLogs)
+      .where(eq(auditLogs.action, "CATALOG_FIELDS_REFRESHED_FROM_FEISHU"));
+    expect(auditLog?.afterJson).toMatchObject({
+      cargoPricePlaceholders: appliedCargoPricePlaceholders,
+    });
+  });
+
   test("merges split products into one source sequence without changing inventory history", async () => {
     const { canonicalProductId } = await seedCatalog();
     const before = await readInventoryFacts();

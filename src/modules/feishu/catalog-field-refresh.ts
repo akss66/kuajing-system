@@ -4,13 +4,18 @@ import { db } from "@/db/client";
 import { auditLogs, products, skus } from "@/db/schema";
 
 import { parseLegacyCargoSheet } from "./cargo-parser";
-import type { ParsedCargoRow } from "./cargo-types";
+import type {
+  AppliedCargoPricePlaceholder,
+  CargoPricePlaceholder,
+  ParsedCargoRow,
+} from "./cargo-types";
 import {
   readFeishuSourceSnapshot,
   type FeishuSourcePort,
 } from "./source-reader";
 
 export type CatalogFieldRefreshPreview = {
+  cargoPricePlaceholders: AppliedCargoPricePlaceholder[];
   sourceSequenceCount: number;
   skuCount: number;
   matchedSkuCount: number;
@@ -25,6 +30,7 @@ export type CatalogFieldRefreshReadPort = Pick<
 type DatabaseLike = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type PreparedSource = {
+  appliedCargoPricePlaceholders: AppliedCargoPricePlaceholder[];
   rows: ParsedCargoRow[];
   sourceSequenceCount: number;
   skuCount: number;
@@ -51,6 +57,7 @@ function assertExpectedCount(actual: number, expected: number, code: string) {
 }
 
 async function prepareSource(input: {
+  cargoPricePlaceholders?: readonly CargoPricePlaceholder[];
   client: CatalogFieldRefreshReadPort;
   expectedSkuCount: number;
   expectedSourceSequenceCount: number;
@@ -67,7 +74,9 @@ async function prepareSource(input: {
   });
   if ("status" in snapshot) fail(snapshot.status);
 
-  const parsed = parseLegacyCargoSheet(snapshot.values);
+  const parsed = parseLegacyCargoSheet(snapshot.values, {
+    cargoPricePlaceholders: input.cargoPricePlaceholders,
+  });
   if (parsed.issues.some((issue) => issue.severity === "BLOCKING")) {
     fail("PARSER_BLOCKING_ISSUES");
   }
@@ -85,6 +94,7 @@ async function prepareSource(input: {
   assertExpectedCount(sourceSkuCodes.size, input.expectedSkuCount, "SKU_COUNT_MISMATCH");
 
   return {
+    appliedCargoPricePlaceholders: parsed.appliedCargoPricePlaceholders,
     rows: parsed.rows,
     skuCount: sourceSkuCodes.size,
     sourceSequenceCount: sourceSequences.size,
@@ -141,6 +151,7 @@ async function buildRefreshPlan(
   }
 
   return {
+    cargoPricePlaceholders: source.appliedCargoPricePlaceholders,
     groups,
     involvedProductIds: [...involvedProductIds],
     matchedSkuCount: existingSkus.length,
@@ -201,6 +212,7 @@ async function applyPlan(input: {
     actorId: input.actorUserId,
     actorType: "ADMIN",
     afterJson: {
+      cargoPricePlaceholders: input.plan.cargoPricePlaceholders,
       matchedSkuCount: input.plan.matchedSkuCount,
       productsToMerge: input.plan.productsToMerge,
       skuCount: input.plan.skuCount,
@@ -216,6 +228,7 @@ async function applyPlan(input: {
 export function createCatalogFieldRefreshService(database: typeof db = db) {
   return {
     async preview(input: {
+      cargoPricePlaceholders?: readonly CargoPricePlaceholder[];
       client: CatalogFieldRefreshReadPort;
       sourceSheetId: string;
       sourceWikiToken: string;
@@ -225,6 +238,7 @@ export function createCatalogFieldRefreshService(database: typeof db = db) {
       const source = await prepareSource(input);
       const plan = await buildRefreshPlan(database, source);
       return {
+        cargoPricePlaceholders: plan.cargoPricePlaceholders,
         matchedSkuCount: plan.matchedSkuCount,
         productsToMerge: plan.productsToMerge,
         skuCount: plan.skuCount,
@@ -233,6 +247,7 @@ export function createCatalogFieldRefreshService(database: typeof db = db) {
     },
     async apply(input: {
       actorUserId: string;
+      cargoPricePlaceholders?: readonly CargoPricePlaceholder[];
       client: CatalogFieldRefreshReadPort;
       reason: string;
       sourceSheetId: string;
@@ -256,6 +271,7 @@ export function createCatalogFieldRefreshService(database: typeof db = db) {
           reason,
         });
         return {
+          cargoPricePlaceholders: plan.cargoPricePlaceholders,
           matchedSkuCount: plan.matchedSkuCount,
           productsToMerge: plan.productsToMerge,
           skuCount: plan.skuCount,
