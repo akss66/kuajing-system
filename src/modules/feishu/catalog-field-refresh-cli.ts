@@ -1,4 +1,4 @@
-export const REQUIRED_SOURCE_SEQUENCE_COUNT = 74;
+export const REQUIRED_SOURCE_SEQUENCE_COUNT = 76;
 export const REQUIRED_SKU_COUNT = 140;
 
 export type CatalogFieldRefreshCliArguments = {

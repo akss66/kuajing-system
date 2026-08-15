@@ -11,19 +11,19 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
 
   test("requires an explicit SKU count when applying", () => {
     expect(() => parseCatalogFieldRefreshCliArguments([
-      "--apply", "--expected-source-sequences=74", "--reason=confirmed repair",
+      "--apply", "--expected-source-sequences=76", "--reason=confirmed repair",
     ])).toThrow("APPLY_EXPECTED_SKUS_REQUIRED");
   });
 
   test("requires an explicit operator reason when applying", () => {
     expect(() => parseCatalogFieldRefreshCliArguments([
-      "--apply", "--expected-source-sequences=74", "--expected-skus=140",
+      "--apply", "--expected-source-sequences=76", "--expected-skus=140",
     ])).toThrow("APPLY_REASON_REQUIRED");
   });
 
   test.each([
-    ["--expected-source-sequences=73", "--expected-skus=140"],
-    ["--expected-source-sequences=74", "--expected-skus=139"],
+    ["--expected-source-sequences=74", "--expected-skus=140"],
+    ["--expected-source-sequences=76", "--expected-skus=139"],
   ])("rejects wrong apply confirmation counts", (sourceSequenceArgument, skuArgument) => {
     expect(() => parseCatalogFieldRefreshCliArguments([
       "--apply", sourceSequenceArgument, skuArgument, "--reason=confirmed repair",
@@ -32,17 +32,17 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
 
   test("rejects a blank explicit apply reason", () => {
     expect(() => parseCatalogFieldRefreshCliArguments([
-      "--apply", "--expected-source-sequences=74", "--expected-skus=140", "--reason=   ",
+      "--apply", "--expected-source-sequences=76", "--expected-skus=140", "--reason=   ",
     ])).toThrow("APPLY_REASON_REQUIRED");
   });
 
   test("accepts all four explicit apply guards", () => {
     expect(parseCatalogFieldRefreshCliArguments([
-      "--apply", "--expected-source-sequences=74", "--expected-skus=140", "--reason=confirmed repair",
+      "--apply", "--expected-source-sequences=76", "--expected-skus=140", "--reason=confirmed repair",
     ])).toEqual({
       apply: true,
       expectedSkuCount: 140,
-      expectedSourceSequenceCount: 74,
+      expectedSourceSequenceCount: 76,
       reason: "confirmed repair",
     });
   });
@@ -51,7 +51,7 @@ describe("parseCatalogFieldRefreshCliArguments", () => {
     expect(parseCatalogFieldRefreshCliArguments([])).toEqual({
       apply: false,
       expectedSkuCount: 140,
-      expectedSourceSequenceCount: 74,
+      expectedSourceSequenceCount: 76,
       reason: "",
     });
   });
