@@ -5,6 +5,7 @@ import {
   filterCatalogGroups,
   filterCatalogGroupVariants,
   groupCatalogItems,
+  sortCatalogGroups,
   type CatalogGroupableItem,
 } from "@/modules/catalog/product-groups";
 
@@ -287,5 +288,117 @@ describe("filterCatalogGroupVariants", () => {
     );
     expect(unavailable.flatMap((group) => group.variants.map((item) => item.skuCode)))
       .toEqual(["TZX-001-2", "TZX-002"]);
+  });
+});
+
+describe("sortCatalogGroups", () => {
+  type PricedCatalogItem = CatalogGroupableItem & { price: number };
+
+  function pricedItem(
+    overrides: Partial<PricedCatalogItem> = {},
+  ): PricedCatalogItem {
+    return {
+      ...item(),
+      price: 1_000,
+      ...overrides,
+    };
+  }
+
+  it("defaults to natural SKU order when customer-safe groups have no source sequence", () => {
+    const groups = groupCatalogItems([
+      pricedItem({
+        productId: "product-053",
+        productName: "PP塑料吸管",
+        skuCode: "TZX-053",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        id: "sku-034-2",
+        productId: "product-034",
+        productName: "A4文件袋",
+        skuCode: "TZX-034-2",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        id: "sku-034-1",
+        productId: "product-034",
+        productName: "A4文件袋",
+        skuCode: "TZX-034-1",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        productId: "product-037",
+        productName: "USB数据线",
+        skuCode: "TZX-037-1",
+        sourceSequence: null,
+      }),
+    ]);
+
+    const sorted = sortCatalogGroups(groups, "SKU_ASC", (variant) => variant.price);
+
+    expect(sorted.map((group) => group.productId)).toEqual([
+      "product-034",
+      "product-037",
+      "product-053",
+    ]);
+    expect(sorted[0]!.variants.map((variant) => variant.skuCode)).toEqual([
+      "TZX-034-1",
+      "TZX-034-2",
+    ]);
+  });
+
+  it("orders visible product groups and variants by price with SKU tie breakers", () => {
+    const groups = groupCatalogItems([
+      pricedItem({
+        id: "sku-034-2",
+        price: 1_500,
+        productId: "product-034",
+        skuCode: "TZX-034-2",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        id: "sku-034-1",
+        price: 1_350,
+        productId: "product-034",
+        skuCode: "TZX-034-1",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        id: "sku-037-1",
+        price: 3_100,
+        productId: "product-037",
+        skuCode: "TZX-037-1",
+        sourceSequence: null,
+      }),
+      pricedItem({
+        id: "sku-053",
+        price: 2_000,
+        productId: "product-053",
+        skuCode: "TZX-053",
+        sourceSequence: null,
+      }),
+    ]);
+
+    const ascending = sortCatalogGroups(groups, "PRICE_ASC", (variant) => variant.price);
+    expect(ascending.map((group) => group.productId)).toEqual([
+      "product-034",
+      "product-053",
+      "product-037",
+    ]);
+    expect(ascending[0]!.variants.map((variant) => variant.skuCode)).toEqual([
+      "TZX-034-1",
+      "TZX-034-2",
+    ]);
+
+    const descending = sortCatalogGroups(groups, "PRICE_DESC", (variant) => variant.price);
+    expect(descending.map((group) => group.productId)).toEqual([
+      "product-037",
+      "product-053",
+      "product-034",
+    ]);
+    expect(descending[2]!.variants.map((variant) => variant.skuCode)).toEqual([
+      "TZX-034-2",
+      "TZX-034-1",
+    ]);
   });
 });

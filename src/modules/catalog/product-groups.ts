@@ -17,6 +17,7 @@ export type CatalogProductGroup<T extends CatalogGroupableItem> = {
 };
 
 export type CatalogSaleStatusFilter = "ALL" | "SELLABLE" | "NOT_SELLABLE";
+export type CatalogSortOrder = "SKU_ASC" | "PRICE_ASC" | "PRICE_DESC";
 
 function isAsciiDigit(character: string) {
   return character >= "0" && character <= "9";
@@ -195,5 +196,53 @@ export function filterCatalogGroupVariants<T extends CatalogGroupableItem>(
   return groups.flatMap((group) => {
     const variants = group.variants.filter((variant) => isSellable(variant) === expected);
     return variants.length > 0 ? [{ ...group, variants }] : [];
+  });
+}
+
+function compareVariantsBySku<T extends CatalogGroupableItem>(left: T, right: T) {
+  const skuCode = compareCatalogNaturally(left.skuCode, right.skuCode);
+  return skuCode !== 0 ? skuCode : compareCatalogNaturally(left.id, right.id);
+}
+
+function compareNumbers(left: number, right: number) {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+export function sortCatalogGroups<T extends CatalogGroupableItem>(
+  groups: readonly CatalogProductGroup<T>[],
+  order: CatalogSortOrder,
+  getPrice: (variant: T) => number,
+): CatalogProductGroup<T>[] {
+  const priceDirection = order === "PRICE_DESC" ? -1 : 1;
+  const sortedGroups = groups.map((group) => ({
+    ...group,
+    variants: [...group.variants].sort((left, right) => {
+      if (order !== "SKU_ASC") {
+        const price = compareNumbers(getPrice(left), getPrice(right)) * priceDirection;
+        if (price !== 0) return price;
+      }
+      return compareVariantsBySku(left, right);
+    }),
+  }));
+
+  return sortedGroups.sort((left, right) => {
+    const leftFirst = left.variants[0];
+    const rightFirst = right.variants[0];
+    if (!leftFirst || !rightFirst) {
+      if (leftFirst) return -1;
+      if (rightFirst) return 1;
+      return compareCatalogNaturally(left.productId, right.productId);
+    }
+
+    if (order !== "SKU_ASC") {
+      const price =
+        compareNumbers(getPrice(leftFirst), getPrice(rightFirst)) * priceDirection;
+      if (price !== 0) return price;
+    }
+
+    const skuCode = compareCatalogNaturally(leftFirst.skuCode, rightFirst.skuCode);
+    if (skuCode !== 0) return skuCode;
+    return compareCatalogNaturally(left.productId, right.productId);
   });
 }

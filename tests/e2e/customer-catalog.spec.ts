@@ -190,7 +190,14 @@ async function seedCustomerCatalog() {
     },
   ]);
   const user = await createManagedUser({ customerId: customerA.id, role: "user" });
-  return { availableSku, manualUnavailableSku, productName, soldOutSku, user };
+  return {
+    availableSku,
+    manualUnavailableSku,
+    productId: product.id,
+    productName,
+    soldOutSku,
+    user,
+  };
 }
 
 function observeBrowserFailures(page: import("@playwright/test").Page) {
@@ -325,6 +332,41 @@ test("customer sees only its own price and real available inventory", async ({ p
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/, { timeout: 15_000 });
   await page.goto("/portal/catalog");
+
+  const sortControl = page.getByRole("combobox", { name: "货盘排序方式" });
+  await expect(sortControl).toContainText("SKU 顺序");
+  const sortControlBox = await sortControl.boundingBox();
+  expect(sortControlBox).not.toBeNull();
+  expect(sortControlBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  const fixtureProduct = page.locator(
+    `[data-testid="catalog-product-${fixture.productId}"]:visible`,
+  );
+  const visibleVariantOrder = () =>
+    fixtureProduct.locator('[data-testid^="catalog-"]').evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute("data-testid")),
+    );
+  await expect.poll(visibleVariantOrder).toEqual([
+    `catalog-${fixture.availableSku.id}`,
+    `catalog-${fixture.manualUnavailableSku.id}`,
+    `catalog-${fixture.soldOutSku.id}`,
+  ]);
+
+  await sortControl.click();
+  await page.getByRole("option", { name: "货价：从高到低" }).click();
+  await expect.poll(visibleVariantOrder).toEqual([
+    `catalog-${fixture.availableSku.id}`,
+    `catalog-${fixture.soldOutSku.id}`,
+    `catalog-${fixture.manualUnavailableSku.id}`,
+  ]);
+
+  await sortControl.click();
+  await page.getByRole("option", { name: "货价：从低到高" }).click();
+  await expect.poll(visibleVariantOrder).toEqual([
+    `catalog-${fixture.manualUnavailableSku.id}`,
+    `catalog-${fixture.soldOutSku.id}`,
+    `catalog-${fixture.availableSku.id}`,
+  ]);
 
   const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
   const protectedImage = availableRow.locator("img").first();

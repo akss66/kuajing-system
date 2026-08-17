@@ -505,8 +505,8 @@ describe("catalog workspaces", () => {
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual([
-      "人工暂停销售商品",
       "冬季运输防护袋",
+      "人工暂停销售商品",
       "暂时售罄商品",
     ]);
     const firstVariant = within(cards).getByTestId("catalog-customer-sku-manual");
@@ -576,6 +576,57 @@ describe("catalog workspaces", () => {
     expect(desktopGroup!.textContent).not.toContain("采购价");
     expect(desktopGroup!.textContent).not.toContain("总库存");
     expect(desktopGroup!.textContent).not.toContain("货品价格");
+  });
+
+  it("defaults customer products to SKU order and offers price sorting", () => {
+    const sortableRows: CustomerCatalogItem[] = [
+      {
+        ...customerRows[0]!,
+        actualUnitPriceMilliYuan: 2_000,
+        id: "sortable-053",
+        productId: "sortable-product-053",
+        productName: "PP塑料吸管",
+        skuCode: "TZX-053",
+      },
+      {
+        ...customerRows[0]!,
+        actualUnitPriceMilliYuan: 1_350,
+        id: "sortable-034",
+        productId: "sortable-product-034",
+        productName: "A4文件袋",
+        skuCode: "TZX-034-1",
+      },
+      {
+        ...customerRows[0]!,
+        actualUnitPriceMilliYuan: 3_100,
+        id: "sortable-037",
+        productId: "sortable-product-037",
+        productName: "USB数据线",
+        skuCode: "TZX-037-1",
+      },
+    ];
+
+    render(<CustomerCatalogWorkspace items={sortableRows} query="" />);
+
+    const desktopProductNames = () =>
+      Array.from(
+        screen
+          .getByTestId("customer-catalog-results")
+          .querySelectorAll("[data-customer-catalog-table] > section h3"),
+      ).map((heading) => heading.textContent);
+
+    expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toHaveTextContent(
+      "SKU 顺序",
+    );
+    expect(desktopProductNames()).toEqual(["A4文件袋", "USB数据线", "PP塑料吸管"]);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "货盘排序方式" }));
+    fireEvent.click(screen.getByRole("option", { name: "货价：从高到低" }));
+    expect(desktopProductNames()).toEqual(["USB数据线", "PP塑料吸管", "A4文件袋"]);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "货盘排序方式" }));
+    fireEvent.click(screen.getByRole("option", { name: "货价：从低到高" }));
+    expect(desktopProductNames()).toEqual(["A4文件袋", "PP塑料吸管", "USB数据线"]);
   });
 
   it("filters customer catalog variants by availability while retaining detailed unavailable reasons", () => {

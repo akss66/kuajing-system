@@ -10,6 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,8 +29,10 @@ import {
   filterCatalogGroups,
   filterCatalogGroupVariants,
   groupCatalogItems,
+  sortCatalogGroups,
   type CatalogSaleStatusFilter,
   type CatalogProductGroup,
+  type CatalogSortOrder,
 } from "@/modules/catalog/product-groups";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
@@ -365,6 +374,7 @@ export function CustomerCatalogWorkspace({
   query: string;
 }) {
   const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const [sortOrder, setSortOrder] = useState<CatalogSortOrder>("SKU_ASC");
   const [draftQuery, setDraftQuery] = useState(query);
   const [searchQuery, setSearchQuery] = useState(query);
   const groupedItems = useMemo(
@@ -384,7 +394,16 @@ export function CustomerCatalogWorkspace({
       ),
     [saleStatus, searchedGroups],
   );
-  const skuCount = filteredGroups.reduce((count, group) => count + group.variants.length, 0);
+  const sortedGroups = useMemo(
+    () =>
+      sortCatalogGroups(
+        filteredGroups,
+        sortOrder,
+        (variant) => variant.actualUnitPriceMilliYuan,
+      ),
+    [filteredGroups, sortOrder],
+  );
+  const skuCount = sortedGroups.reduce((count, group) => count + group.variants.length, 0);
   const resetFilters = () => {
     setSaleStatus("ALL");
     setSearchQuery("");
@@ -427,18 +446,36 @@ export function CustomerCatalogWorkspace({
               搜索货盘
             </Button>
           </form>
-          <CatalogSaleStatusFilterControl onValueChange={setSaleStatus} value={saleStatus} />
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+            <Select
+              onValueChange={(value) => setSortOrder(value as CatalogSortOrder)}
+              value={sortOrder}
+            >
+              <SelectTrigger
+                aria-label="货盘排序方式"
+                className="min-h-11 w-full sm:w-48"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem value="SKU_ASC">SKU 顺序</SelectItem>
+                <SelectItem value="PRICE_ASC">货价：从低到高</SelectItem>
+                <SelectItem value="PRICE_DESC">货价：从高到低</SelectItem>
+              </SelectContent>
+            </Select>
+            <CatalogSaleStatusFilterControl onValueChange={setSaleStatus} value={saleStatus} />
+          </div>
         </div>
       </section>
       <section aria-label="客户货盘结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">可选货盘</h2>
           <p className="text-sm tabular-nums text-muted-foreground">
-            {filteredGroups.length} 个商品 / {skuCount} 个 SKU
+            {sortedGroups.length} 个商品 / {skuCount} 个 SKU
           </p>
         </div>
-        {filteredGroups.length > 0 ? (
-          <CustomerCatalogResults groups={filteredGroups} />
+        {sortedGroups.length > 0 ? (
+          <CustomerCatalogResults groups={sortedGroups} />
         ) : (
           <ActionableEmptyState
             action={
