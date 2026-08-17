@@ -252,6 +252,18 @@ describe("dashboard queries", () => {
         submittedAt: new Date("2026-08-13T10:00:00.000Z"),
         totalRows: 5,
       },
+      {
+        customerId: customer.id,
+        expiresAt: new Date("2026-08-13T13:59:59.999Z"),
+        fileSha256: "c".repeat(64),
+        fileSizeBytes: 1_024,
+        originalFileName: "expired-needs-review.xlsx",
+        readyRows: 3,
+        status: "PREVIEW",
+        storeId: store.id,
+        totalRows: 5,
+        unknownSkuRows: 2,
+      },
     ]);
 
     const dashboard = await getAdminOperationsDashboard(FIXED_NOW);

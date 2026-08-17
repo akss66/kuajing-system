@@ -77,6 +77,7 @@ export async function getAdminOperationsDashboard(
           select count(*)
           from order_import_batches
           where status = 'PREVIEW'
+            and expires_at > ${now.toISOString()}::timestamptz
             and (invalid_rows > 0 or unknown_sku_rows > 0)
         ) as "importExceptionCount"
       from fulfillment_orders
