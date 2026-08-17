@@ -6,7 +6,6 @@ import {
   orderImportBatches,
   orderImportRows,
   orderLines,
-  products,
   skus,
 } from "@/db/schema";
 import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
@@ -79,10 +78,9 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         .select({
           id: skus.id,
           lifecycleStatus: skus.lifecycleStatus,
-          unitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+          unitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
         })
         .from(skus)
-        .innerJoin(products, eq(products.id, skus.productId))
         .where(
           and(
             inArray(skus.id, skuIds),

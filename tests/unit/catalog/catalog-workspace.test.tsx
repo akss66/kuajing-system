@@ -98,8 +98,9 @@ const groupedAdminRows: AdminCatalogItem[] = [
   "1",
   "2",
   "3",
-].map((variant) => ({
+].map((variant, index) => ({
   ...adminRows[0]!,
+  cargoUnitPriceMilliYuan: (index + 1) * 1_000,
   id: `sku-001-${variant}`,
   productId: "product-001",
   productName: "三规格货品",
@@ -198,7 +199,12 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    expect(screen.getAllByText("序号 1")).toHaveLength(1);
+    const desktopTable = screen.getByRole("table", { name: "商品与 SKU 列表" });
+    expect(within(desktopTable).getByText("1", { exact: true })).toBeVisible();
+    expect(within(desktopTable).queryByText("序号 1", { exact: true })).not.toBeInTheDocument();
+    for (const price of ["¥1.00", "¥2.00", "¥3.00"]) {
+      expect(within(desktopTable).getByText(price, { exact: true })).toBeVisible();
+    }
     for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
       expect(screen.getAllByText(skuCode)).toHaveLength(2);
       for (const sku of screen.getAllByText(skuCode)) expect(sku).toBeVisible();

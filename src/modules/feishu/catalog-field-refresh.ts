@@ -179,7 +179,6 @@ async function applyPlan(input: {
     await input.database
       .update(products)
       .set({
-        cargoUnitPriceMilliYuan: parent.cargoUnitPriceMilliYuan,
         linkText: parent.linkText,
         name: parent.productName,
         sourceSequence: parent.sourceSequence,
@@ -191,6 +190,7 @@ async function applyPlan(input: {
       await input.database
         .update(skus)
         .set({
+          cargoUnitPriceMilliYuan: row.cargoUnitPriceMilliYuan,
           color: row.color,
           combination: row.combination,
           defaultUnitPriceFen: row.defaultUnitPriceFen,

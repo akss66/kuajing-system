@@ -50,7 +50,7 @@ export async function listAdminCatalog(options: { lifecycle?: "ACTIVE" | "ARCHIV
         sql<number>`greatest(coalesce(${inventoryBalances.totalQuantity}, 0) - coalesce(${activeReservations.quantity}, 0), 0)::int`.mapWith(
           Number,
         ),
-      cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+      cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
       color: skus.color,
       combination: skus.combination,
       defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,

@@ -49,7 +49,6 @@ describe("SKU management service", () => {
     const created = await createManagedSku({
       actorId,
       product: {
-        cargoUnitPriceMilliYuan: 8_000,
         linkText: "爆款防爆反光宠物牵引绳",
         mode: "CREATE",
         name: "狗绳",
@@ -57,6 +56,7 @@ describe("SKU management service", () => {
       },
       reason: "建立首个完整货盘 SKU",
       sku: {
+        cargoUnitPriceMilliYuan: 8_000,
         color: "黑色",
         combination: "单件",
         defaultUnitPriceMilliYuan: 2_930,
@@ -83,12 +83,12 @@ describe("SKU management service", () => {
     const [asset] = await db.select().from(catalogAssets);
 
     expect(product).toEqual(expect.objectContaining({
-      cargoUnitPriceMilliYuan: 8_000,
       linkText: "爆款防爆反光宠物牵引绳",
       name: "狗绳",
       sourceSequence: "1",
     }));
     expect(sku).toEqual(expect.objectContaining({
+      cargoUnitPriceMilliYuan: 8_000,
       color: "黑色",
       combination: "单件",
       defaultUnitPriceMilliYuan: 2_930,
@@ -125,6 +125,7 @@ describe("SKU management service", () => {
       product: { mode: "EXISTING", productId: product.id },
       reason: "错误分组验证",
       sku: {
+        cargoUnitPriceMilliYuan: 1_350,
         color: null,
         combination: null,
         defaultUnitPriceMilliYuan: 1_350,
@@ -143,6 +144,7 @@ describe("SKU management service", () => {
       product: { mode: "EXISTING", productId: product.id },
       reason: "停用商品不应接收新 SKU",
       sku: {
+        cargoUnitPriceMilliYuan: 1_350,
         color: null,
         combination: null,
         defaultUnitPriceMilliYuan: 1_350,
@@ -159,14 +161,15 @@ describe("SKU management service", () => {
   test("updates shared product fields and SKU-specific fields with audit history", async () => {
     const created = await createManagedSku({
       actorId,
-      product: { cargoUnitPriceMilliYuan: 5000, linkText: null, mode: "CREATE", name: "头绳", sourceSequence: "4" },
+      product: { linkText: null, mode: "CREATE", name: "头绳", sourceSequence: "4" },
       reason: "初始化",
-      sku: { color: null, combination: null, defaultUnitPriceMilliYuan: 4000, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-004", specification: null, weightGrams: 35 },
+      sku: { cargoUnitPriceMilliYuan: 5000, color: null, combination: null, defaultUnitPriceMilliYuan: 4000, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-004", specification: null, weightGrams: 35 },
     });
 
-    await updateManagedProduct({ actorId, cargoUnitPriceMilliYuan: 7000, linkText: "新链接文字", name: "头绳组合", productId: created.productId, reason: "更新商品资料", sourceSequence: "4" });
+    await updateManagedProduct({ actorId, linkText: "新链接文字", name: "头绳组合", productId: created.productId, reason: "更新商品资料", sourceSequence: "4" });
     await updateManagedSku({
       actorId,
+      cargoUnitPriceMilliYuan: 7000,
       color: "混色",
       combination: "10pcs/包",
       defaultUnitPriceMilliYuan: 5200,
@@ -189,9 +192,10 @@ describe("SKU management service", () => {
     const [product] = await db.select().from(products).where(eq(products.id, created.productId));
     const [sku] = await db.select().from(skus).where(eq(skus.id, created.skuId));
     const audits = await db.select().from(auditLogs).where(eq(auditLogs.entityId, created.skuId));
-    expect(product).toEqual(expect.objectContaining({ cargoUnitPriceMilliYuan: 7000, name: "头绳组合" }));
+    expect(product).toEqual(expect.objectContaining({ name: "头绳组合" }));
     expect(sku).toEqual(expect.objectContaining({
       color: "混色",
+      cargoUnitPriceMilliYuan: 7000,
       defaultUnitPriceMilliYuan: 5200,
       imageUrl: expect.stringMatching(/^\/api\/catalog-assets\//),
       saleStatus: "NOT_SELLABLE",
@@ -202,15 +206,15 @@ describe("SKU management service", () => {
   test("physically deletes unused SKUs, archives historical SKUs, and batch-updates atomically", async () => {
     const first = await createManagedSku({
       actorId,
-      product: { cargoUnitPriceMilliYuan: 1000, linkText: null, mode: "CREATE", name: "商品 10", sourceSequence: "10" },
+      product: { linkText: null, mode: "CREATE", name: "商品 10", sourceSequence: "10" },
       reason: "初始化",
-      sku: { color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-010-1", specification: null, weightGrams: 1 },
+      sku: { cargoUnitPriceMilliYuan: 1000, color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-010-1", specification: null, weightGrams: 1 },
     });
     const second = await createManagedSku({
       actorId,
       product: { mode: "EXISTING", productId: first.productId },
       reason: "初始化",
-      sku: { color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-010-2", specification: null, weightGrams: 1 },
+      sku: { cargoUnitPriceMilliYuan: 1200, color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "SELLABLE", skuCode: "TZX-010-2", specification: null, weightGrams: 1 },
     });
 
     await batchManageSkus({ actorId, mode: "SET_STATUS", reason: "批量下架", saleStatus: "NOT_SELLABLE", skuIds: [second.skuId, first.skuId, second.skuId] });

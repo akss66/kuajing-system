@@ -191,10 +191,12 @@ describe("catalog field refresh", () => {
       ...validInput,
     })).resolves.toMatchObject({ cargoPricePlaceholders: appliedCargoPricePlaceholders });
 
-    const [parentProductId] = await productIdsFor(["TZX-076"]);
-    const [parent] = await db.select({ cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan })
-      .from(products).where(eq(products.id, parentProductId));
-    expect(parent).toEqual({ cargoUnitPriceMilliYuan: 99_000 });
+    const refreshedPrices = await db.execute<{ cargoUnitPriceMilliYuan: number }>(sql`
+      select cargo_unit_price_milli_yuan as "cargoUnitPriceMilliYuan"
+      from skus
+      where sku_code = 'TZX-076'
+    `);
+    expect(refreshedPrices).toEqual([{ cargoUnitPriceMilliYuan: 99_000 }]);
 
     const [auditLog] = await db.select({ afterJson: auditLogs.afterJson }).from(auditLogs)
       .where(eq(auditLogs.action, "CATALOG_FIELDS_REFRESHED_FROM_FEISHU"));

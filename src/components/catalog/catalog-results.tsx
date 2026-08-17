@@ -207,7 +207,7 @@ function CatalogTable({ actions, groups, onSelectionChange, selectedIds }: Catal
                     className="whitespace-normal text-right align-top font-semibold tabular-nums"
                     rowSpan={group.variants.length}
                   >
-                    {group.sourceSequence === null ? "—" : `序号 ${group.sourceSequence}`}
+                    {group.sourceSequence ?? "—"}
                   </TableCell>
                 ) : null}
                 {index === 0 ? (
@@ -233,14 +233,9 @@ function CatalogTable({ actions, groups, onSelectionChange, selectedIds }: Catal
                 <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
                   {row.availableQuantity}
                 </TableCell>
-                {index === 0 ? (
-                  <TableCell
-                    className="whitespace-normal text-right align-top font-semibold tabular-nums"
-                    rowSpan={group.variants.length}
-                  >
-                    <PriceValue value={group.variants[0]!.cargoUnitPriceMilliYuan} />
-                  </TableCell>
-                ) : null}
+                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
+                  <PriceValue value={row.cargoUnitPriceMilliYuan} />
+                </TableCell>
                 <TableCell className="whitespace-normal align-top">
                   <CatalogStatus row={row} />
                 </TableCell>
@@ -278,12 +273,6 @@ function CatalogCards({ actions, groups, onSelectionChange, selectedIds }: Catal
                 来源序号 {group.sourceSequence ?? "—"}
               </p>
             </div>
-            <div className="shrink-0 text-right">
-              <p className="text-xs font-medium text-muted-foreground">货品价格</p>
-              <p className="mt-1 font-semibold tabular-nums text-foreground">
-                <PriceValue value={group.variants[0]!.cargoUnitPriceMilliYuan} />
-              </p>
-            </div>
           </div>
 
           <ul
@@ -302,7 +291,7 @@ function CatalogCards({ actions, groups, onSelectionChange, selectedIds }: Catal
                   <CatalogAttributes row={row} />
                 </div>
 
-                <dl className="mt-3 grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
+                <dl className="mt-3 grid grid-cols-3 gap-4 border-t border-border/70 pt-3">
                   <div>
                     <dt className="text-xs font-medium text-muted-foreground">采购价</dt>
                     <dd className="mt-1 font-semibold tabular-nums text-foreground">
@@ -313,6 +302,12 @@ function CatalogCards({ actions, groups, onSelectionChange, selectedIds }: Catal
                     <dt className="text-xs font-medium text-muted-foreground">库存</dt>
                     <dd className="mt-1 font-semibold tabular-nums text-foreground">
                       {row.totalQuantity} / {row.availableQuantity}
+                    </dd>
+                  </div>
+                  <div className="text-right">
+                    <dt className="text-xs font-medium text-muted-foreground">货品价格</dt>
+                    <dd className="mt-1 font-semibold tabular-nums text-foreground">
+                      <PriceValue value={row.cargoUnitPriceMilliYuan} />
                     </dd>
                   </div>
                 </dl>

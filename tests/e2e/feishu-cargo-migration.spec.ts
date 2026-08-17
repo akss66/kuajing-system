@@ -567,7 +567,7 @@ test.describe.serial("Feishu cargo migration", () => {
 
     const trio = await db
       .select({
-        cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+        cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
         defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
         saleStatus: skus.saleStatus,
         skuCode: skus.skuCode,

@@ -103,6 +103,7 @@ export const skus = pgTable(
     color: varchar("color", { length: 160 }),
     combination: varchar("combination", { length: 160 }),
     weightGrams: integer("weight_grams"),
+    cargoUnitPriceMilliYuan: integer("cargo_unit_price_milli_yuan"),
     defaultUnitPriceMilliYuan: integer("default_unit_price_milli_yuan")
       .default(0)
       .notNull(),
@@ -119,6 +120,10 @@ export const skus = pgTable(
   },
   (table) => [
     check("skus_weight_non_negative", sql`${table.weightGrams} >= 0`),
+    check(
+      "skus_cargo_unit_price_milli_yuan_non_negative",
+      sql`${table.cargoUnitPriceMilliYuan} >= 0`,
+    ),
     check(
       "skus_default_price_milli_yuan_non_negative",
       sql`${table.defaultUnitPriceMilliYuan} >= 0`,

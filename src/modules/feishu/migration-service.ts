@@ -725,7 +725,6 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
             await tx
               .update(products)
               .set({
-                cargoUnitPriceMilliYuan: rows[0].cargoUnitPriceMilliYuan,
                 linkText: rows[0].linkText,
                 name: rows[0].productName,
                 sourceSequence,
@@ -736,7 +735,6 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
             [product] = await tx
               .insert(products)
               .values({
-                cargoUnitPriceMilliYuan: rows[0].cargoUnitPriceMilliYuan,
                 linkText: rows[0].linkText,
                 name: rows[0].productName,
                 sourceSequence,
@@ -755,6 +753,7 @@ export function createFeishuCargoMigrationService(options: MigrationServiceOptio
           }
           const productId = productIdByGroup.get(row.sourceSequence)!;
           const skuMetadata = {
+            cargoUnitPriceMilliYuan: row.cargoUnitPriceMilliYuan,
             color: row.color,
             combination: row.combination,
             defaultUnitPriceFen: row.defaultUnitPriceFen,

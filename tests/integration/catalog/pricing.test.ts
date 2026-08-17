@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
@@ -35,11 +36,12 @@ async function createCatalogFixture() {
     .returning({ id: stores.id });
   const [product] = await db
     .insert(products)
-    .values({ cargoUnitPriceMilliYuan: 8_155, name: "Demo product" })
+    .values({ name: "Demo product" })
     .returning({ id: products.id });
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 8_155,
       defaultUnitPriceFen: 690,
       name: "Demo red",
       productId: product.id,
@@ -51,6 +53,18 @@ async function createCatalogFixture() {
 }
 
 describe("catalog cargo price", () => {
+  test("uses the individual SKU cargo price when sibling prices can differ", async () => {
+    const fixture = await createCatalogFixture();
+    await db.execute(sql`
+      update skus
+      set cargo_unit_price_milli_yuan = 9123
+      where id = ${fixture.sku.id}
+    `);
+
+    await expect(db.transaction((tx) => resolveUnitPrice(tx, { skuId: fixture.sku.id })))
+      .resolves.toEqual({ unitPriceFen: 912, unitPriceMilliYuan: 9_123 });
+  });
+
   test("database constraints reject negative stored prices", async () => {
     const fixture = await createCatalogFixture();
 
@@ -63,7 +77,7 @@ describe("catalog cargo price", () => {
     ).rejects.toThrow();
   });
 
-  test("uses the product cargo price and ignores an active customer price", async () => {
+  test("uses the SKU cargo price and ignores an active customer price", async () => {
     const fixture = await createCatalogFixture();
     await db.insert(customerSkuPrices).values({
       customerId: fixture.customer.id,
@@ -83,7 +97,7 @@ describe("catalog cargo price", () => {
     });
   });
 
-  test("uses the product cargo price instead of the SKU purchase price", async () => {
+  test("uses the SKU cargo price instead of the SKU purchase price", async () => {
     const fixture = await createCatalogFixture();
 
     const actual = await db.transaction((tx) =>
@@ -125,9 +139,9 @@ describe("catalog cargo price", () => {
     });
   });
 
-  test("rejects ordering when the product cargo price is missing", async () => {
+  test("rejects ordering when the SKU cargo price is missing", async () => {
     const fixture = await createCatalogFixture();
-    await db.update(products).set({ cargoUnitPriceMilliYuan: null });
+    await db.update(skus).set({ cargoUnitPriceMilliYuan: null });
 
     await expect(
       db.transaction((tx) =>

@@ -1160,12 +1160,12 @@ describe("Feishu cargo migration service", () => {
     expect(reservationAfterBackfill).toEqual(reservationBeforeBackfill);
     expect(customerPriceAfterBackfill).toEqual(customerPriceBeforeBackfill);
     expect(sequence34).toMatchObject({
-      cargoUnitPriceMilliYuan: 1_366,
       description: "preserved description 67",
       linkText: "查看飞书商品",
       sourceSequence: "34",
     });
     expect(sequence34Skus).toHaveLength(3);
+    expect(sequence34Skus.every((sku) => sku.cargoUnitPriceMilliYuan === 1_366)).toBe(true);
     expect(new Set(sequence34Skus.map((sku) => sku.productId))).toEqual(
       new Set([sequence34.id]),
     );

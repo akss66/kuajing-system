@@ -58,7 +58,6 @@ async function createQueryFixture() {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 1_366,
       linkText: "查看货品详情",
       name: "多变体商品",
       sourceSequence: "34",
@@ -68,6 +67,7 @@ async function createQueryFixture() {
     .insert(skus)
     .values([
       {
+        cargoUnitPriceMilliYuan: 1_366,
         color: "赤陶红",
         combination: "单件装",
         defaultUnitPriceFen: 33,
@@ -81,6 +81,7 @@ async function createQueryFixture() {
         weightGrams: 480,
       },
       {
+        cargoUnitPriceMilliYuan: 1_366,
         color: "雾霾蓝",
         combination: "两件装",
         defaultUnitPriceFen: 46,
@@ -95,6 +96,7 @@ async function createQueryFixture() {
         weightGrams: 620,
       },
       {
+        cargoUnitPriceMilliYuan: 1_366,
         color: "岩石灰",
         combination: "三件装",
         defaultUnitPriceFen: 58,
@@ -252,9 +254,9 @@ describe("audience-separated catalog queries", () => {
   test("keeps missing cargo prices visible but blocks customer ordering without a purchase-price fallback", async () => {
     const fixture = await createQueryFixture();
     await db
-      .update(products)
+      .update(skus)
       .set({ cargoUnitPriceMilliYuan: null })
-      .where(sql`${products.id} = ${fixture.product.id}`);
+      .where(sql`${skus.productId} = ${fixture.product.id}`);
 
     const customerRows = await listCustomerCatalog(fixture.customer.id);
 

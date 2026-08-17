@@ -30,7 +30,7 @@ export function CreateSkuDrawer({
   return (
     <EntityDrawer description="完整录入商品、SKU 与初始库存；同一商品可以继续添加多个 SKU。" size="lg" title="新建 SKU" trigger={<Button className="min-h-11 w-full !bg-primary-hover sm:w-auto" type="button"><Plus aria-hidden="true" />新建 SKU</Button>}>
       <ActionForm action={action} className="grid gap-6" submitClassName="bg-primary-hover" submitLabel="创建 SKU">
-        <DrawerSection description="选择已有商品可复用序号、名称、链接文字和货品价格。" title="所属商品">
+        <DrawerSection description="选择已有商品可复用序号、名称和链接文字；货品价格由每个 SKU 独立维护。" title="所属商品">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="创建方式">
               <select className={selectClassName} name="productMode" onChange={(event) => setMode(event.target.value as typeof mode)} value={mode}>
@@ -42,14 +42,15 @@ export function CreateSkuDrawer({
             ) : (
               <Field label="序号"><Input inputMode="numeric" maxLength={64} name="sourceSequence" placeholder="例如：77" required /></Field>
             )}
-            {mode === "CREATE" ? <><Field label="商品名称"><Input maxLength={200} name="productName" required /></Field><Field label="货品价格（元）"><Input inputMode="decimal" name="cargoPriceYuan" placeholder="8.00" required /></Field><Field label="链接文字"><Input maxLength={500} name="linkText" /></Field></> : null}
+            {mode === "CREATE" ? <><Field label="商品名称"><Input maxLength={200} name="productName" required /></Field><Field label="链接文字"><Input maxLength={500} name="linkText" /></Field></> : null}
           </div>
         </DrawerSection>
-        <DrawerSection description="采购价仅供内部管理；客户拿货价只读取所属商品的货品价格。" title="SKU 资料">
+        <DrawerSection description="采购价仅供内部管理；客户拿货价读取该 SKU 自己的货品价格。" title="SKU 资料">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="SKU"><Input maxLength={80} name="skuCode" placeholder="TZX-077-1" required /></Field>
             <Field label="图片"><Input accept="image/jpeg,image/png,image/webp" name="image" type="file" /><span className="text-xs font-normal text-muted-foreground">支持 JPEG、PNG、WebP，最大 8 MiB；创建后会显示在管理端和客户货盘。</span></Field>
             <Field label="采购价（元）"><Input inputMode="decimal" name="defaultPriceYuan" required /></Field>
+            <Field label="货品价格（元）"><Input inputMode="decimal" name="cargoPriceYuan" placeholder="8.00" required /></Field>
             <Field label="初始库存（份）"><Input inputMode="numeric" min="0" name="initialStock" required type="number" /></Field>
             <Field label="链接地址"><Input name="productUrl" placeholder="https://" type="url" /></Field>
             <Field label="规格"><Input maxLength={240} name="specification" /></Field>
@@ -81,13 +82,12 @@ export function ManageSkuDrawer({ actions, groupSize, row }: { actions: Pick<Cat
   }
   return (
     <EntityDrawer description={`分别维护共享商品资料与 ${row.skuCode} 的独立资料。`} size="lg" title={`管理 ${row.skuCode}`} trigger={<Button className="min-h-11" size="sm" type="button" variant="outline"><Settings2 aria-hidden="true" />管理</Button>}>
-      <DrawerSection description={`修改后会影响该商品下 ${groupSize} 个 SKU 的名称、链接文字和拿货价。`} title="商品资料（同组共享）">
+      <DrawerSection description={`修改后会影响该商品下 ${groupSize} 个 SKU 的序号、商品名称和链接文字。`} title="商品资料（同组共享）">
         <ActionForm action={actions.updateProduct} className="grid gap-4 sm:grid-cols-2" submitLabel="保存商品资料">
           <input name="productId" type="hidden" value={row.productId} />
           <Field label="序号"><Input defaultValue={row.sourceSequence ?? ""} name="sourceSequence" required /></Field>
           <Field label="商品名称"><Input defaultValue={row.productName} name="productName" required /></Field>
           <Field label="链接文字"><Input defaultValue={row.linkText ?? ""} name="linkText" /></Field>
-          <Field label="货品价格（元）"><Input defaultValue={row.cargoUnitPriceMilliYuan === null ? "" : String(row.cargoUnitPriceMilliYuan / 1000)} inputMode="decimal" name="cargoPriceYuan" required /></Field>
           <Field label="修改原因"><Input name="reason" required /></Field>
         </ActionForm>
       </DrawerSection>
@@ -97,6 +97,7 @@ export function ManageSkuDrawer({ actions, groupSize, row }: { actions: Pick<Cat
           <Field label="SKU"><Input defaultValue={row.skuCode} name="skuCode" required /></Field>
           <Field label="替换图片"><Input accept="image/jpeg,image/png,image/webp" name="image" type="file" /><span className="text-xs font-normal text-muted-foreground">留空则保留现有图片；支持 JPEG、PNG、WebP，最大 8 MiB。</span></Field>
           <Field label="采购价（元）"><Input defaultValue={String(row.defaultUnitPriceMilliYuan / 1000)} inputMode="decimal" name="defaultPriceYuan" required /></Field>
+          <Field label="货品价格（元）"><Input defaultValue={row.cargoUnitPriceMilliYuan === null ? "" : String(row.cargoUnitPriceMilliYuan / 1000)} inputMode="decimal" name="cargoPriceYuan" required /></Field>
           <Field label="链接地址"><Input defaultValue={row.productUrl ?? ""} name="productUrl" type="url" /></Field>
           <Field label="规格"><Input defaultValue={row.specification ?? ""} name="specification" /></Field>
           <Field label="颜色"><Input defaultValue={row.color ?? ""} name="color" /></Field>

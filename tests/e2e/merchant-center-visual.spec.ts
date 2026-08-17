@@ -245,7 +245,6 @@ async function seedFieldAlignedVisualCatalog() {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 1366,
       linkText: "查看商品详情",
       name: "字段映射商品 34",
       sourceSequence: "34",
@@ -255,6 +254,7 @@ async function seedFieldAlignedVisualCatalog() {
     .insert(skus)
     .values([
       {
+        cargoUnitPriceMilliYuan: 1366,
         color: "深海青",
         combination: "三件组合",
         defaultUnitPriceFen: 33,
@@ -270,6 +270,7 @@ async function seedFieldAlignedVisualCatalog() {
         weightGrams: 325,
       },
       {
+        cargoUnitPriceMilliYuan: 1366,
         color: "红色",
         combination: "单个",
         defaultUnitPriceFen: 137,
@@ -285,6 +286,7 @@ async function seedFieldAlignedVisualCatalog() {
         weightGrams: 100,
       },
       {
+        cargoUnitPriceMilliYuan: 1366,
         defaultUnitPriceFen: 520,
         defaultUnitPriceMilliYuan: 5200,
         imageAssetId: asset.id,

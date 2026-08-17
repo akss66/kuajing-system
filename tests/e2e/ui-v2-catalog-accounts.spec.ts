@@ -17,7 +17,6 @@ async function seedGroupedCatalog() {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 1_366,
       linkText: "来源商品说明",
       name: "分组测试货品",
       sourceSequence: "1",
@@ -27,7 +26,8 @@ async function seedGroupedCatalog() {
   const variants = await db
     .insert(skus)
     .values(
-      ["1", "2", "3"].map((suffix) => ({
+      ["1", "2", "3"].map((suffix, index) => ({
+        cargoUnitPriceMilliYuan: [1_366, 1_500, 1_700][index]!,
         defaultUnitPriceFen: 33,
         defaultUnitPriceMilliYuan: 325,
         name: `测试变体 ${suffix}`,
@@ -84,8 +84,12 @@ test("admin catalog groups source products across desktop search and mobile vari
   await page.goto("/admin/catalog");
   const table = page.getByRole("table", { name: "商品与 SKU 列表" });
   await expect(table).toBeVisible();
-  await expect(table.getByText("序号 1", { exact: true })).toHaveCount(1);
-  await expect(table.locator('td[rowspan="3"]')).toHaveCount(3);
+  await expect(table.locator('tbody td[rowspan="3"]').first()).toHaveText("1");
+  await expect(table.getByText("序号 1", { exact: true })).toHaveCount(0);
+  for (const price of ["¥1.366", "¥1.50", "¥1.70"]) {
+    await expect(table.getByText(price, { exact: true })).toHaveCount(1);
+  }
+  await expect(table.locator('td[rowspan="3"]')).toHaveCount(2);
   for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
     await expect(table.getByText(skuCode, { exact: true })).toBeVisible();
   }

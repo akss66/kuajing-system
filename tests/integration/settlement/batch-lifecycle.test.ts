@@ -270,13 +270,13 @@ async function createSubmissionFixture(prices: readonly number[]) {
     const [product] = await db
       .insert(products)
       .values({
-        cargoUnitPriceMilliYuan: price * 10,
         name: `结算商品-${index}-${crypto.randomUUID()}`,
       })
       .returning();
     const [sku] = await db
       .insert(skus)
       .values({
+        cargoUnitPriceMilliYuan: price * 10,
         defaultUnitPriceFen: price,
         name: `结算规格-${index}`,
         productId: product.id,

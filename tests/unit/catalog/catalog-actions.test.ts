@@ -91,9 +91,13 @@ describe("catalog management actions", () => {
     expect(uploadMocks.storeCatalogImageUpload).not.toHaveBeenCalled();
     expect(serviceMocks.createManagedSku).toHaveBeenCalledWith(
       expect.objectContaining({
-        sku: expect.not.objectContaining({ imageAsset: expect.anything() }),
+        sku: expect.objectContaining({
+          cargoUnitPriceMilliYuan: 8_000,
+        }),
       }),
     );
+    expect(serviceMocks.createManagedSku.mock.calls[0]?.[0].product)
+      .not.toHaveProperty("cargoUnitPriceMilliYuan");
   });
 
   it("stores a replacement image when an administrator updates a SKU", async () => {
@@ -112,6 +116,7 @@ describe("catalog management actions", () => {
     formData.set("skuId", "00000000-0000-4000-8000-000000000077");
     formData.set("skuCode", "TZX-077-1");
     formData.set("defaultPriceYuan", "3.10");
+    formData.set("cargoPriceYuan", "8.50");
     formData.set("productUrl", "https://example.test/new-product");
     formData.set("specification", "20*10cm");
     formData.set("color", "蓝色");
@@ -129,7 +134,7 @@ describe("catalog management actions", () => {
       skuCode: "TZX-077-1",
     });
     expect(serviceMocks.updateManagedSku).toHaveBeenCalledWith(
-      expect.objectContaining({ imageAsset }),
+      expect.objectContaining({ cargoUnitPriceMilliYuan: 8_500, imageAsset }),
     );
   });
 });

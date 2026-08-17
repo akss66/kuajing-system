@@ -107,7 +107,6 @@ async function seedCustomerCatalog() {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 1366,
       linkText: "查看商品详情",
       name: productName,
       sourceSequence: "34",
@@ -117,6 +116,7 @@ async function seedCustomerCatalog() {
     .insert(skus)
     .values([
       {
+        cargoUnitPriceMilliYuan: 1366,
         color: "深海青",
         combination: "三件组合",
         defaultUnitPriceFen: 33,
@@ -132,6 +132,7 @@ async function seedCustomerCatalog() {
         weightGrams: 325,
       },
       {
+        cargoUnitPriceMilliYuan: 1366,
         color: "红色",
         combination: "单个",
         defaultUnitPriceFen: 137,
@@ -145,6 +146,7 @@ async function seedCustomerCatalog() {
         weightGrams: 100,
       },
       {
+        cargoUnitPriceMilliYuan: 1366,
         defaultUnitPriceFen: 520,
         defaultUnitPriceMilliYuan: 5200,
         name: "蓝色",
@@ -294,6 +296,7 @@ async function seedImportPreview() {
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 7600,
       defaultUnitPriceFen: 760,
       defaultUnitPriceMilliYuan: 7600,
       name: "黑色",

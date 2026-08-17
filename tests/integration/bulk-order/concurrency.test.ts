@@ -27,13 +27,13 @@ async function createSku(code: string, totalQuantity: number) {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 1_000,
       name: `并发商品-${code}-${crypto.randomUUID()}`,
     })
     .returning();
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 1_000,
       defaultUnitPriceFen: 100,
       name: `并发规格-${code}`,
       productId: product.id,

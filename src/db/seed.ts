@@ -150,17 +150,15 @@ export async function seed() {
   if (!product) {
     [product] = await db
       .insert(products)
-      .values({ cargoUnitPriceMilliYuan: 7_600, name: "演示头绳" })
+      .values({ name: "演示头绳" })
       .returning({ id: products.id });
   } else {
-    await db
-      .update(products)
-      .set({ cargoUnitPriceMilliYuan: 7_600, updatedAt: new Date() })
-      .where(eq(products.id, product.id));
+    await db.update(products).set({ updatedAt: new Date() }).where(eq(products.id, product.id));
   }
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 7_600,
       defaultUnitPriceFen: 690,
       defaultUnitPriceMilliYuan: 6_900,
       name: "黑色 10 件装",
@@ -169,6 +167,7 @@ export async function seed() {
     })
     .onConflictDoUpdate({
       set: {
+        cargoUnitPriceMilliYuan: 7_600,
         defaultUnitPriceFen: 690,
         defaultUnitPriceMilliYuan: 6_900,
         name: "黑色 10 件装",

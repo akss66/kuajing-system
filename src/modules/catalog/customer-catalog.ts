@@ -86,7 +86,7 @@ export async function listCustomerCatalog(
     .as("customer_catalog_active_reservations");
   const rows = await db
     .select({
-      actualUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+      actualUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
       availableQuantity:
         sql<number>`greatest(coalesce(${inventoryBalances.totalQuantity}, 0) - coalesce(${activeReservations.quantity}, 0), 0)::int`.mapWith(
           Number,

@@ -22,7 +22,6 @@ export default async function CatalogPage({
   const [rows, productRows, storeRows] = await Promise.all([
     listAdminCatalog({ lifecycle }),
     db.select({
-      cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
       id: products.id,
       linkText: products.linkText,
       name: products.name,

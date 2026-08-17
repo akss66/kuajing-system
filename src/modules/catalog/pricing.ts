@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import type { DbTransaction } from "@/db/client";
-import { products, skus } from "@/db/schema";
+import { skus } from "@/db/schema";
 
 import type { ResolveUnitPriceInput } from "./types";
 import { roundMilliYuanToFen } from "./unit-price";
@@ -31,10 +31,9 @@ export async function resolveUnitPrice(
 ): Promise<ResolvedUnitPrice> {
   const [sku] = await tx
     .select({
-      unitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+      unitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
     })
     .from(skus)
-    .innerJoin(products, eq(products.id, skus.productId))
     .where(
       and(
         eq(skus.id, input.skuId),

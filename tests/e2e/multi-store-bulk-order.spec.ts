@@ -140,13 +140,13 @@ async function seedBulkWorkspace() {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan: 10_000,
       name: `多店铺商品 ${suffix}`,
     })
     .returning();
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 10_000,
       defaultUnitPriceFen: 1_000,
       name: "蓝色",
       productId: product.id,

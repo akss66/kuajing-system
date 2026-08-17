@@ -50,6 +50,7 @@ function revalidateCatalog() {
 }
 
 const sharedSkuFields = {
+  cargoPriceMilliYuan: moneySchema,
   color: nullableText,
   combination: nullableText,
   defaultPriceMilliYuan: moneySchema,
@@ -64,7 +65,6 @@ const sharedSkuFields = {
 const createSkuSchema = z.discriminatedUnion("productMode", [
   z.object({
     ...sharedSkuFields,
-    cargoPriceMilliYuan: moneySchema,
     linkText: nullableText,
     productMode: z.literal("CREATE"),
     productName: z.string().trim().min(1).max(200),
@@ -95,10 +95,10 @@ export async function createSkuAction(_state: ActionState, formData: FormData): 
     await createManagedSku({
       actorId: principal.userId,
       product: input.productMode === "CREATE"
-        ? { cargoUnitPriceMilliYuan: input.cargoPriceMilliYuan, linkText: input.linkText, mode: "CREATE", name: input.productName, sourceSequence: input.sourceSequence }
+        ? { linkText: input.linkText, mode: "CREATE", name: input.productName, sourceSequence: input.sourceSequence }
         : { mode: "EXISTING", productId: input.productId },
       reason: input.reason,
-      sku: { color: input.color, combination: input.combination, defaultUnitPriceMilliYuan: input.defaultPriceMilliYuan, imageAsset, initialStock: input.initialStock, productUrl: input.productUrl, saleStatus: input.saleStatus, skuCode: input.skuCode, specification: input.specification, weightGrams: input.weightGrams },
+      sku: { cargoUnitPriceMilliYuan: input.cargoPriceMilliYuan, color: input.color, combination: input.combination, defaultUnitPriceMilliYuan: input.defaultPriceMilliYuan, imageAsset, initialStock: input.initialStock, productUrl: input.productUrl, saleStatus: input.saleStatus, skuCode: input.skuCode, specification: input.specification, weightGrams: input.weightGrams },
     });
   } catch (error) {
     return catalogActionError(error, "标准 SKU 已存在或数据保存失败。");
@@ -108,29 +108,29 @@ export async function createSkuAction(_state: ActionState, formData: FormData): 
 }
 
 const updateProductSchema = z.object({
-  cargoUnitPriceMilliYuan: moneySchema, linkText: nullableText,
+  linkText: nullableText,
   name: z.string().trim().min(1).max(200), productId: z.string().uuid(),
   reason: z.string().trim().min(2).max(500), sourceSequence: z.string().trim().min(1).max(64),
 });
 export async function updateProductAction(_state: ActionState, formData: FormData): Promise<ActionState> {
   const principal = await requireAdmin();
-  const parsed = updateProductSchema.safeParse({ cargoUnitPriceMilliYuan: formData.get("cargoPriceYuan"), linkText: formData.get("linkText"), name: formData.get("productName"), productId: formData.get("productId"), reason: formData.get("reason"), sourceSequence: formData.get("sourceSequence") });
+  const parsed = updateProductSchema.safeParse({ linkText: formData.get("linkText"), name: formData.get("productName"), productId: formData.get("productId"), reason: formData.get("reason"), sourceSequence: formData.get("sourceSequence") });
   if (!parsed.success) return validationError(parsed.error);
   try { await updateManagedProduct({ actorId: principal.userId, ...parsed.data }); }
   catch (error) { return catalogActionError(error, "商品资料保存失败。"); }
   revalidateCatalog();
-  return { message: "商品资料已保存，同组 SKU 已同步使用新的货品价格。", status: "success" };
+  return { message: "商品资料已保存。", status: "success" };
 }
 
 const updateSkuSchema = z.object({
-  color: nullableText, combination: nullableText, defaultUnitPriceMilliYuan: moneySchema,
+  cargoUnitPriceMilliYuan: moneySchema, color: nullableText, combination: nullableText, defaultUnitPriceMilliYuan: moneySchema,
   productUrl: nullableText, reason: z.string().trim().min(2).max(500),
   saleStatus: z.enum(["SELLABLE", "NOT_SELLABLE"]), skuCode: z.string().trim().min(2).max(80),
   skuId: z.string().uuid(), specification: nullableText, weightGrams: nonNegativeIntegerSchema,
 });
 export async function updateSkuAction(_state: ActionState, formData: FormData): Promise<ActionState> {
   const principal = await requireAdmin();
-  const parsed = updateSkuSchema.safeParse({ color: formData.get("color"), combination: formData.get("combination"), defaultUnitPriceMilliYuan: formData.get("defaultPriceYuan"), productUrl: formData.get("productUrl"), reason: formData.get("reason"), saleStatus: formData.get("saleStatus"), skuCode: formData.get("skuCode"), skuId: formData.get("skuId"), specification: formData.get("specification"), weightGrams: formData.get("weightGrams") });
+  const parsed = updateSkuSchema.safeParse({ cargoUnitPriceMilliYuan: formData.get("cargoPriceYuan"), color: formData.get("color"), combination: formData.get("combination"), defaultUnitPriceMilliYuan: formData.get("defaultPriceYuan"), productUrl: formData.get("productUrl"), reason: formData.get("reason"), saleStatus: formData.get("saleStatus"), skuCode: formData.get("skuCode"), skuId: formData.get("skuId"), specification: formData.get("specification"), weightGrams: formData.get("weightGrams") });
   if (!parsed.success) return validationError(parsed.error);
   try {
     const imageValue = formData.get("image");

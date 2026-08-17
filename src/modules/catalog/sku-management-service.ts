@@ -37,7 +37,6 @@ export class CatalogManagementError extends Error {
 type ProductSelection =
   | { mode: "EXISTING"; productId: string }
   | {
-      cargoUnitPriceMilliYuan: number;
       linkText: string | null;
       mode: "CREATE";
       name: string;
@@ -45,6 +44,7 @@ type ProductSelection =
     };
 
 type SkuFields = {
+  cargoUnitPriceMilliYuan: number;
   color: string | null;
   combination: string | null;
   defaultUnitPriceMilliYuan: number;
@@ -120,6 +120,10 @@ function normalizedSku(input: SkuFields) {
   const specification = optionalText(input.specification);
   const color = optionalText(input.color);
   return {
+    cargoUnitPriceMilliYuan: nonNegativeInteger(
+      input.cargoUnitPriceMilliYuan,
+      "货品价格",
+    ),
     color,
     combination: optionalText(input.combination),
     defaultUnitPriceFen: roundMilliYuanToFen(
@@ -179,7 +183,6 @@ async function persistCatalogImageAsset(
 
 async function lockProduct(tx: DbTransaction, productId: string) {
   const rows = await tx.execute<{
-    cargoUnitPriceMilliYuan: number | null;
     id: string;
     linkText: string | null;
     name: string;
@@ -188,7 +191,6 @@ async function lockProduct(tx: DbTransaction, productId: string) {
   }>(sql`
     select
       id,
-      cargo_unit_price_milli_yuan as "cargoUnitPriceMilliYuan",
       link_text as "linkText",
       name,
       source_sequence as "sourceSequence",
@@ -218,20 +220,14 @@ export async function createManagedSku(input: {
     let product: Awaited<ReturnType<typeof lockProduct>>;
     if (input.product.mode === "CREATE") {
       const sourceSequence = normalizedSequence(input.product.sourceSequence);
-      const cargoUnitPriceMilliYuan = nonNegativeInteger(
-        input.product.cargoUnitPriceMilliYuan,
-        "货品价格",
-      );
       const [created] = await tx
         .insert(products)
         .values({
-          cargoUnitPriceMilliYuan,
           linkText: optionalText(input.product.linkText),
           name: requiredText(input.product.name, "商品名称"),
           sourceSequence,
         })
         .returning({
-          cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
           id: products.id,
           linkText: products.linkText,
           name: products.name,
@@ -243,9 +239,6 @@ export async function createManagedSku(input: {
       product = await lockProduct(tx, input.product.productId);
       if (product.status !== "ACTIVE") {
         throw new CatalogManagementError("INVALID_INPUT", "所属商品已停用，无法新增 SKU");
-      }
-      if (product.cargoUnitPriceMilliYuan === null) {
-        throw new CatalogManagementError("INVALID_INPUT", "请先补齐所属商品的货品价格");
       }
     }
     assertSkuMatchesSequence(skuInput.skuCode, product.sourceSequence);
@@ -283,7 +276,6 @@ export async function createManagedSku(input: {
 
 export async function updateManagedProduct(input: {
   actorId: string;
-  cargoUnitPriceMilliYuan: number;
   linkText: string | null;
   name: string;
   productId: string;
@@ -303,7 +295,6 @@ export async function updateManagedProduct(input: {
       .for("update");
     for (const sku of siblingSkus) assertSkuMatchesSequence(sku.skuCode, sourceSequence);
     const after = {
-      cargoUnitPriceMilliYuan: nonNegativeInteger(input.cargoUnitPriceMilliYuan, "货品价格"),
       linkText: optionalText(input.linkText),
       name: requiredText(input.name, "商品名称"),
       sourceSequence,
@@ -335,6 +326,7 @@ export async function updateManagedSku(input: {
   const after = normalizedSku(input);
   return db.transaction(async (tx) => {
     const rows = await tx.execute<{
+      cargoUnitPriceMilliYuan: number | null;
       color: string | null;
       combination: string | null;
       defaultUnitPriceMilliYuan: number;
@@ -350,6 +342,7 @@ export async function updateManagedSku(input: {
     }>(sql`
       select product_id as "productId", sku_code as "skuCode", specification,
         color, combination, weight_grams as "weightGrams",
+        cargo_unit_price_milli_yuan as "cargoUnitPriceMilliYuan",
         default_unit_price_milli_yuan as "defaultUnitPriceMilliYuan",
         image_asset_id as "imageAssetId", image_url as "imageUrl",
         product_url as "productUrl", sale_status as "saleStatus",
@@ -475,12 +468,14 @@ export async function restoreManagedSku(input: { actorId: string; reason: string
       archiveReason: string | null;
       archivedAt: Date | null;
       archivedByAdminUserId: string | null;
+      cargoUnitPriceMilliYuan: number | null;
       lifecycleStatus: "ACTIVE" | "ARCHIVED";
       productId: string;
       saleStatus: "SELLABLE" | "NOT_SELLABLE";
       skuCode: string;
     }>(sql`
       select product_id as "productId", sku_code as "skuCode",
+        cargo_unit_price_milli_yuan as "cargoUnitPriceMilliYuan",
         lifecycle_status as "lifecycleStatus", sale_status as "saleStatus",
         archived_at as "archivedAt",
         archived_by_admin_user_id as "archivedByAdminUserId",
@@ -496,8 +491,8 @@ export async function restoreManagedSku(input: { actorId: string; reason: string
     if (product.status !== "ACTIVE") {
       throw new CatalogManagementError("INVALID_INPUT", "所属商品已停用，无法恢复 SKU");
     }
-    if (product.cargoUnitPriceMilliYuan === null) {
-      throw new CatalogManagementError("INVALID_INPUT", "请先补齐所属商品的货品价格");
+    if (before.cargoUnitPriceMilliYuan === null) {
+      throw new CatalogManagementError("INVALID_INPUT", "请先补齐该 SKU 的货品价格");
     }
     assertSkuMatchesSequence(before.skuCode, product.sourceSequence);
     const after = {

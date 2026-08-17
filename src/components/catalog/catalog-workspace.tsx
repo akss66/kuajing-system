@@ -25,7 +25,6 @@ export { CustomerCatalogWorkspace } from "./customer-catalog-workspace";
 
 export type CatalogRow = AdminCatalogItem;
 export type CatalogProductOption = {
-  cargoUnitPriceMilliYuan: number | null;
   id: string;
   linkText: string | null;
   name: string;

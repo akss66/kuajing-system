@@ -91,16 +91,16 @@ async function createSku(input: {
   const [product] = await db
     .insert(products)
     .values({
-      cargoUnitPriceMilliYuan:
-        input.cargoPriceMilliYuan ??
-        input.defaultPriceMilliYuan ??
-        (input.defaultPriceFen ?? 100) * 10,
       name: `商品-${input.code}-${crypto.randomUUID()}`,
     })
     .returning();
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan:
+        input.cargoPriceMilliYuan ??
+        input.defaultPriceMilliYuan ??
+        (input.defaultPriceFen ?? 100) * 10,
       defaultUnitPriceFen: input.defaultPriceFen ?? 100,
       defaultUnitPriceMilliYuan:
         input.defaultPriceMilliYuan ?? (input.defaultPriceFen ?? 100) * 10,
