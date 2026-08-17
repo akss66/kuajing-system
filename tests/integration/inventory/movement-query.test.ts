@@ -357,7 +357,6 @@ describe("inventory movement read model", () => {
         lockedQuantity: 7,
         productName: "库存流水主商品",
         skuCode: fixture.primarySku.skuCode,
-        skuName: "库存流水主 SKU",
         specification: "主规格",
         totalQuantity: 50,
       }),

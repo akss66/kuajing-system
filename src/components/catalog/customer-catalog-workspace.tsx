@@ -1,7 +1,6 @@
 "use client";
 
 import { ExternalLink, ImageIcon, Search } from "lucide-react";
-import Image from "next/image";
 import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -37,6 +36,7 @@ import {
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 import { CatalogSaleStatusFilterControl } from "./catalog-sale-status-filter";
+import { CatalogImagePreview } from "./catalog-image-preview";
 
 type CustomerCatalogGroupableItem = CustomerCatalogItem & { sourceSequence: null };
 
@@ -61,17 +61,7 @@ function toCustomerCatalogGroupableItem(
 
 function CatalogImage({ item }: { item: CustomerCatalogItem }) {
   if (item.imageUrl) {
-    return (
-      <Image
-        alt={`${item.productName} 商品图片`}
-        className="size-12 shrink-0 rounded-[var(--radius-control)] border border-border object-cover"
-        height={48}
-        sizes="48px"
-        src={item.imageUrl}
-        unoptimized
-        width={48}
-      />
-    );
+    return <CatalogImagePreview imageUrl={item.imageUrl} productName={item.productName} />;
   }
 
   return (
@@ -132,6 +122,7 @@ function CatalogAttributes({ item }: { item: CustomerCatalogItem }) {
 function availabilityLabel(reason: CustomerCatalogItem["availabilityReason"]) {
   if (reason === "AVAILABLE") return "可售";
   if (reason === "MANUALLY_UNAVAILABLE") return "不可售";
+  if (reason === "PRICE_MISSING") return "价格待维护";
   return "售罄";
 }
 
@@ -146,6 +137,14 @@ function CatalogStatus({ item }: { item: CustomerCatalogItem }) {
     <Badge className={availabilityClassName(item.availabilityReason)} variant="secondary">
       {availabilityLabel(item.availabilityReason)}
     </Badge>
+  );
+}
+
+function CustomerUnitPrice({ value }: { value: number | null }) {
+  return value === null ? (
+    <span className="text-muted-foreground">价格待维护</span>
+  ) : (
+    <>{formatMilliYuan(value)}</>
   );
 }
 
@@ -240,7 +239,7 @@ function CustomerCatalogTable({
               <TableRow>
                 <TableHead>SKU</TableHead>
                 <TableHead>规格/属性</TableHead>
-                <TableHead className="text-right">实际拿货价</TableHead>
+                <TableHead className="text-right">拿货价</TableHead>
                 <TableHead className="text-right">可售库存</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>链接</TableHead>
@@ -256,7 +255,7 @@ function CustomerCatalogTable({
                     <CatalogAttributes item={item} />
                   </TableCell>
                   <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                    {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
                   </TableCell>
                   <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
                     {item.availableQuantity}
@@ -316,9 +315,9 @@ function CustomerCatalogCards({
                   className="mt-4 border-t border-border pt-3"
                   data-customer-catalog-section="price"
                 >
-                  <dt className="text-xs font-medium text-muted-foreground">实际拿货价</dt>
+                  <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
                   <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                    {formatMilliYuan(item.actualUnitPriceMilliYuan)}
+                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
                   </dd>
                 </dl>
                 <dl
@@ -399,7 +398,9 @@ export function CustomerCatalogWorkspace({
       sortCatalogGroups(
         filteredGroups,
         sortOrder,
-        (variant) => variant.actualUnitPriceMilliYuan,
+        (variant) =>
+          variant.actualUnitPriceMilliYuan ??
+          (sortOrder === "PRICE_DESC" ? -1 : Number.MAX_SAFE_INTEGER),
       ),
     [filteredGroups, sortOrder],
   );
@@ -413,7 +414,7 @@ export function CustomerCatalogWorkspace({
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
       <PageHeading
-        description="这里仅显示你的实际拿货价，以及扣除有效锁定后的实时可售库存。"
+        description="这里显示商品货品价格对应的拿货价，以及扣除有效锁定后的实时可售库存。"
         title="货盘选品"
       />
       <section aria-label="货盘搜索" className="border-y border-border py-4">

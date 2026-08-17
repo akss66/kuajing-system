@@ -40,6 +40,23 @@ function positivePage(value: string | undefined) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
+export function toInventoryWorkspaceRow(
+  row: Awaited<ReturnType<typeof listInventorySnapshot>>[number],
+  coverage: Awaited<ReturnType<typeof getStockCoverageReport>>[number] | undefined,
+) {
+  return {
+    alertLevel: coverage?.alertLevel ?? ("NO_BASELINE" as const),
+    available: row.availableQuantity,
+    coverageDays: coverage?.coverageDays ?? null,
+    id: row.skuId,
+    locked: row.lockedQuantity,
+    name: row.productName,
+    shippedQuantity7d: coverage?.shippedQuantity7d ?? 0,
+    skuCode: row.skuCode,
+    total: row.totalQuantity,
+  };
+}
+
 export function inventoryDateBoundary(
   value: string | undefined,
   boundary: "start" | "end",
@@ -100,20 +117,9 @@ export default async function InventoryPage({
   ]);
 
   const coverageBySku = new Map(coverageRows.map((row) => [row.skuId, row]));
-  const rows = snapshotRows.map((row) => {
-    const coverage = coverageBySku.get(row.skuId);
-    return {
-      alertLevel: coverage?.alertLevel ?? ("NO_BASELINE" as const),
-      available: row.availableQuantity,
-      coverageDays: coverage?.coverageDays ?? null,
-      id: row.skuId,
-      locked: row.lockedQuantity,
-      name: row.specification ?? row.skuName ?? row.productName,
-      shippedQuantity7d: coverage?.shippedQuantity7d ?? 0,
-      skuCode: row.skuCode,
-      total: row.totalQuantity,
-    };
-  });
+  const rows = snapshotRows.map((row) =>
+    toInventoryWorkspaceRow(row, coverageBySku.get(row.skuId)),
+  );
 
   return (
     <InventoryWorkspace

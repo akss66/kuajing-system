@@ -1,6 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -16,21 +17,33 @@ import {
 } from "@/modules/catalog/product-groups";
 import type { ManagedAction } from "@/shared/action-state";
 
-import { AliasDrawer, CreateSkuDrawer, CustomerPriceDrawer } from "./catalog-mutation-drawers";
+import { AliasDrawer, BatchSkuDrawer, CreateSkuDrawer } from "./catalog-mutation-drawers";
 import { CatalogResults } from "./catalog-results";
 import { CatalogSaleStatusFilterControl } from "./catalog-sale-status-filter";
 
 export { CustomerCatalogWorkspace } from "./customer-catalog-workspace";
 
 export type CatalogRow = AdminCatalogItem;
+export type CatalogProductOption = {
+  cargoUnitPriceMilliYuan: number | null;
+  id: string;
+  linkText: string | null;
+  name: string;
+  sourceSequence: string | null;
+};
 
 export type CatalogWorkspaceProps = {
   actions: {
+    batchManage: ManagedAction;
     createAlias: ManagedAction;
     createSku: ManagedAction;
-    setCustomerPrice: ManagedAction;
+    deleteSku: ManagedAction;
+    restoreSku: ManagedAction;
+    updateProduct: ManagedAction;
+    updateSku: ManagedAction;
   };
-  customers: { code: string; id: string }[];
+  lifecycle?: "ACTIVE" | "ARCHIVED";
+  products?: CatalogProductOption[];
   rows: CatalogRow[];
   stores: { id: string; name: string }[];
 };
@@ -49,9 +62,16 @@ function adminVariantSearchValues(variant: AdminCatalogItem) {
   ];
 }
 
-export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWorkspaceProps) {
+export function CatalogWorkspace({
+  actions,
+  lifecycle = "ACTIVE",
+  products = [],
+  rows,
+  stores,
+}: CatalogWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [saleStatus, setSaleStatus] = useState<CatalogSaleStatusFilter>("ALL");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const hasQuery = query.length > 0;
   const hasStatusFilter = saleStatus !== "ALL";
   const groups = useMemo(() => groupCatalogItems(rows), [rows]);
@@ -79,9 +99,9 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
   return (
     <div className="min-w-0 space-y-6" data-admin-catalog-workspace>
       <PageHeading
-        action={<CreateSkuDrawer action={actions.createSku} />}
+        action={lifecycle === "ACTIVE" ? <CreateSkuDrawer action={actions.createSku} products={products} /> : undefined}
         breadcrumbs={[{ href: "/admin", label: "管理工作台" }, { label: "商品与 SKU" }]}
-        description="按来源序号、商品、真实规格或 SKU 快速核对货盘，并维护客户价格和店铺映射。"
+        description="维护商品、SKU、货品价格和店铺映射；每个 SKU 都可独立管理。"
         title="商品与 SKU"
       />
       <section aria-label="商品与 SKU 搜索及操作" className="flex min-w-0 flex-wrap items-center gap-3 border-y border-border py-4">
@@ -91,14 +111,20 @@ export function CatalogWorkspace({ actions, customers, rows, stores }: CatalogWo
           <Input aria-label="搜索商品与 SKU" className="min-h-11 pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU、商品或规格" type="search" value={query} />
         </label>
         <CatalogSaleStatusFilterControl onValueChange={setSaleStatus} value={saleStatus} />
-        <div className="grid min-w-0 grid-cols-2 gap-3 sm:ml-auto">
-          <CustomerPriceDrawer action={actions.setCustomerPrice} customers={customers} rows={rows} />
-          <AliasDrawer action={actions.createAlias} rows={rows} stores={stores} />
+        <div className="flex min-w-0 flex-wrap gap-3 sm:ml-auto">
+          <Button asChild className="min-h-11" variant="outline"><Link href={lifecycle === "ACTIVE" ? "/admin/catalog?lifecycle=archived" : "/admin/catalog"}>{lifecycle === "ACTIVE" ? "查看已删除" : "返回在用 SKU"}</Link></Button>
+          {lifecycle === "ACTIVE" ? <BatchSkuDrawer action={actions.batchManage} products={products} selectedIds={[...selectedIds]} /> : null}
+          {lifecycle === "ACTIVE" ? <AliasDrawer action={actions.createAlias} rows={rows} stores={stores} /> : null}
         </div>
       </section>
       <section aria-label="商品与 SKU 结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold text-foreground">SKU 货盘</h2><p className="text-sm tabular-nums text-muted-foreground">{filteredGroups.length} 个商品 / {filteredSkuCount} 个 SKU</p></div>
-        {filteredGroups.length > 0 ? <CatalogResults groups={filteredGroups} /> : (
+        {filteredGroups.length > 0 ? <CatalogResults
+          actions={actions}
+          groups={filteredGroups}
+          onSelectionChange={setSelectedIds}
+          selectedIds={selectedIds}
+        /> : (
           <ActionableEmptyState
             action={
               hasQuery && hasStatusFilter ? (

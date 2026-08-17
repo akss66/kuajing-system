@@ -220,7 +220,7 @@ async function seedInventoryAcceptanceData(input: { referenceDate?: string } = {
   if (!store) throw new Error("Inventory E2E seed store is missing");
 
   await db.insert(products).values([
-    { id: ids.primaryProduct, name: "库存流水验收主商品" },
+    { id: ids.primaryProduct, name: acceptance.longName },
     { id: ids.secondaryProduct, name: "库存流水验收次商品" },
   ]);
   await db.insert(skus).values([

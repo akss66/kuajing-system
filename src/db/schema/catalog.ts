@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -17,6 +18,11 @@ import { accountStatus, customers, stores } from "./customers";
 export const skuSaleStatus = pgEnum("sku_sale_status", [
   "SELLABLE",
   "NOT_SELLABLE",
+]);
+
+export const skuLifecycleStatus = pgEnum("sku_lifecycle_status", [
+  "ACTIVE",
+  "ARCHIVED",
 ]);
 
 export const catalogAssetMimeType = pgEnum("catalog_asset_mime_type", [
@@ -103,6 +109,12 @@ export const skus = pgTable(
     defaultUnitPriceFen: integer("default_unit_price_fen").notNull(),
     declarationUnitPriceFen: integer("declaration_unit_price_fen"),
     saleStatus: skuSaleStatus("sale_status").default("SELLABLE").notNull(),
+    lifecycleStatus: skuLifecycleStatus("lifecycle_status")
+      .default("ACTIVE")
+      .notNull(),
+    archivedAt: timestamp("archived_at", { mode: "date", withTimezone: true }),
+    archivedByAdminUserId: text("archived_by_admin_user_id"),
+    archiveReason: text("archive_reason"),
     ...timestamps,
   },
   (table) => [
@@ -122,6 +134,11 @@ export const skus = pgTable(
     check(
       "skus_declaration_price_non_negative",
       sql`${table.declarationUnitPriceFen} >= 0`,
+    ),
+    index("skus_lifecycle_status_index").on(table.lifecycleStatus),
+    index("skus_product_lifecycle_index").on(
+      table.productId,
+      table.lifecycleStatus,
     ),
   ],
 );

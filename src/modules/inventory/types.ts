@@ -16,6 +16,7 @@ export const INVENTORY_MOVEMENT_REASON_CODES = [
   "SYSTEM_SHIPMENT",
   "SHIPMENT_REVERSAL",
   "FEISHU_INITIAL_IMPORT",
+  "SKU_INITIAL_STOCK",
 ] as const;
 
 export type InventoryMovementReasonCode =
@@ -75,6 +76,8 @@ export function inventoryReasonLabel(
       return "发货撤销回补";
     case "FEISHU_INITIAL_IMPORT":
       return "飞书初始导入";
+    case "SKU_INITIAL_STOCK":
+      return "SKU 初始库存";
   }
 }
 

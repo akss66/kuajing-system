@@ -2,12 +2,12 @@ import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
-  customerSkuPrices,
   inventoryBalances,
   inventoryReservations,
   products,
   skus,
 } from "@/db/schema";
+import { roundMilliYuanToFen } from "./unit-price";
 
 export type CustomerCatalogRecord = {
   id: string;
@@ -23,14 +23,15 @@ export type CustomerCatalogRecord = {
   weightGrams: number | null;
   linkText: string | null;
   productUrl: string | null;
-  actualUnitPriceFen: number;
-  actualUnitPriceMilliYuan: number;
+  actualUnitPriceFen: number | null;
+  actualUnitPriceMilliYuan: number | null;
   availableQuantity: number;
   saleStatus: "SELLABLE" | "NOT_SELLABLE";
   orderable: boolean;
   availabilityReason:
     | "AVAILABLE"
     | "MANUALLY_UNAVAILABLE"
+    | "PRICE_MISSING"
     | "SOLD_OUT";
   sellable: boolean;
 };
@@ -40,12 +41,16 @@ export type CustomerCatalogItem = Omit<CustomerCatalogRecord, "sourceSequence">;
 export function resolveCatalogAvailability(
   saleStatus: "SELLABLE" | "NOT_SELLABLE",
   availableQuantity: number,
+  cargoUnitPriceMilliYuan: number | null,
 ) {
   if (saleStatus === "NOT_SELLABLE") {
     return {
       availabilityReason: "MANUALLY_UNAVAILABLE" as const,
       orderable: false,
     };
+  }
+  if (cargoUnitPriceMilliYuan === null) {
+    return { availabilityReason: "PRICE_MISSING" as const, orderable: false };
   }
   if (availableQuantity <= 0) {
     return { availabilityReason: "SOLD_OUT" as const, orderable: false };
@@ -64,8 +69,9 @@ export function toCustomerCatalogItems(
 }
 
 export async function listCustomerCatalog(
-  customerId: string,
+  _customerId: string,
 ): Promise<CustomerCatalogItem[]> {
+  void _customerId;
   const activeReservations = db
     .select({
       quantity:
@@ -80,14 +86,7 @@ export async function listCustomerCatalog(
     .as("customer_catalog_active_reservations");
   const rows = await db
     .select({
-      actualUnitPriceFen:
-        sql<number>`coalesce(${customerSkuPrices.unitPriceFen}, ${skus.defaultUnitPriceFen})::int`.mapWith(
-          Number,
-        ),
-      actualUnitPriceMilliYuan:
-        sql<number>`coalesce(${customerSkuPrices.unitPriceMilliYuan}, ${skus.defaultUnitPriceMilliYuan})::int`.mapWith(
-          Number,
-        ),
+      actualUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
       availableQuantity:
         sql<number>`greatest(coalesce(${inventoryBalances.totalQuantity}, 0) - coalesce(${activeReservations.quantity}, 0), 0)::int`.mapWith(
           Number,
@@ -109,26 +108,29 @@ export async function listCustomerCatalog(
     })
     .from(skus)
     .innerJoin(products, eq(products.id, skus.productId))
-    .leftJoin(
-      customerSkuPrices,
-      and(
-        eq(customerSkuPrices.skuId, skus.id),
-        eq(customerSkuPrices.customerId, customerId),
-        eq(customerSkuPrices.active, true),
-      ),
-    )
     .leftJoin(inventoryBalances, eq(inventoryBalances.skuId, skus.id))
     .leftJoin(activeReservations, eq(activeReservations.skuId, skus.id))
-    .where(eq(products.status, "ACTIVE"))
+    .where(
+      and(
+        eq(products.status, "ACTIVE"),
+        eq(skus.lifecycleStatus, "ACTIVE"),
+      ),
+    )
     .orderBy(asc(skus.skuCode));
 
   return toCustomerCatalogItems(rows.map((row) => {
+    const actualUnitPriceFen =
+      row.actualUnitPriceMilliYuan === null
+        ? null
+        : roundMilliYuanToFen(row.actualUnitPriceMilliYuan);
     const availability = resolveCatalogAvailability(
       row.saleStatus,
       row.availableQuantity,
+      row.actualUnitPriceMilliYuan,
     );
     return {
       ...row,
+      actualUnitPriceFen,
       ...availability,
       sellable: availability.orderable,
     };

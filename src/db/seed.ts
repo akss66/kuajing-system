@@ -6,7 +6,6 @@ import {
   adminUsers,
   authAccounts,
   authUsers,
-  customerSkuPrices,
   customerUsers,
   customers,
   inventoryBalances,
@@ -151,8 +150,13 @@ export async function seed() {
   if (!product) {
     [product] = await db
       .insert(products)
-      .values({ name: "演示头绳" })
+      .values({ cargoUnitPriceMilliYuan: 7_600, name: "演示头绳" })
       .returning({ id: products.id });
+  } else {
+    await db
+      .update(products)
+      .set({ cargoUnitPriceMilliYuan: 7_600, updatedAt: new Date() })
+      .where(eq(products.id, product.id));
   }
   const [sku] = await db
     .insert(skus)
@@ -173,23 +177,6 @@ export async function seed() {
       target: skus.skuCode,
     })
     .returning({ id: skus.id });
-  await db
-    .insert(customerSkuPrices)
-    .values({
-      customerId: customer.id,
-      skuId: sku.id,
-      unitPriceFen: 760,
-      unitPriceMilliYuan: 7_600,
-    })
-    .onConflictDoUpdate({
-      set: {
-        active: true,
-        unitPriceFen: 760,
-        unitPriceMilliYuan: 7_600,
-        updatedAt: new Date(),
-      },
-      target: [customerSkuPrices.customerId, customerSkuPrices.skuId],
-    });
   await db
     .insert(inventoryBalances)
     .values({ skuId: sku.id, totalQuantity: 10 })

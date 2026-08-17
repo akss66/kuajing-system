@@ -6,9 +6,9 @@ import {
   authAccounts,
   authSessions,
   authUsers,
-  customerSkuPrices,
   customerUsers,
   customers,
+  customerSkuPrices,
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
@@ -88,21 +88,22 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
   await page.goto("/admin/catalog");
   await page.getByRole("button", { name: "新建 SKU" }).click();
   drawer = page.getByRole("dialog", { name: "新建 SKU" });
-  await drawer.getByLabel("标准 SKU", { exact: true }).fill("TZX-DEMO-001");
+  await drawer.getByLabel("创建方式").selectOption("CREATE");
+  await drawer.getByLabel("序号").fill("900");
   await drawer.getByLabel("商品名称").fill("阶段一验收商品");
-  await drawer.getByLabel("规格名称").fill("红色");
-  await drawer.getByLabel("统一拿货价（元）").fill("6.90");
+  await drawer.getByLabel("货品价格（元）").fill("6.90");
+  await drawer.getByLabel("SKU", { exact: true }).fill("TZX-DEMO-001");
+  await drawer.getByLabel("采购价（元）").fill("2.50");
+  await drawer.getByLabel("初始库存（份）").fill("0");
+  await drawer.getByLabel("规格").fill("红色");
+  await drawer.getByLabel("重量（克）").fill("0");
+  await drawer.getByLabel("创建原因").fill("E2E 阶段一验收新增商品与 SKU");
   await drawer.getByRole("button", { name: "创建 SKU" }).click();
-  await expect(drawer.getByText("SKU 已创建，并初始化为 0 库存。")).toBeVisible();
+  await expect(drawer.getByText("SKU 已创建，商品资料与初始库存已保存。")).toBeVisible();
   await drawer.getByRole("button", { name: "关闭" }).click();
-  await expect(page.getByRole("cell", { name: "TZX-DEMO-001" })).toBeVisible();
-  await page.getByRole("button", { name: "设置客户价" }).click();
-  drawer = page.getByRole("dialog", { name: "设置客户专属价" });
-  await drawer.getByLabel("专属价客户").selectOption({ label: "PHASE-DEMO" });
-  await drawer.getByLabel("专属价 SKU").selectOption({ label: "TZX-DEMO-001" });
-  await drawer.getByLabel("客户价（元）").fill("7.60");
-  await drawer.getByRole("button", { name: "保存客户专属价" }).click();
-  await expect(drawer.getByText("客户专属价已保存。")).toBeVisible();
+  await expect(
+    page.getByRole("table", { name: "商品与 SKU 列表" }).getByText("TZX-DEMO-001", { exact: true }),
+  ).toBeVisible();
 
   await page.goto("/admin/inventory");
   await page.getByRole("button", { name: "+ / - 调整 TZX-DEMO-001" }).click();
@@ -128,7 +129,7 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
     .from(skus)
     .where(eq(skus.skuCode, "TZX-DEMO-001"));
   const row = page.locator(`[data-testid="catalog-${sku.id}"]:visible`);
-  await expect(row).toContainText("¥7.60");
+  await expect(row).toContainText("¥6.90");
   await expect(row.getByRole("cell", { name: "10", exact: true })).toBeVisible();
   await expect(row.getByText("可售", { exact: true })).toBeVisible();
 });

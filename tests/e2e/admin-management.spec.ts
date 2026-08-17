@@ -914,7 +914,7 @@ test("catalog and inventory keep mutations in drawers and fit approved mobile wi
   expect((await catalogTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   await catalogTrigger.click();
   const catalogDrawer = page.getByRole("dialog", { name: "新建 SKU" });
-  await expect(catalogDrawer.getByLabel("标准 SKU")).toBeVisible();
+  await expect(catalogDrawer.getByLabel("SKU", { exact: true })).toBeVisible();
   await closeAccountDrawer(catalogDrawer);
 
   await page.goto("/admin/inventory");

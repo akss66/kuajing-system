@@ -356,21 +356,21 @@ test("customer sees only its own price and real available inventory", async ({ p
   await page.getByRole("option", { name: "货价：从高到低" }).click();
   await expect.poll(visibleVariantOrder).toEqual([
     `catalog-${fixture.availableSku.id}`,
-    `catalog-${fixture.soldOutSku.id}`,
     `catalog-${fixture.manualUnavailableSku.id}`,
+    `catalog-${fixture.soldOutSku.id}`,
   ]);
 
   await sortControl.click();
   await page.getByRole("option", { name: "货价：从低到高" }).click();
   await expect.poll(visibleVariantOrder).toEqual([
+    `catalog-${fixture.availableSku.id}`,
     `catalog-${fixture.manualUnavailableSku.id}`,
     `catalog-${fixture.soldOutSku.id}`,
-    `catalog-${fixture.availableSku.id}`,
   ]);
 
   const availableRow = visibleCatalogItem(page, fixture.availableSku.id);
   const protectedImage = availableRow.locator("img").first();
-  await expect(availableRow).toContainText("¥7.60");
+  await expect(availableRow).toContainText("¥1.366");
   await expect(availableRow.getByText("6", { exact: true })).toBeVisible();
   await expect(page.getByText("¥6.20")).toHaveCount(0);
 
@@ -384,6 +384,11 @@ test("customer sees only its own price and real available inventory", async ({ p
   await expect
     .poll(() => protectedImage.evaluate((element) => (element as HTMLImageElement).naturalWidth))
     .toBeGreaterThan(0);
+  await availableRow.getByRole("button", { name: `查看 ${fixture.productName} 大图` }).click();
+  const imagePreview = page.getByRole("dialog", { name: `${fixture.productName} 图片预览` });
+  await expect(imagePreview.getByRole("img", { name: `${fixture.productName} 大图` })).toBeVisible();
+  await imagePreview.getByRole("button", { name: "关闭图片预览" }).click();
+  await expect(imagePreview).toHaveCount(0);
 
   const manualUnavailableRow = visibleCatalogItem(page, fixture.manualUnavailableSku.id);
   await expect(manualUnavailableRow.getByText("5", { exact: true })).toBeVisible();
@@ -522,7 +527,7 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
 
     const availableItem = visibleCatalogItem(page, fixture.availableSku.id);
     const specification = availableItem.locator("[title]").first();
-    const price = availableItem.getByText("¥7.60", { exact: true });
+    const price = availableItem.getByText("¥1.366", { exact: true });
     const inventory = availableItem.getByText("6", { exact: true });
     const status = availableItem.getByText("可售", { exact: true });
     await expectNoOverlap(specification, price, `${viewport.width}x${viewport.height} spec/price`);

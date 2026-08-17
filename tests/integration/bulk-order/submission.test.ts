@@ -81,6 +81,7 @@ async function createDraftFixture(groupNames: readonly string[]) {
 }
 
 async function createSku(input: {
+  cargoPriceMilliYuan?: number;
   code: string;
   defaultPriceFen?: number;
   defaultPriceMilliYuan?: number;
@@ -89,7 +90,13 @@ async function createSku(input: {
 }) {
   const [product] = await db
     .insert(products)
-    .values({ name: `商品-${input.code}-${crypto.randomUUID()}` })
+    .values({
+      cargoUnitPriceMilliYuan:
+        input.cargoPriceMilliYuan ??
+        input.defaultPriceMilliYuan ??
+        (input.defaultPriceFen ?? 100) * 10,
+      name: `商品-${input.code}-${crypto.randomUUID()}`,
+    })
     .returning();
   const [sku] = await db
     .insert(skus)
@@ -364,9 +371,9 @@ describe("atomic partial bulk submission", () => {
       .orderBy(asc(fulfillmentOrders.storeId));
     expect(orders).toHaveLength(8);
     expect(orders.filter((row) => row.storeId === multiFileGroup.storeId)).toHaveLength(1);
-    expect(orders.reduce((total, row) => total + row.totalAmountFen, 0)).toBe(675);
+    expect(orders.reduce((total, row) => total + row.totalAmountFen, 0)).toBe(900);
     const linePrices = await db.select({ unitPriceFen: orderLines.unitPriceFen }).from(orderLines);
-    expect(new Set(linePrices.map((line) => line.unitPriceFen))).toEqual(new Set([75]));
+    expect(new Set(linePrices.map((line) => line.unitPriceFen))).toEqual(new Set([100]));
     const reservations = await db
       .select()
       .from(inventoryReservations)
@@ -379,8 +386,8 @@ describe("atomic partial bulk submission", () => {
       .where(eq(settlementBatches.id, result.settlementBatchId!));
     expect(settlement).toMatchObject({
       customerId: fixture.customer.id,
-      offlineAmountFen: 675,
-      totalAmountFen: 675,
+      offlineAmountFen: 900,
+      totalAmountFen: 900,
       walletAmountFen: 0,
     });
 

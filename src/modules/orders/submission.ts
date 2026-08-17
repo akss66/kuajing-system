@@ -268,6 +268,7 @@ export async function submitTemuImportBatch(input: {
     const skuRows = await tx
       .select({
         id: skus.id,
+        lifecycleStatus: skus.lifecycleStatus,
         name: skus.name,
         saleStatus: skus.saleStatus,
         skuCode: skus.skuCode,
@@ -281,7 +282,7 @@ export async function submitTemuImportBatch(input: {
     >();
     for (const skuId of skuIds) {
       const sku = skuById.get(skuId);
-      if (!sku || sku.saleStatus !== "SELLABLE") {
+      if (!sku || sku.lifecycleStatus !== "ACTIVE" || sku.saleStatus !== "SELLABLE") {
         throw new OrderSubmissionError(
           "SKU_NOT_SELLABLE",
           "订单中有已下架 SKU，请重新预览",
@@ -290,7 +291,6 @@ export async function submitTemuImportBatch(input: {
       priceBySkuId.set(
         skuId,
         await resolveUnitPrice(tx, {
-          customerId: batch.customerId,
           skuId,
         }),
       );

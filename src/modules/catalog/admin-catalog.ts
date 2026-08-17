@@ -25,10 +25,12 @@ export type AdminCatalogItem = {
   cargoUnitPriceMilliYuan: number | null;
   saleStatus: "SELLABLE" | "NOT_SELLABLE";
   linkText: string | null;
+  lifecycleStatus?: "ACTIVE" | "ARCHIVED";
+  archiveReason?: string | null;
   productUrl: string | null;
 };
 
-export async function listAdminCatalog(): Promise<AdminCatalogItem[]> {
+export async function listAdminCatalog(options: { lifecycle?: "ACTIVE" | "ARCHIVED" } = {}): Promise<AdminCatalogItem[]> {
   const activeReservations = db
     .select({
       quantity:
@@ -55,6 +57,8 @@ export async function listAdminCatalog(): Promise<AdminCatalogItem[]> {
       id: skus.id,
       imageUrl: skus.imageUrl,
       linkText: products.linkText,
+      lifecycleStatus: skus.lifecycleStatus,
+      archiveReason: skus.archiveReason,
       productId: products.id,
       productName: products.name,
       productUrl: skus.productUrl,
@@ -72,5 +76,6 @@ export async function listAdminCatalog(): Promise<AdminCatalogItem[]> {
     .innerJoin(products, eq(products.id, skus.productId))
     .leftJoin(inventoryBalances, eq(inventoryBalances.skuId, skus.id))
     .leftJoin(activeReservations, eq(activeReservations.skuId, skus.id))
+    .where(eq(skus.lifecycleStatus, options.lifecycle ?? "ACTIVE"))
     .orderBy(asc(skus.skuCode));
 }

@@ -1,20 +1,33 @@
 import { CatalogWorkspace } from "@/components/catalog/catalog-workspace";
 import { db } from "@/db/client";
-import { customers, stores } from "@/db/schema";
+import { products, stores } from "@/db/schema";
 import {
+  batchManageSkusAction,
   createSkuAction,
   createSkuAliasAction,
-  setCustomerPriceAction,
+  deleteSkuAction,
+  restoreSkuAction,
+  updateProductAction,
+  updateSkuAction,
 } from "@/modules/catalog/actions";
 import { listAdminCatalog } from "@/modules/catalog/admin-catalog";
 
-export default async function CatalogPage() {
-  const [rows, customerRows, storeRows] = await Promise.all([
-    listAdminCatalog(),
-    db
-      .select({ code: customers.code, id: customers.id })
-      .from(customers)
-      .orderBy(customers.code),
+export default async function CatalogPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const lifecycle = params.lifecycle === "archived" ? "ARCHIVED" : "ACTIVE";
+  const [rows, productRows, storeRows] = await Promise.all([
+    listAdminCatalog({ lifecycle }),
+    db.select({
+      cargoUnitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+      id: products.id,
+      linkText: products.linkText,
+      name: products.name,
+      sourceSequence: products.sourceSequence,
+    }).from(products).orderBy(products.sourceSequence, products.name),
     db
       .select({ id: stores.id, name: stores.name })
       .from(stores)
@@ -24,11 +37,16 @@ export default async function CatalogPage() {
   return (
     <CatalogWorkspace
       actions={{
+        batchManage: batchManageSkusAction,
         createAlias: createSkuAliasAction,
         createSku: createSkuAction,
-        setCustomerPrice: setCustomerPriceAction,
+        deleteSku: deleteSkuAction,
+        restoreSku: restoreSkuAction,
+        updateProduct: updateProductAction,
+        updateSku: updateSkuAction,
       }}
-      customers={customerRows}
+      lifecycle={lifecycle}
+      products={productRows}
       rows={rows}
       stores={storeRows}
     />

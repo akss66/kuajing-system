@@ -81,7 +81,7 @@ export function InventoryWorkspace({
             <label className="relative block max-w-xl">
               <span className="sr-only">搜索库存 SKU</span>
               <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label="搜索库存 SKU" className="min-h-11 pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU 或规格名称" type="search" value={query} />
+              <Input aria-label="搜索库存 SKU" className="min-h-11 pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU 或商品名称" type="search" value={query} />
             </label>
           </section>
           <InventoryHealthSummary rows={rows} />

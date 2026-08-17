@@ -26,7 +26,10 @@ const future = () => new Date(Date.now() + 60 * 60 * 1_000);
 async function createSku(code: string, totalQuantity: number) {
   const [product] = await db
     .insert(products)
-    .values({ name: `并发商品-${code}-${crypto.randomUUID()}` })
+    .values({
+      cargoUnitPriceMilliYuan: 1_000,
+      name: `并发商品-${code}-${crypto.randomUUID()}`,
+    })
     .returning();
   const [sku] = await db
     .insert(skus)

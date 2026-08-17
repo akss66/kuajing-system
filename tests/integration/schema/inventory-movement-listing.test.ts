@@ -276,9 +276,9 @@ test("the migration journal applies inventory listing after the protected migrat
   ) as { entries: { idx: number; tag: string }[] };
 
   expect(journal.entries.slice(-4).map(({ idx, tag }) => ({ idx, tag }))).toEqual([
-    { idx: 19, tag: "0019_jifeng_bigint_logistics_id" },
     { idx: 20, tag: "0020_feishu_field_mapping" },
     { idx: 21, tag: "0021_inventory_movement_listing_and_stocktakes" },
     { idx: 22, tag: "0022_backfill_feishu_product_fields" },
+    { idx: 23, tag: "0023_sku_lifecycle_management" },
   ]);
 });

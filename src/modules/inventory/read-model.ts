@@ -81,7 +81,6 @@ export type InventorySnapshotRow = {
   productName: string;
   skuCode: string;
   skuId: string;
-  skuName: string;
   specification: string | null;
   totalQuantity: number;
 };
@@ -225,6 +224,8 @@ function reasonLabel(
       return "发货撤销回补";
     case "FEISHU_INITIAL_IMPORT":
       return "飞书初始导入";
+    case "SKU_INITIAL_STOCK":
+      return "SKU 初始库存";
     default:
       return fallbackReason;
   }
@@ -297,7 +298,6 @@ export async function listInventorySnapshot(
       productName: products.name,
       skuCode: skus.skuCode,
       skuId: skus.id,
-      skuName: skus.name,
       specification: skus.specification,
       totalQuantity: inventoryBalances.totalQuantity,
     })

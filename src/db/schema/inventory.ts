@@ -39,6 +39,7 @@ export const inventoryMovementReasonCode = pgEnum(
     "SYSTEM_SHIPMENT",
     "SHIPMENT_REVERSAL",
     "FEISHU_INITIAL_IMPORT",
+    "SKU_INITIAL_STOCK",
   ],
 );
 

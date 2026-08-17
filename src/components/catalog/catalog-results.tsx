@@ -14,6 +14,8 @@ import type { CatalogProductGroup } from "@/modules/catalog/product-groups";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 import type { CatalogRow } from "./catalog-workspace";
+import type { CatalogWorkspaceProps } from "./catalog-workspace";
+import { ManageSkuDrawer } from "./catalog-mutation-drawers";
 
 type CatalogGroup = CatalogProductGroup<CatalogRow>;
 
@@ -143,26 +145,44 @@ function PriceValue({ value }: { value: number | null }) {
   );
 }
 
-function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
+type CatalogResultsProps = {
+  actions: CatalogWorkspaceProps["actions"];
+  groups: CatalogGroup[];
+  onSelectionChange: (selectedIds: Set<string>) => void;
+  selectedIds: Set<string>;
+};
+
+function selectionToggle(selectedIds: Set<string>, id: string, checked: boolean) {
+  const next = new Set(selectedIds);
+  if (checked) next.add(id); else next.delete(id);
+  return next;
+}
+
+function CatalogTable({ actions, groups, onSelectionChange, selectedIds }: CatalogResultsProps) {
+  const visibleIds = groups.flatMap((group) => group.variants.map((row) => row.id));
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   return (
     <div className="hidden min-w-0 xl:block" data-admin-catalog-table>
       <Table aria-label="商品与 SKU 列表" className="w-full table-fixed">
         <colgroup>
+          <col className="w-[3%]" />
           <col className="w-[6%]" />
-          <col className="w-[12%]" />
-          <col className="w-[18%]" />
-          <col className="w-[18%]" />
+          <col className="w-[10%]" />
+          <col className="w-[15%]" />
+          <col className="w-[15%]" />
           <col className="w-[8%]" />
           <col className="w-[7%]" />
           <col className="w-[7%]" />
           <col className="w-[8%]" />
           <col className="w-[7%]" />
-          <col className="w-[9%]" />
+          <col className="w-[8%]" />
+          <col className="w-[7%]" />
         </colgroup>
         <TableHeader>
           <TableRow>
+            <TableHead><input aria-label="选择当前结果全部 SKU" checked={allSelected} onChange={(event) => onSelectionChange(event.target.checked ? new Set([...selectedIds, ...visibleIds]) : new Set([...selectedIds].filter((id) => !visibleIds.includes(id))))} type="checkbox" /></TableHead>
             <TableHead className="text-right">序号</TableHead>
-            <TableHead>来源商品</TableHead>
+            <TableHead>商品</TableHead>
             <TableHead>SKU</TableHead>
             <TableHead>规格/属性</TableHead>
             <TableHead className="text-right">采购价</TableHead>
@@ -171,6 +191,7 @@ function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
             <TableHead className="text-right">货品价格</TableHead>
             <TableHead>状态</TableHead>
             <TableHead>SKU 链接</TableHead>
+            <TableHead>操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -180,6 +201,7 @@ function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
                 className={index === 0 ? "border-t-2 border-border" : undefined}
                 key={row.id}
               >
+                <TableCell className="align-top"><input aria-label={`选择 ${row.skuCode}`} checked={selectedIds.has(row.id)} onChange={(event) => onSelectionChange(selectionToggle(selectedIds, row.id, event.target.checked))} type="checkbox" /></TableCell>
                 {index === 0 ? (
                   <TableCell
                     className="whitespace-normal text-right align-top font-semibold tabular-nums"
@@ -225,6 +247,7 @@ function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
                 <TableCell className="min-w-0 whitespace-normal align-top">
                   <CatalogProductLink row={row} />
                 </TableCell>
+                <TableCell className="whitespace-normal align-top"><ManageSkuDrawer actions={actions} groupSize={group.variants.length} row={row} /></TableCell>
               </TableRow>
             )),
           )}
@@ -234,7 +257,7 @@ function CatalogTable({ groups }: { groups: CatalogGroup[] }) {
   );
 }
 
-function CatalogCards({ groups }: { groups: CatalogGroup[] }) {
+function CatalogCards({ actions, groups, onSelectionChange, selectedIds }: CatalogResultsProps) {
   return (
     <ul
       aria-label="商品与 SKU 卡片列表"
@@ -270,8 +293,8 @@ function CatalogCards({ groups }: { groups: CatalogGroup[] }) {
             {group.variants.map((row) => (
               <li className="min-w-0 border-b border-border/70 pb-3 last:border-b-0 last:pb-0" key={row.id}>
                 <div className="flex min-w-0 items-start justify-between gap-3">
-                  <CatalogSkuIdentity row={row} />
-                  <CatalogStatus row={row} />
+                  <label className="flex min-h-11 min-w-0 items-start gap-3"><input aria-label={`选择 ${row.skuCode}`} checked={selectedIds.has(row.id)} className="mt-4" onChange={(event) => onSelectionChange(selectionToggle(selectedIds, row.id, event.target.checked))} type="checkbox" /><CatalogSkuIdentity row={row} /></label>
+                  <div className="flex flex-col items-end gap-2"><CatalogStatus row={row} /><ManageSkuDrawer actions={actions} groupSize={group.variants.length} row={row} /></div>
                 </div>
 
                 <div className="mt-3" data-catalog-section="attributes">
@@ -307,11 +330,11 @@ function CatalogCards({ groups }: { groups: CatalogGroup[] }) {
   );
 }
 
-export function CatalogResults({ groups }: { groups: CatalogGroup[] }) {
+export function CatalogResults(props: CatalogResultsProps) {
   return (
     <>
-      <CatalogTable groups={groups} />
-      <CatalogCards groups={groups} />
+      <CatalogTable {...props} />
+      <CatalogCards {...props} />
     </>
   );
 }

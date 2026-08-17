@@ -329,6 +329,67 @@ export async function adjustTotalInventory(
   return movement;
 }
 
+export async function initializeSkuInventory(
+  tx: DbTransaction,
+  input: { actorId: string; quantity: number; skuId: string },
+): Promise<InventoryMovement | null> {
+  if (!input.actorId.trim()) {
+    throw new InventoryValidationError("Initial inventory requires an administrator");
+  }
+  if (!Number.isSafeInteger(input.quantity) || input.quantity < 0) {
+    throw new InventoryValidationError("Initial inventory must be a non-negative integer");
+  }
+
+  await tx.insert(inventoryBalances).values({
+    skuId: input.skuId,
+    totalQuantity: 0,
+  });
+  if (input.quantity === 0) return null;
+
+  const balance = await lockInventoryBalance(tx, input.skuId);
+  await tx
+    .update(inventoryBalances)
+    .set({ totalQuantity: input.quantity, updatedAt: new Date() })
+    .where(eq(inventoryBalances.skuId, input.skuId));
+
+  const [movement] = await tx
+    .insert(inventoryMovements)
+    .values({
+      actorId: input.actorId,
+      actorType: "ADMIN",
+      afterQuantity: input.quantity,
+      beforeQuantity: balance.totalQuantity,
+      delta: input.quantity,
+      movementType: "MANUAL_INCREASE",
+      reason: "SKU 初始库存",
+      reasonCode: "SKU_INITIAL_STOCK",
+      skuId: input.skuId,
+    })
+    .returning({
+      afterQuantity: inventoryMovements.afterQuantity,
+      beforeQuantity: inventoryMovements.beforeQuantity,
+      delta: inventoryMovements.delta,
+      id: inventoryMovements.id,
+      movementType: inventoryMovements.movementType,
+      reasonCode: inventoryMovements.reasonCode,
+      remark: inventoryMovements.remark,
+      skuId: inventoryMovements.skuId,
+      stocktakeBatchId: inventoryMovements.stocktakeBatchId,
+    });
+
+  await tx.insert(auditLogs).values({
+    action: "SKU_INITIAL_STOCK_CREATED",
+    actorId: input.actorId,
+    actorType: "ADMIN",
+    afterJson: { quantity: input.quantity },
+    beforeJson: { quantity: 0 },
+    entityId: input.skuId,
+    entityType: "SKU_INVENTORY",
+    reason: "SKU 初始库存",
+  });
+  return movement;
+}
+
 function normalizedRemark(remark: string | null | undefined): string | null {
   const normalized = remark?.trim();
   if (!normalized) return null;

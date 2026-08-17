@@ -2,11 +2,11 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
-  customerSkuPrices,
   fulfillmentOrders,
   orderImportBatches,
   orderImportRows,
   orderLines,
+  products,
   skus,
 } from "@/db/schema";
 import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
@@ -74,38 +74,29 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           .orderBy(asc(orderImportBatches.createdAt), asc(orderImportRows.rowNumber));
 
   const skuIds = [...new Set(rows.flatMap((row) => (row.resolvedSkuId ? [row.resolvedSkuId] : [])))];
-  const [defaultPrices, customerPrices] = await Promise.all([
-    skuIds.length
-      ? db
-          .select({
-            defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
-            id: skus.id,
-          })
-          .from(skus)
-          .where(inArray(skus.id, skuIds))
-      : Promise.resolve([]),
-    skuIds.length
-      ? db
-          .select({
-            skuId: customerSkuPrices.skuId,
-            unitPriceMilliYuan: customerSkuPrices.unitPriceMilliYuan,
-          })
-          .from(customerSkuPrices)
-          .where(
-            and(
-              eq(customerSkuPrices.customerId, customerId),
-              eq(customerSkuPrices.active, true),
-              inArray(customerSkuPrices.skuId, skuIds),
-            ),
-          )
-      : Promise.resolve([]),
-  ]);
+  const cargoPrices = skuIds.length
+    ? await db
+        .select({
+          id: skus.id,
+          lifecycleStatus: skus.lifecycleStatus,
+          unitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
+        })
+        .from(skus)
+        .innerJoin(products, eq(products.id, skus.productId))
+        .where(
+          and(
+            inArray(skus.id, skuIds),
+            eq(skus.lifecycleStatus, "ACTIVE"),
+          ),
+        )
+    : [];
   const priceBySku = new Map(
-    defaultPrices.map((row) => [row.id, row.defaultUnitPriceMilliYuan]),
+    cargoPrices.flatMap((row) =>
+      row.unitPriceMilliYuan === null
+        ? []
+        : [[row.id, row.unitPriceMilliYuan] as const],
+    ),
   );
-  for (const row of customerPrices) {
-    priceBySku.set(row.skuId, row.unitPriceMilliYuan);
-  }
 
   const allSubOrders = [...new Set(rows.flatMap((row) => (row.externalSubOrderNo ? [row.externalSubOrderNo] : [])))];
   const existingRows =

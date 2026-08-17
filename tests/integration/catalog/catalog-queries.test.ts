@@ -178,7 +178,7 @@ afterEach(async () => {
 });
 
 describe("audience-separated catalog queries", () => {
-  test("returns customer-safe rows with isolated prices and independent availability facts", async () => {
+  test("returns customer-safe rows priced only from the product cargo price", async () => {
     const fixture = await createQueryFixture();
 
     const customerRows = await listCustomerCatalog(fixture.customer.id);
@@ -191,7 +191,7 @@ describe("audience-separated catalog queries", () => {
       ["TZX-034-3", "SOLD_OUT"],
     ]);
     expect(customerRows[0]).toMatchObject({
-      actualUnitPriceMilliYuan: 775,
+      actualUnitPriceMilliYuan: 1_366,
       availableQuantity: 7,
       color: "赤陶红",
       combination: "单件装",
@@ -214,7 +214,7 @@ describe("audience-separated catalog queries", () => {
       orderable: false,
       saleStatus: "SELLABLE",
     });
-    expect(otherCustomerRows[0].actualUnitPriceMilliYuan).toBe(999);
+    expect(otherCustomerRows[0].actualUnitPriceMilliYuan).toBe(1_366);
     expect(customerRows.map((row) => row.productId)).toEqual(
       adminRows.map((row) => row.productId),
     );
@@ -246,6 +246,23 @@ describe("audience-separated catalog queries", () => {
       specification: "55 厘米长款",
       totalQuantity: 10,
       weightGrams: 480,
+    });
+  });
+
+  test("keeps missing cargo prices visible but blocks customer ordering without a purchase-price fallback", async () => {
+    const fixture = await createQueryFixture();
+    await db
+      .update(products)
+      .set({ cargoUnitPriceMilliYuan: null })
+      .where(sql`${products.id} = ${fixture.product.id}`);
+
+    const customerRows = await listCustomerCatalog(fixture.customer.id);
+
+    expect(customerRows[0]).toMatchObject({
+      actualUnitPriceFen: null,
+      actualUnitPriceMilliYuan: null,
+      availabilityReason: "PRICE_MISSING",
+      orderable: false,
     });
   });
 

@@ -89,6 +89,7 @@ async function createCustomerAndStore() {
 }
 
 async function createSku(input: {
+  cargoPriceMilliYuan?: number;
   customerId: string;
   storeId: string;
   externalSku: string;
@@ -100,7 +101,13 @@ async function createSku(input: {
 }) {
   const [product] = await db
     .insert(products)
-    .values({ name: `商品-${input.externalSku}-${crypto.randomUUID()}` })
+    .values({
+      cargoUnitPriceMilliYuan:
+        input.cargoPriceMilliYuan ??
+        input.defaultPriceMilliYuan ??
+        input.defaultPriceFen * 10,
+      name: `商品-${input.externalSku}-${crypto.randomUUID()}`,
+    })
     .returning();
   const [sku] = await db
     .insert(skus)
@@ -174,10 +181,11 @@ describe("atomic TEMU take-order submission", () => {
     `));
   });
 
-  test("creates one package, snapshots actual prices, aggregates reservations and is idempotent", async () => {
+  test("creates one package, snapshots cargo prices, ignores customer prices and is idempotent", async () => {
     const { customer, store } = await createCustomerAndStore();
     const skuA = await createSku({
       customerId: customer.id,
+      cargoPriceMilliYuan: 5_500,
       customerPriceFen: 450,
       defaultPriceFen: 500,
       externalSku: "EXT-SKU-A",
@@ -214,7 +222,7 @@ describe("atomic TEMU take-order submission", () => {
     expect(submittedAgain).toEqual(submitted);
     expect(submitted).toMatchObject({
       status: "PENDING_PAYMENT",
-      totalAmountFen: 1200,
+      totalAmountFen: 1400,
       totalPackageCount: 1,
       totalQuantity: 3,
     });
@@ -225,7 +233,7 @@ describe("atomic TEMU take-order submission", () => {
       .from(orderLines)
       .orderBy(orderLines.externalSubOrderNo);
     expect(lines.map((line) => [line.unitPriceFen, line.lineAmountFen])).toEqual([
-      [450, 900],
+      [550, 1100],
       [300, 300],
     ]);
     const reservations = await db

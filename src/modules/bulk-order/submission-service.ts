@@ -921,6 +921,7 @@ export async function submitBulkDraft(
         : await tx
             .select({
               id: skus.id,
+              lifecycleStatus: skus.lifecycleStatus,
               name: skus.name,
               saleStatus: skus.saleStatus,
               skuCode: skus.skuCode,
@@ -934,10 +935,9 @@ export async function submitBulkDraft(
     >();
     for (const skuId of skuIds) {
       const sku = skuById.get(skuId);
-      if (!sku || sku.saleStatus !== "SELLABLE") continue;
+      if (!sku || sku.lifecycleStatus !== "ACTIVE" || sku.saleStatus !== "SELLABLE") continue;
       try {
         const price = await resolveUnitPrice(tx, {
-          customerId: input.customerId,
           skuId,
         });
         if (
@@ -961,6 +961,7 @@ export async function submitBulkDraft(
         work.rows.some(
           (row) =>
             !skuById.has(row.resolvedSkuId) ||
+            skuById.get(row.resolvedSkuId)!.lifecycleStatus !== "ACTIVE" ||
             skuById.get(row.resolvedSkuId)!.saleStatus !== "SELLABLE" ||
             !priceBySku.has(row.resolvedSkuId),
         )

@@ -8,7 +8,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   bulkImportStoreGroups,
-  customerSkuPrices,
   customers,
   inventoryBalances,
   products,
@@ -140,7 +139,10 @@ async function seedBulkWorkspace() {
     .returning();
   const [product] = await db
     .insert(products)
-    .values({ name: `多店铺商品 ${suffix}` })
+    .values({
+      cargoUnitPriceMilliYuan: 10_000,
+      name: `多店铺商品 ${suffix}`,
+    })
     .returning();
   const [sku] = await db
     .insert(skus)
@@ -152,11 +154,6 @@ async function seedBulkWorkspace() {
     })
     .returning();
 
-  await db.insert(customerSkuPrices).values({
-    customerId: customer.id,
-    skuId: sku.id,
-    unitPriceFen: 1_000,
-  });
   await db.insert(inventoryBalances).values({
     skuId: sku.id,
     totalQuantity: 100,

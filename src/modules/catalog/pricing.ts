@@ -1,20 +1,20 @@
 import { and, eq } from "drizzle-orm";
 
 import type { DbTransaction } from "@/db/client";
-import { customerSkuPrices, skus } from "@/db/schema";
+import { products, skus } from "@/db/schema";
 
 import type { ResolveUnitPriceInput } from "./types";
-import { fenToMilliYuan } from "./unit-price";
+import { roundMilliYuanToFen } from "./unit-price";
 
 export type ResolvedUnitPrice = {
   unitPriceFen: number;
   unitPriceMilliYuan: number;
 };
 
-export class InvalidUnitPriceError extends Error {
-  constructor() {
-    super("Unit price must be a non-negative integer number of fen");
-    this.name = "InvalidUnitPriceError";
+export class MissingCargoUnitPriceError extends Error {
+  constructor(public readonly skuId: string) {
+    super(`Cargo unit price is missing for SKU: ${skuId}`);
+    this.name = "MissingCargoUnitPriceError";
   }
 }
 
@@ -25,50 +25,30 @@ export class SkuNotFoundError extends Error {
   }
 }
 
-function assertValidUnitPrice(value: number): void {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new InvalidUnitPriceError();
-  }
-}
-
 export async function resolveUnitPrice(
   tx: DbTransaction,
   input: ResolveUnitPriceInput,
 ): Promise<ResolvedUnitPrice> {
-  if (input.overrideUnitPriceFen !== undefined) {
-    assertValidUnitPrice(input.overrideUnitPriceFen);
-    return {
-      unitPriceFen: input.overrideUnitPriceFen,
-      unitPriceMilliYuan: fenToMilliYuan(input.overrideUnitPriceFen),
-    };
-  }
-
-  const [customerPrice] = await tx
+  const [sku] = await tx
     .select({
-      unitPriceFen: customerSkuPrices.unitPriceFen,
-      unitPriceMilliYuan: customerSkuPrices.unitPriceMilliYuan,
+      unitPriceMilliYuan: products.cargoUnitPriceMilliYuan,
     })
-    .from(customerSkuPrices)
+    .from(skus)
+    .innerJoin(products, eq(products.id, skus.productId))
     .where(
       and(
-        eq(customerSkuPrices.customerId, input.customerId),
-        eq(customerSkuPrices.skuId, input.skuId),
-        eq(customerSkuPrices.active, true),
+        eq(skus.id, input.skuId),
+        eq(skus.lifecycleStatus, "ACTIVE"),
       ),
     )
     .limit(1);
 
-  if (customerPrice) return customerPrice;
-
-  const [sku] = await tx
-    .select({
-      unitPriceFen: skus.defaultUnitPriceFen,
-      unitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
-    })
-    .from(skus)
-    .where(eq(skus.id, input.skuId))
-    .limit(1);
-
   if (!sku) throw new SkuNotFoundError(input.skuId);
-  return sku;
+  if (sku.unitPriceMilliYuan === null) {
+    throw new MissingCargoUnitPriceError(input.skuId);
+  }
+  return {
+    unitPriceFen: roundMilliYuanToFen(sku.unitPriceMilliYuan),
+    unitPriceMilliYuan: sku.unitPriceMilliYuan,
+  };
 }

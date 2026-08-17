@@ -10,7 +10,7 @@ import {
   stores,
 } from "@/db/schema";
 import {
-  InvalidUnitPriceError,
+  MissingCargoUnitPriceError,
   resolveUnitPrice,
 } from "@/modules/catalog/pricing";
 import { resolveStandardSku } from "@/modules/catalog/repository";
@@ -35,7 +35,7 @@ async function createCatalogFixture() {
     .returning({ id: stores.id });
   const [product] = await db
     .insert(products)
-    .values({ name: "Demo product" })
+    .values({ cargoUnitPriceMilliYuan: 8_155, name: "Demo product" })
     .returning({ id: products.id });
   const [sku] = await db
     .insert(skus)
@@ -50,7 +50,7 @@ async function createCatalogFixture() {
   return { customer, sku, store };
 }
 
-describe("catalog price priority", () => {
+describe("catalog cargo price", () => {
   test("database constraints reject negative stored prices", async () => {
     const fixture = await createCatalogFixture();
 
@@ -63,7 +63,7 @@ describe("catalog price priority", () => {
     ).rejects.toThrow();
   });
 
-  test("uses an order-specific override before the customer and default prices", async () => {
+  test("uses the product cargo price and ignores an active customer price", async () => {
     const fixture = await createCatalogFixture();
     await db.insert(customerSkuPrices).values({
       customerId: fixture.customer.id,
@@ -73,52 +73,28 @@ describe("catalog price priority", () => {
 
     const actual = await db.transaction((tx) =>
       resolveUnitPrice(tx, {
-        customerId: fixture.customer.id,
-        overrideUnitPriceFen: 880,
         skuId: fixture.sku.id,
       }),
     );
 
     expect(actual).toEqual({
-      unitPriceFen: 880,
-      unitPriceMilliYuan: 8_800,
+      unitPriceFen: 816,
+      unitPriceMilliYuan: 8_155,
     });
   });
 
-  test("uses an active customer price before the default price", async () => {
-    const fixture = await createCatalogFixture();
-    await db.insert(customerSkuPrices).values({
-      customerId: fixture.customer.id,
-      skuId: fixture.sku.id,
-      unitPriceFen: 760,
-    });
-
-    const actual = await db.transaction((tx) =>
-      resolveUnitPrice(tx, {
-        customerId: fixture.customer.id,
-        skuId: fixture.sku.id,
-      }),
-    );
-
-    expect(actual).toEqual({
-      unitPriceFen: 760,
-      unitPriceMilliYuan: 7_600,
-    });
-  });
-
-  test("falls back to the SKU default price", async () => {
+  test("uses the product cargo price instead of the SKU purchase price", async () => {
     const fixture = await createCatalogFixture();
 
     const actual = await db.transaction((tx) =>
       resolveUnitPrice(tx, {
-        customerId: fixture.customer.id,
         skuId: fixture.sku.id,
       }),
     );
 
     expect(actual).toEqual({
-      unitPriceFen: 690,
-      unitPriceMilliYuan: 6_900,
+      unitPriceFen: 816,
+      unitPriceMilliYuan: 8_155,
     });
   });
 
@@ -139,33 +115,28 @@ describe("catalog price priority", () => {
 
     const actual = await db.transaction((tx) =>
       resolveUnitPrice(tx, {
-        customerId: fixture.customer.id,
         skuId: fixture.sku.id,
       }),
     );
 
     expect(actual).toEqual({
-      unitPriceFen: 690,
-      unitPriceMilliYuan: 6_900,
+      unitPriceFen: 816,
+      unitPriceMilliYuan: 8_155,
     });
   });
 
-  test.each([-1, 1.5, Number.NaN])(
-    "rejects invalid order-specific override prices: %s",
-    async (overrideUnitPriceFen) => {
-      const fixture = await createCatalogFixture();
+  test("rejects ordering when the product cargo price is missing", async () => {
+    const fixture = await createCatalogFixture();
+    await db.update(products).set({ cargoUnitPriceMilliYuan: null });
 
-      await expect(
-        db.transaction((tx) =>
-          resolveUnitPrice(tx, {
-            customerId: fixture.customer.id,
-            overrideUnitPriceFen,
-            skuId: fixture.sku.id,
-          }),
-        ),
-      ).rejects.toBeInstanceOf(InvalidUnitPriceError);
-    },
-  );
+    await expect(
+      db.transaction((tx) =>
+        resolveUnitPrice(tx, {
+          skuId: fixture.sku.id,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(MissingCargoUnitPriceError);
+  });
 });
 
 describe("external SKU aliases", () => {

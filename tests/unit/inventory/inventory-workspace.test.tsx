@@ -17,7 +17,10 @@ vi.mock("@/modules/reports/stock-coverage", () => ({
   getStockCoverageReport: vi.fn(),
 }));
 
-import { inventoryDateBoundary } from "@/app/(admin)/admin/inventory/page";
+import {
+  inventoryDateBoundary,
+  toInventoryWorkspaceRow,
+} from "@/app/(admin)/admin/inventory/page";
 import { InventoryWorkspace } from "@/components/inventory/inventory-workspace";
 import type { ManagedAction } from "@/shared/action-state";
 
@@ -97,6 +100,24 @@ const movementPage = {
 afterEach(cleanup);
 
 describe("inventory workspace", () => {
+  it("uses the product name instead of specification fields for inventory displays", () => {
+    expect(
+      toInventoryWorkspaceRow(
+        {
+          availableQuantity: 8,
+          lockedQuantity: 2,
+          productId: "product-1",
+          productName: "狗绳",
+          skuCode: "TZX-001-1",
+          skuId: "sku-1",
+          specification: "150*80",
+          totalQuantity: 10,
+        },
+        undefined,
+      ),
+    ).toEqual(expect.objectContaining({ name: "狗绳" }));
+  });
+
   it("interprets strict inventory filter dates in the Toronto business day", () => {
     expect(inventoryDateBoundary("2026-08-14", "start")?.toISOString()).toBe(
       "2026-08-14T04:00:00.000Z",

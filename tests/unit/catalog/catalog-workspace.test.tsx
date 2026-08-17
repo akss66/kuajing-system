@@ -40,6 +40,16 @@ vi.mock("@/modules/identity/principal", () => ({
 
 const successfulAction: ManagedAction = async () => ({ status: "success" });
 
+const catalogActions = {
+  batchManage: successfulAction,
+  createAlias: successfulAction,
+  createSku: successfulAction,
+  deleteSku: successfulAction,
+  restoreSku: successfulAction,
+  updateProduct: successfulAction,
+  updateSku: successfulAction,
+};
+
 const longSpecification =
   "适用于加拿大冬季运输场景的超长规格说明，包含加厚防护层、可重复封装结构与批次追踪标识，内容必须稳定换行且不能侵入相邻价格或库存列；同时包含耐低温材料、双重封口、清晰批次标签与长途运输缓冲说明，确保超过一百个字符时仍然保持完整可读。";
 
@@ -182,12 +192,7 @@ describe("catalog workspaces", () => {
   it("groups source product variants and keeps every sibling when one SKU matches search", () => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={groupedAdminRows}
         stores={[]}
       />,
@@ -227,12 +232,7 @@ describe("catalog workspaces", () => {
     ];
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={mixedStatusRows}
         stores={[]}
       />,
@@ -267,12 +267,7 @@ describe("catalog workspaces", () => {
   it("clears combined administrator query and sale-status filters locally from the empty state", () => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={[adminRows[0]!]}
         stores={[]}
       />,
@@ -294,39 +289,93 @@ describe("catalog workspaces", () => {
   it("keeps catalog mutations out of the resource list until their drawers open", async () => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[{ code: "NORTH-01", id: "customer-1" }]}
+        actions={catalogActions}
         rows={[adminRows[0]!]}
         stores={[{ id: "store-1", name: "Temu North" }]}
       />,
     );
 
     expect(screen.getByRole("searchbox")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "设置客户价" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "新建 SKU" }));
 
     const createDrawer = await screen.findByRole("dialog");
-    expect(within(createDrawer).getAllByRole("textbox").length).toBeGreaterThanOrEqual(4);
+    fireEvent.change(within(createDrawer).getByLabelText("创建方式"), {
+      target: { value: "CREATE" },
+    });
+    for (const field of [
+      "序号",
+      "商品名称",
+      "货品价格（元）",
+      "链接文字",
+      "SKU",
+      "图片",
+      "采购价（元）",
+      "初始库存（份）",
+      "链接地址",
+      "规格",
+      "颜色",
+      "组合销售",
+      "重量（克）",
+      "销售状态",
+      "创建原因",
+    ]) {
+      expect(
+        within(createDrawer).getByLabelText(field === "图片" ? /^图片/ : field),
+      ).toBeVisible();
+    }
     const submitButton = within(createDrawer)
       .getAllByRole("button")
       .find((button) => button.getAttribute("type") === "submit");
     expect(submitButton).toBeEnabled();
   });
 
+  it("exposes per-SKU management and enables batch management after selection", async () => {
+    render(<CatalogWorkspace actions={catalogActions} rows={[adminRows[0]!]} stores={[]} />);
+
+    expect(screen.getByRole("button", { name: "批量管理 SKU" })).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "选择 TZX-034-2" })[0]!);
+    expect(screen.getByRole("button", { name: "批量管理 SKU (1)" })).toBeEnabled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "管理" })[0]!);
+    const drawer = await screen.findByRole("dialog", { name: "管理 TZX-034-2" });
+    expect(within(drawer).getByRole("heading", { name: "商品资料（同组共享）" })).toBeVisible();
+    expect(within(drawer).getByRole("heading", { name: "SKU 资料" })).toBeVisible();
+    expect(within(drawer).getByLabelText("商品名称")).toHaveValue("冬季运输防护袋");
+    expect(within(drawer).getByLabelText("货品价格（元）")).toHaveValue("1.366");
+    expect(within(drawer).getByLabelText("SKU")).toHaveValue("TZX-034-2");
+    expect(within(drawer).getByRole("button", { name: "确认删除 SKU" })).toBeVisible();
+  });
+
+  it("lets administrators restore an archived SKU without exposing active-only operations", async () => {
+    render(
+      <CatalogWorkspace
+        actions={catalogActions}
+        lifecycle="ARCHIVED"
+        rows={[{
+          ...adminRows[0]!,
+          archiveReason: "历史订单已结束",
+          lifecycleStatus: "ARCHIVED",
+          saleStatus: "NOT_SELLABLE",
+        }]}
+        stores={[]}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /新建 SKU/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /批量管理 SKU/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "管理" })[0]!);
+    expect(await screen.findByText("归档原因：历史订单已结束")).toBeVisible();
+    expect(screen.getByLabelText("恢复原因")).toBeVisible();
+    expect(screen.getByRole("button", { name: "恢复 SKU" })).toBeVisible();
+  });
+
   it("renders the complete admin field mapping in a semantic table and ordered cards", () => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={adminRows}
         stores={[]}
       />,
@@ -340,8 +389,9 @@ describe("catalog workspaces", () => {
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
     ).toEqual([
+      "",
       "序号",
-      "来源商品",
+      "商品",
       "SKU",
       "规格/属性",
       "采购价",
@@ -350,6 +400,7 @@ describe("catalog workspaces", () => {
       "货品价格",
       "状态",
       "SKU 链接",
+      "操作",
     ]);
     expect(within(desktopTable).getByText("¥0.325")).toBeVisible();
     expect(within(desktopTable).getByText("¥1.366")).toBeVisible();
@@ -401,12 +452,7 @@ describe("catalog workspaces", () => {
   ])("filters the admin catalog by %s", (_mode, query, expectedSku, excludedSku) => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={adminRows}
         stores={[]}
       />,
@@ -430,12 +476,7 @@ describe("catalog workspaces", () => {
   ])("does not render an unsafe %s product link", (_case, productUrl) => {
     render(
       <CatalogWorkspace
-        actions={{
-          createAlias: successfulAction,
-          createSku: successfulAction,
-          setCustomerPrice: successfulAction,
-        }}
-        customers={[]}
+        actions={catalogActions}
         rows={[{ ...adminRows[0]!, productUrl }]}
         stores={[]}
       />,
@@ -497,7 +538,7 @@ describe("catalog workspaces", () => {
       within(desktopTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual(["SKU", "规格/属性", "实际拿货价", "可售库存", "状态", "链接"]);
+    ).toEqual(["SKU", "规格/属性", "拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
     expect(
@@ -539,7 +580,7 @@ describe("catalog workspaces", () => {
     ).not.toBeInTheDocument();
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toBeVisible();
   });
 
   it("groups customer SKU variants and retains sibling variants for a one-SKU search", () => {
@@ -576,6 +617,46 @@ describe("catalog workspaces", () => {
     expect(desktopGroup!.textContent).not.toContain("采购价");
     expect(desktopGroup!.textContent).not.toContain("总库存");
     expect(desktopGroup!.textContent).not.toContain("货品价格");
+  });
+
+  it("opens an accessible large preview when a customer selects a SKU image", () => {
+    render(<CustomerCatalogWorkspace items={[customerRows[0]!]} query="" />);
+
+    const triggers = screen.getAllByRole("button", {
+      name: "查看 冬季运输防护袋 大图",
+    });
+    expect(triggers).toHaveLength(2);
+
+    fireEvent.click(triggers[0]!);
+
+    const dialog = screen.getByRole("dialog", { name: "冬季运输防护袋 图片预览" });
+    expect(within(dialog).getByRole("img", { name: "冬季运输防护袋 大图" })).toHaveAttribute(
+      "src",
+      "/api/catalog-assets/asset-available",
+    );
+    expect(within(dialog).getByRole("button", { name: "关闭图片预览" })).toBeVisible();
+  });
+
+  it("shows a missing cargo price as unavailable instead of falling back to purchase price", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          {
+            ...customerRows[0]!,
+            actualUnitPriceFen: null,
+            actualUnitPriceMilliYuan: null,
+            availabilityReason: "PRICE_MISSING",
+            id: "customer-price-missing",
+            orderable: false,
+          },
+        ]}
+        query=""
+      />,
+    );
+
+    const results = within(screen.getByTestId("customer-catalog-results"));
+    expect(results.getAllByText("价格待维护")).toHaveLength(4);
+    expect(screen.queryByText("实际拿货价")).not.toBeInTheDocument();
   });
 
   it("defaults customer products to SKU order and offers price sorting", () => {
