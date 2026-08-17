@@ -8,6 +8,8 @@ test("login surface is accessible, responsive and uses the approved teal action 
 
   await expect(page.getByRole("heading", { name: "登录同舟行跨境" })).toBeVisible();
   await expect(page.getByText("AI+Agent+跨境")).toBeVisible();
+  const loginPanel = page.locator("[data-login-panel]");
+  await expect(loginPanel).toBeVisible();
   const heroHeading = page.getByRole("heading", { name: /加拿大本地货盘.*一站式经营更简单/ });
   const heroDescription = page.getByText(
     "一键上传订单、跟进付款与发货状态，让每一次发货都清晰、可追踪、可恢复。",
@@ -15,9 +17,25 @@ test("login surface is accessible, responsive and uses the approved teal action 
   if (testInfo.project.name.includes("mobile")) {
     await expect(heroHeading).toBeHidden();
     await expect(heroDescription).toBeHidden();
+    await expect(page.locator("[data-login-shell]")).toHaveCSS("justify-content", "center");
   } else {
     await expect(heroHeading).toBeVisible();
     await expect(heroDescription).toBeVisible();
+    const heroRgb = await page.locator("[data-login-hero]").evaluate((element) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext("2d");
+      if (!context) return [];
+      context.fillStyle = getComputedStyle(element).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
+    });
+    expect(heroRgb).toHaveLength(3);
+    expect(Math.min(...heroRgb)).toBeGreaterThan(38);
+    expect(Math.max(...heroRgb)).toBeLessThan(86);
+    expect(Math.max(...heroRgb) - Math.min(...heroRgb)).toBeLessThan(10);
+    await expect(loginPanel).toHaveCSS("border-top-width", "1px");
   }
   await expect(page.getByLabel("登录邮箱")).not.toHaveAttribute("placeholder");
   await expect(page.getByLabel("登录密码")).not.toHaveAttribute("placeholder");

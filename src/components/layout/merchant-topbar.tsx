@@ -1,6 +1,7 @@
 "use client";
 
-import { Bell, Menu, ShieldCheck, UserCircle2, X } from "lucide-react";
+import { Bell, ChevronDown, Menu, ShieldCheck, UserCircle2, X } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { SignOutMenuItem } from "@/components/auth/sign-out-button";
@@ -44,6 +45,7 @@ export function MerchantTopbar({
   title,
 }: MerchantTopbarProps) {
   const displayName = identity.displayName?.trim() || "未设置姓名";
+  const displayInitial = Array.from(displayName)[0] ?? "账";
 
   return (
     <div className="flex h-full min-w-0 items-center justify-between px-3 sm:px-5 lg:px-6">
@@ -92,23 +94,31 @@ export function MerchantTopbar({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <Button
-          aria-label="通知"
-          className="size-11 rounded-md border-white/12 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
-          size="icon"
-          variant="ghost"
-        >
-          <Bell aria-hidden="true" />
-        </Button>
+        {audience === "admin" ? (
+          <Button
+            asChild
+            className="size-10 rounded-md border-0 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
+            size="icon"
+            variant="ghost"
+          >
+            <Link aria-label="查看系统通知" href="/admin/notifications">
+              <Bell aria-hidden="true" className="size-[18px]" />
+            </Link>
+          </Button>
+        ) : null}
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
               aria-label="打开账号菜单"
-              className="min-h-11 min-w-11 gap-2 rounded-md border-white/12 bg-white/5 px-3 text-[var(--merchant-topbar-foreground)] hover:bg-white/10 hover:text-white"
-              variant="outline"
+              className="min-h-10 min-w-10 max-w-48 gap-2 rounded-md border-0 bg-transparent px-1.5 text-[var(--merchant-topbar-foreground)] hover:bg-white/8 hover:text-white sm:pl-1.5 sm:pr-2"
+              data-account-trigger="true"
+              variant="ghost"
             >
-              <UserCircle2 aria-hidden="true" className="size-4" />
-              <span className="hidden sm:inline">账号</span>
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--merchant-nav-active)] text-xs font-semibold text-[var(--merchant-nav-active-foreground)]">
+                {displayInitial}
+              </span>
+              <span className="hidden max-w-28 truncate text-sm font-medium sm:inline">{displayName}</span>
+              <ChevronDown aria-hidden="true" className="hidden size-3.5 text-[var(--merchant-topbar-muted)] sm:block" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

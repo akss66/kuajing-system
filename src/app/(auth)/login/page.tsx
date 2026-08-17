@@ -8,10 +8,16 @@ export const metadata: Metadata = { title: "登录" };
 
 export default function LoginPage() {
   return (
-    <main className="min-h-svh bg-background lg:grid lg:grid-cols-[minmax(0,1.16fr)_minmax(28rem,0.84fr)]">
-      <section className="relative flex flex-col overflow-hidden bg-background px-6 pb-2 pt-6 sm:px-10 sm:pb-3 sm:pt-8 lg:min-h-svh lg:bg-surface lg:px-12 lg:py-10 xl:px-16">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-primary">
-          <svg className="absolute -right-24 top-1/2 hidden h-[32rem] w-[44rem] -translate-y-1/2 opacity-[0.09] lg:block" viewBox="0 0 704 512">
+    <main
+      className="flex min-h-svh flex-col justify-center bg-login-canvas lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(30rem,0.92fr)] lg:justify-normal"
+      data-login-shell
+    >
+      <section
+        className="login-metal-surface relative flex flex-col overflow-hidden bg-login-canvas px-6 pb-2 pt-6 sm:px-10 sm:pb-3 sm:pt-8 lg:min-h-svh lg:px-12 lg:py-10 xl:px-16"
+        data-login-hero
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-login-hero-muted">
+          <svg className="absolute -right-24 top-1/2 hidden h-[32rem] w-[44rem] -translate-y-1/2 opacity-[0.08] lg:block" viewBox="0 0 704 512">
             <path d="M34 390C150 316 203 164 346 143C474 124 524 252 670 96" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <path d="M86 458C213 400 296 276 410 268C530 258 583 344 706 224" fill="none" stroke="currentColor" strokeWidth="1" />
             <circle cx="346" cy="143" fill="currentColor" r="5" />
@@ -23,29 +29,32 @@ export default function LoginPage() {
         <div className="relative flex shrink-0 items-center gap-3.5">
           <Image alt={BRAND.name} className="h-11 w-auto object-contain" height={44} priority src={BRAND.logoPath} width={46} />
           <div>
-            <div className="text-lg font-semibold tracking-[-0.02em] text-foreground">{BRAND.name}</div>
-            <div className="mt-0.5 text-xs font-medium tracking-[0.04em] text-muted-foreground">AI+Agent+跨境</div>
+            <div className="text-lg font-semibold tracking-[-0.02em] text-foreground lg:text-login-hero-foreground">{BRAND.name}</div>
+            <div className="mt-0.5 text-xs font-medium tracking-[0.04em] text-muted-foreground lg:text-login-hero-muted">AI+Agent+跨境</div>
           </div>
         </div>
 
         <div className="relative hidden lg:flex lg:flex-1 lg:items-center lg:py-16">
           <div className="max-w-[44rem]">
-            <h2 className="text-balance text-[clamp(2.25rem,5.4vw,5rem)] font-semibold leading-[1.03] tracking-[-0.04em] text-foreground">
+            <h2 className="text-balance text-[clamp(2.25rem,5.1vw,4.75rem)] font-semibold leading-[1.03] tracking-[-0.04em] text-login-hero-foreground">
               <span className="block">加拿大本地货盘，</span>
               <span className="block">一站式经营更简单。</span>
             </h2>
-            <p className="mt-6 max-w-[43rem] text-[15px] leading-7 text-muted-foreground sm:text-base lg:mt-8 lg:text-[17px] lg:leading-8">
+            <p className="mt-6 max-w-[43rem] text-[15px] leading-7 text-login-hero-muted sm:text-base lg:mt-8 lg:text-[17px] lg:leading-8">
               一键上传订单、跟进付款与发货状态，让每一次发货都清晰、可追踪、可恢复。
             </p>
 
           </div>
         </div>
 
-        <p className="relative hidden shrink-0 text-xs text-muted-foreground lg:block">业务时区 · 加拿大渥太华</p>
+        <p className="relative hidden shrink-0 text-xs text-login-hero-muted lg:block">业务时区 · 加拿大渥太华</p>
       </section>
 
-      <section className="flex items-center justify-center bg-background px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
-        <div className="w-full max-w-[26rem]">
+      <section className="flex items-center justify-center bg-login-canvas px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
+        <div
+          className="w-full max-w-[29rem] sm:rounded-xl sm:border sm:border-border sm:bg-background sm:p-9 lg:p-10"
+          data-login-panel
+        >
           <div className="mb-8">
             <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">登录同舟行跨境</h1>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">使用管理员为你开通的账号进入系统。</p>

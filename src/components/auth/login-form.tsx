@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { authClient } from "@/modules/identity/auth-client";
 
 const inputClassName =
-  "min-h-12 w-full rounded-[var(--radius-control)] border border-border bg-surface/45 px-3.5 text-[15px] text-ink shadow-none transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-muted focus:border-primary focus:bg-background focus:outline-none focus:ring-3 focus:ring-primary/15";
+  "login-input min-h-12 w-full rounded-[var(--radius-control)] border border-border bg-background px-3.5 text-[15px] text-ink shadow-none transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15";
 
 export function LoginForm() {
   const router = useRouter();

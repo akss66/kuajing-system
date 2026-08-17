@@ -91,6 +91,13 @@ describe("merchant shells", () => {
     expect(screen.getByText("系统管理")).toBeVisible();
     expect(screen.queryByRole("button", { name: "帮助" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+    const notificationLink = within(topbar).getByRole("link", { name: "查看系统通知" });
+    expect(notificationLink).toHaveAttribute("href", "/admin/notifications");
+    expect(notificationLink).toHaveClass("border-0");
+    const accountTrigger = within(topbar).getByRole("button", { name: "打开账号菜单" });
+    expect(accountTrigger).toHaveAttribute("data-account-trigger", "true");
+    expect(accountTrigger).toHaveTextContent(adminIdentity.displayName);
+    expect(accountTrigger).toHaveClass("border-0");
     const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
