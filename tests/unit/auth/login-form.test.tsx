@@ -37,6 +37,8 @@ describe("LoginForm", () => {
     expect(email).not.toBeNull();
     expect(password).not.toBeNull();
     expect(form).not.toBeNull();
+    expect(email?.getAttribute("placeholder")).toBeNull();
+    expect(password?.getAttribute("placeholder")).toBeNull();
     fireEvent.change(email!, { target: { value: "admin@example.com" } });
     fireEvent.change(password!, { target: { value: "a-valid-password" } });
     fireEvent.submit(form!);

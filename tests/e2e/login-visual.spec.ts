@@ -7,6 +7,14 @@ test("login surface is accessible, responsive and uses the approved teal action 
   await page.goto("/login");
 
   await expect(page.getByRole("heading", { name: "登录同舟行跨境" })).toBeVisible();
+  await expect(page.getByText("AI+Agent+跨境")).toBeVisible();
+  await expect(page.getByText("加拿大本地货盘，")).toBeVisible();
+  await expect(page.getByText("一站式经营更简单。")).toBeVisible();
+  await expect(
+    page.getByText("一键上传订单、跟进付款与发货状态，让每一次发货都清晰、可追踪、可恢复。"),
+  ).toBeVisible();
+  await expect(page.getByLabel("登录邮箱")).not.toHaveAttribute("placeholder");
+  await expect(page.getByLabel("登录密码")).not.toHaveAttribute("placeholder");
   const loginButton = page.getByRole("button", { name: "登录系统" });
   await expect(loginButton).toBeVisible();
 

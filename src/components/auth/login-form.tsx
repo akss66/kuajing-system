@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { authClient } from "@/modules/identity/auth-client";
 
 const inputClassName =
-  "min-h-11 w-full rounded-[var(--radius-control)] border border-border bg-background px-3.5 text-[15px] text-ink shadow-[0_1px_1px_oklch(0.22_0.018_175/0.03)] transition-[border-color,box-shadow] duration-[var(--duration-fast)] placeholder:text-muted/75 hover:border-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15";
+  "min-h-12 w-full rounded-[var(--radius-control)] border border-border bg-surface/45 px-3.5 text-[15px] text-ink shadow-none transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-muted focus:border-primary focus:bg-background focus:outline-none focus:ring-3 focus:ring-primary/15";
 
 export function LoginForm() {
   const router = useRouter();
@@ -58,7 +58,6 @@ export function LoginForm() {
           disabled={pending}
           id="email"
           name="email"
-          placeholder="name@example.com"
           required
           type="email"
         />
@@ -75,7 +74,6 @@ export function LoginForm() {
           id="password"
           minLength={12}
           name="password"
-          placeholder="请输入密码"
           required
           type="password"
         />
@@ -88,7 +86,7 @@ export function LoginForm() {
       ) : null}
 
       <Button
-        className="mt-1 flex min-h-11 w-full items-center justify-center rounded-[var(--radius-control)] bg-primary px-4 text-sm font-semibold text-white shadow-[0_1px_2px_oklch(0.22_0.018_175/0.12)] transition-[background-color,transform] duration-[var(--duration-fast)] hover:bg-primary-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-1 flex min-h-12 w-full items-center justify-center rounded-[var(--radius-control)] bg-primary px-4 text-sm font-semibold text-white shadow-none transition-[background-color,transform] duration-[var(--duration-fast)] hover:bg-primary-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
         disabled={pending}
         type="submit"
       >

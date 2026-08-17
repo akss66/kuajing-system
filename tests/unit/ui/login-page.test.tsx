@@ -15,14 +15,21 @@ vi.mock("next/navigation", () => ({
 import LoginPage from "@/app/(auth)/login/page";
 
 describe("login page", () => {
-  it("presents the approved merchant login copy without fulfillment wording", () => {
+  it("presents the approved merchant login copy and brand lockup", () => {
     render(<LoginPage />);
 
-    expect(screen.getByText("加拿大本地货盘，选品拿货更简单。")).toBeVisible();
+    expect(screen.getByText("加拿大本地货盘，")).toBeVisible();
+    expect(screen.getByText("一站式经营更简单。")).toBeVisible();
+    expect(
+      screen.getByText("一键上传订单、跟进付款与发货状态，让每一次发货都清晰、可追踪、可恢复。"),
+    ).toBeVisible();
+    expect(screen.getByText("AI+Agent+跨境")).toBeVisible();
     expect(screen.getByRole("heading", { name: "登录同舟行跨境" })).toBeVisible();
     expect(screen.getByText("使用管理员为你开通的账号进入系统。")).toBeVisible();
     expect(screen.getByLabelText("登录邮箱")).toHaveAttribute("type", "email");
+    expect(screen.getByLabelText("登录邮箱")).not.toHaveAttribute("placeholder");
     expect(screen.getByLabelText("登录密码")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("登录密码")).not.toHaveAttribute("placeholder");
     expect(screen.getByRole("button", { name: "登录系统" })).toBeEnabled();
     expect(screen.getByRole("img", { name: "同舟行跨境" })).toHaveAttribute(
       "src",
