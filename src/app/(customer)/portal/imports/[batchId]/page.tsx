@@ -18,7 +18,7 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 const statusMeta = {
   READY: { label: "可提交", className: "bg-success/10 text-success" },
   DUPLICATE: { label: "重复跳过", className: "bg-surface-muted text-muted" },
-  UNKNOWN_SKU: { label: "未知 SKU", className: "bg-warning/10 text-warning" },
+  UNKNOWN_SKU: { label: "未映射 SKU", className: "bg-warning/10 text-warning" },
   INVALID: { label: "格式错误", className: "bg-danger/10 text-danger" },
 } as const;
 
@@ -98,7 +98,7 @@ export default async function ImportPreviewPage({
         items={[
           { label: "可提交", value: `${preview.summary.ready}` },
           { label: "重复订单", value: `${preview.summary.duplicate}` },
-          { label: "未知 SKU", value: `${preview.summary.unknownSku}` },
+          { label: "未映射 SKU", value: `${preview.summary.unknownSku}` },
           { label: "格式错误", value: `${preview.summary.invalid}` },
         ]}
       />
@@ -109,7 +109,7 @@ export default async function ImportPreviewPage({
           <div>
             <p className="font-semibold">还有 {blocking} 行需要处理，暂不能提交拿货单</p>
             <p className="mt-1 text-warning">
-              未知 SKU 请联系管理员建立映射；格式错误请修正 TEMU 文件后重新上传。重复订单会自动跳过。
+              未映射 SKU 请联系管理员建立映射；格式错误请修正 TEMU 文件后重新上传。重复订单会自动跳过。
             </p>
           </div>
         </div>
@@ -125,7 +125,7 @@ export default async function ImportPreviewPage({
         </div>
         <div className="p-4">
           <p className="text-sm font-semibold text-ink">需管理员处理</p>
-          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行未知 SKU，联系管理员补齐映射。</p>
+          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行未映射 SKU，联系管理员补齐映射。</p>
         </div>
         <div className="p-4">
           <p className="text-sm font-semibold text-ink">不可提交</p>
@@ -208,7 +208,7 @@ export default async function ImportPreviewPage({
       <div className="flex flex-col gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted">
           {blocking
-            ? "处理全部未知 SKU 和格式错误后再提交。"
+            ? "处理全部未映射 SKU 和格式错误后再提交。"
             : `已核对 ${preview.summary.ready} 行可提交订单。`}
         </p>
         <OrderSubmitButton

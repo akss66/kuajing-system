@@ -18,6 +18,7 @@ import {
   orderImportRows,
   orderLines,
   skuAliases,
+  skus,
   stores,
 } from "@/db/schema";
 import { assertStoreOwnership } from "@/modules/identity/guards";
@@ -77,29 +78,45 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
   return result;
 }
 
-async function exactAliasMap(
+async function exactSkuResolutionMap(
   tx: DbTransaction,
   storeId: string,
   externalSkus: readonly string[],
 ) {
   if (externalSkus.length === 0) return new Map<string, string>();
 
-  const aliases = await tx
-    .select({
-      externalSku: skuAliases.externalSku,
-      skuId: skuAliases.skuId,
-      storeId: skuAliases.storeId,
-    })
-    .from(skuAliases)
-    .where(
-      and(
-        eq(skuAliases.active, true),
-        inArray(skuAliases.externalSku, [...new Set(externalSkus)]),
-        or(eq(skuAliases.storeId, storeId), isNull(skuAliases.storeId)),
+  const uniqueExternalSkus = [...new Set(externalSkus)];
+  const [standardSkus, aliases] = await Promise.all([
+    tx
+      .select({ skuCode: skus.skuCode, skuId: skus.id })
+      .from(skus)
+      .where(
+        and(
+          inArray(skus.skuCode, uniqueExternalSkus),
+          eq(skus.lifecycleStatus, "ACTIVE"),
+          isNull(skus.archivedAt),
+        ),
       ),
-    );
+    tx
+      .select({
+        externalSku: skuAliases.externalSku,
+        skuId: skuAliases.skuId,
+        storeId: skuAliases.storeId,
+      })
+      .from(skuAliases)
+      .where(
+        and(
+          eq(skuAliases.active, true),
+          inArray(skuAliases.externalSku, uniqueExternalSkus),
+          or(eq(skuAliases.storeId, storeId), isNull(skuAliases.storeId)),
+        ),
+      ),
+  ]);
 
   const resolved = new Map<string, string>();
+  for (const standardSku of standardSkus) {
+    resolved.set(standardSku.skuCode, standardSku.skuId);
+  }
   for (const alias of aliases.filter((row) => row.storeId === null)) {
     resolved.set(alias.externalSku, alias.skuId);
   }
@@ -254,8 +271,8 @@ export async function createTemuImportPreviewInTransaction(
     throw new ImportPreviewError("EMPTY_DATA", "Excel 文件中没有订单数据");
   }
 
-  const [skuIdByExactAlias, duplicateSubOrderNumbers] = await Promise.all([
-    exactAliasMap(
+  const [skuIdByExternalSku, duplicateSubOrderNumbers] = await Promise.all([
+    exactSkuResolutionMap(
       tx,
       input.storeId,
       parsed.rows.map((row) => row.externalSku),
@@ -268,7 +285,7 @@ export async function createTemuImportPreviewInTransaction(
   ]);
   const classified = classifyTemuRows(parsed, {
     duplicateSubOrderNumbers,
-    skuIdByExactAlias,
+    skuIdByExactAlias: skuIdByExternalSku,
   });
   const piiKey = parsePiiEncryptionKey();
   const rowsForStorage = classifiedRowsForStorage(classified, piiKey);

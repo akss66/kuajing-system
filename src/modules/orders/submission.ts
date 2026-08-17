@@ -172,7 +172,7 @@ export async function submitTemuImportBatch(input: {
     if (batch.unknownSkuRows > 0 || batch.invalidRows > 0) {
       throw new OrderSubmissionError(
         "IMPORT_NOT_READY",
-        "请先处理未知 SKU 和格式错误",
+        "请先处理未映射 SKU 和格式错误",
       );
     }
 

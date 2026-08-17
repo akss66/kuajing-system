@@ -190,7 +190,7 @@ function defaultHelperText(group: BulkOrderWorkspaceGroup) {
     case "BLOCKED_CROSS_STORE":
       return "检测到跨店铺文件或跨店子订单，请移除冲突文件后重新上传。";
     case "BLOCKED_UNKNOWN_SKU":
-      return "存在未知 SKU，请先联系管理员补齐映射，再继续上传该店铺文件。";
+      return "存在未映射 SKU，请先联系管理员补齐映射，再继续上传该店铺文件。";
     case "BLOCKED_INVALID":
       return "文件中仍有格式问题，请修正后重新上传；失败文件会保留。";
     case "BLOCKED_INVENTORY":

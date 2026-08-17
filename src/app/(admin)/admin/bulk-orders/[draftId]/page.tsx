@@ -81,7 +81,7 @@ export default async function AdminBulkOrderDetailPage({
                         {`${bytes(file.fileSizeBytes)} · 原始 ${file.totalRows} 行 · 可用 ${file.readyRows} 行`}
                       </p>
                       <p className="mt-1 text-xs text-muted">
-                        {`重复 ${file.duplicateRows} · 未知 SKU ${file.unknownSkuRows} · 格式问题 ${file.invalidRows}`}
+                        {`重复 ${file.duplicateRows} · 未映射 SKU ${file.unknownSkuRows} · 格式问题 ${file.invalidRows}`}
                       </p>
                     </div>
                   ))
@@ -115,7 +115,7 @@ export default async function AdminBulkOrderDetailPage({
                 <div className="rounded-lg bg-surface px-3 py-3 text-sm text-muted">
                   <p>{`可用行 ${group.partialResultSummary.readyRows}`}</p>
                   <p className="mt-1">{`重复行 ${group.partialResultSummary.duplicateRows}`}</p>
-                  <p className="mt-1">{`未知 SKU ${group.partialResultSummary.unknownSkuRows}`}</p>
+                  <p className="mt-1">{`未映射 SKU ${group.partialResultSummary.unknownSkuRows}`}</p>
                   <p className="mt-1">{`格式问题 ${group.partialResultSummary.invalidRows}`}</p>
                 </div>
               </section>

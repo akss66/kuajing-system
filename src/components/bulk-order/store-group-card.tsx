@@ -160,7 +160,7 @@ export function StoreGroupCard({
               <p className="mt-1 font-semibold text-ink">{group.totalQuantity}</p>
             </div>
             <div className="rounded-lg bg-surface px-3 py-2">
-              <p className="text-xs text-muted">未知 SKU</p>
+              <p className="text-xs text-muted">未映射 SKU</p>
               <p className="mt-1 font-semibold text-ink">{group.unknownSkuCount}</p>
             </div>
             <div className="rounded-lg bg-surface px-3 py-2">
@@ -218,7 +218,7 @@ export function StoreGroupCard({
                     <p className="truncate font-medium text-ink">{file.fileName}</p>
                   </div>
                   <p className="mt-1 text-xs text-muted">
-                    {`${bytes(file.fileSizeBytes)} · 原始订单 ${file.rawOrderCount} · 未知 SKU ${file.unknownSkuRows} · 格式问题 ${file.invalidRows}`}
+                    {`${bytes(file.fileSizeBytes)} · 原始订单 ${file.rawOrderCount} · 未映射 SKU ${file.unknownSkuRows} · 格式问题 ${file.invalidRows}`}
                   </p>
                 </div>
                 <Button

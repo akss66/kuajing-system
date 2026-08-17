@@ -43,7 +43,7 @@ const bulkDraftValidationStatusLabels = {
   BLOCKED_CROSS_STORE: "跨店冲突",
   BLOCKED_INVALID: "格式问题",
   BLOCKED_INVENTORY: "库存变化",
-  BLOCKED_UNKNOWN_SKU: "未知 SKU",
+  BLOCKED_UNKNOWN_SKU: "未映射 SKU",
   EMPTY: "无可提交订单",
   EXPIRED: "已过期",
   SUBMITTABLE: "可提交",
@@ -66,7 +66,7 @@ const bulkDraftErrorLabels = {
   INSUFFICIENT_STOCK: "库存不足",
   INVALID_ROW: "存在格式问题",
   NO_VALID_ORDERS: "没有可提交订单",
-  UNKNOWN_SKU: "存在未知 SKU",
+  UNKNOWN_SKU: "存在未映射 SKU",
 } as const;
 
 export function getAdminSettlementBatchStatusLabel(status: string) {

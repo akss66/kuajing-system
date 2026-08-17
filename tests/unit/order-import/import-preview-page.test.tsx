@@ -132,7 +132,7 @@ describe("ImportPreviewPage", () => {
     expect(recovery).toHaveTextContent("不可提交");
     expect(metricStrip?.textContent).toContain("可提交");
     expect(metricStrip?.textContent).toContain("重复订单");
-    expect(metricStrip?.textContent).toContain("未知 SKU");
+    expect(metricStrip?.textContent).toContain("未映射 SKU");
     expect(metricStrip?.textContent).toContain("格式错误");
     expect(metricStrip?.querySelectorAll("article")).toHaveLength(4);
   });

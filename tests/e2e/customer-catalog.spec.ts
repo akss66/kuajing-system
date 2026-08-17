@@ -591,6 +591,6 @@ test("customer import preview keeps re-upload navigation and unique heading metr
   await expect(metricStrip.locator("article")).toHaveCount(4);
   await expect(metricStrip.getByText("可提交", { exact: true })).toHaveCount(1);
   await expect(metricStrip.getByText("重复订单", { exact: true })).toHaveCount(1);
-  await expect(metricStrip.getByText("未知 SKU", { exact: true })).toHaveCount(1);
+  await expect(metricStrip.getByText("未映射 SKU", { exact: true })).toHaveCount(1);
   await expect(metricStrip.getByText("格式错误", { exact: true })).toHaveCount(1);
 });

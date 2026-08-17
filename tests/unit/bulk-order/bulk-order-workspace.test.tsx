@@ -226,7 +226,7 @@ describe("BulkOrderWorkspace", () => {
             groupId: "group-blocked",
             storeId: "store-blocked",
             storeName: "受阻店铺",
-            helperText: "存在未知 SKU",
+            helperText: "存在未映射 SKU",
             status: "BLOCKED_UNKNOWN_SKU",
             statusLabel: "需管理员处理",
           }),

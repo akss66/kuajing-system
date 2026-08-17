@@ -242,6 +242,147 @@ describe("customer-scoped TEMU import preview", () => {
     });
   });
 
+  test("resolves an active standard SKU code when no alias exists", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: fixture.sku.skuCode,
+          子订单号: "SUB-STANDARD-SKU",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "standard-sku.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    expect(preview.summary).toEqual({
+      total: 1,
+      ready: 1,
+      duplicate: 0,
+      unknownSku: 0,
+      invalid: 0,
+    });
+    await expect(
+      db
+        .select({ resolvedSkuId: orderImportRows.resolvedSkuId })
+        .from(orderImportRows)
+        .where(sql`${orderImportRows.batchId} = ${preview.batchId}`),
+    ).resolves.toEqual([{ resolvedSkuId: fixture.sku.id }]);
+  });
+
+  test("keeps store aliases ahead of global aliases and standard SKU fallback", async () => {
+    const fixture = await createFixture();
+    const [product] = await db
+      .insert(products)
+      .values({ name: "映射优先级商品" })
+      .returning();
+    const [standardSku, globalSku, storeSku] = await db
+      .insert(skus)
+      .values([
+        {
+          defaultUnitPriceFen: 500,
+          name: "标准 SKU",
+          productId: product.id,
+          skuCode: "TZX-ALIAS-PRIORITY",
+        },
+        {
+          defaultUnitPriceFen: 500,
+          name: "全局映射 SKU",
+          productId: product.id,
+          skuCode: `TZX-${crypto.randomUUID()}`,
+        },
+        {
+          defaultUnitPriceFen: 500,
+          name: "店铺映射 SKU",
+          productId: product.id,
+          skuCode: `TZX-${crypto.randomUUID()}`,
+        },
+      ])
+      .returning();
+    await db.insert(skuAliases).values([
+      {
+        externalSku: standardSku.skuCode,
+        skuId: globalSku.id,
+        storeId: null,
+      },
+      {
+        externalSku: standardSku.skuCode,
+        skuId: storeSku.id,
+        storeId: fixture.store.id,
+      },
+    ]);
+
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: standardSku.skuCode,
+          子订单号: "SUB-STORE-ALIAS",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "alias-priority.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    await expect(
+      db
+        .select({ resolvedSkuId: orderImportRows.resolvedSkuId })
+        .from(orderImportRows)
+        .where(sql`${orderImportRows.batchId} = ${preview.batchId}`),
+    ).resolves.toEqual([{ resolvedSkuId: storeSku.id }]);
+
+    await db
+      .delete(skuAliases)
+      .where(
+        sql`${skuAliases.storeId} = ${fixture.store.id} and ${skuAliases.externalSku} = ${standardSku.skuCode}`,
+      );
+    const globalPreview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: standardSku.skuCode,
+          子订单号: "SUB-GLOBAL-ALIAS",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "global-alias-priority.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    await expect(
+      db
+        .select({ resolvedSkuId: orderImportRows.resolvedSkuId })
+        .from(orderImportRows)
+        .where(sql`${orderImportRows.batchId} = ${globalPreview.batchId}`),
+    ).resolves.toEqual([{ resolvedSkuId: globalSku.id }]);
+  });
+
+  test("does not resolve an archived standard SKU without an alias", async () => {
+    const fixture = await createFixture();
+    await db
+      .update(skus)
+      .set({ archivedAt: new Date(), lifecycleStatus: "ARCHIVED" })
+      .where(sql`${skus.id} = ${fixture.sku.id}`);
+
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: fixture.sku.skuCode,
+          子订单号: "SUB-ARCHIVED-SKU",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "archived-sku.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    expect(preview.summary).toMatchObject({ ready: 0, unknownSku: 1 });
+  });
+
   test("only returns previews belonging to the requesting customer", async () => {
     const fixture = await createFixture();
     const created = await createTemuImportPreview({

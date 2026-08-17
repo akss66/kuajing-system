@@ -17,7 +17,7 @@ import {
 const statusOptions = [
   { label: "可提交", value: "SUBMITTABLE" },
   { label: "跨店冲突", value: "BLOCKED_CROSS_STORE" },
-  { label: "未知 SKU", value: "BLOCKED_UNKNOWN_SKU" },
+  { label: "未映射 SKU", value: "BLOCKED_UNKNOWN_SKU" },
   { label: "格式问题", value: "BLOCKED_INVALID" },
   { label: "库存变化", value: "BLOCKED_INVENTORY" },
   { label: "已提交", value: "ALREADY_SUBMITTED" },
