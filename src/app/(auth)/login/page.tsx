@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "登录" };
 export default function LoginPage() {
   return (
     <main className="min-h-svh bg-background lg:grid lg:grid-cols-[minmax(0,1.16fr)_minmax(28rem,0.84fr)]">
-      <section className="relative flex flex-col overflow-hidden bg-surface px-6 py-6 sm:px-10 sm:py-8 lg:min-h-svh lg:px-12 lg:py-10 xl:px-16">
+      <section className="relative flex flex-col overflow-hidden bg-background px-6 pb-2 pt-6 sm:px-10 sm:pb-3 sm:pt-8 lg:min-h-svh lg:bg-surface lg:px-12 lg:py-10 xl:px-16">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-primary">
           <svg className="absolute -right-24 top-1/2 hidden h-[32rem] w-[44rem] -translate-y-1/2 opacity-[0.09] lg:block" viewBox="0 0 704 512">
             <path d="M34 390C150 316 203 164 346 143C474 124 524 252 670 96" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -28,7 +28,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="relative py-11 sm:py-14 lg:flex lg:flex-1 lg:items-center lg:py-16">
+        <div className="relative hidden lg:flex lg:flex-1 lg:items-center lg:py-16">
           <div className="max-w-[44rem]">
             <h2 className="text-balance text-[clamp(2.25rem,5.4vw,5rem)] font-semibold leading-[1.03] tracking-[-0.04em] text-foreground">
               <span className="block">加拿大本地货盘，</span>
@@ -44,7 +44,7 @@ export default function LoginPage() {
         <p className="relative hidden shrink-0 text-xs text-muted-foreground lg:block">业务时区 · 加拿大渥太华</p>
       </section>
 
-      <section className="flex items-center justify-center border-t border-border bg-background px-6 py-10 sm:px-10 sm:py-14 lg:min-h-svh lg:border-t-0 lg:px-14">
+      <section className="flex items-center justify-center bg-background px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
         <div className="w-full max-w-[26rem]">
           <div className="mb-8">
             <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">登录同舟行跨境</h1>
@@ -54,7 +54,7 @@ export default function LoginPage() {
           <LoginForm />
 
           <div className="mt-8 border-t border-border pt-5 text-sm leading-6 text-muted-foreground">
-            暂无账号或忘记密码？请通过微信联系同舟行管理员处理。
+            暂无账号或忘记密码？请微信联系同舟行管理员。
           </div>
         </div>
       </section>
