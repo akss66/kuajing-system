@@ -364,6 +364,7 @@ async function buildCreateOrderInput(
     erpNo: shipment.erpNo,
     logisticsId: config.logisticsId,
     note: `同舟行拿货单 ${shipment.orderNumber}`,
+    packageType: 3,
     platform: "temu",
     platformOrderNo: shipment.externalOrderNo,
     recipientAddress: recipient.addressLine1,

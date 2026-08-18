@@ -28,6 +28,7 @@ import {
   createFulfillmentOrderNumber,
   UNPAID_ORDER_LOCK_MS,
 } from "@/modules/orders/submission";
+import { calculateOrderPricing } from "@/modules/orders/pricing";
 import {
   applyBulkSettlementWallet,
   lockWalletFunding,
@@ -144,10 +145,12 @@ type ReadyRow = LoadedRow & {
 type PreparedGroup = {
   batches: LoadedBatch[];
   group: StoreGroup;
+  merchandiseAmountFen: number;
   orderId: string;
   orderNumber: string;
   quantityBySku: Map<string, number>;
   rows: ReadyRow[];
+  shippingFeeFen: number;
   totalAmountFen: number;
   totalPackageCount: number;
   totalQuantity: number;
@@ -970,7 +973,7 @@ export async function submitBulkDraft(
         continue;
       }
       const quantityBySku = new Map<string, number>();
-      let totalAmountFen = 0;
+      let merchandiseAmountFen = 0;
       let totalQuantity = 0;
       for (const row of work.rows) {
         const quantity = safeAdd(
@@ -979,29 +982,42 @@ export async function submitBulkDraft(
         );
         quantityBySku.set(row.resolvedSkuId, quantity);
         totalQuantity = safeAdd(totalQuantity, row.quantity);
-        totalAmountFen = safeAdd(
-          totalAmountFen,
+        merchandiseAmountFen = safeAdd(
+          merchandiseAmountFen,
           calculateLineAmountFen(
             row.quantity,
             priceBySku.get(row.resolvedSkuId)!.unitPriceMilliYuan,
           ),
         );
       }
-      if (totalAmountFen <= 0) {
+      if (merchandiseAmountFen <= 0) {
+        failedByGroup.set(group.id, "INVALID");
+        continue;
+      }
+      const totalPackageCount = new Set(
+        work.rows.map((row) => row.externalOrderNo),
+      ).size;
+      let pricing: ReturnType<typeof calculateOrderPricing>;
+      try {
+        pricing = calculateOrderPricing({
+          merchandiseAmountFen,
+          packageCount: totalPackageCount,
+        });
+      } catch {
         failedByGroup.set(group.id, "INVALID");
         continue;
       }
       preparedGroups.push({
         batches: work.batches,
         group,
+        merchandiseAmountFen,
         orderId: crypto.randomUUID(),
         orderNumber: createFulfillmentOrderNumber(now),
         quantityBySku,
         rows: work.rows,
-        totalAmountFen,
-        totalPackageCount: new Set(
-          work.rows.map((row) => row.externalOrderNo),
-        ).size,
+        shippingFeeFen: pricing.shippingFeeFen,
+        totalAmountFen: pricing.totalAmountFen,
+        totalPackageCount,
         totalQuantity,
       });
     }
@@ -1110,6 +1126,8 @@ export async function submitBulkDraft(
         actorType: "CUSTOMER",
         afterJson: {
           lockExpiresAt: lockExpiresAt.toISOString(),
+          merchandiseAmountFen: prepared.merchandiseAmountFen,
+          shippingFeeFen: prepared.shippingFeeFen,
           status: "PENDING_PAYMENT",
           totalAmountFen: prepared.totalAmountFen,
           totalPackageCount: prepared.totalPackageCount,

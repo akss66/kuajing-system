@@ -197,6 +197,7 @@ describe("Jifeng runtime credential provider", () => {
         buyerName: "Managed Buyer",
         buyerPhone: "+1-416-555-0100",
         erpNo: "PROVIDER-MANAGED-AUTH",
+        packageType: 3,
         platform: "other",
         recipientAddress: "1 Test Street",
         recipientCity: "Toronto",

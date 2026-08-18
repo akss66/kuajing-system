@@ -371,7 +371,7 @@ describe("atomic partial bulk submission", () => {
       .orderBy(asc(fulfillmentOrders.storeId));
     expect(orders).toHaveLength(8);
     expect(orders.filter((row) => row.storeId === multiFileGroup.storeId)).toHaveLength(1);
-    expect(orders.reduce((total, row) => total + row.totalAmountFen, 0)).toBe(900);
+    expect(orders.reduce((total, row) => total + row.totalAmountFen, 0)).toBe(12600);
     const linePrices = await db.select({ unitPriceFen: orderLines.unitPriceFen }).from(orderLines);
     expect(new Set(linePrices.map((line) => line.unitPriceFen))).toEqual(new Set([100]));
     const reservations = await db
@@ -386,8 +386,8 @@ describe("atomic partial bulk submission", () => {
       .where(eq(settlementBatches.id, result.settlementBatchId!));
     expect(settlement).toMatchObject({
       customerId: fixture.customer.id,
-      offlineAmountFen: 900,
-      totalAmountFen: 900,
+      offlineAmountFen: 12600,
+      totalAmountFen: 12600,
       walletAmountFen: 0,
     });
 
@@ -451,7 +451,7 @@ describe("atomic partial bulk submission", () => {
     expect(result.createdOrders).toHaveLength(1);
     const [order] = await db.select().from(fulfillmentOrders);
     const [line] = await db.select().from(orderLines);
-    expect(order.totalAmountFen).toBe(98);
+    expect(order.totalAmountFen).toBe(1398);
     expect(line).toMatchObject({
       lineAmountFen: 98,
       unitPriceFen: 33,

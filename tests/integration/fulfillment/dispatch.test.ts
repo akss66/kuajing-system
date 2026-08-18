@@ -380,6 +380,7 @@ describe("paid order Jifeng dispatch", () => {
       currency: "CNY",
       erpNo: `TZX-${shipment.id.replaceAll("-", "")}`,
       logisticsId: 310,
+      packageType: 3,
       platform: "temu",
       platformOrderNo: shipment.externalOrderNo,
       recipientAddress: recipient.addressLine1,

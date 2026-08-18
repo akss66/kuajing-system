@@ -1,5 +1,22 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+// Shipping-fee arithmetic is covered by the order and bulk-submission suites.
+// These settlement lifecycle fixtures intentionally isolate funding/state transitions
+// from pricing policy so their small synthetic amounts remain readable.
+vi.mock("@/modules/orders/pricing", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/modules/orders/pricing")
+  >();
+  return {
+    ...actual,
+    calculateOrderPricing: (input: { merchandiseAmountFen: number }) => ({
+      merchandiseAmountFen: input.merchandiseAmountFen,
+      shippingFeeFen: 0,
+      totalAmountFen: input.merchandiseAmountFen,
+    }),
+  };
+});
 
 import { db } from "@/db/client";
 import {

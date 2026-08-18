@@ -283,7 +283,8 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   await expect(page.getByRole("heading", { name: "统一付款结算" })).toBeVisible();
   await expect(page.getByRole("region", { name: "付款任务" })).toBeVisible();
   await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
-  await expect(page.getByLabel("付款金额（元）")).toHaveValue("80.00");
+  // Eight distinct external orders are eight packages: ¥80 merchandise + ¥104 shipping.
+  await expect(page.getByLabel("付款金额（元）")).toHaveValue("184.00");
   await expect(page.locator("header").getByText("待付款", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "跳到付款声明" })).toHaveAttribute(
     "href",

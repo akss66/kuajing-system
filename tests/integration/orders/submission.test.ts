@@ -222,7 +222,7 @@ describe("atomic TEMU take-order submission", () => {
     expect(submittedAgain).toEqual(submitted);
     expect(submitted).toMatchObject({
       status: "PENDING_PAYMENT",
-      totalAmountFen: 1400,
+      totalAmountFen: 2700,
       totalPackageCount: 1,
       totalQuantity: 3,
     });
@@ -339,7 +339,7 @@ describe("atomic TEMU take-order submission", () => {
       .from(orderLines)
       .orderBy(orderLines.externalSubOrderNo);
 
-    expect(submitted.totalAmountFen).toBe(163);
+    expect(submitted.totalAmountFen).toBe(1463);
     expect(lines).toEqual([
       { lineAmountFen: 65, unitPriceFen: 33, unitPriceMilliYuan: 325 },
       { lineAmountFen: 98, unitPriceFen: 33, unitPriceMilliYuan: 325 },
@@ -417,7 +417,7 @@ describe("atomic TEMU take-order submission", () => {
     await adjustWalletBalance({
       actorUserId: "auth-admin-wallet",
       customerId: customer.id,
-      deltaFen: 500,
+      deltaFen: 1_800,
       reason: "并发自动扣款测试充值",
     });
     const first = await createPreview({
@@ -452,8 +452,8 @@ describe("atomic TEMU take-order submission", () => {
     expect(debits).toHaveLength(1);
     expect(debits[0]).toMatchObject({
       afterBalanceFen: 0,
-      beforeBalanceFen: 500,
-      deltaFen: -500,
+      beforeBalanceFen: 1_800,
+      deltaFen: -1_800,
     });
     const paidOrder = submitted.find(
       (order) => order.status === "PAID_PENDING_FULFILLMENT",

@@ -80,6 +80,7 @@ export type JifengCreateOrderInput = {
   logisticsId?: number;
   logisticsName?: string;
   note?: string;
+  packageType: 1 | 2 | 3;
   platform: "temu" | "other";
   platformOrderNo?: string;
   recipientAddress: string;

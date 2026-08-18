@@ -18,6 +18,8 @@ import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
+import { calculateOrderPricing } from "./pricing";
+
 export const UNPAID_ORDER_LOCK_MS = 2 * 60 * 60 * 1_000;
 
 type OrderSubmissionErrorCode =
@@ -297,7 +299,7 @@ export async function submitTemuImportBatch(input: {
     }
 
     const quantityBySkuId = new Map<string, number>();
-    let totalAmountFen = 0;
+    let merchandiseAmountFen = 0;
     let totalQuantity = 0;
     for (const row of readyRows) {
       const skuId = row.resolvedSkuId!;
@@ -308,8 +310,8 @@ export async function submitTemuImportBatch(input: {
         safeAdd(quantityBySkuId.get(skuId) ?? 0, quantity),
       );
       totalQuantity = safeAdd(totalQuantity, quantity);
-      totalAmountFen = safeAdd(
-        totalAmountFen,
+      merchandiseAmountFen = safeAdd(
+        merchandiseAmountFen,
         calculateLineAmountFen(quantity, price.unitPriceMilliYuan),
       );
     }
@@ -324,6 +326,20 @@ export async function submitTemuImportBatch(input: {
         recipientPayloadEncrypted: row.recipientPayloadEncrypted!,
       });
     }
+
+    let pricing: ReturnType<typeof calculateOrderPricing>;
+    try {
+      pricing = calculateOrderPricing({
+        merchandiseAmountFen,
+        packageCount: shipmentRows.size,
+      });
+    } catch {
+      throw new OrderSubmissionError(
+        "AMOUNT_OVERFLOW",
+        "订单金额或包裹数量超出系统范围",
+      );
+    }
+    const { shippingFeeFen, totalAmountFen } = pricing;
 
     const orderId = crypto.randomUUID();
     const lockExpiresAt = new Date(now.getTime() + UNPAID_ORDER_LOCK_MS);
@@ -436,7 +452,9 @@ export async function submitTemuImportBatch(input: {
       actorType: "CUSTOMER",
       afterJson: {
         lockExpiresAt: finalLockExpiresAt?.toISOString() ?? null,
+        merchandiseAmountFen,
         paymentMode: paidFromWallet ? "WALLET" : null,
+        shippingFeeFen,
         status: finalStatus,
         totalAmountFen,
         totalPackageCount: shipmentRows.size,
