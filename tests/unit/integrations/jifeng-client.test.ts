@@ -93,6 +93,48 @@ describe("Jifeng API client", () => {
     expect(headers.get("Accept-Language")).toBe("zh_CN");
   });
 
+  test("accepts nullable optional fields returned by the production order query", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          data: {
+            currency: null,
+            erpNo: "TZX-6262f1e6f19c40b09016f51cc7b2cac4",
+            errorCode: null,
+            errorMsg: null,
+            logisticsFee: null,
+            orderNo: "PNJ1412823",
+            shippedTime: null,
+            status: 2,
+            trackingNo: "6064889708473275",
+          },
+          message: "SUCCESS",
+          requestId: "production-shaped-response",
+        }),
+      ),
+      nonce: () => "14",
+      now: () => 1_692_889_556_000,
+    });
+
+    await expect(
+      client.getOrder({
+        erpNo: "TZX-6262f1e6f19c40b09016f51cc7b2cac4",
+      }),
+    ).resolves.toEqual({
+      currency: undefined,
+      erpNo: "TZX-6262f1e6f19c40b09016f51cc7b2cac4",
+      errorCode: undefined,
+      errorMsg: undefined,
+      logisticsFee: undefined,
+      orderNo: "PNJ1412823",
+      shippedTime: undefined,
+      status: 2,
+      trackingNo: "6064889708473275",
+    });
+  });
+
   test.each([
     [
       "warehouses",

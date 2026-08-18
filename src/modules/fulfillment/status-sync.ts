@@ -391,18 +391,14 @@ export async function pollActiveJifengFulfillments(input: {
       await db.transaction(async (tx) => {
         const locked = await tx.execute<{
           fulfillmentId: string;
-          orderId: string;
-          orderStatus: string;
+          fulfillmentStatus: string;
         }>(sql`
           select
             f.id as "fulfillmentId",
-            s.order_id as "orderId",
-            o.status as "orderStatus"
+            f.status as "fulfillmentStatus"
           from shipment_fulfillments f
-          inner join order_shipments s on s.id = f.shipment_id
-          inner join fulfillment_orders o on o.id = s.order_id
           where f.erp_no = ${fulfillment.erpNo}
-          for update of f, o
+          for update of f
         `);
         const row = locked[0];
         if (!row) return;
@@ -412,16 +408,9 @@ export async function pollActiveJifengFulfillments(input: {
             lastErrorCode: "STATUS_POLL_FAILED",
             lastErrorMessage: "极风状态查询失败，系统将在稍后重试",
             nextRetryAt,
-            status: "EXCEPTION",
             updatedAt: now,
           })
           .where(eq(shipmentFulfillments.id, row.fulfillmentId));
-        if (row.orderStatus !== "SHIPPED") {
-          await tx
-            .update(fulfillmentOrders)
-            .set({ status: "FULFILLMENT_EXCEPTION", updatedAt: now })
-            .where(eq(fulfillmentOrders.id, row.orderId));
-        }
         await tx.insert(auditLogs).values({
           action: "JIFENG_STATUS_POLL_FAILED",
           actorId: null,
@@ -430,7 +419,7 @@ export async function pollActiveJifengFulfillments(input: {
             errorCode: "STATUS_POLL_FAILED",
             nextRetryAt: nextRetryAt.toISOString(),
           },
-          beforeJson: {},
+          beforeJson: { fulfillmentStatus: row.fulfillmentStatus },
           entityId: row.fulfillmentId,
           entityType: "SHIPMENT_FULFILLMENT",
           reason: "极风状态查询失败，已安排重试",
@@ -439,9 +428,9 @@ export async function pollActiveJifengFulfillments(input: {
           deduplicationKey: `jifeng-poll-failed:${row.fulfillmentId}`,
           entityId: row.fulfillmentId,
           entityType: "SHIPMENT_FULFILLMENT",
-          message: "极风状态查询连续失败，系统已安排重试，请检查极风连接。",
+          message: "极风状态查询失败，系统已安排重试；远端订单不会因此重复创建。",
           now,
-          severity: "ERROR",
+          severity: "WARNING",
           title: "极风状态查询失败",
           type: "JIFENG_POLL_FAILED",
         });

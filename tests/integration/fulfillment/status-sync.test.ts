@@ -16,7 +16,10 @@ import {
   skus,
   stores,
 } from "@/db/schema";
-import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
+import {
+  applyJifengOrderStatus,
+  pollActiveJifengFulfillments,
+} from "@/modules/fulfillment/status-sync";
 
 async function createTwoPackageFixture() {
   const suffix = crypto.randomUUID().slice(0, 8);
@@ -254,5 +257,40 @@ describe("Jifeng order status convergence", () => {
       lastErrorCode: "50038",
       status: "EXCEPTION",
     });
+  });
+
+  test("keeps submitted fulfillments active when a status query temporarily fails", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-18T08:00:00.000Z");
+
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async () => {
+          throw new Error("temporary response parsing failure");
+        },
+      },
+      now,
+    });
+
+    const fulfillments = await db
+      .select()
+      .from(shipmentFulfillments)
+      .orderBy(shipmentFulfillments.erpNo);
+    expect(fulfillments).toHaveLength(2);
+    expect(fulfillments.every((fulfillment) => fulfillment.status === "SUBMITTED")).toBe(
+      true,
+    );
+    expect(
+      fulfillments.every(
+        (fulfillment) =>
+          fulfillment.lastErrorCode === "STATUS_POLL_FAILED" &&
+          fulfillment.nextRetryAt?.toISOString() === "2026-08-18T08:05:00.000Z",
+      ),
+    ).toBe(true);
+    const [order] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+    expect(order.status).toBe("FULFILLING");
   });
 });

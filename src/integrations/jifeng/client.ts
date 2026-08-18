@@ -33,16 +33,31 @@ const responseSchema = z.object({
   requestId: z.string().optional(),
 });
 
+const nullableOptionalString = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? undefined);
+const nullableOptionalInteger = z
+  .coerce.number()
+  .int()
+  .nullish()
+  .transform((value) => value ?? undefined);
+const nullableOptionalNonnegativeNumber = z
+  .coerce.number()
+  .nonnegative()
+  .nullish()
+  .transform((value) => value ?? undefined);
+
 const orderDetailSchema = z.object({
-  currency: z.string().optional(),
+  currency: nullableOptionalString,
   erpNo: z.string(),
-  errorCode: z.coerce.number().int().optional(),
-  errorMsg: z.string().optional(),
-  logisticsFee: z.coerce.number().nonnegative().optional(),
-  orderNo: z.string().optional(),
-  shippedTime: z.string().optional(),
+  errorCode: nullableOptionalInteger,
+  errorMsg: nullableOptionalString,
+  logisticsFee: nullableOptionalNonnegativeNumber,
+  orderNo: nullableOptionalString,
+  shippedTime: nullableOptionalString,
   status: z.coerce.number().int().min(1).max(11),
-  trackingNo: z.string().optional(),
+  trackingNo: nullableOptionalString,
 });
 
 const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
