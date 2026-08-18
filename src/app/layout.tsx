@@ -10,6 +10,11 @@ import { BRAND } from "@/shared/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  icons: {
+    apple: BRAND.logoPath,
+    icon: BRAND.logoPath,
+    shortcut: BRAND.logoPath,
+  },
   title: {
     default: BRAND.name,
     template: `%s · ${BRAND.name}`,
