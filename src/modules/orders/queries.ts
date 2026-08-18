@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, ne, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -43,7 +43,7 @@ function isIsoDate(value: string) {
 
 export async function listCustomerOrders(
   customerId: string,
-  status?: "PENDING_PAYMENT",
+  status?: AdminOrderStatus,
 ) {
   return db
     .select({
@@ -66,7 +66,10 @@ export async function listCustomerOrders(
             eq(fulfillmentOrders.customerId, customerId),
             eq(fulfillmentOrders.status, status),
           )
-        : eq(fulfillmentOrders.customerId, customerId),
+        : and(
+            eq(fulfillmentOrders.customerId, customerId),
+            ne(fulfillmentOrders.status, "CANCELLED"),
+          ),
     )
     .orderBy(desc(fulfillmentOrders.createdAt));
 }
@@ -191,6 +194,8 @@ export async function listAdminOrders(filters: AdminOrderFilters = {}) {
   const conditions: SQL[] = [];
   if (filters.status && adminOrderStatuses.includes(filters.status)) {
     conditions.push(eq(fulfillmentOrders.status, filters.status));
+  } else {
+    conditions.push(ne(fulfillmentOrders.status, "CANCELLED"));
   }
   if (filters.customerId) conditions.push(eq(fulfillmentOrders.customerId, filters.customerId));
   if (filters.storeId) conditions.push(eq(fulfillmentOrders.storeId, filters.storeId));

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -696,6 +697,7 @@ export const orderShipments = pgTable(
       .notNull()
       .references(() => stores.id, { onDelete: "restrict" }),
     kind: shipmentKind("kind").default("NORMAL").notNull(),
+    deduplicationActive: boolean("deduplication_active").default(true).notNull(),
     externalOrderNo: varchar("external_order_no", { length: 160 }).notNull(),
     recipientPayloadEncrypted: text("recipient_payload_encrypted").notNull(),
     countryCode: varchar("country_code", { length: 2 }).default("CA").notNull(),
@@ -714,10 +716,9 @@ export const orderShipments = pgTable(
       columns: [table.orderId, table.storeId],
       foreignColumns: [fulfillmentOrders.id, fulfillmentOrders.storeId],
     }).onDelete("restrict"),
-    uniqueIndex("order_shipments_store_external_order_unique").on(
-      table.storeId,
-      table.externalOrderNo,
-    ),
+    uniqueIndex("order_shipments_store_external_order_unique")
+      .on(table.storeId, table.externalOrderNo)
+      .where(sql`${table.deduplicationActive} = true`),
     uniqueIndex("order_shipments_id_order_unique").on(
       table.id,
       table.orderId,
@@ -758,6 +759,7 @@ export const orderLines = pgTable(
     skuId: uuid("sku_id")
       .notNull()
       .references(() => skus.id, { onDelete: "restrict" }),
+    deduplicationActive: boolean("deduplication_active").default(true).notNull(),
     externalSubOrderNo: varchar("external_sub_order_no", { length: 160 }),
     externalSku: varchar("external_sku", { length: 160 }),
     skuCodeSnapshot: varchar("sku_code_snapshot", { length: 80 }).notNull(),
@@ -783,7 +785,9 @@ export const orderLines = pgTable(
     }).onDelete("restrict"),
     uniqueIndex("order_lines_store_external_sub_order_unique")
       .on(table.storeId, table.externalSubOrderNo)
-      .where(sql`${table.externalSubOrderNo} is not null`),
+      .where(
+        sql`${table.externalSubOrderNo} is not null and ${table.deduplicationActive} = true`,
+      ),
     check("order_lines_quantity_positive", sql`${table.quantity} > 0`),
     check(
       "order_lines_unit_price_milli_yuan_non_negative",

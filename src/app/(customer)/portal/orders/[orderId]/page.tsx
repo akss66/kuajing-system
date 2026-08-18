@@ -17,11 +17,11 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 const labels = {
   CANCELLED: "已取消",
   EXPIRED: "已超时",
-  FULFILLING: "履约中",
+  FULFILLING: "待仓库发货",
   FULFILLMENT_EXCEPTION: "履约异常",
   PAID_PENDING_FULFILLMENT: "已付款 / 待发货",
   PENDING_PAYMENT: "待付款",
-  SHIPPED: "已发货",
+  SHIPPED: "仓库已发货",
 } as const;
 
 function money(fen: number) {

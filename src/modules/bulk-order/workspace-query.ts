@@ -110,6 +110,7 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           .where(
             and(
               eq(fulfillmentOrders.customerId, customerId),
+              eq(orderLines.deduplicationActive, true),
               inArray(orderLines.externalSubOrderNo, allSubOrders),
             ),
           );

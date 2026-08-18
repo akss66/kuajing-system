@@ -281,7 +281,12 @@ export async function validateBulkDraft(input: {
               ),
             ),
           )
-          .where(inArray(bulkImportStoreGroups.id, [...previewGroupIds]));
+          .where(
+            and(
+              inArray(bulkImportStoreGroups.id, [...previewGroupIds]),
+              eq(orderLines.deduplicationActive, true),
+            ),
+          );
   const existingOrderKeys = new Set(
     existingRows.flatMap((row) =>
       row.externalSubOrderNo

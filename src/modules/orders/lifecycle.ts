@@ -6,6 +6,8 @@ import {
   fulfillmentOrders,
   integrationOutbox,
   inventoryReservations,
+  orderLines,
+  orderShipments,
   paymentClaims,
   settlementBatchOrders,
   settlementPaymentClaims,
@@ -577,6 +579,14 @@ export async function cancelFulfillmentOrder(input: {
         updatedAt: now,
       })
       .where(eq(fulfillmentOrders.id, input.orderId));
+    await tx
+      .update(orderShipments)
+      .set({ deduplicationActive: false })
+      .where(eq(orderShipments.orderId, input.orderId));
+    await tx
+      .update(orderLines)
+      .set({ deduplicationActive: false })
+      .where(eq(orderLines.orderId, input.orderId));
     await tx.insert(auditLogs).values({
       action: "FULFILLMENT_ORDER_CANCELLED",
       actorId: input.actorUserId,

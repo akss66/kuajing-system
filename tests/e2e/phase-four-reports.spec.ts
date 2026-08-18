@@ -164,7 +164,7 @@ test("reports and stock coverage fit approved mobile widths @mobile-only", async
   }
 
   await page.goto("/admin/inventory");
-  await expect(page.getByRole("heading", { name: "实时库存" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "实时库存", exact: true })).toBeVisible();
   await expect(page.getByText(/预计可售|暂无消耗基线/).first()).toBeVisible();
   expect(
     await page.evaluate(

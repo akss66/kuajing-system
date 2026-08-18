@@ -852,6 +852,7 @@ export async function submitBulkDraft(
         .where(
           and(
             eq(fulfillmentOrders.customerId, input.customerId),
+            eq(orderLines.deduplicationActive, true),
             inArray(orderLines.externalSubOrderNo, candidateSubOrders),
           ),
         );

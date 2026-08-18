@@ -139,6 +139,7 @@ async function duplicateSubOrders(
     .where(
       and(
         eq(orderLines.storeId, storeId),
+        eq(orderLines.deduplicationActive, true),
         inArray(
           orderLines.externalSubOrderNo,
           [...new Set(externalSubOrderNumbers)],

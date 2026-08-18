@@ -27,6 +27,8 @@ import { InsufficientInventoryError } from "@/modules/inventory/service";
 import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 import { submitTemuImportBatch } from "@/modules/orders/submission";
+import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
+import { listAdminOrders, listCustomerOrders } from "@/modules/orders/queries";
 import { adjustWalletBalance } from "@/modules/wallet/service";
 
 const baseRow: Record<(typeof TEMU_EXPORT_HEADERS)[number], string | number> = {
@@ -262,6 +264,88 @@ describe("atomic TEMU take-order submission", () => {
       .from(auditLogs)
       .where(eq(auditLogs.action, "FULFILLMENT_ORDER_SUBMITTED"));
     expect(submitAudits).toHaveLength(1);
+  });
+
+  test("a cancelled order releases duplicate protection for an identical re-import", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-SKU-A",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+
+    const firstPreview = await createPreview({
+      customerId: customer.id,
+      rows: [{}],
+      storeId: store.id,
+    });
+    const firstOrder = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: firstPreview.batchId,
+      customerId: customer.id,
+    });
+    await cancelFulfillmentOrder({
+      actorType: "CUSTOMER",
+      actorUserId: "auth-customer-submit",
+      customerId: customer.id,
+      now: new Date("2026-08-18T12:00:00.000Z"),
+      orderId: firstOrder.orderId,
+      reason: "客户取消后重新下单",
+    });
+
+    const secondPreview = await createPreview({
+      customerId: customer.id,
+      rows: [{}],
+      storeId: store.id,
+    });
+    expect(secondPreview.summary.duplicate).toBe(0);
+
+    const secondOrder = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: secondPreview.batchId,
+      customerId: customer.id,
+    });
+    expect(secondOrder.orderId).not.toBe(firstOrder.orderId);
+
+    const activeOrders = await listAdminOrders({ customerId: customer.id });
+    expect(activeOrders.map((row) => row.id)).toEqual([secondOrder.orderId]);
+    const cancelledOrders = await listAdminOrders({
+      customerId: customer.id,
+      status: "CANCELLED",
+    });
+    expect(cancelledOrders.map((row) => row.id)).toEqual([firstOrder.orderId]);
+    expect(
+      (await listCustomerOrders(customer.id)).map((row) => row.id),
+    ).toEqual([secondOrder.orderId]);
+    expect(
+      (await listCustomerOrders(customer.id, "CANCELLED")).map((row) => row.id),
+    ).toEqual([firstOrder.orderId]);
+
+    const releasedLines = await db
+      .select({ deduplicationActive: orderLines.deduplicationActive })
+      .from(orderLines)
+      .where(eq(orderLines.orderId, firstOrder.orderId));
+    const releasedShipments = await db
+      .select({ deduplicationActive: orderShipments.deduplicationActive })
+      .from(orderShipments)
+      .where(eq(orderShipments.orderId, firstOrder.orderId));
+    expect(releasedLines.every((row) => !row.deduplicationActive)).toBe(true);
+    expect(releasedShipments.every((row) => !row.deduplicationActive)).toBe(true);
+
+    await db
+      .update(fulfillmentOrders)
+      .set({
+        cancelReason: "结算批次直接取消路径",
+        status: "CANCELLED",
+      })
+      .where(eq(fulfillmentOrders.id, secondOrder.orderId));
+    const triggerReleasedLines = await db
+      .select({ deduplicationActive: orderLines.deduplicationActive })
+      .from(orderLines)
+      .where(eq(orderLines.orderId, secondOrder.orderId));
+    expect(triggerReleasedLines.every((row) => !row.deduplicationActive)).toBe(true);
   });
 
   test("rolls back the whole order when any SKU has insufficient inventory", async () => {

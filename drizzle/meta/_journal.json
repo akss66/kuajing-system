@@ -176,6 +176,13 @@
       "when": 1786937808403,
       "tag": "0024_sku_cargo_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787044176500,
+      "tag": "0025_cancelled_order_deduplication",
+      "breakpoints": true
     }
   ]
 }

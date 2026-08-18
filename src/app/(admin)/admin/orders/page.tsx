@@ -21,8 +21,8 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 const statuses: Array<{ label: string; value: AdminOrderStatus }> = [
   { label: "待付款", value: "PENDING_PAYMENT" },
   { label: "已付款 / 待发货", value: "PAID_PENDING_FULFILLMENT" },
-  { label: "履约中", value: "FULFILLING" },
-  { label: "已发货", value: "SHIPPED" },
+  { label: "待仓库发货", value: "FULFILLING" },
+  { label: "仓库已发货", value: "SHIPPED" },
   { label: "履约异常", value: "FULFILLMENT_EXCEPTION" },
   { label: "已取消", value: "CANCELLED" },
   { label: "已超时", value: "EXPIRED" },
@@ -74,6 +74,7 @@ export default async function AdminOrdersPage({
   };
 
   const [orders, options] = await Promise.all([listAdminOrders(filters), listAdminOrderFilterOptions()]);
+  const isCancelledView = filters.status === "CANCELLED";
   const pendingPaymentCount = orders.filter((order) => order.status === "PENDING_PAYMENT").length;
   const exceptionCount = orders.filter((order) => order.status === "FULFILLMENT_EXCEPTION").length;
   const totalAmountFen = orders.reduce((sum, order) => sum + order.totalAmountFen, 0);
@@ -81,17 +82,37 @@ export default async function AdminOrdersPage({
   return (
     <div className="space-y-5">
       <PageHeading
-        description="按客户、店铺、状态和日期查询拿货单，履约异常与超时订单优先扫读。"
-        title="订单管理"
+        action={
+          <Button asChild variant="outline">
+            <Link href={isCancelledView ? "/admin/orders" : "/admin/orders?status=CANCELLED"}>
+              {isCancelledView ? "返回有效拿货单" : "查看已取消拿货单"}
+            </Link>
+          </Button>
+        }
+        description={
+          isCancelledView
+            ? "已取消拿货单仅用于审计追溯，不计入有效订单数量和经营金额。"
+            : "按客户、店铺、状态和日期查询有效拿货单；已取消记录单独归档。"
+        }
+        title={isCancelledView ? "已取消拿货单" : "订单管理"}
       />
 
       <MetricStrip
-        items={[
-          { hint: "当前筛选条件下的订单数", label: "订单总数", value: String(orders.length) },
-          { hint: "等待客户线下付款", label: "待付款", tone: pendingPaymentCount ? "warning" : "default", value: String(pendingPaymentCount) },
-          { hint: "需要人工核查履约问题", label: "履约异常", tone: exceptionCount ? "danger" : "default", value: String(exceptionCount) },
-          { hint: "当前筛选结果的订单金额", label: "订单金额", value: money(totalAmountFen) },
-        ]}
+        items={
+          isCancelledView
+            ? [
+                { hint: "当前归档筛选下的取消记录", label: "已取消订单", value: String(orders.length) },
+                { hint: "取消记录中的原包裹数", label: "原包裹数", value: String(orders.reduce((sum, order) => sum + order.totalPackageCount, 0)) },
+                { hint: "取消记录中的原商品件数", label: "原商品件数", value: String(orders.reduce((sum, order) => sum + order.totalQuantity, 0)) },
+                { hint: "仅供审计，不计入经营金额", label: "取消前金额", value: money(totalAmountFen) },
+              ]
+            : [
+                { hint: "当前筛选条件下的有效订单数", label: "订单总数", value: String(orders.length) },
+                { hint: "等待客户线下付款", label: "待付款", tone: pendingPaymentCount ? "warning" : "default", value: String(pendingPaymentCount) },
+                { hint: "需要人工核查履约问题", label: "履约异常", tone: exceptionCount ? "danger" : "default", value: String(exceptionCount) },
+                { hint: "当前有效筛选结果的订单金额", label: "订单金额", value: money(totalAmountFen) },
+              ]
+        }
       />
 
       <OrderFilterBar
@@ -108,7 +129,7 @@ export default async function AdminOrdersPage({
         <WorkspacePanelHeader
           action={<PackageSearch className="size-4 text-primary" />}
           description={`当前条件共 ${orders.length} 条，最多显示 500 条。`}
-          title="拿货单"
+          title={isCancelledView ? "已取消拿货单" : "拿货单"}
         />
         <div className="hidden md:block">
           <ResponsiveDataTable>

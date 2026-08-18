@@ -112,7 +112,7 @@ describe("AdminOrderDetailPage", () => {
     expect(screen.getAllByText("实际成交额")).toHaveLength(1);
     expect(screen.getAllByText("创建时间")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "订单状态时间线" })).toBeVisible();
-    expect(screen.getByText("补发履约中")).toBeVisible();
+    expect(screen.getAllByText("补发待仓库发货")).toHaveLength(2);
     expect(screen.queryByText("FULFILLING")).not.toBeInTheDocument();
   });
 });

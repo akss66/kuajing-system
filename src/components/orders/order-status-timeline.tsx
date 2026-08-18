@@ -21,9 +21,9 @@ const shipmentLabels: Record<string, string> = {
   CANCELLED: "包裹已取消",
   CANCEL_PENDING: "包裹取消中",
   EXCEPTION: "履约异常",
-  FULFILLING: "履约中",
+  FULFILLING: "待仓库发货",
   PENDING: "待推送履约",
-  SHIPPED: "已发货",
+  SHIPPED: "仓库已发货",
   SUBMITTED: "已提交履约",
   SUBMITTING: "正在提交履约",
 };
@@ -81,9 +81,9 @@ function buildStages({
   if (orderStatus === "FULFILLMENT_EXCEPTION" || shipmentStatus === "EXCEPTION") {
     stages.push({ label: "履约异常", tone: "danger" });
   } else if (orderStatus === "SHIPPED" || shipmentStatus === "SHIPPED") {
-    stages.push({ label: "已发货" });
+    stages.push({ label: "仓库已发货" });
   } else if (orderStatus === "FULFILLING" || shipmentStatus) {
-    stages.push({ label: shipmentStatus ? (shipmentLabels[shipmentStatus] ?? "履约中") : "履约中" });
+    stages.push({ label: shipmentStatus ? (shipmentLabels[shipmentStatus] ?? "待仓库发货") : "待仓库发货" });
   } else {
     stages.push({ label: "待发货", tone: "warning" });
   }
@@ -94,7 +94,9 @@ function buildStages({
     stages.push({
       label:
         replacementStatus === "FULFILLING"
-          ? "补发履约中"
+          ? "补发待仓库发货"
+          : replacementStatus === "SHIPPED"
+            ? "补发仓库已发货"
           : replacementStatus === "PENDING_FULFILLMENT"
             ? "待补发"
             : `补发${replacementLabel}`,

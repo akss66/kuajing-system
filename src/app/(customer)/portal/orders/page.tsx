@@ -7,14 +7,14 @@ import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/worksp
 import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
-import { listCustomerOrders } from "@/modules/orders/queries";
+import { listCustomerOrders, type AdminOrderStatus } from "@/modules/orders/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const labels = {
   PENDING_PAYMENT: "待付款",
   PAID_PENDING_FULFILLMENT: "已付款，待发货",
-  FULFILLING: "履约中",
-  SHIPPED: "已发货",
+  FULFILLING: "待仓库发货",
+  SHIPPED: "仓库已发货",
   FULFILLMENT_EXCEPTION: "履约异常",
   CANCELLED: "已取消",
   EXPIRED: "已超时",
@@ -59,7 +59,10 @@ export default async function CustomerOrdersPage({
     status: selectedStatus && selectedStatus in labels ? selectedStatus : undefined,
   };
   const pendingOnly = filters.status === "PENDING_PAYMENT";
-  const allOrders = await listCustomerOrders(principal.customerId);
+  const allOrders = await listCustomerOrders(
+    principal.customerId,
+    filters.status as AdminOrderStatus | undefined,
+  );
   const orders = allOrders.filter((order) => {
     if (filters.status && order.status !== filters.status) return false;
     if (filters.orderNumber && !order.orderNumber.toLocaleLowerCase().includes(filters.orderNumber.toLocaleLowerCase())) {

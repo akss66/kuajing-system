@@ -97,7 +97,7 @@ export function MerchantTopbar({
         {audience === "admin" ? (
           <Button
             asChild
-            className="size-10 rounded-md border-0 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
+            className="size-11 rounded-md border-0 bg-transparent text-[var(--merchant-topbar-muted)] hover:bg-white/8 hover:text-white"
             size="icon"
             variant="ghost"
           >
@@ -110,7 +110,7 @@ export function MerchantTopbar({
           <DropdownMenuTrigger asChild>
             <Button
               aria-label="打开账号菜单"
-              className="min-h-10 min-w-10 max-w-48 gap-2 rounded-md border-0 bg-transparent px-1.5 text-[var(--merchant-topbar-foreground)] hover:bg-white/8 hover:text-white sm:pl-1.5 sm:pr-2"
+              className="min-h-11 min-w-11 max-w-48 gap-2 rounded-md border-0 bg-transparent px-1.5 text-[var(--merchant-topbar-foreground)] hover:bg-white/8 hover:text-white sm:pl-1.5 sm:pr-2"
               data-account-trigger="true"
               variant="ghost"
             >

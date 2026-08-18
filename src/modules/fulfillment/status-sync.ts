@@ -254,7 +254,7 @@ export async function applyJifengOrderStatus(input: {
           message: "补发包裹已由极风确认发货，可在系统订单详情查看运单。",
           now,
           severity: "INFO",
-          title: "补发已发货",
+          title: "补发仓库已发货",
           type: "REPLACEMENT_SHIPPED",
         });
       }

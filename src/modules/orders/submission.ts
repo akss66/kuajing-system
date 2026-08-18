@@ -208,6 +208,7 @@ export async function submitTemuImportBatch(input: {
         .where(
           and(
             eq(orderLines.storeId, batch.storeId),
+            eq(orderLines.deduplicationActive, true),
             inArray(orderLines.externalSubOrderNo, subOrderNumbers),
           ),
         );

@@ -104,11 +104,41 @@ describe("order workspace hierarchy", () => {
     expect(commonFilters.length).toBeGreaterThan(0);
     expect(commonFilters.length).toBeLessThanOrEqual(4);
     expect(within(filters).queryByLabelText("开始日期")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看已取消拿货单" })).toHaveAttribute(
+      "href",
+      "/admin/orders?status=CANCELLED",
+    );
 
     fireEvent.click(within(filters).getByRole("button", { name: "更多筛选" }));
     const drawer = await screen.findByRole("dialog", { name: "更多订单筛选" });
     expect(within(drawer).getByLabelText("开始日期")).toHaveValue("2026-08-01");
     expect(within(drawer).getByRole("button", { name: "关闭" })).toBeVisible();
+  });
+
+  it("keeps cancelled orders in a separate archive with clearly non-operating metrics", async () => {
+    queryMocks.listAdminOrders.mockResolvedValueOnce([
+      {
+        ...order,
+        customerCode: "C-001",
+        customerName: "客户一",
+        status: "CANCELLED",
+      },
+    ]);
+
+    render(
+      await AdminOrdersPage({
+        searchParams: Promise.resolve({ status: "CANCELLED" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "已取消拿货单" })).toBeVisible();
+    expect(screen.getByText("已取消订单")).toBeVisible();
+    expect(screen.getByText("取消前金额")).toBeVisible();
+    expect(screen.queryByText("订单金额")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回有效拿货单" })).toHaveAttribute(
+      "href",
+      "/admin/orders",
+    );
   });
 
   it("removes one active URL filter without losing the others", async () => {
@@ -242,7 +272,10 @@ describe("order workspace hierarchy", () => {
     );
 
     const timeline = screen.getByRole("region", { name: "订单状态时间线" });
-    expect(within(timeline).getByText("已发货")).toBeVisible();
-    expect(within(timeline).getByText("补发履约中")).toHaveAttribute("aria-current", "step");
+    expect(within(timeline).getByText("仓库已发货")).toBeVisible();
+    expect(within(timeline).getByText("补发待仓库发货")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
   });
 });

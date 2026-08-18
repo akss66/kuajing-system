@@ -24,9 +24,9 @@ const statusLabels: Record<string, string> = {
   CANCELLED: "已取消",
   CANCEL_PENDING: "取消中",
   EXCEPTION: "异常",
-  FULFILLING: "履约中",
+  FULFILLING: "待仓库发货",
   PENDING: "待推送",
-  SHIPPED: "已发货",
+  SHIPPED: "仓库已发货",
   SUBMITTED: "已提交极风",
   SUBMITTING: "提交中",
 };
@@ -123,7 +123,7 @@ export default async function AdminOrderDetailPage({
                 <div><p className="text-xs text-muted">发货时间</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.shippedAt)}</p></div>
                 <div><p className="text-xs text-muted">外部调用次数</p><p className="mt-1 font-medium text-ink">{shipment.attemptCount ?? 0} 次</p></div>
                 <div><p className="text-xs text-muted">下次重试</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.nextRetryAt)}</p></div>
-                <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus === "FULFILLING" ? "履约中" : shipment.replacementStatus ? formatReplacementStatus(shipment.replacementStatus) : "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
+                <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus === "FULFILLING" ? "补发待仓库发货" : shipment.replacementStatus === "SHIPPED" ? "补发仓库已发货" : shipment.replacementStatus ? formatReplacementStatus(shipment.replacementStatus) : "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
               </div>
 
               {shipment.lastErrorCode ? <div className="flex gap-3 border-b border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger sm:px-5"><CircleAlert className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">{shipment.lastErrorCode}</p><p className="mt-1">{shipment.lastErrorMessage}</p></div></div> : null}
