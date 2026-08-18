@@ -17,11 +17,10 @@ vi.mock("@/modules/reports/stock-coverage", () => ({
   getStockCoverageReport: vi.fn(),
 }));
 
-import {
-  inventoryDateBoundary,
-  toInventoryWorkspaceRow,
-} from "@/app/(admin)/admin/inventory/page";
+import { InventoryMovementsView } from "@/components/inventory/inventory-movements-view";
 import { InventoryWorkspace } from "@/components/inventory/inventory-workspace";
+import { toInventoryWorkspaceRow } from "@/app/(admin)/admin/inventory/page";
+import { inventoryDateBoundary } from "@/modules/inventory/movement-date";
 import type { ManagedAction } from "@/shared/action-state";
 
 const successfulAction: ManagedAction = async () => ({ status: "success" });
@@ -132,39 +131,28 @@ describe("inventory workspace", () => {
     expect(inventoryDateBoundary("14-08-2026", "start")).toBeUndefined();
   });
 
-  it("exposes exactly the two canonical first-level inventory views", () => {
+  it("keeps realtime inventory focused and links to the standalone movement module", () => {
     render(
       <InventoryWorkspace
-        activeView="snapshot"
         adjustInventoryAction={successfulAction}
-        movementFilters={{}}
-        movementPage={movementPage}
         rows={rows}
         setInventoryToActualCountAction={successfulAction}
       />,
     );
 
-    const viewTabs = screen.getByRole("tablist", { name: "库存视图" });
-    expect(within(viewTabs).getAllByRole("tab")).toHaveLength(2);
-    expect(within(viewTabs).getByRole("tab", { name: "实时库存" })).toHaveAttribute(
+    expect(screen.getByRole("heading", { level: 1, name: "实时库存" })).toBeVisible();
+    expect(screen.queryByRole("tablist", { name: "库存视图" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看库存流水" })).toHaveAttribute(
       "href",
-      "/admin/inventory",
+      "/admin/inventory/movements",
     );
-    expect(within(viewTabs).getByRole("tab", { name: "库存流水" })).toHaveAttribute(
-      "href",
-      "/admin/inventory?view=movements",
-    );
-    expect(within(viewTabs).queryByRole("tab", { name: /批量盘点/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "最近库存变动" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "库存流水" })).not.toBeInTheDocument();
   });
 
   it("opens a row-scoped directional adjustment with shared defaults and six-fact preview", async () => {
     render(
       <InventoryWorkspace
-        activeView="snapshot"
         adjustInventoryAction={successfulAction}
-        movementFilters={{}}
-        movementPage={movementPage}
         rows={rows}
         setInventoryToActualCountAction={successfulAction}
       />,
@@ -212,10 +200,7 @@ describe("inventory workspace", () => {
   it("keeps set-to-actual as a secondary mode and explains no-change", async () => {
     render(
       <InventoryWorkspace
-        activeView="snapshot"
         adjustInventoryAction={successfulAction}
-        movementFilters={{}}
-        movementPage={movementPage}
         rows={rows}
         setInventoryToActualCountAction={successfulAction}
       />,
@@ -234,10 +219,8 @@ describe("inventory workspace", () => {
 
   it("renders canonical movement filters, pagination, source distinction, and table/card fact parity", () => {
     render(
-      <InventoryWorkspace
-        activeView="movements"
-        adjustInventoryAction={successfulAction}
-        movementFilters={{
+      <InventoryMovementsView
+        filters={{
           actorId: "admin-1",
           from: "2026-08-01",
           movementType: "SHIPMENT",
@@ -246,8 +229,6 @@ describe("inventory workspace", () => {
           to: "2026-08-14",
         }}
         movementPage={movementPage}
-        rows={rows}
-        setInventoryToActualCountAction={successfulAction}
       />,
     );
 
@@ -260,7 +241,7 @@ describe("inventory workspace", () => {
     expect(within(filters).getByLabelText("来源")).toHaveValue("SYSTEM_ORDER_SHIPMENT");
     expect(within(filters).getByRole("link", { name: "重置筛选" })).toHaveAttribute(
       "href",
-      "/admin/inventory?view=movements",
+      "/admin/inventory/movements",
     );
 
     const table = screen.getByRole("table", { name: "库存流水列表" });
@@ -292,7 +273,7 @@ describe("inventory workspace", () => {
 
     expect(screen.getByRole("link", { name: "上一页" })).toHaveAttribute(
       "href",
-      expect.stringContaining("view=movements"),
+      "/admin/inventory/movements?sku=TZX-LOW-001&from=2026-08-01&to=2026-08-14&type=SHIPMENT&operator=admin-1&source=SYSTEM_ORDER_SHIPMENT",
     );
     expect(screen.getByRole("link", { name: "上一页" }).getAttribute("href")).not.toContain("page=");
     expect(screen.getByRole("link", { name: "下一页" })).toHaveAttribute(
@@ -303,10 +284,8 @@ describe("inventory workspace", () => {
 
   it("resets every uncontrolled movement filter when canonical URL props clear", () => {
     const { rerender } = render(
-      <InventoryWorkspace
-        activeView="movements"
-        adjustInventoryAction={successfulAction}
-        movementFilters={{
+      <InventoryMovementsView
+        filters={{
           actorId: "admin-1",
           from: "2026-08-01",
           movementType: "MANUAL_DECREASE",
@@ -315,19 +294,13 @@ describe("inventory workspace", () => {
           to: "2026-08-14",
         }}
         movementPage={movementPage}
-        rows={rows}
-        setInventoryToActualCountAction={successfulAction}
       />,
     );
 
     rerender(
-      <InventoryWorkspace
-        activeView="movements"
-        adjustInventoryAction={successfulAction}
-        movementFilters={{}}
+      <InventoryMovementsView
+        filters={{}}
         movementPage={movementPage}
-        rows={rows}
-        setInventoryToActualCountAction={successfulAction}
       />,
     );
 
