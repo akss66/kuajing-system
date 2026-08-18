@@ -14,6 +14,7 @@ import type {
   InventoryMovementPage,
   InventoryMovementSource,
 } from "@/modules/inventory/read-model";
+import { INVENTORY_MOVEMENTS_PATH } from "@/modules/inventory/movement-navigation";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 export type SerializableInventoryMovementPage = Omit<InventoryMovementPage, "rows"> & {
@@ -56,7 +57,7 @@ function sourceLabel(source: InventoryMovementSource) {
 }
 
 function movementHref(filters: InventoryMovementFilterValues, page: number) {
-  const query = new URLSearchParams({ view: "movements" });
+  const query = new URLSearchParams();
   if (filters.skuCode) query.set("sku", filters.skuCode);
   if (filters.from) query.set("from", filters.from);
   if (filters.to) query.set("to", filters.to);
@@ -64,7 +65,8 @@ function movementHref(filters: InventoryMovementFilterValues, page: number) {
   if (filters.actorId) query.set("operator", filters.actorId);
   if (filters.source) query.set("source", filters.source);
   if (page > 1) query.set("page", String(page));
-  return `/admin/inventory?${query.toString()}`;
+  const search = query.toString();
+  return `${INVENTORY_MOVEMENTS_PATH}${search ? `?${search}` : ""}`;
 }
 
 function Relation({ relation }: { relation: SerializableInventoryMovementPage["rows"][number]["relation"] }) {
@@ -95,7 +97,6 @@ export function InventoryMovementsView({
         method="get"
         role="search"
       >
-        <input name="view" type="hidden" value="movements" />
         <label className="grid gap-1.5 text-sm font-medium text-foreground">
           SKU
           <Input className="min-h-11" defaultValue={filters.skuCode} name="sku" placeholder="输入完整 SKU" />
@@ -129,7 +130,7 @@ export function InventoryMovementsView({
         <div className="flex gap-2 sm:col-span-2 xl:col-span-6 xl:justify-end">
           <Button className="min-h-11" type="submit">应用筛选</Button>
           <Button asChild className="min-h-11" variant="outline">
-            <Link href="/admin/inventory?view=movements">重置筛选</Link>
+            <Link href={INVENTORY_MOVEMENTS_PATH}>重置筛选</Link>
           </Button>
         </div>
       </form>

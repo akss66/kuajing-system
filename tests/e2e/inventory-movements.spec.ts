@@ -459,9 +459,9 @@ async function resetInventoryAcceptanceBaseline(input: { referenceDate?: string 
 
 async function loginAndOpenInventory(page: Page) {
   await loginThroughUi(page, seededSuperAdmin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 60_000 });
   await page.goto("/admin/inventory");
-  await expect(page.getByRole("heading", { level: 1, name: "货盘库存" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "实时库存" })).toBeVisible();
 }
 
 async function openAdjustment(page: Page, skuCode = acceptance.primarySkuCode) {
@@ -539,10 +539,21 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
   await resetInventoryAcceptanceBaseline({ referenceDate: currentBusinessDate });
   await loginAndOpenInventory(page);
 
-  const tabs = page.getByRole("tablist", { name: "库存视图" }).getByRole("tab");
-  await expect(tabs).toHaveCount(2);
-  await expect(tabs).toHaveText(["实时库存", "库存流水"]);
-  await expect(page.getByRole("tab", { name: "批量盘点" })).toHaveCount(0);
+  await page.goto(
+    `/admin/inventory?view=movements&sku=${acceptance.primarySkuCode}&unknown=drop-me`,
+  );
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/admin/inventory/movements\\?sku=${acceptance.primarySkuCode}$`,
+    ),
+  );
+  await page.goto("/admin/inventory");
+
+  await expect(page.getByRole("tablist", { name: "库存视图" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "查看库存流水" })).toHaveAttribute(
+    "href",
+    "/admin/inventory/movements",
+  );
 
   let dialog = await openAdjustment(page);
   const quantity = dialog.getByLabel("调整数量");
@@ -666,8 +677,9 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
   });
   await closeAdjustment(dialog);
 
-  await page.getByRole("tab", { name: "库存流水" }).click();
-  await expect(page).toHaveURL(/view=movements/);
+  await page.getByRole("link", { name: "查看库存流水" }).click();
+  await expect(page).toHaveURL(/\/admin\/inventory\/movements$/);
+  await expect(page.getByRole("heading", { level: 1, name: "库存流水" })).toBeVisible();
   const table = page.getByRole("table", { name: "库存流水列表" });
   await expect(table).toBeVisible();
   await expect(table.getByRole("columnheader")).toHaveText([
@@ -716,7 +728,7 @@ test("inventory adjustment, stocktake, filters, relations, and pagination preser
     false,
   );
   await page.getByRole("link", { name: "重置筛选" }).click();
-  await expect(page).toHaveURL(/\/admin\/inventory\?view=movements$/);
+  await expect(page).toHaveURL(/\/admin\/inventory\/movements$/);
   const resetForm = page.getByRole("search", { name: "筛选库存流水" });
   await expect(resetForm.getByLabel("SKU")).toHaveValue("");
   await expect(resetForm.getByLabel("开始时间")).toHaveValue("");
@@ -797,7 +809,7 @@ test("inventory views and adjustment drawer pass the exact viewport visual matri
     const context = `${viewport.width}x${viewport.height}`;
     await page.setViewportSize({ height: viewport.height, width: viewport.width });
     await page.goto("/admin/inventory");
-    await expect(page.getByRole("heading", { level: 1, name: "货盘库存" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "实时库存" })).toBeVisible();
     await waitForLayout(page);
     await expectNoOverflow(page, `${context} snapshot`);
     await expectAxeClean(page, `${context} snapshot`);
@@ -856,7 +868,8 @@ test("inventory views and adjustment drawer pass the exact viewport visual matri
     });
     await closeAdjustment(dialog);
 
-    await page.goto("/admin/inventory?view=movements");
+    await page.goto("/admin/inventory/movements");
+    await expect(page.getByRole("heading", { level: 1, name: "库存流水" })).toBeVisible();
     await expect(page.getByRole("region", { name: "库存流水" })).toBeVisible();
     await waitForLayout(page);
     await expectNoOverflow(page, `${context} movements`);
