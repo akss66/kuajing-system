@@ -120,6 +120,7 @@ export async function adjustInventoryAction(
   }
 
   revalidatePath("/admin/inventory");
+  revalidatePath("/admin/inventory/movements");
   revalidatePath("/admin");
   return { message: "库存已调整并记录流水。", status: "success" };
 }
@@ -179,6 +180,7 @@ export async function setInventoryToActualCountAction(
   }
 
   revalidatePath("/admin/inventory");
+  revalidatePath("/admin/inventory/movements");
   revalidatePath("/admin");
   return { message: "盘点库存已更新并记录流水。", status: "success" };
 }

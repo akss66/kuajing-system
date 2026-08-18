@@ -69,7 +69,7 @@ const workspaceRoutes = [
   },
   {
     audience: "admin" as const,
-    heading: "货盘库存",
+    heading: "实时库存",
     expectedTexts: [
       "实时库存",
       "库存流水",
@@ -82,6 +82,15 @@ const workspaceRoutes = [
     screenshot: "admin-inventory",
     shouldShowMetricStrip: false,
     workspaceSelector: "[data-inventory-workspace]",
+  },
+  {
+    audience: "admin" as const,
+    heading: "库存流水",
+    expectedTexts: ["SKU", "流水类型", "操作人", "来源", "没有符合条件的库存流水。"],
+    path: "/admin/inventory/movements",
+    screenshot: "admin-inventory-movements",
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-inventory-movements-module]",
   },
   {
     audience: "admin" as const,
@@ -431,7 +440,9 @@ for (const route of workspaceRoutes) {
 
     await expect(page).toHaveURL(new RegExp(route.path.replace(/\//g, "\\/")));
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", route.audience);
-    await expect(page.getByRole("heading", { name: route.heading })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { exact: true, name: route.heading }),
+    ).toBeVisible();
     await expect(page.locator("[data-page-heading]")).toBeVisible();
     await expect(page.locator("main")).toHaveCSS("background-color", "rgb(244, 245, 245)");
 

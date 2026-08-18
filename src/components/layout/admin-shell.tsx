@@ -9,6 +9,7 @@ import {
   Building2,
   ClipboardList,
   FileSearch,
+  History,
   LayoutDashboard,
   PackageSearch,
   PlugZap,
@@ -19,6 +20,7 @@ import {
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import type { AuthenticatedIdentity } from "@/modules/identity/principal";
+import { INVENTORY_MOVEMENTS_PATH } from "@/modules/inventory/movement-navigation";
 
 import { MerchantShellFrame } from "./merchant-shell-frame";
 import { MerchantTopbar } from "./merchant-topbar";
@@ -48,7 +50,8 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
       items: [
         { href: "/admin/customers", icon: Building2, label: "客户与店铺" },
         { href: "/admin/catalog", icon: PackageSearch, label: "商品与 SKU" },
-        { href: "/admin/inventory", icon: Boxes, label: "货盘库存" },
+        { href: "/admin/inventory", icon: Boxes, label: "实时库存", exact: true },
+        { href: INVENTORY_MOVEMENTS_PATH, icon: History, label: "库存流水" },
       ],
     },
     {

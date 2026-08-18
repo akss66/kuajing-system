@@ -87,6 +87,14 @@ describe("merchant shells", () => {
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "客户与店铺" })).toBeVisible();
+    expect(within(navigation).getByRole("link", { name: "实时库存" })).toHaveAttribute(
+      "href",
+      "/admin/inventory",
+    );
+    expect(within(navigation).getByRole("link", { name: "库存流水" })).toHaveAttribute(
+      "href",
+      "/admin/inventory/movements",
+    );
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
     fireEvent.click(within(navigation).getByRole("button", { name: "系统管理" }));
     expect(within(navigation).getByRole("link", { name: "账号管理" })).toBeVisible();
@@ -175,6 +183,26 @@ describe("merchant shells", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("marks only the standalone inventory movement entry current", () => {
+    navigationState.pathname = "/admin/inventory/movements";
+
+    render(
+      <AdminShell identity={adminIdentity} principalKind="SUPER_ADMIN">
+        <div>内容</div>
+      </AdminShell>,
+    );
+
+    const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
+    expect(within(navigation).getByRole("link", { name: "库存流水" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(navigation).getByRole("link", { name: "实时库存" })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
   });
 
   it("semantically marks and strengthens only the group containing the current route", () => {

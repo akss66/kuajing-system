@@ -115,6 +115,9 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
   await expect(page.getByRole("heading", { name: "审计日志" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "库存调整" }).first()).toBeVisible();
   await page.goto("/admin/inventory?view=movements&sku=TZX-DEMO-001");
+  await expect(page).toHaveURL(
+    /\/admin\/inventory\/movements\?sku=TZX-DEMO-001$/,
+  );
   await expect(page.getByRole("table", { name: "库存流水列表" })).toContainText(
     "首批测试库存",
   );

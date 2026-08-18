@@ -275,10 +275,17 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     },
     {
       audience: "admin",
-      heading: "货盘库存",
+      heading: "实时库存",
       keyTarget: { name: "搜索库存 SKU", role: "searchbox" },
       pageType: "resource-list",
       path: "/admin/inventory",
+    },
+    {
+      audience: "admin",
+      heading: "库存流水",
+      keyTarget: { name: "应用筛选", role: "button" },
+      pageType: "resource-list",
+      path: "/admin/inventory/movements",
     },
     {
       audience: "admin",

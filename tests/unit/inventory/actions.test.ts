@@ -109,6 +109,9 @@ describe("inventory actions", () => {
         },
       );
       expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/admin/inventory");
+      expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
+        "/admin/inventory/movements",
+      );
       expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/admin");
     },
   );
@@ -236,6 +239,9 @@ describe("inventory actions", () => {
       },
     );
     expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/admin/inventory");
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
+      "/admin/inventory/movements",
+    );
     expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/admin");
   });
 
