@@ -100,7 +100,7 @@ export function CustomerTaskDashboard({
             </div>
             <div className="divide-y divide-border">
               <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
-              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要查看订单进度或联系运营" href="/portal/orders" icon={AlertTriangle} label="履约异常" tone="danger" />
+              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要查看订单进度或联系运营" href="/portal/orders" icon={AlertTriangle} label="仓库处理异常" tone="danger" />
             </div>
           </div>
         </WorkspacePanel>

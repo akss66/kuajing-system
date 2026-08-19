@@ -23,7 +23,7 @@ const statuses: Array<{ label: string; value: AdminOrderStatus }> = [
   { label: "已付款 / 待发货", value: "PAID_PENDING_FULFILLMENT" },
   { label: "待仓库发货", value: "FULFILLING" },
   { label: "仓库已发货", value: "SHIPPED" },
-  { label: "履约异常", value: "FULFILLMENT_EXCEPTION" },
+  { label: "仓库处理异常", value: "FULFILLMENT_EXCEPTION" },
   { label: "已取消", value: "CANCELLED" },
   { label: "已超时", value: "EXPIRED" },
 ];
@@ -109,7 +109,7 @@ export default async function AdminOrdersPage({
             : [
                 { hint: "当前筛选条件下的有效订单数", label: "订单总数", value: String(orders.length) },
                 { hint: "等待客户线下付款", label: "待付款", tone: pendingPaymentCount ? "warning" : "default", value: String(pendingPaymentCount) },
-                { hint: "需要人工核查履约问题", label: "履约异常", tone: exceptionCount ? "danger" : "default", value: String(exceptionCount) },
+                { hint: "需要人工核查仓库处理问题", label: "仓库处理异常", tone: exceptionCount ? "danger" : "default", value: String(exceptionCount) },
                 { hint: "当前有效筛选结果的订单金额", label: "订单金额", value: money(totalAmountFen) },
               ]
         }

@@ -259,6 +259,113 @@ describe("Jifeng order status convergence", () => {
     });
   });
 
+  test("releases only the cancelled package reservation and marks the order exceptional", async () => {
+    const fixture = await createTwoPackageFixture();
+    const cancelledAt = new Date("2026-08-19T02:00:00.000Z");
+
+    const result = await applyJifengOrderStatus({
+      detail: {
+        erpNo: fixture.fulfillments[0].erpNo,
+        orderNo: fixture.shipments[0].externalOrderNo ?? undefined,
+        status: 9,
+      },
+      now: cancelledAt,
+      source: "POLL",
+    });
+
+    expect(result).toEqual({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+      status: "CANCELLED",
+    });
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(20);
+    expect(await db.select().from(inventoryMovements)).toHaveLength(0);
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+    expect(
+      (
+        await db
+          .select()
+          .from(fulfillmentOrders)
+          .where(eq(fulfillmentOrders.id, fixture.order.id))
+      )[0].status,
+    ).toBe("FULFILLMENT_EXCEPTION");
+    expect(
+      (
+        await db
+          .select()
+          .from(shipmentFulfillments)
+          .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id))
+      )[0],
+    ).toMatchObject({
+      cancelledAt,
+      jifengStatus: 9,
+      nextRetryAt: null,
+      status: "CANCELLED",
+    });
+
+    expect(
+      await applyJifengOrderStatus({
+        detail: { erpNo: fixture.fulfillments[0].erpNo, status: 9 },
+        now: new Date("2026-08-19T02:01:00.000Z"),
+        source: "WEBHOOK",
+      }),
+    ).toEqual({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+      status: "ALREADY_CANCELLED",
+    });
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+    expect(
+      (await db.select().from(auditLogs)).filter(
+        (entry) => entry.action === "JIFENG_SHIPMENT_CANCELLED",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("repairs a previously cancelled package whose parent order stayed fulfilling", async () => {
+    const fixture = await createTwoPackageFixture();
+    const cancelledAt = new Date("2026-08-18T10:26:15.658Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ cancelledAt, jifengStatus: 9, status: "CANCELLED" })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+
+    expect(
+      await applyJifengOrderStatus({
+        detail: { erpNo: fixture.fulfillments[0].erpNo, status: 9 },
+        now: new Date("2026-08-19T02:10:00.000Z"),
+        source: "POLL",
+      }),
+    ).toEqual({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+      status: "CANCELLED",
+    });
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+    expect(
+      (
+        await db
+          .select()
+          .from(fulfillmentOrders)
+          .where(eq(fulfillmentOrders.id, fixture.order.id))
+      )[0].status,
+    ).toBe("FULFILLMENT_EXCEPTION");
+    expect(
+      (
+        await db
+          .select()
+          .from(shipmentFulfillments)
+          .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id))
+      )[0].cancelledAt,
+    ).toEqual(cancelledAt);
+  });
+
   test("keeps submitted fulfillments active when a status query temporarily fails", async () => {
     const fixture = await createTwoPackageFixture();
     const now = new Date("2026-08-18T08:00:00.000Z");

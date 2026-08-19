@@ -63,7 +63,7 @@ export default async function ReplacementsPage() {
         <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
           <div>
             <h2 className="text-base font-semibold text-foreground" id="replacement-queue-title">待处理补发</h2>
-            <p className="mt-1 text-sm text-muted-foreground">按最近创建时间排列，优先回到订单处理履约异常。</p>
+            <p className="mt-1 text-sm text-muted-foreground">按最近创建时间排列，优先回到订单处理仓库异常。</p>
           </div>
           <span className="text-sm tabular-nums text-muted-foreground">{pendingRows.length} 项</span>
         </div>

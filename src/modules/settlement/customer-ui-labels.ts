@@ -19,7 +19,7 @@ const orderStatusLabels = {
   CANCELLED: "已取消",
   EXPIRED: "已超时",
   FULFILLING: "待仓库发货",
-  FULFILLMENT_EXCEPTION: "履约异常",
+  FULFILLMENT_EXCEPTION: "仓库处理异常",
   PAID_PENDING_FULFILLMENT: "已付款 / 待发货",
   PENDING_PAYMENT: "待付款",
   SHIPPED: "仓库已发货",

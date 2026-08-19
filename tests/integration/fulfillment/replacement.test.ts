@@ -381,7 +381,7 @@ describe("replacement fulfillment", () => {
   test.each([
     [6, "FULFILLING", "FULFILLING", "ACTIVE", 10],
     [7, "SHIPPED", "SHIPPED", "CONSUMED", 9],
-    [9, "CANCELLED", "CANCELLED", "ACTIVE", 10],
+    [9, "CANCELLED", "CANCELLED", "RELEASED", 10],
     [8, "EXCEPTION", "EXCEPTION", "ACTIVE", 10],
   ] as const)(
     "maps reconciled replacement Jifeng status %s without flattening lifecycle semantics",

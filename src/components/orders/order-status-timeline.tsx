@@ -20,7 +20,7 @@ type TimelineStage = {
 const shipmentLabels: Record<string, string> = {
   CANCELLED: "包裹已取消",
   CANCEL_PENDING: "包裹取消中",
-  EXCEPTION: "履约异常",
+  EXCEPTION: "仓库处理异常",
   FULFILLING: "待仓库发货",
   PENDING: "待推送履约",
   SHIPPED: "仓库已发货",
@@ -79,7 +79,7 @@ function buildStages({
 
   const shipmentStatus = mostRelevantStatus(shipmentStatuses);
   if (orderStatus === "FULFILLMENT_EXCEPTION" || shipmentStatus === "EXCEPTION") {
-    stages.push({ label: "履约异常", tone: "danger" });
+    stages.push({ label: "仓库处理异常", tone: "danger" });
   } else if (orderStatus === "SHIPPED" || shipmentStatus === "SHIPPED") {
     stages.push({ label: "仓库已发货" });
   } else if (orderStatus === "FULFILLING" || shipmentStatus) {
@@ -118,7 +118,7 @@ export function OrderStatusTimeline(props: OrderStatusTimelineProps) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-ink">订单进度</h2>
-          <p className="mt-1 text-sm text-muted">按付款、履约和补发的真实状态显示当前进度。</p>
+          <p className="mt-1 text-sm text-muted">按付款、仓库处理和补发的真实状态显示当前进度。</p>
         </div>
         <Clock3 aria-hidden="true" className="size-5 shrink-0 text-primary" />
       </div>

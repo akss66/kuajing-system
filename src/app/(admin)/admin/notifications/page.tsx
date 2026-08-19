@@ -80,7 +80,7 @@ export default async function NotificationsPage() {
           { href: "/admin", label: "管理工作台" },
           { label: "系统通知" },
         ]}
-        description="同步展示履约异常、补发提醒与库存预警，不暴露客户隐私字段。"
+        description="同步展示仓库处理异常、补发提醒与库存预警，不暴露客户隐私字段。"
         title="系统通知"
       />
 

@@ -229,7 +229,7 @@ export async function getCustomerTaskDashboard(
     primaryContinuationTarget = {
       href: "/portal/orders",
       kind: "FULFILLMENT_EXCEPTION",
-      label: "查看履约异常",
+      label: "查看仓库处理异常",
     };
   }
 

@@ -42,6 +42,7 @@ export async function applyJifengOrderStatus(input: {
 
   const apply = async (tx: DbTransaction) => {
     const rows = await tx.execute<{
+      fulfillmentCancelledAt: Date | string | null;
       fulfillmentId: string;
       fulfillmentStatus: string;
       kind: string;
@@ -51,6 +52,7 @@ export async function applyJifengOrderStatus(input: {
       shipmentId: string;
     }>(sql`
       select
+        f.cancelled_at as "fulfillmentCancelledAt",
         f.id as "fulfillmentId",
         f.status as "fulfillmentStatus",
         s.id as "shipmentId",
@@ -72,6 +74,17 @@ export async function applyJifengOrderStatus(input: {
       return {
         orderStatus: current.orderStatus as "FULFILLING" | "SHIPPED",
         status: "ALREADY_SHIPPED" as const,
+      };
+    }
+    if (
+      current.fulfillmentStatus === "CANCELLED" &&
+      input.detail.status === 9 &&
+      (current.replacementRequestId !== null ||
+        current.orderStatus === "FULFILLMENT_EXCEPTION")
+    ) {
+      return {
+        orderStatus: current.orderStatus,
+        status: "ALREADY_CANCELLED" as const,
       };
     }
 
@@ -270,7 +283,7 @@ export async function applyJifengOrderStatus(input: {
           externalOrderNo: input.detail.orderNo ?? null,
           jifengStatus: input.detail.status,
           lastErrorCode: String(input.detail.errorCode ?? input.detail.status),
-          lastErrorMessage: "极风报告履约异常，请在极风后台核查",
+          lastErrorMessage: "极风报告仓库处理异常，请在极风后台核查",
           status: "EXCEPTION",
           updatedAt: now,
         })
@@ -303,26 +316,140 @@ export async function applyJifengOrderStatus(input: {
         },
         entityId: current.shipmentId,
         entityType: "ORDER_SHIPMENT",
-        reason: "极风返回履约异常状态",
+        reason: "极风返回仓库处理异常状态",
       });
       await createSystemNotification(tx, {
         deduplicationKey: `jifeng-exception:${current.fulfillmentId}:${input.detail.status}`,
         entityId: current.shipmentId,
         entityType: "ORDER_SHIPMENT",
-        message: `极风包裹状态异常（状态码 ${input.detail.status}），请进入履约详情处理。`,
+        message: `极风包裹状态异常（状态码 ${input.detail.status}），请进入订单详情处理。`,
         now,
         severity: "ERROR",
-        title: "极风履约异常",
+        title: "极风仓库处理异常",
         type: "JIFENG_EXCEPTION",
       });
       return { orderStatus, status: "EXCEPTION" as const };
     }
 
-    const status = input.detail.status === 9 ? "CANCELLED" : "FULFILLING";
+    if (input.detail.status === 9) {
+      const quantities = await tx.execute<{ quantity: number; skuId: string }>(sql`
+        select sku_id as "skuId", sum(quantity)::int as quantity
+        from order_lines
+        where shipment_id = ${current.shipmentId}
+        group by sku_id
+        order by sku_id
+      `);
+      const referenceType = current.replacementRequestId
+        ? "REPLACEMENT_REQUEST"
+        : "FULFILLMENT_ORDER";
+      const referenceId = current.replacementRequestId ?? current.orderId;
+      for (const item of quantities) {
+        const reservationRows = await tx.execute<{ id: string; quantity: number }>(sql`
+          select id, quantity
+          from inventory_reservations
+          where reference_type = ${referenceType}
+            and reference_id = ${referenceId}
+            and sku_id = ${item.skuId}
+            and status = 'ACTIVE'
+          for update
+        `);
+        const reservation = reservationRows[0];
+        if (!reservation || reservation.quantity < item.quantity) {
+          throw new Error("极风取消包裹缺少足额库存锁定，请人工核查");
+        }
+        if (reservation.quantity === item.quantity) {
+          await tx
+            .update(inventoryReservations)
+            .set({
+              expiresAt: null,
+              releaseReason: "极风状态同步确认包裹已取消",
+              status: "RELEASED",
+              updatedAt: now,
+            })
+            .where(eq(inventoryReservations.id, reservation.id));
+        } else {
+          await tx
+            .update(inventoryReservations)
+            .set({ quantity: reservation.quantity - item.quantity, updatedAt: now })
+            .where(eq(inventoryReservations.id, reservation.id));
+        }
+      }
+
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          cancelledAt: current.fulfillmentCancelledAt
+            ? new Date(current.fulfillmentCancelledAt)
+            : now,
+          externalOrderNo: input.detail.orderNo ?? null,
+          jifengStatus: 9,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          nextRetryAt: null,
+          status: "CANCELLED",
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+
+      const orderStatus = current.replacementRequestId
+        ? current.orderStatus
+        : "FULFILLMENT_EXCEPTION";
+      if (current.replacementRequestId) {
+        await tx
+          .update(replacementRequests)
+          .set({ status: "CANCELLED", updatedAt: now })
+          .where(eq(replacementRequests.id, current.replacementRequestId));
+      } else {
+        await tx
+          .update(fulfillmentOrders)
+          .set({
+            cancelReason: "极风确认包裹已取消，需人工处理",
+            status: "FULFILLMENT_EXCEPTION",
+            updatedAt: now,
+          })
+          .where(eq(fulfillmentOrders.id, current.orderId));
+      }
+      await tx.insert(auditLogs).values({
+        action: "JIFENG_SHIPMENT_CANCELLED",
+        actorId: null,
+        actorType: "SYSTEM",
+        afterJson: {
+          fulfillmentStatus: "CANCELLED",
+          jifengStatus: 9,
+          orderStatus,
+          source: input.source,
+        },
+        beforeJson: {
+          fulfillmentStatus: current.fulfillmentStatus,
+          orderStatus: current.orderStatus,
+        },
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        reason: "极风状态同步确认包裹已取消",
+      });
+      await enqueueCargoSyncEvent(tx, {
+        idempotencyKey: `shipment-cancelled:${current.shipmentId}`,
+        now,
+        reason: "cancelled-shipment-inventory-released",
+      });
+      await createSystemNotification(tx, {
+        deduplicationKey: `jifeng-cancelled:${current.fulfillmentId}`,
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        message: "极风已取消包裹，系统已释放对应库存锁定，请进入订单详情处理。",
+        now,
+        severity: "WARNING",
+        title: "极风包裹已取消",
+        type: "JIFENG_EXCEPTION",
+      });
+      return { orderStatus, status: "CANCELLED" as const };
+    }
+
+    const status = "FULFILLING";
     await tx
       .update(shipmentFulfillments)
       .set({
-        cancelledAt: status === "CANCELLED" ? now : null,
+        cancelledAt: null,
         externalOrderNo: input.detail.orderNo ?? null,
         jifengStatus: input.detail.status,
         lastErrorCode: null,
@@ -335,12 +462,12 @@ export async function applyJifengOrderStatus(input: {
       await tx
         .update(replacementRequests)
         .set({
-          status: status === "CANCELLED" ? "CANCELLED" : "FULFILLING",
+          status: "FULFILLING",
           updatedAt: now,
         })
         .where(eq(replacementRequests.id, current.replacementRequestId));
     }
-    if (current.orderStatus !== "SHIPPED" && status !== "CANCELLED") {
+    if (current.orderStatus !== "SHIPPED") {
       await tx
         .update(fulfillmentOrders)
         .set({ status: "FULFILLING", updatedAt: now })

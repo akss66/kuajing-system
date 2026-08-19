@@ -116,7 +116,7 @@ export function AdminOperationsDashboard({
                 count={dashboard.fulfillmentExceptionCount}
                 href="/admin/orders?status=FULFILLMENT_EXCEPTION"
                 icon={AlertTriangle}
-                label="履约异常"
+                label="仓库处理异常"
                 tone="danger"
               />
             </div>

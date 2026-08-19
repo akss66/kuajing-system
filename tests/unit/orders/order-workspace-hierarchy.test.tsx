@@ -278,4 +278,21 @@ describe("order workspace hierarchy", () => {
       "step",
     );
   });
+
+  it("describes warehouse processing exceptions without fulfillment jargon", () => {
+    render(
+      <OrderStatusTimeline
+        orderStatus="FULFILLMENT_EXCEPTION"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["EXCEPTION"]}
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("仓库处理异常")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(timeline).queryByText("履约异常")).not.toBeInTheDocument();
+  });
 });
