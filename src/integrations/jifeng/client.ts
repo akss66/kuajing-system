@@ -64,6 +64,9 @@ const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
 // Official business codes 50019 (ERP order exists) and 50038 (processing)
 // require an order query/reconciliation; blind create retries can duplicate orders.
 const retryableCodes = new Set([-1, 1, 10017, 10018]);
+const safeBusinessErrorMessages = new Map<number, string>([
+  [50026, "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存"],
+]);
 
 export class JifengApiError extends Error {
   readonly code: string;
@@ -245,7 +248,9 @@ export class JifengClient {
 
     throw new JifengApiError({
       code: String(parsed.data.code),
-      message: `极风接口调用失败（${parsed.data.code}）`,
+      message:
+        safeBusinessErrorMessages.get(parsed.data.code) ??
+        `极风接口调用失败（${parsed.data.code}）`,
       requestId: parsed.data.requestId,
       retryable: retryableCodes.has(parsed.data.code),
     });

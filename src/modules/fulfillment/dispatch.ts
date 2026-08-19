@@ -250,7 +250,12 @@ async function claimEvent(eventId: string, now: Date) {
       ["PENDING_FULFILLMENT", "EXCEPTION"].includes(
         event.replacementStatus ?? "",
       );
-    if (order.status !== "PAID_PENDING_FULFILLMENT" && !replacementEligible) {
+    const orderEligibleForPackageDispatch = [
+      "PAID_PENDING_FULFILLMENT",
+      "FULFILLING",
+      "FULFILLMENT_EXCEPTION",
+    ].includes(order.status);
+    if (!orderEligibleForPackageDispatch && !replacementEligible) {
       const skippedAs =
         order.status === "CANCELLED" ? "CANCELLED" : "NOT_ELIGIBLE";
       const errorCode =

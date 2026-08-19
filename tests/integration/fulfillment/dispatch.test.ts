@@ -180,6 +180,46 @@ async function createShipmentFixture(
   return { order, shipment, sku, store };
 }
 
+async function addSiblingShipment(
+  fixture: Awaited<ReturnType<typeof createShipmentFixture>>,
+) {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const [shipment] = await db
+    .insert(orderShipments)
+    .values({
+      externalOrderNo: `TEMU-SIBLING-${suffix}`,
+      orderId: fixture.order.id,
+      recipientPayloadEncrypted: encryptPii(recipient),
+      storeId: fixture.store.id,
+    })
+    .returning();
+  await db.insert(orderLines).values({
+    externalSku: `EXT-SIBLING-${suffix}`,
+    lineAmountFen: 450,
+    orderId: fixture.order.id,
+    quantity: 1,
+    shipmentId: shipment.id,
+    skuCodeSnapshot: fixture.sku.skuCode,
+    skuId: fixture.sku.id,
+    skuNameSnapshot: fixture.sku.name,
+    storeId: fixture.store.id,
+    unitPriceFen: 450,
+  });
+  await db
+    .update(fulfillmentOrders)
+    .set({
+      totalAmountFen: 1_350,
+      totalPackageCount: 2,
+      totalQuantity: 3,
+    })
+    .where(eq(fulfillmentOrders.id, fixture.order.id));
+  await db
+    .update(inventoryReservations)
+    .set({ quantity: 3 })
+    .where(eq(inventoryReservations.referenceId, fixture.order.id));
+  return shipment;
+}
+
 describe("paid order Jifeng dispatch", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
@@ -419,6 +459,87 @@ describe("paid order Jifeng dispatch", () => {
       responseMetadata: { requestId: "request-success" },
     });
     expect(dispatchAudits).toHaveLength(1);
+  });
+
+  test("dispatches every package sequentially after the order enters fulfillment", async () => {
+    const fixture = await createShipmentFixture();
+    const sibling = await addSiblingShipment(fixture);
+    expect(await enqueuePaidOrdersForFulfillment()).toBe(2);
+    const events = await db.select().from(integrationOutbox);
+    const firstEvent = events.find(
+      (event) => event.aggregateId === fixture.shipment.id,
+    );
+    const siblingEvent = events.find((event) => event.aggregateId === sibling.id);
+    expect(firstEvent).toBeDefined();
+    expect(siblingEvent).toBeDefined();
+    const createOrder = vi.fn(async () => ({ data: null }));
+
+    await expect(
+      processJifengCreateOrderEvent({
+        client: { createOrder },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: firstEvent!.id,
+      }),
+    ).resolves.toEqual({ status: "COMPLETED" });
+    await expect(
+      processJifengCreateOrderEvent({
+        client: { createOrder },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: siblingEvent!.id,
+      }),
+    ).resolves.toEqual({ status: "COMPLETED" });
+
+    expect(createOrder).toHaveBeenCalledTimes(2);
+    const fulfillments = await db.select().from(shipmentFulfillments);
+    expect(fulfillments).toHaveLength(2);
+    expect(fulfillments.every((row) => row.status === "SUBMITTED")).toBe(true);
+  });
+
+  test("keeps sibling packages dispatchable after one package lacks Jifeng inventory", async () => {
+    const fixture = await createShipmentFixture();
+    const sibling = await addSiblingShipment(fixture);
+    expect(await enqueuePaidOrdersForFulfillment()).toBe(2);
+    const events = await db.select().from(integrationOutbox);
+    const failedEvent = events.find(
+      (event) => event.aggregateId === fixture.shipment.id,
+    );
+    const siblingEvent = events.find((event) => event.aggregateId === sibling.id);
+    expect(failedEvent).toBeDefined();
+    expect(siblingEvent).toBeDefined();
+    const createOrder = vi.fn(async (input: JifengCreateOrderInput) => {
+      if (input.erpNo === `TZX-${fixture.shipment.id.replaceAll("-", "")}`) {
+        throw new JifengApiError({
+          code: "50026",
+          message: "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存",
+          retryable: false,
+        });
+      }
+      return { data: null };
+    });
+
+    await expect(
+      processJifengCreateOrderEvent({
+        client: { createOrder },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: failedEvent!.id,
+      }),
+    ).resolves.toEqual({ status: "FAILED" });
+    await expect(
+      processJifengCreateOrderEvent({
+        client: { createOrder },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: siblingEvent!.id,
+      }),
+    ).resolves.toEqual({ status: "COMPLETED" });
+
+    expect(createOrder).toHaveBeenCalledTimes(2);
+    const fulfillments = await db.select().from(shipmentFulfillments);
+    expect(
+      fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
+    ).toMatchObject({ lastErrorCode: "50026", status: "EXCEPTION" });
+    expect(
+      fulfillments.find((row) => row.shipmentId === sibling.id),
+    ).toMatchObject({ lastErrorCode: null, status: "SUBMITTED" });
   });
 
   test("never calls Jifeng for an event whose local order cancellation already committed", async () => {

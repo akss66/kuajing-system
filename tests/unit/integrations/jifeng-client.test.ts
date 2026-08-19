@@ -7,6 +7,7 @@ import {
   signJifengRequest,
   type JifengSigningInput,
 } from "@/integrations/jifeng";
+import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 
 const credentials = {
   accessToken: "1b56814f081c432cb82751be145261d3",
@@ -414,6 +415,26 @@ describe("Jifeng API client", () => {
 
     expect(error).toBeInstanceOf(JifengApiError);
     expect(error).toMatchObject({ code: String(code), retryable });
+  });
+
+  test("shows a safe actionable message for insufficient Jifeng warehouse stock", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: async () =>
+        Response.json({
+          code: 50026,
+          data: null,
+          message: "The inventory of SKU is insufficient",
+        }),
+    });
+
+    await expect(
+      client.createOrder({} as JifengCreateOrderInput),
+    ).rejects.toMatchObject({
+      code: "50026",
+      message: "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存",
+      retryable: false,
+    });
   });
 
   test.each([50018, 50060])(
