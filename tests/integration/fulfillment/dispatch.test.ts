@@ -31,6 +31,7 @@ import {
   retryJifengShipment,
   type JifengCreateOrderPort,
 } from "@/modules/fulfillment/dispatch";
+import { cancelJifengShipment } from "@/modules/fulfillment/replacement";
 import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import type { TemuRecipient } from "@/modules/order-import/temu-parser";
@@ -540,6 +541,109 @@ describe("paid order Jifeng dispatch", () => {
     expect(
       fulfillments.find((row) => row.shipmentId === sibling.id),
     ).toMatchObject({ lastErrorCode: null, status: "SUBMITTED" });
+    expect(
+      (
+        await db
+          .select()
+          .from(fulfillmentOrders)
+          .where(eq(fulfillmentOrders.id, fixture.order.id))
+      )[0].status,
+    ).toBe("FULFILLMENT_EXCEPTION");
+    const siblingAudit = (
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "JIFENG_ORDER_SUBMITTED"))
+    ).find((entry) => entry.afterJson?.fulfillmentStatus === "SUBMITTED");
+    expect(siblingAudit?.beforeJson).toMatchObject({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+    });
+  });
+
+  test("cancels one never-submitted package locally while keeping its sibling dispatchable", async () => {
+    const fixture = await createShipmentFixture();
+    const sibling = await addSiblingShipment(fixture);
+    await enqueuePaidOrdersForFulfillment();
+    let remoteCancellationCalls = 0;
+
+    await cancelJifengShipment({
+      actorUserId: "admin-user",
+      client: {
+        async cancelOrder() {
+          remoteCancellationCalls += 1;
+          throw new Error("never-submitted package must not call Jifeng");
+        },
+      },
+      reason: "客户只取消其中一个平台订单",
+      shipmentId: fixture.shipment.id,
+    });
+
+    expect(remoteCancellationCalls).toBe(0);
+    const fulfillments = await db.select().from(shipmentFulfillments);
+    expect(
+      fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
+    ).toMatchObject({ status: "CANCELLED" });
+    expect(
+      fulfillments.find((row) => row.shipmentId === sibling.id),
+    ).toMatchObject({ status: "PENDING" });
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+    expect(savedOrder.status).toBe("FULFILLMENT_EXCEPTION");
+    const [reservation] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, fixture.order.id));
+    expect(reservation.quantity).toBe(1);
+    const events = await db.select().from(integrationOutbox);
+    expect(
+      events.find((event) => event.aggregateId === fixture.shipment.id),
+    ).toMatchObject({ lastErrorCode: "SHIPMENT_CANCELLED", status: "COMPLETED" });
+    expect(
+      events.find((event) => event.aggregateId === sibling.id),
+    ).toMatchObject({ status: "PENDING" });
+  });
+
+  test("retrying one failed package keeps the parent exceptional while a sibling is still failed", async () => {
+    const fixture = await createShipmentFixture();
+    const sibling = await addSiblingShipment(fixture);
+    await enqueuePaidOrdersForFulfillment();
+    const events = await db.select().from(integrationOutbox);
+    for (const event of events) {
+      await processJifengCreateOrderEvent({
+        client: {
+          async createOrder() {
+            throw new JifengApiError({
+              code: "50026",
+              message: "warehouse stock is insufficient",
+              retryable: false,
+            });
+          },
+        },
+        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+        eventId: event.id,
+      });
+    }
+
+    await retryJifengShipment({
+      actorUserId: "admin-user",
+      reason: "仅重试已补足库存的平台订单",
+      shipmentId: fixture.shipment.id,
+    });
+
+    const fulfillments = await db.select().from(shipmentFulfillments);
+    expect(
+      fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
+    ).toMatchObject({ status: "PENDING" });
+    expect(
+      fulfillments.find((row) => row.shipmentId === sibling.id),
+    ).toMatchObject({ status: "EXCEPTION" });
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+    expect(savedOrder.status).toBe("FULFILLMENT_EXCEPTION");
   });
 
   test("never calls Jifeng for an event whose local order cancellation already committed", async () => {
@@ -645,7 +749,7 @@ describe("paid order Jifeng dispatch", () => {
     const [fulfillment] = await db.select().from(shipmentFulfillments);
     const [updatedEvent] = await db.select().from(integrationOutbox);
     const [attempt] = await db.select().from(integrationAttempts);
-    expect(updatedOrder.status).toBe("PAID_PENDING_FULFILLMENT");
+    expect(updatedOrder.status).toBe("FULFILLMENT_EXCEPTION");
     expect(fulfillment).toMatchObject({
       attemptCount: 1,
       lastErrorCode: "HTTP_503",

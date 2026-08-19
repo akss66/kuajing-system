@@ -272,6 +272,19 @@ describe("replacement fulfillment", () => {
       .select()
       .from(shipmentFulfillments)
       .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+    const [event] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          return { data: null, requestId: "replacement-created-before-cancel" };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
 
     await expect(
       cancelJifengShipment({
@@ -319,7 +332,127 @@ describe("replacement fulfillment", () => {
     ).toBe(true);
   });
 
-  test("does not call Jifeng or mutate cancellation state when the connection is disabled", async () => {
+  test("does not submit a second cancellation while one is already in progress", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "取消处理中测试",
+    });
+    await db
+      .update(shipmentFulfillments)
+      .set({ status: "CANCEL_PENDING" })
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+    const cancelOrder = vi.fn(async () => ({ data: null }));
+
+    await expect(
+      cancelJifengShipment({
+        actorUserId: "auth-admin-replacement",
+        client: { cancelOrder },
+        reason: "不要重复提交",
+        shipmentId: created.replacementShipmentId,
+      }),
+    ).rejects.toMatchObject({ code: "CANCELLATION_IN_PROGRESS" });
+
+    expect(cancelOrder).not.toHaveBeenCalled();
+    const [reservation] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, created.replacementRequestId));
+    expect(reservation.status).toBe("ACTIVE");
+  });
+
+  test("does not cancel while the same package is being submitted to Jifeng", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "提交竞态测试",
+    });
+    await db
+      .update(integrationOutbox)
+      .set({ status: "PROCESSING" })
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    const cancelOrder = vi.fn(async () => ({ data: null }));
+
+    await expect(
+      cancelJifengShipment({
+        actorUserId: "auth-admin-replacement",
+        client: { cancelOrder },
+        reason: "不要与创建请求并发",
+        shipmentId: created.replacementShipmentId,
+      }),
+    ).rejects.toMatchObject({ code: "FULFILLMENT_SUBMISSION_IN_PROGRESS" });
+
+    expect(cancelOrder).not.toHaveBeenCalled();
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+    expect(fulfillment.status).toBe("PENDING");
+  });
+
+  test("does not release inventory twice when status sync confirms cancellation first", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "取消竞态测试",
+    });
+    const [event] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          return { data: null, requestId: "replacement-created-before-race" };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+    });
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+
+    await expect(
+      cancelJifengShipment({
+        actorUserId: "auth-admin-replacement",
+        client: {
+          async cancelOrder() {
+            await applyJifengOrderStatus({
+              detail: { erpNo: fulfillment.erpNo, status: 9 },
+              source: "POLL",
+            });
+            return { data: null, requestId: "cancel-confirmed-by-sync" };
+          },
+        },
+        reason: "状态同步先确认取消",
+        shipmentId: created.replacementShipmentId,
+      }),
+    ).resolves.toEqual({ status: "ALREADY_CANCELLED" });
+
+    const [reservation] = await db
+      .select()
+      .from(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, created.replacementRequestId));
+    expect(reservation).toMatchObject({ quantity: 1, status: "RELEASED" });
+    expect(
+      (await db.select().from(auditLogs)).filter(
+        (entry) => entry.action === "JIFENG_SHIPMENT_CANCELLED",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("cancels a never-submitted package locally without requiring an enabled Jifeng connection", async () => {
     const fixture = await createShippedFixture();
     const created = await createReplacementRequest({
       actorUserId: "auth-admin-replacement",
@@ -363,19 +496,19 @@ describe("replacement fulfillment", () => {
 
     await expect(
       cancelJifengShipmentAction({ status: "idle" }, formData),
-    ).resolves.toMatchObject({ status: "error" });
+    ).resolves.toMatchObject({ status: "success" });
 
     expect(fetchMock).not.toHaveBeenCalled();
     const [fulfillment] = await db
       .select()
       .from(shipmentFulfillments)
       .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
-    expect(fulfillment.status).toBe("PENDING");
+    expect(fulfillment.status).toBe("CANCELLED");
     const [reservation] = await db
       .select()
       .from(inventoryReservations)
       .where(eq(inventoryReservations.referenceId, created.replacementRequestId));
-    expect(reservation.status).toBe("ACTIVE");
+    expect(reservation.status).toBe("RELEASED");
   });
 
   test.each([

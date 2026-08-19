@@ -108,16 +108,27 @@ export async function cancelJifengShipmentAction(
   const orderId = String(formData.get("orderId") ?? "");
   if (!parsed.success) return { status: "error", message: "包裹或取消原因无效。" };
   try {
-    const { client } = await getEnabledJifengWriteClient();
-    await cancelJifengShipment({
-      actorUserId: principal.userId,
-      client,
-      reason: parsed.data.reason,
-      shipmentId: parsed.data.shipmentId,
-    });
+    try {
+      await cancelJifengShipment({
+        actorUserId: principal.userId,
+        reason: parsed.data.reason,
+        shipmentId: parsed.data.shipmentId,
+      });
+    } catch (error) {
+      if (!(error instanceof ReplacementError) || error.code !== "JIFENG_CLIENT_REQUIRED") {
+        throw error;
+      }
+      const { client } = await getEnabledJifengWriteClient();
+      await cancelJifengShipment({
+        actorUserId: principal.userId,
+        client,
+        reason: parsed.data.reason,
+        shipmentId: parsed.data.shipmentId,
+      });
+    }
   } catch (error) {
     return failure(error, "极风取消失败，库存未释放。" );
   }
   refreshOrder(orderId);
-  return { message: "极风已确认取消，相关库存锁定已释放。", status: "success" };
+  return { message: "包裹已取消，相关库存锁定已释放。", status: "success" };
 }

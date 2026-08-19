@@ -326,6 +326,38 @@ describe("Jifeng order status convergence", () => {
     ).toHaveLength(1);
   });
 
+  test("keeps the parent exceptional when one package ships after its sibling was cancelled", async () => {
+    const fixture = await createTwoPackageFixture();
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fixture.fulfillments[0].erpNo, status: 9 },
+      now: new Date("2026-08-19T02:00:00.000Z"),
+      source: "POLL",
+    });
+    const result = await applyJifengOrderStatus({
+      detail: {
+        erpNo: fixture.fulfillments[1].erpNo,
+        shippedTime: "2026-08-19T02:05:00.000Z",
+        status: 7,
+      },
+      now: new Date("2026-08-19T02:05:00.000Z"),
+      source: "POLL",
+    });
+
+    expect(result).toEqual({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+      status: "SHIPPED",
+    });
+    expect(
+      (
+        await db
+          .select()
+          .from(fulfillmentOrders)
+          .where(eq(fulfillmentOrders.id, fixture.order.id))
+      )[0].status,
+    ).toBe("FULFILLMENT_EXCEPTION");
+  });
+
   test("repairs a previously cancelled package whose parent order stayed fulfilling", async () => {
     const fixture = await createTwoPackageFixture();
     const cancelledAt = new Date("2026-08-18T10:26:15.658Z");

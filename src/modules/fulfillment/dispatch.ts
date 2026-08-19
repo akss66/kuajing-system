@@ -22,6 +22,8 @@ import { decryptPii } from "@/shared/pii-crypto";
 import { createSystemNotification } from "@/modules/notifications/service";
 import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 
+import { refreshParentFulfillmentStatus } from "./order-rollup";
+
 const recipientSchema = z.object({
   addressLine1: z.string().min(1),
   addressLine2: z.string().nullable(),
@@ -600,15 +602,10 @@ async function markReconciliationRequired(
         updatedAt: now,
       })
       .where(eq(integrationOutbox.id, eventId));
-    await tx
-      .update(fulfillmentOrders)
-      .set({ status: "FULFILLMENT_EXCEPTION", updatedAt: now })
-      .where(
-        and(
-          eq(fulfillmentOrders.id, inspected.orderId),
-          sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
-        ),
-      );
+    await refreshParentFulfillmentStatus(tx, {
+      now,
+      orderId: inspected.orderId,
+    });
     await tx.insert(auditLogs).values({
       action: "JIFENG_ORDER_RECONCILIATION_REQUIRED",
       actorId: null,
@@ -831,6 +828,12 @@ export async function processJifengCreateOrderEvent(input: {
       if (!current || !ownsProcessingClaim(current, claimed.claimToken)) {
         return false;
       }
+      const orderRows = await tx.execute<{ status: string }>(sql`
+        select status
+        from fulfillment_orders
+        where id = ${claimed.orderId}
+      `);
+      const orderStatusBefore = orderRows[0]?.status ?? null;
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -855,18 +858,13 @@ export async function processJifengCreateOrderEvent(input: {
         })
         .where(eq(integrationOutbox.id, input.eventId));
       await tx
-        .update(fulfillmentOrders)
-        .set({ status: "FULFILLING", updatedAt: now })
-        .where(
-          and(
-            eq(fulfillmentOrders.id, claimed.orderId),
-            eq(fulfillmentOrders.status, "PAID_PENDING_FULFILLMENT"),
-          ),
-        );
-      await tx
         .update(replacementRequests)
         .set({ status: "FULFILLING", updatedAt: now })
         .where(eq(replacementRequests.replacementShipmentId, claimed.shipmentId));
+      const orderStatus = await refreshParentFulfillmentStatus(tx, {
+        now,
+        orderId: claimed.orderId,
+      });
       await tx.insert(integrationAttempts).values({
         attemptNumber: claimed.attemptNumber,
         finishedAt: now,
@@ -884,11 +882,11 @@ export async function processJifengCreateOrderEvent(input: {
         afterJson: {
           attemptNumber: claimed.attemptNumber,
           fulfillmentStatus: "SUBMITTED",
-          orderStatus: "FULFILLING",
+          orderStatus,
         },
         beforeJson: {
           fulfillmentStatus: "PENDING",
-          orderStatus: "PAID_PENDING_FULFILLMENT",
+          orderStatus: orderStatusBefore,
         },
         entityId: claimed.orderId,
         entityType: "FULFILLMENT_ORDER",
@@ -963,23 +961,13 @@ export async function processJifengCreateOrderEvent(input: {
         })
         .where(eq(integrationOutbox.id, input.eventId));
       await tx
-        .update(fulfillmentOrders)
-        .set({
-          status: requiresReconciliation
-            ? "PAID_PENDING_FULFILLMENT"
-            : "FULFILLMENT_EXCEPTION",
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(fulfillmentOrders.id, claimed.orderId),
-            sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
-          ),
-        );
-      await tx
         .update(replacementRequests)
         .set({ status: "EXCEPTION", updatedAt: now })
         .where(eq(replacementRequests.replacementShipmentId, claimed.shipmentId));
+      await refreshParentFulfillmentStatus(tx, {
+        now,
+        orderId: claimed.orderId,
+      });
       await tx.insert(integrationAttempts).values({
         attemptNumber: claimed.attemptNumber,
         errorCode: failure.code,
@@ -1201,15 +1189,10 @@ export async function retryJifengShipment(input: {
         ),
       );
     if (!fulfillment.replacementRequestId) {
-      await tx
-        .update(fulfillmentOrders)
-        .set({ status: "PAID_PENDING_FULFILLMENT", updatedAt: now })
-        .where(
-          and(
-            eq(fulfillmentOrders.id, fulfillment.orderId),
-            sql`${fulfillmentOrders.status} not in ('SHIPPED', 'CANCELLED')`,
-          ),
-        );
+      await refreshParentFulfillmentStatus(tx, {
+        now,
+        orderId: fulfillment.orderId,
+      });
     }
     await tx
       .update(replacementRequests)

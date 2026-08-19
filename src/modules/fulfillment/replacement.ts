@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { eq, sql } from "drizzle-orm";
 
-import { db } from "@/db/client";
+import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
-  fulfillmentOrders,
   integrationOutbox,
   inventoryReservations,
   orderLines,
@@ -17,6 +16,8 @@ import { JifengApiError } from "@/integrations/jifeng/client";
 import { reserveInventory } from "@/modules/inventory/service";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { createSystemNotification } from "@/modules/notifications/service";
+
+import { refreshParentFulfillmentStatus } from "./order-rollup";
 
 export class ReplacementError extends Error {
   constructor(
@@ -219,9 +220,142 @@ function safeCancellationFailure(error: unknown) {
   return { code: "CANCEL_FAILED", message: "极风取消请求失败" };
 }
 
+type ShipmentCancellationClaim = {
+  erpNo: string;
+  fulfillmentId: string;
+  kind: string;
+  orderId: string;
+  replacementRequestId: string | null;
+  status: string;
+};
+
+async function finalizeShipmentCancellation(
+  tx: DbTransaction,
+  input: {
+    actorUserId: string;
+    claim: ShipmentCancellationClaim;
+    localOnly: boolean;
+    now: Date;
+    reason: string;
+    shipmentId: string;
+  },
+) {
+  const quantities = await tx.execute<{ quantity: number; skuId: string }>(sql`
+    select sku_id as "skuId", sum(quantity)::int as quantity
+    from order_lines
+    where shipment_id = ${input.shipmentId}
+    group by sku_id
+    order by sku_id
+  `);
+  const referenceType = input.claim.replacementRequestId
+    ? "REPLACEMENT_REQUEST"
+    : "FULFILLMENT_ORDER";
+  const referenceId = input.claim.replacementRequestId ?? input.claim.orderId;
+  for (const item of quantities) {
+    const reservationRows = await tx.execute<{ id: string; quantity: number }>(sql`
+      select id, quantity
+      from inventory_reservations
+      where reference_type = ${referenceType}
+        and reference_id = ${referenceId}
+        and sku_id = ${item.skuId}
+        and status = 'ACTIVE'
+      for update
+    `);
+    const reservation = reservationRows[0];
+    if (!reservation || reservation.quantity < item.quantity) {
+      throw new ReplacementError(
+        "RESERVATION_MISMATCH",
+        "取消包裹缺少足额库存锁定，请人工核查",
+      );
+    }
+    if (reservation.quantity === item.quantity) {
+      await tx
+        .update(inventoryReservations)
+        .set({
+          expiresAt: null,
+          releaseReason: input.localOnly
+            ? `本地包裹取消：${input.reason}`
+            : `极风取消确认：${input.reason}`,
+          status: "RELEASED",
+          updatedAt: input.now,
+        })
+        .where(eq(inventoryReservations.id, reservation.id));
+    } else {
+      await tx
+        .update(inventoryReservations)
+        .set({ quantity: reservation.quantity - item.quantity, updatedAt: input.now })
+        .where(eq(inventoryReservations.id, reservation.id));
+    }
+  }
+  await tx
+    .update(shipmentFulfillments)
+    .set({
+      cancelledAt: input.now,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      nextRetryAt: null,
+      status: "CANCELLED",
+      updatedAt: input.now,
+    })
+    .where(eq(shipmentFulfillments.id, input.claim.fulfillmentId));
+  if (input.localOnly) {
+    await tx
+      .update(integrationOutbox)
+      .set({
+        claimToken: null,
+        completedAt: input.now,
+        lastErrorCode: "SHIPMENT_CANCELLED",
+        lastErrorMessage: "Package cancelled before Jifeng submission",
+        lockedAt: null,
+        nextAttemptAt: input.now,
+        status: "COMPLETED",
+        updatedAt: input.now,
+      })
+      .where(sql`
+        aggregate_id = ${input.shipmentId}
+        and target = 'JIFENG'
+        and event_type = 'JIFENG_CREATE_ORDER'
+        and status in ('PENDING', 'FAILED')
+      `);
+  }
+  if (input.claim.replacementRequestId) {
+    await tx
+      .update(replacementRequests)
+      .set({ status: "CANCELLED", updatedAt: input.now })
+      .where(eq(replacementRequests.id, input.claim.replacementRequestId));
+  } else {
+    await refreshParentFulfillmentStatus(tx, {
+      now: input.now,
+      orderId: input.claim.orderId,
+    });
+  }
+  await tx.insert(auditLogs).values({
+    action: input.localOnly
+      ? "SHIPMENT_CANCELLED_BEFORE_SUBMISSION"
+      : "JIFENG_SHIPMENT_CANCELLED",
+    actorId: input.actorUserId,
+    actorType: "ADMIN",
+    afterJson: {
+      cancellationMode: input.localOnly ? "LOCAL" : "JIFENG_CONFIRMED",
+      status: "CANCELLED",
+    },
+    beforeJson: {
+      status: input.localOnly ? input.claim.status : "CANCEL_PENDING",
+    },
+    entityId: input.shipmentId,
+    entityType: "ORDER_SHIPMENT",
+    reason: input.reason,
+  });
+  await enqueueCargoSyncEvent(tx, {
+    idempotencyKey: `shipment-cancelled:${input.shipmentId}`,
+    now: input.now,
+    reason: "cancelled-shipment-inventory-released",
+  });
+}
+
 export async function cancelJifengShipment(input: {
   actorUserId: string;
-  client: JifengCancelOrderPort;
+  client?: JifengCancelOrderPort;
   now?: Date;
   reason: string;
   shipmentId: string;
@@ -232,19 +366,40 @@ export async function cancelJifengShipment(input: {
     throw new ReplacementError("REASON_TOO_LONG", "取消原因不能超过 1000 个字符");
   }
   const now = input.now ?? new Date();
+  const references = await db.execute<{ orderId: string }>(sql`
+    select order_id as "orderId"
+    from order_shipments
+    where id = ${input.shipmentId}
+  `);
+  const reference = references[0];
+  if (!reference) throw new ReplacementError("SHIPMENT_NOT_FOUND", "未找到极风包裹");
   const claimed = await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select id
+      from fulfillment_orders
+      where id = ${reference.orderId}
+      for update
+    `);
     const rows = await tx.execute<{
+      attemptCount: number;
       erpNo: string;
+      externalOrderNo: string | null;
       fulfillmentId: string;
+      jifengStatus: number | null;
       kind: string;
       orderId: string;
       replacementRequestId: string | null;
       status: string;
+      submittedAt: Date | string | null;
     }>(sql`
       select
+        f.attempt_count as "attemptCount",
         f.id as "fulfillmentId",
         f.erp_no as "erpNo",
+        f.external_order_no as "externalOrderNo",
+        f.jifeng_status as "jifengStatus",
         f.status,
+        f.submitted_at as "submittedAt",
         s.kind,
         s.order_id as "orderId",
         r.id as "replacementRequestId"
@@ -259,20 +414,89 @@ export async function cancelJifengShipment(input: {
     if (row.status === "SHIPPED") {
       throw new ReplacementError("ALREADY_SHIPPED", "极风已发货包裹不能取消");
     }
-    if (row.status === "CANCELLED") return { ...row, alreadyCancelled: true };
+    if (row.status === "CANCELLED") {
+      return { ...row, alreadyCancelled: true, completedLocally: false };
+    }
+    if (row.status === "CANCEL_PENDING") {
+      throw new ReplacementError(
+        "CANCELLATION_IN_PROGRESS",
+        "该包裹正在等待极风确认取消，请勿重复提交",
+      );
+    }
+    const outboxRows = await tx.execute<{
+      attemptCount: number;
+      status: string;
+    }>(sql`
+      select attempt_count as "attemptCount", status
+      from integration_outbox
+      where aggregate_id = ${input.shipmentId}
+        and target = 'JIFENG'
+        and event_type = 'JIFENG_CREATE_ORDER'
+      for update
+    `);
+    const outbox = outboxRows[0];
+    if (outbox?.status === "PROCESSING") {
+      throw new ReplacementError(
+        "FULFILLMENT_SUBMISSION_IN_PROGRESS",
+        "该包裹正在提交极风，请等待本次提交结束后再取消",
+      );
+    }
+    const localOnly =
+      ["PENDING", "EXCEPTION"].includes(row.status) &&
+      row.attemptCount === 0 &&
+      row.externalOrderNo === null &&
+      row.jifengStatus === null &&
+      row.submittedAt === null &&
+      (outbox?.attemptCount ?? 0) === 0;
+    if (localOnly) {
+      await finalizeShipmentCancellation(tx, {
+        actorUserId: input.actorUserId,
+        claim: row,
+        localOnly: true,
+        now,
+        reason,
+        shipmentId: input.shipmentId,
+      });
+      return { ...row, alreadyCancelled: false, completedLocally: true };
+    }
+    if (!input.client) {
+      throw new ReplacementError(
+        "JIFENG_CLIENT_REQUIRED",
+        "该包裹已尝试提交极风，取消前必须连接极风确认远端状态",
+      );
+    }
     await tx
       .update(shipmentFulfillments)
       .set({ status: "CANCEL_PENDING", updatedAt: now })
       .where(eq(shipmentFulfillments.id, row.fulfillmentId));
-    return { ...row, alreadyCancelled: false };
+    return { ...row, alreadyCancelled: false, completedLocally: false };
   });
   if (claimed.alreadyCancelled) return { status: "ALREADY_CANCELLED" as const };
+  if (claimed.completedLocally) return { status: "CANCELLED" as const };
 
   try {
-    await input.client.cancelOrder({ deleteRecord: false, erpNo: claimed.erpNo });
+    await input.client!.cancelOrder({ deleteRecord: false, erpNo: claimed.erpNo });
   } catch (error) {
     const failure = safeCancellationFailure(error);
-    await db.transaction(async (tx) => {
+    const terminalStatus = await db.transaction(async (tx) => {
+      if (!claimed.replacementRequestId) {
+        await tx.execute(sql`
+          select id
+          from fulfillment_orders
+          where id = ${claimed.orderId}
+          for update
+        `);
+      }
+      const statusRows = await tx.execute<{ status: string }>(sql`
+        select status
+        from shipment_fulfillments
+        where id = ${claimed.fulfillmentId}
+        for update
+      `);
+      const currentStatus = statusRows[0]?.status;
+      if (currentStatus === "CANCELLED" || currentStatus === "SHIPPED") {
+        return currentStatus;
+      }
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -287,6 +511,11 @@ export async function cancelJifengShipment(input: {
           .update(replacementRequests)
           .set({ status: "EXCEPTION", updatedAt: now })
           .where(eq(replacementRequests.id, claimed.replacementRequestId));
+      } else {
+        await refreshParentFulfillmentStatus(tx, {
+          now,
+          orderId: claimed.orderId,
+        });
       }
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_CANCEL_FAILED",
@@ -298,11 +527,29 @@ export async function cancelJifengShipment(input: {
         entityType: "ORDER_SHIPMENT",
         reason,
       });
+      return null;
     });
+    if (terminalStatus === "CANCELLED") {
+      return { status: "ALREADY_CANCELLED" as const };
+    }
+    if (terminalStatus === "SHIPPED") {
+      throw new ReplacementError(
+        "SHIPPED_DURING_CANCEL",
+        "取消期间极风已发货，系统未释放库存，请人工核查",
+      );
+    }
     throw error;
   }
 
   return db.transaction(async (tx) => {
+    if (!claimed.replacementRequestId) {
+      await tx.execute(sql`
+        select id
+        from fulfillment_orders
+        where id = ${claimed.orderId}
+        for update
+      `);
+    }
     const statusRows = await tx.execute<{ status: string }>(sql`
       select status
       from shipment_fulfillments
@@ -315,90 +562,16 @@ export async function cancelJifengShipment(input: {
         "取消期间极风已发货，系统未释放库存，请人工核查",
       );
     }
-    const quantities = await tx.execute<{ quantity: number; skuId: string }>(sql`
-      select sku_id as "skuId", sum(quantity)::int as quantity
-      from order_lines
-      where shipment_id = ${input.shipmentId}
-      group by sku_id
-      order by sku_id
-    `);
-    const referenceType = claimed.replacementRequestId
-      ? "REPLACEMENT_REQUEST"
-      : "FULFILLMENT_ORDER";
-    const referenceId = claimed.replacementRequestId ?? claimed.orderId;
-    for (const item of quantities) {
-      const reservationRows = await tx.execute<{ id: string; quantity: number }>(sql`
-        select id, quantity
-        from inventory_reservations
-        where reference_type = ${referenceType}
-          and reference_id = ${referenceId}
-          and sku_id = ${item.skuId}
-          and status = 'ACTIVE'
-        for update
-      `);
-      const reservation = reservationRows[0];
-      if (!reservation || reservation.quantity < item.quantity) {
-        throw new ReplacementError(
-          "RESERVATION_MISMATCH",
-          "取消包裹缺少足额库存锁定，请人工核查",
-        );
-      }
-      if (reservation.quantity === item.quantity) {
-        await tx
-          .update(inventoryReservations)
-          .set({
-            expiresAt: null,
-            releaseReason: `极风取消确认：${reason}`,
-            status: "RELEASED",
-            updatedAt: now,
-          })
-          .where(eq(inventoryReservations.id, reservation.id));
-      } else {
-        await tx
-          .update(inventoryReservations)
-          .set({ quantity: reservation.quantity - item.quantity, updatedAt: now })
-          .where(eq(inventoryReservations.id, reservation.id));
-      }
+    if (statusRows[0]?.status === "CANCELLED") {
+      return { status: "ALREADY_CANCELLED" as const };
     }
-    await tx
-      .update(shipmentFulfillments)
-      .set({
-        cancelledAt: now,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        status: "CANCELLED",
-        updatedAt: now,
-      })
-      .where(eq(shipmentFulfillments.id, claimed.fulfillmentId));
-    if (claimed.replacementRequestId) {
-      await tx
-        .update(replacementRequests)
-        .set({ status: "CANCELLED", updatedAt: now })
-        .where(eq(replacementRequests.id, claimed.replacementRequestId));
-    } else {
-      await tx
-        .update(fulfillmentOrders)
-        .set({
-          cancelReason: reason,
-          status: "FULFILLMENT_EXCEPTION",
-          updatedAt: now,
-        })
-        .where(eq(fulfillmentOrders.id, claimed.orderId));
-    }
-    await tx.insert(auditLogs).values({
-      action: "JIFENG_SHIPMENT_CANCELLED",
-      actorId: input.actorUserId,
-      actorType: "ADMIN",
-      afterJson: { status: "CANCELLED" },
-      beforeJson: { status: "CANCEL_PENDING" },
-      entityId: input.shipmentId,
-      entityType: "ORDER_SHIPMENT",
-      reason,
-    });
-    await enqueueCargoSyncEvent(tx, {
-      idempotencyKey: `shipment-cancelled:${input.shipmentId}`,
+    await finalizeShipmentCancellation(tx, {
+      actorUserId: input.actorUserId,
+      claim: claimed,
+      localOnly: false,
       now,
-      reason: "cancelled-shipment-inventory-released",
+      reason,
+      shipmentId: input.shipmentId,
     });
     return { status: "CANCELLED" as const };
   });

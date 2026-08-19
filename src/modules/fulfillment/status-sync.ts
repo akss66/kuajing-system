@@ -1,9 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
-  fulfillmentOrders,
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
@@ -13,6 +12,7 @@ import {
 } from "@/db/schema";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
+import { refreshParentFulfillmentStatus } from "@/modules/fulfillment/order-rollup";
 import { inventoryReasonLabel } from "@/modules/inventory/types";
 import { createSystemNotification } from "@/modules/notifications/service";
 
@@ -41,6 +41,20 @@ export async function applyJifengOrderStatus(input: {
   const now = input.now ?? new Date();
 
   const apply = async (tx: DbTransaction) => {
+    const references = await tx.execute<{ orderId: string }>(sql`
+      select s.order_id as "orderId"
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      where f.erp_no = ${input.detail.erpNo}
+    `);
+    const reference = references[0];
+    if (!reference) throw new Error("未找到对应的极风履约包裹");
+    await tx.execute(sql`
+      select id
+      from fulfillment_orders
+      where id = ${reference.orderId}
+      for update
+    `);
     const rows = await tx.execute<{
       fulfillmentCancelledAt: Date | string | null;
       fulfillmentId: string;
@@ -65,7 +79,7 @@ export async function applyJifengOrderStatus(input: {
       inner join fulfillment_orders o on o.id = s.order_id
       left join replacement_requests r on r.replacement_shipment_id = s.id
       where f.erp_no = ${input.detail.erpNo}
-      for update of f, s, o
+      for update of f, s
     `);
     const current = rows[0];
     if (!current) throw new Error("未找到对应的极风履约包裹");
@@ -222,20 +236,12 @@ export async function applyJifengOrderStatus(input: {
           .where(eq(replacementRequests.id, current.replacementRequestId));
       }
 
-      const remainingNormal = await tx.execute<{ count: number }>(sql`
-        select count(*)::int as count
-        from order_shipments s
-        left join shipment_fulfillments f on f.shipment_id = s.id
-        where s.order_id = ${current.orderId}
-          and s.kind = 'NORMAL'
-          and (f.id is null or f.status <> 'SHIPPED')
-      `);
-      const orderStatus =
-        remainingNormal[0]?.count === 0 ? "SHIPPED" : "FULFILLING";
-      await tx
-        .update(fulfillmentOrders)
-        .set({ status: orderStatus, updatedAt: now })
-        .where(eq(fulfillmentOrders.id, current.orderId));
+      const orderStatus = current.replacementRequestId
+        ? current.orderStatus
+        : await refreshParentFulfillmentStatus(tx, {
+            now,
+            orderId: current.orderId,
+          });
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_SHIPPED",
         actorId: null,
@@ -275,8 +281,6 @@ export async function applyJifengOrderStatus(input: {
     }
 
     if (input.detail.status === 8 || input.detail.status === 11) {
-      const orderStatus =
-        current.orderStatus === "SHIPPED" ? "SHIPPED" : "FULFILLMENT_EXCEPTION";
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -294,12 +298,12 @@ export async function applyJifengOrderStatus(input: {
           .set({ status: "EXCEPTION", updatedAt: now })
           .where(eq(replacementRequests.id, current.replacementRequestId));
       }
-      if (orderStatus !== current.orderStatus) {
-        await tx
-          .update(fulfillmentOrders)
-          .set({ status: orderStatus, updatedAt: now })
-          .where(eq(fulfillmentOrders.id, current.orderId));
-      }
+      const orderStatus = current.replacementRequestId
+        ? current.orderStatus
+        : await refreshParentFulfillmentStatus(tx, {
+            now,
+            orderId: current.orderId,
+          });
       await tx.insert(auditLogs).values({
         action: "JIFENG_FULFILLMENT_EXCEPTION",
         actorId: null,
@@ -391,24 +395,18 @@ export async function applyJifengOrderStatus(input: {
         })
         .where(eq(shipmentFulfillments.id, current.fulfillmentId));
 
-      const orderStatus = current.replacementRequestId
-        ? current.orderStatus
-        : "FULFILLMENT_EXCEPTION";
       if (current.replacementRequestId) {
         await tx
           .update(replacementRequests)
           .set({ status: "CANCELLED", updatedAt: now })
           .where(eq(replacementRequests.id, current.replacementRequestId));
-      } else {
-        await tx
-          .update(fulfillmentOrders)
-          .set({
-            cancelReason: "极风确认包裹已取消，需人工处理",
-            status: "FULFILLMENT_EXCEPTION",
-            updatedAt: now,
-          })
-          .where(eq(fulfillmentOrders.id, current.orderId));
       }
+      const orderStatus = current.replacementRequestId
+        ? current.orderStatus
+        : await refreshParentFulfillmentStatus(tx, {
+            now,
+            orderId: current.orderId,
+          });
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_CANCELLED",
         actorId: null,
@@ -467,20 +465,14 @@ export async function applyJifengOrderStatus(input: {
         })
         .where(eq(replacementRequests.id, current.replacementRequestId));
     }
-    if (current.orderStatus !== "SHIPPED") {
-      await tx
-        .update(fulfillmentOrders)
-        .set({ status: "FULFILLING", updatedAt: now })
-        .where(
-          and(
-            eq(fulfillmentOrders.id, current.orderId),
-            sql`${fulfillmentOrders.status} <> 'SHIPPED'`,
-          ),
-        );
-    }
+    const orderStatus = current.replacementRequestId
+      ? current.orderStatus
+      : await refreshParentFulfillmentStatus(tx, {
+          now,
+          orderId: current.orderId,
+        });
     return {
-      orderStatus:
-        current.orderStatus === "SHIPPED" ? "SHIPPED" : "FULFILLING",
+      orderStatus,
       status,
     };
   };
