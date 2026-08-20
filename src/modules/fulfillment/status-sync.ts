@@ -140,10 +140,19 @@ export async function applyJifengOrderStatus(input: {
     const current = rows[0];
     if (!current) throw new Error("未找到对应的极风履约包裹");
 
-    if (current.fulfillmentStatus === "SHIPPED" && input.detail.status === 7) {
+    if (current.fulfillmentStatus === "SHIPPED") {
       return {
         orderStatus: current.orderStatus as "FULFILLING" | "SHIPPED",
         status: "ALREADY_SHIPPED" as const,
+      };
+    }
+    if (
+      current.fulfillmentStatus === "CANCELLED" &&
+      input.detail.status !== 9
+    ) {
+      return {
+        orderStatus: current.orderStatus,
+        status: "ALREADY_CANCELLED" as const,
       };
     }
     if (

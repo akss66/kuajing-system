@@ -236,6 +236,37 @@ describe("Jifeng order status convergence", () => {
     ).toHaveLength(2);
   });
 
+  test("does not regress a shipped package when a stale non-terminal webhook arrives", async () => {
+    const fixture = await createTwoPackageFixture();
+    const fulfillment = fixture.fulfillments[0];
+
+    await applyJifengOrderStatus({
+      detail: {
+        erpNo: fulfillment.erpNo,
+        shippedTime: "2026-08-20T01:00:00.000Z",
+        status: 7,
+      },
+      now: new Date("2026-08-20T01:00:00.000Z"),
+      source: "POLL",
+    });
+
+    expect(
+      await applyJifengOrderStatus({
+        detail: { erpNo: fulfillment.erpNo, status: 2 },
+        now: new Date("2026-08-20T01:01:00.000Z"),
+        source: "WEBHOOK",
+      }),
+    ).toEqual({ orderStatus: "FULFILLING", status: "ALREADY_SHIPPED" });
+
+    const [updated] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+    expect(updated).toMatchObject({ jifengStatus: 7, status: "SHIPPED" });
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(19);
+    expect(await db.select().from(inventoryMovements)).toHaveLength(1);
+  });
+
   test("marks Jifeng exception statuses without consuming inventory", async () => {
     const fixture = await createTwoPackageFixture();
     const result = await applyJifengOrderStatus({
@@ -327,6 +358,38 @@ describe("Jifeng order status convergence", () => {
         (entry) => entry.action === "JIFENG_SHIPMENT_CANCELLED",
       ),
     ).toHaveLength(1);
+  });
+
+  test("does not regress a cancelled package when a stale non-terminal webhook arrives", async () => {
+    const fixture = await createTwoPackageFixture();
+    const fulfillment = fixture.fulfillments[0];
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fulfillment.erpNo, status: 9 },
+      now: new Date("2026-08-20T02:00:00.000Z"),
+      source: "POLL",
+    });
+
+    expect(
+      await applyJifengOrderStatus({
+        detail: { erpNo: fulfillment.erpNo, status: 2 },
+        now: new Date("2026-08-20T02:01:00.000Z"),
+        source: "WEBHOOK",
+      }),
+    ).toEqual({
+      orderStatus: "FULFILLMENT_EXCEPTION",
+      status: "ALREADY_CANCELLED",
+    });
+
+    const [updated] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+    expect(updated).toMatchObject({ jifengStatus: 9, status: "CANCELLED" });
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
   });
 
   test("keeps the parent exceptional when one package ships after its sibling was cancelled", async () => {
