@@ -8,7 +8,7 @@ import { resolveAdminUserId } from "@/modules/identity/admin-profile";
 import { getEnabledJifengWriteClient } from "@/modules/jifeng-connection/provider";
 import type { ActionState } from "@/shared/action-state";
 
-import { retryJifengShipment } from "./dispatch";
+import { JifengDispatchError, retryJifengShipment } from "./dispatch";
 import {
   cancelJifengShipment,
   createReplacementRequest,
@@ -23,7 +23,7 @@ const shipmentSchema = z.object({
 function failure(error: unknown, fallback: string): ActionState {
   return {
     message:
-      error instanceof ReplacementError || error instanceof Error
+      error instanceof ReplacementError || error instanceof JifengDispatchError
         ? error.message
         : fallback,
     status: "error",

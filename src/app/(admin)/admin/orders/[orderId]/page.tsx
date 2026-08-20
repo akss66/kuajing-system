@@ -14,6 +14,7 @@ import {
   createReplacementAction,
   retryJifengShipmentAction,
 } from "@/modules/fulfillment/actions";
+import { safeFulfillmentError } from "@/modules/fulfillment/fulfillment-ui-labels";
 import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
 import { getAdminOrderDetail } from "@/modules/orders/queries";
@@ -111,6 +112,9 @@ export default async function AdminOrderDetailPage({
           const canCancel = shipment.fulfillmentStatus !== null && !["SHIPPED", "CANCELLED", "CANCEL_PENDING"].includes(shipment.fulfillmentStatus);
           const canReplace = shipment.kind === "NORMAL" && shipment.fulfillmentStatus === "SHIPPED";
           const retryQueued = shipment.lastErrorCode === MANUAL_RETRY_QUEUED;
+          const errorPresentation = shipment.lastErrorCode
+            ? safeFulfillmentError(shipment.lastErrorCode, shipment.lastErrorMessage)
+            : null;
           return (
             <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background" key={shipment.id}>
               <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -133,8 +137,8 @@ export default async function AdminOrderDetailPage({
                 <div className={`flex gap-3 border-b px-4 py-3 text-sm sm:px-5 ${retryQueued ? "border-primary/20 bg-primary-soft text-primary-hover" : "border-danger/20 bg-danger/5 text-danger"}`}>
                   {retryQueued ? <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
                   <div>
-                    <p className="font-semibold">{retryQueued ? "已提交重试，等待系统处理" : shipment.lastErrorCode}</p>
-                    <p className="mt-1">{retryQueued ? "当前包裹已加入处理队列，请勿重复操作。" : shipment.lastErrorMessage}</p>
+                    <p className="font-semibold">{errorPresentation?.title}</p>
+                    <p className="mt-1">{errorPresentation?.message}</p>
                   </div>
                 </div>
               ) : null}

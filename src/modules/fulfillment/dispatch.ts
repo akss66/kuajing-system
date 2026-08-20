@@ -1080,13 +1080,17 @@ export async function retryJifengShipment(input: {
   shipmentId: string;
 }) {
   const reason = input.reason.trim();
-  if (!reason) throw new Error("重试极风履约必须填写原因");
+  if (!reason) {
+    throw new JifengDispatchError("REASON_REQUIRED", "重试极风履约必须填写原因");
+  }
   const now = input.now ?? new Date();
   const references = await db.execute<{ orderId: string }>(sql`
     select order_id as "orderId" from order_shipments where id = ${input.shipmentId}
   `);
   const reference = references[0];
-  if (!reference) throw new Error("Jifeng shipment not found");
+  if (!reference) {
+    throw new JifengDispatchError("SHIPMENT_NOT_FOUND", "未找到极风履约包裹");
+  }
   return db.transaction(async (tx) => {
     await tx.execute(sql`
       select id from fulfillment_orders where id = ${reference.orderId} for update
@@ -1111,12 +1115,20 @@ export async function retryJifengShipment(input: {
       for update of f
     `);
     const fulfillment = rows[0];
-    if (!fulfillment) throw new Error("未找到极风履约包裹");
+    if (!fulfillment) {
+      throw new JifengDispatchError("FULFILLMENT_NOT_FOUND", "未找到极风履约包裹");
+    }
     if (["SHIPPED", "CANCELLED"].includes(fulfillment.status)) {
-      throw new Error("已发货或已取消包裹不能重试");
+      throw new JifengDispatchError(
+        "FULFILLMENT_TERMINAL",
+        "已发货或已取消包裹不能重试",
+      );
     }
     if (fulfillment.status !== "EXCEPTION") {
-      throw new Error("Only failed Jifeng fulfillments can be retried");
+      throw new JifengDispatchError(
+        "FULFILLMENT_NOT_FAILED",
+        "只有异常包裹可以重试",
+      );
     }
     const eventRows = await tx.execute<{
       claimToken: string | null;
@@ -1137,14 +1149,19 @@ export async function retryJifengShipment(input: {
       for update
     `);
     const event = eventRows[0];
-    if (!event) throw new Error("Jifeng create event not found");
+    if (!event) {
+      throw new JifengDispatchError(
+        "CREATE_EVENT_NOT_FOUND",
+        "未找到极风创建任务",
+      );
+    }
     if (
       event.status === "PROCESSING" &&
       !reconciliationLeaseExpired(event.lockedAt, now)
     ) {
       throw new JifengDispatchError(
         "RECONCILIATION_IN_PROGRESS",
-        "Jifeng reconciliation is already in progress",
+        "极风订单正在核对，请勿重复重试",
       );
     }
     const priorErrorCode = event.status === "PROCESSING"

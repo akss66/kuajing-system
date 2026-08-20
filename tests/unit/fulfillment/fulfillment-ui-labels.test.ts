@@ -1,0 +1,34 @@
+import { describe, expect, it } from "vitest";
+
+import { safeFulfillmentError } from "@/modules/fulfillment/fulfillment-ui-labels";
+
+describe("safeFulfillmentError", () => {
+  it("keeps documented Jifeng business codes actionable", () => {
+    expect(safeFulfillmentError("50026")).toEqual({
+      message: "请先同步或补充极风仓库库存，再重试当前包裹。",
+      title: "极风仓库库存不足（50026）",
+    });
+  });
+
+  it.each([
+    "POST_SUCCESS_PERSISTENCE_ERROR",
+    "RECONCILIATION_REQUIRED:NETWORK_ERROR",
+    "CONFIRMED_NOT_FOUND:TIMEOUT",
+  ])("hides internal recovery code %s", (code) => {
+    const presentation = safeFulfillmentError(
+      code,
+      "duplicate key value violates secret_table_constraint",
+    );
+
+    expect(`${presentation.title} ${presentation.message}`).not.toContain(code);
+    expect(`${presentation.title} ${presentation.message}`).not.toContain("secret_table_constraint");
+  });
+
+  it("does not echo unknown stored messages", () => {
+    expect(safeFulfillmentError("INTERNAL_ERROR", "postgres://secret@db/internal"))
+      .toEqual({
+        message: "系统会按计划重试；如持续失败，请检查集成状态或联系技术人员。",
+        title: "极风履约暂时异常",
+      });
+  });
+});
