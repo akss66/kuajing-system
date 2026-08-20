@@ -275,7 +275,7 @@ test("the migration journal applies inventory listing after the protected migrat
     await readFile(path.join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"),
   ) as { entries: { idx: number; tag: string }[] };
 
-  expect(journal.entries.slice(-8).map(({ idx, tag }) => ({ idx, tag }))).toEqual([
+  expect(journal.entries.slice(-9).map(({ idx, tag }) => ({ idx, tag }))).toEqual([
     { idx: 21, tag: "0021_inventory_movement_listing_and_stocktakes" },
     { idx: 22, tag: "0022_backfill_feishu_product_fields" },
     { idx: 23, tag: "0023_sku_lifecycle_management" },
@@ -284,5 +284,6 @@ test("the migration journal applies inventory listing after the protected migrat
     { idx: 26, tag: "0026_jifeng_status_poll_leases" },
     { idx: 27, tag: "0027_expired_order_deduplication" },
     { idx: 28, tag: "0028_package_cancellation_adjustments" },
+    { idx: 29, tag: "0029_typical_speed" },
   ]);
 });

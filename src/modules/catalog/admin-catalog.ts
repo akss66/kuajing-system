@@ -19,7 +19,7 @@ export type AdminCatalogItem = {
   color: string | null;
   combination: string | null;
   weightGrams: number | null;
-  defaultUnitPriceMilliYuan: number;
+  defaultUnitPriceMilliYuan: number | null;
   totalQuantity: number;
   availableQuantity: number;
   cargoUnitPriceMilliYuan: number | null;

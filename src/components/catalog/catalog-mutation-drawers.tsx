@@ -96,13 +96,13 @@ export function ManageSkuDrawer({ actions, groupSize, row }: { actions: Pick<Cat
           <input name="skuId" type="hidden" value={row.id} />
           <Field label="SKU"><Input defaultValue={row.skuCode} name="skuCode" required /></Field>
           <Field label="替换图片"><Input accept="image/jpeg,image/png,image/webp" name="image" type="file" /><span className="text-xs font-normal text-muted-foreground">留空则保留现有图片；支持 JPEG、PNG、WebP，最大 8 MiB。</span></Field>
-          <Field label="采购价（元）"><Input defaultValue={String(row.defaultUnitPriceMilliYuan / 1000)} inputMode="decimal" name="defaultPriceYuan" required /></Field>
+          <Field label="采购价（元）"><Input defaultValue={row.defaultUnitPriceMilliYuan === null ? "" : String(row.defaultUnitPriceMilliYuan / 1000)} inputMode="decimal" name="defaultPriceYuan" required /></Field>
           <Field label="货品价格（元）"><Input defaultValue={row.cargoUnitPriceMilliYuan === null ? "" : String(row.cargoUnitPriceMilliYuan / 1000)} inputMode="decimal" name="cargoPriceYuan" required /></Field>
           <Field label="链接地址"><Input defaultValue={row.productUrl ?? ""} name="productUrl" type="url" /></Field>
           <Field label="规格"><Input defaultValue={row.specification ?? ""} name="specification" /></Field>
           <Field label="颜色"><Input defaultValue={row.color ?? ""} name="color" /></Field>
           <Field label="组合销售"><Input defaultValue={row.combination ?? ""} name="combination" /></Field>
-          <Field label="重量（克）"><Input defaultValue={row.weightGrams ?? 0} min="0" name="weightGrams" required type="number" /></Field>
+          <Field label="重量（克）"><Input defaultValue={row.weightGrams ?? ""} min="0" name="weightGrams" required type="number" /></Field>
           <Field label="销售状态"><select className={selectClassName} defaultValue={row.saleStatus} name="saleStatus"><option value="SELLABLE">可售</option><option value="NOT_SELLABLE">不可售</option></select></Field>
           <Field label="修改原因"><Input name="reason" required /></Field>
         </ActionForm>

@@ -104,10 +104,8 @@ export const skus = pgTable(
     combination: varchar("combination", { length: 160 }),
     weightGrams: integer("weight_grams"),
     cargoUnitPriceMilliYuan: integer("cargo_unit_price_milli_yuan"),
-    defaultUnitPriceMilliYuan: integer("default_unit_price_milli_yuan")
-      .default(0)
-      .notNull(),
-    defaultUnitPriceFen: integer("default_unit_price_fen").notNull(),
+    defaultUnitPriceMilliYuan: integer("default_unit_price_milli_yuan"),
+    defaultUnitPriceFen: integer("default_unit_price_fen"),
     declarationUnitPriceFen: integer("declaration_unit_price_fen"),
     saleStatus: skuSaleStatus("sale_status").default("SELLABLE").notNull(),
     lifecycleStatus: skuLifecycleStatus("lifecycle_status")
@@ -134,7 +132,7 @@ export const skus = pgTable(
     ),
     check(
       "skus_default_price_fen_matches_milli_yuan",
-      sql`${table.defaultUnitPriceFen} = ((${table.defaultUnitPriceMilliYuan}::bigint + 5) / 10)`,
+      sql`(${table.defaultUnitPriceFen} is null and ${table.defaultUnitPriceMilliYuan} is null) or (${table.defaultUnitPriceFen} is not null and ${table.defaultUnitPriceMilliYuan} is not null and ${table.defaultUnitPriceFen} = ((${table.defaultUnitPriceMilliYuan}::bigint + 5) / 10))`,
     ),
     check(
       "skus_declaration_price_non_negative",

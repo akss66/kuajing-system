@@ -355,6 +355,28 @@ describe("catalog workspaces", () => {
     expect(within(drawer).getByRole("button", { name: "确认删除 SKU" })).toBeVisible();
   });
 
+  it("renders a missing purchase price as empty and requires an administrator to fill it before saving", async () => {
+    render(
+      <CatalogWorkspace
+        actions={catalogActions}
+        rows={[{ ...adminRows[1]!, defaultUnitPriceMilliYuan: null }]}
+        stores={[]}
+      />,
+    );
+
+    const desktopTable = screen.getByRole("table", { name: "商品与 SKU 列表" });
+    expect(within(desktopTable).getAllByText("—").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "管理" })[0]!);
+    const drawer = await screen.findByRole("dialog", { name: "管理 TZX-WHITE-002" });
+    const purchasePrice = within(drawer).getByLabelText("采购价（元）");
+    expect(purchasePrice).toHaveValue("");
+    expect(purchasePrice).toBeRequired();
+    const weight = within(drawer).getByLabelText("重量（克）");
+    expect(weight).toHaveValue(null);
+    expect(weight).toBeRequired();
+  });
+
   it("lets administrators restore an archived SKU without exposing active-only operations", async () => {
     render(
       <CatalogWorkspace

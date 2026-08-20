@@ -266,4 +266,68 @@ describe("SKU management service", () => {
       skuIds: Array.from({ length: 101 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     })).rejects.toBeInstanceOf(CatalogManagementError);
   });
+
+  test("rejects an entire batch when any SKU is missing a price required for sale", async () => {
+    const complete = await createManagedSku({
+      actorId,
+      product: { linkText: null, mode: "CREATE", name: "完整商品", sourceSequence: "20" },
+      reason: "初始化完整 SKU",
+      sku: { cargoUnitPriceMilliYuan: 1_000, color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "NOT_SELLABLE", skuCode: "TZX-020-1", specification: null, weightGrams: 1 },
+    });
+    const incomplete = await createManagedSku({
+      actorId,
+      product: { mode: "EXISTING", productId: complete.productId },
+      reason: "初始化待补价 SKU",
+      sku: { cargoUnitPriceMilliYuan: 1_000, color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "NOT_SELLABLE", skuCode: "TZX-020-2", specification: null, weightGrams: 1 },
+    });
+    await db.update(skus).set({ cargoUnitPriceMilliYuan: null }).where(eq(skus.id, incomplete.skuId));
+    const incompleteDefault = await createManagedSku({
+      actorId,
+      product: { mode: "EXISTING", productId: complete.productId },
+      reason: "初始化待补采购价 SKU",
+      sku: { cargoUnitPriceMilliYuan: 1_000, color: null, combination: null, defaultUnitPriceMilliYuan: 500, initialStock: 0, productUrl: null, saleStatus: "NOT_SELLABLE", skuCode: "TZX-020-3", specification: null, weightGrams: 1 },
+    });
+    await db.update(skus).set({
+      defaultUnitPriceFen: null,
+      defaultUnitPriceMilliYuan: null,
+    }).where(eq(skus.id, incompleteDefault.skuId));
+
+    await expect(batchManageSkus({
+      actorId,
+      mode: "SET_STATUS",
+      reason: "批量启用销售",
+      saleStatus: "SELLABLE",
+      skuIds: [complete.skuId, incomplete.skuId, incompleteDefault.skuId],
+    })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+    const rows = await db.select({ id: skus.id, saleStatus: skus.saleStatus }).from(skus);
+    expect(rows).toEqual(expect.arrayContaining([
+      { id: complete.skuId, saleStatus: "NOT_SELLABLE" },
+      { id: incomplete.skuId, saleStatus: "NOT_SELLABLE" },
+      { id: incompleteDefault.skuId, saleStatus: "NOT_SELLABLE" },
+    ]));
+
+    await updateManagedSku({
+      actorId,
+      cargoUnitPriceMilliYuan: 1_200,
+      color: null,
+      combination: null,
+      defaultUnitPriceMilliYuan: 600,
+      productUrl: null,
+      reason: "补齐价格后启用销售",
+      saleStatus: "SELLABLE",
+      skuCode: "TZX-020-3",
+      skuId: incompleteDefault.skuId,
+      specification: null,
+      weightGrams: 1,
+    });
+    expect((await db.select().from(skus).where(eq(skus.id, incompleteDefault.skuId)))[0]).toEqual(
+      expect.objectContaining({
+        cargoUnitPriceMilliYuan: 1_200,
+        defaultUnitPriceFen: 60,
+        defaultUnitPriceMilliYuan: 600,
+        saleStatus: "SELLABLE",
+      }),
+    );
+  });
 });

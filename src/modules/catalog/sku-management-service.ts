@@ -329,7 +329,7 @@ export async function updateManagedSku(input: {
       cargoUnitPriceMilliYuan: number | null;
       color: string | null;
       combination: string | null;
-      defaultUnitPriceMilliYuan: number;
+      defaultUnitPriceMilliYuan: number | null;
       imageAssetId: string | null;
       imageUrl: string | null;
       lifecycleStatus: "ACTIVE" | "ARCHIVED";
@@ -531,7 +531,13 @@ export async function batchManageSkus(input: BatchManageSkusInput) {
   if (skuIds.length > 100) throw new CatalogManagementError("BATCH_LIMIT_EXCEEDED", "一次最多处理 100 个 SKU");
 
   return db.transaction(async (tx) => {
-    const locked = await tx.select({ id: skus.id, lifecycleStatus: skus.lifecycleStatus, skuCode: skus.skuCode }).from(skus)
+    const locked = await tx.select({
+      cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
+      defaultUnitPriceMilliYuan: skus.defaultUnitPriceMilliYuan,
+      id: skus.id,
+      lifecycleStatus: skus.lifecycleStatus,
+      skuCode: skus.skuCode,
+    }).from(skus)
       .where(inArray(skus.id, skuIds)).orderBy(asc(skus.id)).for("update");
     if (locked.length !== skuIds.length) throw new CatalogManagementError("SKU_NOT_FOUND", "部分 SKU 不存在");
     if (locked.some((sku) => sku.lifecycleStatus !== "ACTIVE")) {
@@ -539,6 +545,19 @@ export async function batchManageSkus(input: BatchManageSkusInput) {
     }
 
     if (input.mode === "SET_STATUS") {
+      if (
+        input.saleStatus === "SELLABLE" &&
+        locked.some(
+          (sku) =>
+            sku.cargoUnitPriceMilliYuan === null ||
+            sku.defaultUnitPriceMilliYuan === null,
+        )
+      ) {
+        throw new CatalogManagementError(
+          "INVALID_INPUT",
+          "存在未补齐采购价或货品价格的 SKU，不能设为可售",
+        );
+      }
       await tx.update(skus).set({ saleStatus: input.saleStatus, updatedAt: new Date() }).where(inArray(skus.id, skuIds));
       for (const sku of locked) await tx.insert(auditLogs).values({ action: "SKU_STATUS_UPDATED", actorId, actorType: "ADMIN", afterJson: { saleStatus: input.saleStatus }, beforeJson: {}, entityId: sku.id, entityType: "SKU", reason });
     } else if (input.mode === "MOVE") {
