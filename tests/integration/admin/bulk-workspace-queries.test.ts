@@ -36,7 +36,7 @@ async function createDraft(
     .values({
       createdAt: updatedAt,
       customerId,
-      expiresAt: new Date("2026-08-20T00:00:00.000Z"),
+      expiresAt: new Date("2099-08-20T00:00:00.000Z"),
       updatedAt,
     })
     .returning();
@@ -73,7 +73,7 @@ async function seedUnknownSkuBatch(input: {
       createdAt: input.updatedAt,
       customerId: input.customerId,
       duplicateRows: 0,
-      expiresAt: new Date("2026-08-20T00:00:00.000Z"),
+      expiresAt: new Date("2099-08-20T00:00:00.000Z"),
       fileSha256: "a".repeat(64),
       fileSizeBytes: 1,
       invalidRows: 0,
@@ -121,7 +121,7 @@ describe("admin bulk workspace queries", () => {
       .values({
         createdAt: matchingDate,
         customerId: customer.id,
-        expiresAt: new Date("2026-08-20T00:00:00.000Z"),
+        expiresAt: new Date("2099-08-20T00:00:00.000Z"),
         updatedAt: matchingDate,
       })
       .returning();
