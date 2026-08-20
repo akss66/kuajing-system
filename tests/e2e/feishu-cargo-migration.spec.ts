@@ -630,8 +630,8 @@ test.describe.serial("Feishu cargo migration", () => {
       .getByRole("button", { name: "一键同步飞书货盘" })
       .click();
     await expect(
-      drawer.getByText(/飞书货盘同步完成：已更新 74 个商品来源、140 个 SKU/),
-    ).toBeVisible();
+      drawer.getByText(/飞书货盘同步完成：共 140 个 SKU；新增 0 个 SKU、0 个商品，更新 140 个 SKU/),
+    ).toBeVisible({ timeout: 90_000 });
 
     const [refreshedSku] = await db
       .select({

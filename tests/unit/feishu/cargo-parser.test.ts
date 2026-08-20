@@ -1,6 +1,9 @@
 import cargoSourceValues from "@/../tests/fixtures/feishu/cargo-source-values.json";
 import { buildFieldAlignedCargoSourceFixture } from "@/../tests/fixtures/feishu/field-aligned-cargo-source";
-import { parseLegacyCargoSheet } from "@/modules/feishu/cargo-parser";
+import {
+  parseCargoSheetForSync,
+  parseLegacyCargoSheet,
+} from "@/modules/feishu/cargo-parser";
 
 import { describe, expect, test } from "vitest";
 
@@ -1015,5 +1018,131 @@ describe("parseLegacyCargoSheet", () => {
       totalQuantity: 0,
     });
     expect(Number.isSafeInteger(result.summary.totalQuantity)).toBe(true);
+  });
+});
+
+describe("parseCargoSheetForSync", () => {
+  test("keeps an incomplete SKU as a non-sellable draft with nullable source fields", () => {
+    const values = sampleRows();
+    values.push([
+      "",
+      "TZX-077",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "unknown",
+      "",
+    ]);
+
+    const result = parseCargoSheetForSync(values);
+
+    expect(result.rows.find((row) => row.skuCode === "TZX-077")).toMatchObject({
+      cargoUnitPriceMilliYuan: null,
+      defaultUnitPriceFen: null,
+      defaultUnitPriceMilliYuan: null,
+      imageFileToken: null,
+      linkText: null,
+      productGroupKey: "77",
+      productName: "TZX-077",
+      productUrl: null,
+      saleStatus: "NOT_SELLABLE",
+      skuName: "TZX-077",
+      sourceSequence: "77",
+      specification: null,
+      totalQuantity: null,
+      weightGrams: null,
+    });
+    expect(
+      result.rows.find((row) => row.skuCode === "TZX-077")?.degradedReasons,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "CARGO_SYNC_SEQUENCE_DERIVED" }),
+        expect.objectContaining({ code: "CARGO_SYNC_PRODUCT_NAME_FALLBACK" }),
+        expect.objectContaining({ code: "CARGO_SYNC_MISSING_IMAGE" }),
+        expect.objectContaining({ code: "CARGO_SYNC_MISSING_PRICE" }),
+        expect.objectContaining({ code: "CARGO_SYNC_MISSING_CARGO_PRICE" }),
+        expect.objectContaining({ code: "CARGO_SYNC_MISSING_TOTAL_QUANTITY" }),
+        expect.objectContaining({ code: "CARGO_SYNC_MISSING_PRODUCT_URL" }),
+        expect.objectContaining({ code: "CARGO_SYNC_INVALID_SALE_STATUS" }),
+      ]),
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({
+        severity: "BLOCKING",
+        sourceRowNumber: 6,
+      }),
+    );
+  });
+
+  test("skips nonblank residue rows without a SKU and reports a warning", () => {
+    const values = sampleRows();
+    values.push(["77", "", "", "残留说明"]);
+
+    const result = parseCargoSheetForSync(values);
+
+    expect(result.rows).toHaveLength(4);
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SYNC_MISSING_SKU_SKIPPED",
+      message: "第 6 行没有 SKU，已按残留或草稿行跳过",
+      severity: "WARNING",
+      sourceRowNumber: 6,
+    });
+  });
+
+  test("inherits merged product fields for later SKUs without degrading valid data", () => {
+    const values = sampleRows();
+    values[2][2] = "";
+    values[2][3] = "";
+    values[2][4] = "";
+    values[2][7] = "";
+    values[2][8] = "";
+    values[2][10] = "";
+    values[2][11] = "";
+    values[2][12] = "";
+    values[2][13] = "";
+
+    const result = parseCargoSheetForSync(values);
+    const inherited = result.rows.find((row) => row.skuCode === "TZX-001-2");
+
+    expect(inherited).toMatchObject({
+      cargoUnitPriceMilliYuan: 2930,
+      defaultUnitPriceMilliYuan: 2930,
+      imageFileToken: "file-token-tzx-001-1",
+      productName: "探险杯套装",
+      productUrl: "https://example.test/products/tzx-001",
+      saleStatus: "SELLABLE",
+      sourceSequence: "1",
+    });
+    expect(inherited?.degradedReasons).toEqual([]);
+    expect(inherited?.inheritedFrom).toMatchObject({
+      cargoPrice: 2,
+      image: 2,
+      price: 2,
+      productName: 2,
+      productUrl: 2,
+      saleStatus: 2,
+      sourceSequence: 2,
+    });
+  });
+
+  test("keeps duplicate SKU detection blocking in sync mode", () => {
+    const values = sampleRows();
+    values[2][1] = "TZX-001-1";
+
+    const result = parseCargoSheetForSync(values);
+
+    expect(result.issues).toContainEqual({
+      code: "CARGO_DUPLICATE_SKU",
+      message: "SKU 重复：TZX-001-1",
+      severity: "BLOCKING",
+      sourceRowNumber: 3,
+    });
   });
 });

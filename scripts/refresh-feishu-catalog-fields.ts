@@ -51,6 +51,7 @@ async function main() {
     baseUrl: readFeishuApiBaseUrl(),
   });
   const client: CatalogFieldRefreshReadPort = {
+    downloadMedia: feishuClient.downloadMedia.bind(feishuClient),
     listSheets: feishuClient.listSheets.bind(feishuClient),
     readRangeDetails: feishuClient.readRangeDetails.bind(feishuClient),
     resolveWikiSpreadsheet: feishuClient.resolveWikiSpreadsheet.bind(feishuClient),

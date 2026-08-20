@@ -160,8 +160,11 @@ describe("CargoMigrationPanel", () => {
     expect(
       screen.getByRole("button", { name: "一键同步飞书货盘" }),
     ).toBeEnabled();
-    expect(screen.getByText(/不会覆盖库存数量/)).toBeVisible();
-    expect(screen.getByText(/不会新增或删除 SKU/)).toBeVisible();
+    expect(screen.getAllByText(/已有 SKU 的库存不会被覆盖/)).toHaveLength(2);
+    expect(screen.getByText(/飞书新增的 SKU 会同步创建/)).toBeVisible();
+    expect(screen.getByText(/空字段会保留为空/)).toBeVisible();
+    expect(screen.getByText(/资料不完整的 SKU 会强制保持不可售/)).toBeVisible();
+    expect(screen.getByText(/不会自动删除系统中的历史 SKU/)).toBeVisible();
     expect(screen.getByText(/不会写入飞书/)).toBeVisible();
     expect(screen.getByText("最近同步：2026/08/20 15:30")).toBeVisible();
     expect(document.querySelector('[aria-live="polite"]')).not.toBeNull();

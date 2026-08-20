@@ -103,6 +103,10 @@ function mapCatalogRefreshErrorMessage(error: unknown) {
       return "飞书货盘的 SKU 数量与已导入基线不一致，本次未更新。请先核对新增或缺失的 SKU。";
     case "PARSER_BLOCKING_ISSUES":
       return "飞书货盘存在无法解析的阻断问题，本次未更新。请先修正货盘内容。";
+    case "NO_SYNCABLE_SKUS":
+      return "飞书货盘中没有可同步的有效 SKU，本次未更新。";
+    case "SOURCE_IMAGE_DOWNLOAD_FAILED":
+      return "读取飞书货盘图片失败，请稍后重试；本次未修改商品或库存。";
     case "SOURCE_SHEET_SELECTION_REQUIRED":
       return "已导入基线缺少明确的源工作表，本次未更新。请联系系统维护人员核对配置。";
     default:
@@ -132,10 +136,7 @@ export async function syncFeishuCatalogFieldsAction(
     const service = createCatalogFieldRefreshService();
     result = await service.apply({
       actorUserId: actor.userId,
-      cargoPricePlaceholders: baseline.cargoPricePlaceholders,
       client,
-      expectedSkuCount: baseline.expectedSkuCount,
-      expectedSourceSequenceCount: baseline.expectedSourceSequenceCount,
       reason: "超级管理员一键同步飞书货盘商品字段",
       sourceSheetId: baseline.sourceSheetId,
       sourceWikiToken: config.sourceWikiToken,
@@ -151,7 +152,7 @@ export async function syncFeishuCatalogFieldsAction(
   revalidatePath(CATALOG_PATH);
   revalidatePath(INVENTORY_PATH);
   return {
-    message: `飞书货盘同步完成：已更新 ${result.sourceSequenceCount} 个商品来源、${result.skuCount} 个 SKU 的字段；库存数量保持不变。`,
+    message: `飞书货盘同步完成：共 ${result.skuCount} 个 SKU；新增 ${result.createdSkuCount} 个 SKU、${result.createdProductCount} 个商品，更新 ${result.matchedSkuCount} 个 SKU；${result.degradedSkuCount} 个资料不完整的 SKU 已保持不可售。已有库存未覆盖，新 SKU 已按飞书库存初始化。`,
     status: "success",
   };
 }

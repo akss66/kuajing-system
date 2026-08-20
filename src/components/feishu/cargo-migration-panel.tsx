@@ -320,7 +320,7 @@ export function CargoMigrationPanel({
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
-            飞书源货盘始终只读。确认只会写入本系统数据库；现有 SKU 仅更新元数据和图片，库存余额保持不变。
+            飞书源货盘始终只读。确认只会写入本系统数据库；已有 SKU 的库存不会被覆盖，新 SKU 仅在首次创建时初始化库存。
           </div>
           {showMetricSummary ? (
             <MetricStrip
@@ -379,16 +379,16 @@ export function CargoMigrationPanel({
       {actorKind === "SUPER_ADMIN" && hasImportedCargoBaseline ? (
         <WorkspacePanel>
           <WorkspacePanelHeader
-            description="从飞书源货盘读取最新商品字段，并立即更新系统中的既有商品与 SKU。"
+            description="从飞书源货盘精确读取商品与 SKU；允许新增，并安全保留历史库存和订单。"
             title="飞书货盘一键同步"
           />
           <form action={catalogSyncFormAction} className="space-y-4 px-4 py-4 sm:px-5">
             <div className="space-y-2 text-sm leading-6 text-muted-foreground">
               <p>
-                本操作不会覆盖库存数量，不会新增或删除 SKU，也不会写入飞书。
+                飞书新增的 SKU 会同步创建；已有 SKU 的库存不会被覆盖，新 SKU 会按飞书库存首次初始化；本操作不会写入飞书。
               </p>
               <p>
-                仅当飞书与已导入基线的商品和 SKU 数量、SKU 集合完全一致时，才会更新名称、规格、价格、重量、链接及可售状态等字段。
+                空字段会保留为空，资料不完整的 SKU 会强制保持不可售。飞书中暂时缺失的 SKU 不会自动删除系统中的历史 SKU。
               </p>
               <p>
                 最近同步：{latestCatalogRefreshLabel ?? "尚未执行"}

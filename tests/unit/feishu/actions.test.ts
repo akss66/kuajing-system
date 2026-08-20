@@ -504,19 +504,17 @@ describe("feishu admin actions", () => {
     expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
   });
 
-  it("refreshes existing catalog fields from the trusted imported baseline without writing Feishu", async () => {
+  it("synchronizes exact Feishu catalog rows without legacy counts or placeholders", async () => {
     serviceMocks.applyCatalogFieldRefresh.mockResolvedValue({
-      cargoPricePlaceholders: [
-        {
-          skuCode: "TZX-076",
-          sourceRowNumber: 141,
-          unitPriceMilliYuan: 99_000,
-        },
-      ],
+      cargoPricePlaceholders: [],
+      createdProductCount: 2,
+      createdSkuCount: 3,
+      degradedSkuCount: 1,
       matchedSkuCount: 140,
       productsToMerge: 2,
-      skuCount: 140,
-      sourceSequenceCount: 74,
+      skuCount: 143,
+      sourceSequenceCount: 76,
+      warningCount: 7,
     });
 
     const result = await syncFeishuCatalogFieldsAction(
@@ -525,17 +523,12 @@ describe("feishu admin actions", () => {
     );
 
     expect(result).toEqual({
-      message: "飞书货盘同步完成：已更新 74 个商品来源、140 个 SKU 的字段；库存数量保持不变。",
+      message: "飞书货盘同步完成：共 143 个 SKU；新增 3 个 SKU、2 个商品，更新 140 个 SKU；1 个资料不完整的 SKU 已保持不可售。已有库存未覆盖，新 SKU 已按飞书库存初始化。",
       status: "success",
     });
     expect(serviceMocks.applyCatalogFieldRefresh).toHaveBeenCalledWith({
       actorUserId: "super-admin-user-1",
-      cargoPricePlaceholders: [
-        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
-      ],
       client: clientMocks,
-      expectedSkuCount: 140,
-      expectedSourceSequenceCount: 74,
       reason: "超级管理员一键同步飞书货盘商品字段",
       sourceSheetId: "sheet-source-a",
       sourceWikiToken: "wiki-source-token",
@@ -571,11 +564,10 @@ describe("feishu admin actions", () => {
   });
 
   it.each([
-    ["SKU_SET_MISMATCH", "SKU 集合"],
     ["PRODUCT_GROUPING_CONFLICT", "商品分组"],
-    ["SOURCE_SEQUENCE_COUNT_MISMATCH", "商品数量"],
-    ["SKU_COUNT_MISMATCH", "SKU 数量"],
     ["PARSER_BLOCKING_ISSUES", "阻断问题"],
+    ["NO_SYNCABLE_SKUS", "有效 SKU"],
+    ["SOURCE_IMAGE_DOWNLOAD_FAILED", "图片"],
   ])("maps catalog refresh failure %s to safe Chinese", async (code, label) => {
     serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(new Error(code));
 

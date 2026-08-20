@@ -79,3 +79,52 @@ export type CargoParseResult = {
   issues: MigrationIssue[];
   summary: MigrationSummary;
 };
+
+export type CargoSyncNullableField =
+  | "cargoUnitPriceMilliYuan"
+  | "defaultUnitPriceMilliYuan"
+  | "imageFileToken"
+  | "productName"
+  | "productUrl"
+  | "saleStatus"
+  | "sourceSequence"
+  | "specification"
+  | "totalQuantity"
+  | "weightGrams";
+
+export type CargoSyncDegradation = {
+  code: string;
+  field: CargoSyncNullableField;
+  message: string;
+};
+
+export type ParsedCargoSyncRow = {
+  sourceRowNumber: number;
+  productGroupKey: string;
+  sourceSequence: string | null;
+  skuCode: string;
+  imageFileToken: string | null;
+  productName: string;
+  skuName: string;
+  defaultUnitPriceFen: number | null;
+  defaultUnitPriceMilliYuan: number | null;
+  cargoUnitPriceMilliYuan: number | null;
+  totalQuantity: number | null;
+  linkText: string | null;
+  productUrl: string | null;
+  specification: string | null;
+  color: string | null;
+  combination: string | null;
+  weightGrams: number | null;
+  saleStatus: "SELLABLE" | "NOT_SELLABLE";
+  inheritedFrom: Partial<Record<CargoInheritedField, number>>;
+  degradedReasons: CargoSyncDegradation[];
+};
+
+export type CargoSyncParseResult = {
+  headerRowNumber: number;
+  rows: ParsedCargoSyncRow[];
+  issues: MigrationIssue[];
+  warnings: MigrationIssue[];
+  summary: MigrationSummary;
+};

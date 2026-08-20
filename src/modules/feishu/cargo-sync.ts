@@ -27,8 +27,8 @@ type CargoSnapshotRow = {
   skuCode: string;
   specification: null | string;
   totalQuantity: number;
-  unitPriceFen: number;
-  unitPriceMilliYuan: number;
+  unitPriceFen: number | null;
+  unitPriceMilliYuan: number | null;
   weightGrams: null | number;
 };
 
@@ -197,7 +197,7 @@ function toSnapshotValueRows(rows: CargoSnapshotRow[]): CargoCell[][] {
       row.skuCode,
       "",
       row.name,
-      row.unitPriceMilliYuan / 1_000,
+      row.unitPriceMilliYuan === null ? "" : row.unitPriceMilliYuan / 1_000,
       row.totalQuantity,
       row.availableQuantity,
       row.productUrl ?? "",
