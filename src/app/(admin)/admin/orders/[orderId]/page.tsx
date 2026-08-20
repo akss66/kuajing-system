@@ -31,6 +31,8 @@ const statusLabels: Record<string, string> = {
   SUBMITTING: "提交中",
 };
 
+const MANUAL_RETRY_QUEUED = "MANUAL_CONFIRMED_FAILURE_RETRY";
+
 function dateTime(value: Date | null) {
   return value
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -108,6 +110,7 @@ export default async function AdminOrderDetailPage({
           const canRetry = shipment.fulfillmentStatus === "EXCEPTION";
           const canCancel = shipment.fulfillmentStatus !== null && !["SHIPPED", "CANCELLED", "CANCEL_PENDING"].includes(shipment.fulfillmentStatus);
           const canReplace = shipment.kind === "NORMAL" && shipment.fulfillmentStatus === "SHIPPED";
+          const retryQueued = shipment.lastErrorCode === MANUAL_RETRY_QUEUED;
           return (
             <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background" key={shipment.id}>
               <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -126,7 +129,15 @@ export default async function AdminOrderDetailPage({
                 <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus === "FULFILLING" ? "补发待仓库发货" : shipment.replacementStatus === "SHIPPED" ? "补发仓库已发货" : shipment.replacementStatus ? formatReplacementStatus(shipment.replacementStatus) : "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
               </div>
 
-              {shipment.lastErrorCode ? <div className="flex gap-3 border-b border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger sm:px-5"><CircleAlert className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">{shipment.lastErrorCode}</p><p className="mt-1">{shipment.lastErrorMessage}</p></div></div> : null}
+              {shipment.lastErrorCode ? (
+                <div className={`flex gap-3 border-b px-4 py-3 text-sm sm:px-5 ${retryQueued ? "border-primary/20 bg-primary-soft text-primary-hover" : "border-danger/20 bg-danger/5 text-danger"}`}>
+                  {retryQueued ? <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
+                  <div>
+                    <p className="font-semibold">{retryQueued ? "已提交重试，等待系统处理" : shipment.lastErrorCode}</p>
+                    <p className="mt-1">{retryQueued ? "当前包裹已加入处理队列，请勿重复操作。" : shipment.lastErrorMessage}</p>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="p-4 sm:p-5">
                 <h3 className="text-sm font-semibold text-ink">包裹商品</h3>

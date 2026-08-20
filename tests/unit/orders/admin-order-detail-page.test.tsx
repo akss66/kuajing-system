@@ -159,7 +159,7 @@ describe("AdminOrderDetailPage", () => {
           id: "00000000-0000-4000-8000-000000000002",
           jifengStatus: null,
           kind: "NORMAL",
-          lastErrorCode: null,
+          lastErrorCode: "MANUAL_CONFIRMED_FAILURE_RETRY",
           lastErrorMessage: null,
           lines: [],
           logisticsCurrency: null,
@@ -186,5 +186,9 @@ describe("AdminOrderDetailPage", () => {
 
     expect(screen.getAllByRole("button", { name: "取消此包裹" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "重试这个包裹" })).toBeVisible();
+    expect(screen.getByText("已提交重试，等待系统处理")).toBeVisible();
+    expect(
+      screen.queryByText("MANUAL_CONFIRMED_FAILURE_RETRY"),
+    ).not.toBeInTheDocument();
   });
 });
