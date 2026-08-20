@@ -183,6 +183,13 @@
       "when": 1787044176500,
       "tag": "0025_cancelled_order_deduplication",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787199429309,
+      "tag": "0026_jifeng_status_poll_leases",
+      "breakpoints": true
     }
   ]
 }

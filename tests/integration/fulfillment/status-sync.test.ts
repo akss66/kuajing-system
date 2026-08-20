@@ -15,7 +15,9 @@ import {
   shipmentFulfillments,
   skus,
   stores,
+  systemNotifications,
 } from "@/db/schema";
+import { JifengApiError } from "@/integrations/jifeng/client";
 import {
   applyJifengOrderStatus,
   pollActiveJifengFulfillments,
@@ -113,6 +115,7 @@ describe("Jifeng order status convergence", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
       truncate table
+        system_notifications,
         audit_logs,
         integration_attempts,
         integration_outbox,
@@ -422,7 +425,9 @@ describe("Jifeng order status convergence", () => {
     expect(
       fulfillments.every(
         (fulfillment) =>
-          fulfillment.lastErrorCode === "STATUS_POLL_FAILED" &&
+          fulfillment.lastErrorCode === null &&
+          fulfillment.lastStatusPollErrorCode === "INTERNAL_ERROR" &&
+          fulfillment.statusPollFailureCount === 1 &&
           fulfillment.nextRetryAt?.toISOString() === "2026-08-18T08:05:00.000Z",
       ),
     ).toBe(true);
@@ -431,5 +436,217 @@ describe("Jifeng order status convergence", () => {
       .from(fulfillmentOrders)
       .where(eq(fulfillmentOrders.id, fixture.order.id));
     expect(order.status).toBe("FULFILLING");
+  });
+
+  test("reschedules a recovered status-2 fulfillment instead of polling it every minute", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-18T08:05:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        lastErrorCode: "STATUS_POLL_FAILED",
+        lastErrorMessage: "极风状态查询失败，系统将在稍后重试",
+        nextRetryAt: now,
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => ({ erpNo, status: 2 }),
+      },
+      limit: 1,
+      now,
+    });
+
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment).toMatchObject({
+      jifengStatus: 2,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      status: "FULFILLING",
+    });
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-18T08:10:00.000Z",
+    );
+  });
+
+  test("does not poll permanent create failures that were never submitted to Jifeng", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-18T09:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        lastErrorCode: "50026",
+        lastErrorMessage: "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存",
+        nextRetryAt: null,
+        status: "EXCEPTION",
+        submittedAt: null,
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-18T10:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+    let queryCount = 0;
+
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => {
+          queryCount += 1;
+          return { erpNo, status: 2 };
+        },
+      },
+      now,
+    });
+
+    expect(queryCount).toBe(0);
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment).toMatchObject({
+      lastErrorCode: "50026",
+      status: "EXCEPTION",
+      submittedAt: null,
+    });
+  });
+
+  test("backs off transient poll failures without replacing fulfillment errors or warning immediately", async () => {
+    const fixture = await createTwoPackageFixture();
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        jifengStatus: 8,
+        lastErrorCode: "50038",
+        lastErrorMessage: "极风报告仓库处理异常，请在极风后台核查",
+        status: "EXCEPTION",
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-19T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+    const client = {
+      getOrder: async () => {
+        throw new JifengApiError({
+          code: "TIMEOUT",
+          message: "极风接口请求超时",
+          retryable: true,
+        });
+      },
+    };
+
+    await pollActiveJifengFulfillments({
+      client,
+      now: new Date("2026-08-18T10:00:00.000Z"),
+    });
+    let [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-18T10:05:00.000Z",
+    );
+    expect(fulfillment).toMatchObject({
+      lastErrorCode: "50038",
+      lastErrorMessage: "极风报告仓库处理异常，请在极风后台核查",
+      status: "EXCEPTION",
+    });
+    expect(await db.select().from(systemNotifications)).toHaveLength(0);
+
+    await pollActiveJifengFulfillments({
+      client,
+      now: new Date("2026-08-18T10:05:00.000Z"),
+    });
+    [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-18T10:15:00.000Z",
+    );
+    expect(await db.select().from(systemNotifications)).toHaveLength(0);
+
+    await pollActiveJifengFulfillments({
+      client,
+      now: new Date("2026-08-18T10:15:00.000Z"),
+    });
+    [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-18T10:35:00.000Z",
+    );
+    expect(await db.select().from(systemNotifications)).toHaveLength(1);
+  });
+
+  test("uses a slower retry cadence for non-retryable poll errors", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-18T11:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-19T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async () => {
+          throw new JifengApiError({
+            code: "REFRESH_REQUIRED",
+            message: "极风连接需要重新授权",
+            retryable: false,
+          });
+        },
+      },
+      now,
+    });
+
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-18T11:30:00.000Z",
+    );
+    expect(await db.select().from(systemNotifications)).toHaveLength(1);
+  });
+
+  test("claims due fulfillments so concurrent workers query each package once", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-18T12:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-19T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+    let queryCount = 0;
+    let releaseQuery!: () => void;
+    let signalQueryStarted!: () => void;
+    const queryGate = new Promise<void>((resolve) => {
+      releaseQuery = resolve;
+    });
+    const queryStarted = new Promise<void>((resolve) => {
+      signalQueryStarted = resolve;
+    });
+    const client = {
+      getOrder: async ({ erpNo }: { erpNo: string }) => {
+        queryCount += 1;
+        signalQueryStarted();
+        await queryGate;
+        return { erpNo, status: 2 };
+      },
+    };
+
+    const firstWorker = pollActiveJifengFulfillments({ client, now });
+    await queryStarted;
+    const secondWorker = pollActiveJifengFulfillments({ client, now });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseQuery();
+    await Promise.all([firstWorker, secondWorker]);
+
+    expect(queryCount).toBe(1);
   });
 });

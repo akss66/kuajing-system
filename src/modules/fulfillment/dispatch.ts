@@ -20,7 +20,10 @@ import type {
 } from "@/integrations/jifeng/types";
 import { decryptPii } from "@/shared/pii-crypto";
 import { createSystemNotification } from "@/modules/notifications/service";
-import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
+import {
+  applyJifengOrderStatus,
+  nextJifengStatusPollAt,
+} from "@/modules/fulfillment/status-sync";
 
 import { refreshParentFulfillmentStatus } from "./order-rollup";
 
@@ -839,7 +842,7 @@ export async function processJifengCreateOrderEvent(input: {
         .set({
           lastErrorCode: null,
           lastErrorMessage: null,
-          nextRetryAt: null,
+          nextRetryAt: nextJifengStatusPollAt(now),
           status: "SUBMITTED",
           submittedAt: now,
           updatedAt: now,

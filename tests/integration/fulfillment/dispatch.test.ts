@@ -453,6 +453,9 @@ describe("paid order Jifeng dispatch", () => {
       .where(eq(auditLogs.action, "JIFENG_ORDER_SUBMITTED"));
     expect(updatedOrder.status).toBe("FULFILLING");
     expect(fulfillment).toMatchObject({ attemptCount: 1, status: "SUBMITTED" });
+    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
+      "2026-08-12T02:05:00.000Z",
+    );
     expect(updatedEvent).toMatchObject({ attemptCount: 1, status: "COMPLETED" });
     expect(attempt).toMatchObject({
       attemptNumber: 1,

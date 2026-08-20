@@ -87,6 +87,22 @@ export const shipmentFulfillments = pgTable(
       mode: "date",
       withTimezone: true,
     }),
+    lastStatusPollAt: timestamp("last_status_poll_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    lastStatusPollErrorCode: varchar("last_status_poll_error_code", {
+      length: 80,
+    }),
+    lastStatusPollErrorMessage: text("last_status_poll_error_message"),
+    statusPollClaimToken: uuid("status_poll_claim_token"),
+    statusPollFailureCount: integer("status_poll_failure_count")
+      .default(0)
+      .notNull(),
+    statusPollLockedAt: timestamp("status_poll_locked_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
     submittedAt: timestamp("submitted_at", {
       mode: "date",
       withTimezone: true,
@@ -114,6 +130,10 @@ export const shipmentFulfillments = pgTable(
     check(
       "shipment_fulfillments_attempt_count_non_negative",
       sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "shipment_fulfillments_status_poll_failure_count_non_negative",
+      sql`${table.statusPollFailureCount} >= 0`,
     ),
     index("shipment_fulfillments_status_retry_index").on(
       table.status,

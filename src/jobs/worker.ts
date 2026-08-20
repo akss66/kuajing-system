@@ -71,7 +71,7 @@ await boss.schedule(JIFENG_FULFILLMENT_QUEUE, "* * * * *", null, {
 await boss.work(JIFENG_FULFILLMENT_QUEUE, { batchSize: 1 }, async () => {
   const summary = await runJifengFulfillmentCycle();
   console.info(
-    `[worker] Jifeng cycle enabled=${summary.enabled} enqueued=${summary.enqueuedCount} completed=${summary.processed.completed} retryScheduled=${summary.processed.retryScheduled} failed=${summary.processed.failed} shipped=${summary.statuses.shipped} exceptions=${summary.statuses.exceptions}`,
+    `[worker] Jifeng cycle enabled=${summary.enabled} enqueued=${summary.enqueuedCount} completed=${summary.processed.completed} retryScheduled=${summary.processed.retryScheduled} failed=${summary.processed.failed} shipped=${summary.statuses.shipped} exceptions=${summary.statuses.exceptions} pollFailures=${summary.statuses.pollFailures}`,
   );
   return summary;
 });

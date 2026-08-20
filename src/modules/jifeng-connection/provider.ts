@@ -51,13 +51,19 @@ export type JifengCycleSummary = {
   };
   statuses: {
     exceptions: number;
+    pollFailures: number;
     shipped: number;
     synced: number;
   };
 };
 
 const noProcessedEvents = () => ({ completed: 0, failed: 0, retryScheduled: 0 });
-const noStatusUpdates = () => ({ exceptions: 0, shipped: 0, synced: 0 });
+const noStatusUpdates = () => ({
+  exceptions: 0,
+  pollFailures: 0,
+  shipped: 0,
+  synced: 0,
+});
 
 function providerError(code: string, message: string): never {
   throw new JifengProviderError(code, message);

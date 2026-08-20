@@ -10,6 +10,7 @@ import {
   replacementRequests,
   shipmentFulfillments,
 } from "@/db/schema";
+import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refreshParentFulfillmentStatus } from "@/modules/fulfillment/order-rollup";
@@ -17,6 +18,12 @@ import { inventoryReasonLabel } from "@/modules/inventory/types";
 import { createSystemNotification } from "@/modules/notifications/service";
 
 type StatusSource = "POLL" | "WEBHOOK";
+
+const ACTIVE_STATUS_POLL_INTERVAL_MS = 5 * 60_000;
+const EXCEPTION_STATUS_POLL_INTERVAL_MS = 30 * 60_000;
+const STATUS_POLL_LEASE_MS = 2 * 60_000;
+const STATUS_POLL_MAX_BACKOFF_MS = 6 * 60 * 60_000;
+const STATUS_POLL_WARNING_THRESHOLD = 3;
 
 export type JifengOrderStatusPort = {
   getOrder(input: { erpNo: string }): Promise<JifengOrderDetail>;
@@ -31,6 +38,55 @@ function parsedShippedAt(value: string | undefined, fallback: Date) {
 function logisticsCurrency(value: string | undefined) {
   const normalized = value?.trim().toUpperCase();
   return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : "CAD";
+}
+
+export function nextJifengStatusPollAt(now: Date) {
+  return new Date(now.getTime() + ACTIVE_STATUS_POLL_INTERVAL_MS);
+}
+
+function statusPollFailure(error: unknown) {
+  if (error instanceof JifengApiError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+    };
+  }
+  return {
+    code: "INTERNAL_ERROR",
+    message: "极风状态查询出现内部错误",
+    retryable: true,
+  };
+}
+
+function statusPollRetryAt(input: {
+  failureCount: number;
+  now: Date;
+  retryable: boolean;
+}) {
+  const delayMs = input.retryable
+    ? Math.min(
+        ACTIVE_STATUS_POLL_INTERVAL_MS * 2 ** (input.failureCount - 1),
+        STATUS_POLL_MAX_BACKOFF_MS,
+      )
+    : EXCEPTION_STATUS_POLL_INTERVAL_MS;
+  return new Date(input.now.getTime() + delayMs);
+}
+
+function clearedStatusPollState(input: {
+  nextRetryAt: Date | null;
+  now: Date;
+  source: StatusSource;
+}) {
+  return {
+    ...(input.source === "POLL" ? { lastStatusPollAt: input.now } : {}),
+    lastStatusPollErrorCode: null,
+    lastStatusPollErrorMessage: null,
+    nextRetryAt: input.nextRetryAt,
+    statusPollClaimToken: null,
+    statusPollFailureCount: 0,
+    statusPollLockedAt: null,
+  };
 }
 
 export async function applyJifengOrderStatus(input: {
@@ -219,6 +275,7 @@ export async function applyJifengOrderStatus(input: {
       await tx
         .update(shipmentFulfillments)
         .set({
+          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
           externalOrderNo: input.detail.orderNo ?? null,
           jifengStatus: 7,
           lastErrorCode: null,
@@ -284,6 +341,13 @@ export async function applyJifengOrderStatus(input: {
       await tx
         .update(shipmentFulfillments)
         .set({
+          ...clearedStatusPollState({
+            nextRetryAt: new Date(
+              now.getTime() + EXCEPTION_STATUS_POLL_INTERVAL_MS,
+            ),
+            now,
+            source: input.source,
+          }),
           externalOrderNo: input.detail.orderNo ?? null,
           jifengStatus: input.detail.status,
           lastErrorCode: String(input.detail.errorCode ?? input.detail.status),
@@ -382,6 +446,7 @@ export async function applyJifengOrderStatus(input: {
       await tx
         .update(shipmentFulfillments)
         .set({
+          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
           cancelledAt: current.fulfillmentCancelledAt
             ? new Date(current.fulfillmentCancelledAt)
             : now,
@@ -447,6 +512,11 @@ export async function applyJifengOrderStatus(input: {
     await tx
       .update(shipmentFulfillments)
       .set({
+        ...clearedStatusPollState({
+          nextRetryAt: nextJifengStatusPollAt(now),
+          now,
+          source: input.source,
+        }),
         cancelledAt: null,
         externalOrderNo: input.detail.orderNo ?? null,
         jifengStatus: input.detail.status,
@@ -489,44 +559,114 @@ export async function pollActiveJifengFulfillments(input: {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     throw new Error("极风状态轮询批量大小必须在 1 到 500 之间");
   }
+  const claimToken = crypto.randomUUID();
+  const staleLeaseCutoff = new Date(now.getTime() - STATUS_POLL_LEASE_MS);
   const active = await db.execute<{ erpNo: string }>(sql`
-    select erp_no as "erpNo"
-    from shipment_fulfillments
-    where status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION')
-      and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
-    order by coalesce(last_attempt_at, created_at), id
-    limit ${limit}
+    with due as (
+      select id
+      from shipment_fulfillments
+      where status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION')
+        and (
+          submitted_at is not null
+          or jifeng_status is not null
+          or exists (
+            select 1
+            from integration_outbox as create_event
+            where create_event.aggregate_id = shipment_fulfillments.shipment_id::text
+              and create_event.target = 'JIFENG'
+              and create_event.event_type = 'JIFENG_CREATE_ORDER'
+              and (
+                create_event.last_error_code in (
+                  'TIMEOUT',
+                  'NETWORK_ERROR',
+                  'INVALID_RESPONSE',
+                  'INTERNAL_ERROR',
+                  'POST_SUCCESS_PERSISTENCE_ERROR',
+                  'STALE_PROCESSING',
+                  '50019',
+                  '50038'
+                )
+                or left(create_event.last_error_code, 5) = 'HTTP_'
+                or left(create_event.last_error_code, 24) = 'RECONCILIATION_REQUIRED:'
+              )
+          )
+        )
+        and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
+        and (
+          status_poll_locked_at is null
+          or status_poll_locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz
+        )
+      order by coalesce(next_retry_at, submitted_at, created_at), id
+      for update skip locked
+      limit ${limit}
+    )
+    update shipment_fulfillments as fulfillment
+    set
+      status_poll_claim_token = ${claimToken},
+      status_poll_locked_at = ${now.toISOString()}::timestamptz
+    from due
+    where fulfillment.id = due.id
+    returning fulfillment.erp_no as "erpNo"
   `);
-  const summary = { exceptions: 0, shipped: 0, synced: 0 };
+  const summary = {
+    exceptions: 0,
+    pollFailures: 0,
+    shipped: 0,
+    synced: 0,
+  };
   for (const fulfillment of active) {
     try {
       const detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
-      const result = await applyJifengOrderStatus({ detail, now, source: "POLL" });
+      const result = await db.transaction(async (tx) => {
+        const claimed = await tx.execute<{ id: string }>(sql`
+          select id
+          from shipment_fulfillments
+          where erp_no = ${fulfillment.erpNo}
+            and status_poll_claim_token = ${claimToken}
+          for update
+        `);
+        if (!claimed[0]) return null;
+        return applyJifengOrderStatus({ detail, now, source: "POLL" }, tx);
+      });
+      if (!result) continue;
       if (result.status === "SHIPPED") summary.shipped += 1;
       else if (result.status === "EXCEPTION") summary.exceptions += 1;
       else summary.synced += 1;
-    } catch {
-      const nextRetryAt = new Date(now.getTime() + 5 * 60_000);
+    } catch (error) {
+      const failure = statusPollFailure(error);
       await db.transaction(async (tx) => {
         const locked = await tx.execute<{
           fulfillmentId: string;
           fulfillmentStatus: string;
+          statusPollFailureCount: number;
         }>(sql`
           select
             f.id as "fulfillmentId",
-            f.status as "fulfillmentStatus"
+            f.status as "fulfillmentStatus",
+            f.status_poll_failure_count as "statusPollFailureCount"
           from shipment_fulfillments f
           where f.erp_no = ${fulfillment.erpNo}
+            and f.status_poll_claim_token = ${claimToken}
           for update of f
         `);
         const row = locked[0];
         if (!row) return;
+        const failureCount = row.statusPollFailureCount + 1;
+        const nextRetryAt = statusPollRetryAt({
+          failureCount,
+          now,
+          retryable: failure.retryable,
+        });
         await tx
           .update(shipmentFulfillments)
           .set({
-            lastErrorCode: "STATUS_POLL_FAILED",
-            lastErrorMessage: "极风状态查询失败，系统将在稍后重试",
+            lastStatusPollAt: now,
+            lastStatusPollErrorCode: failure.code,
+            lastStatusPollErrorMessage: failure.message,
             nextRetryAt,
+            statusPollClaimToken: null,
+            statusPollFailureCount: failureCount,
+            statusPollLockedAt: null,
             updatedAt: now,
           })
           .where(eq(shipmentFulfillments.id, row.fulfillmentId));
@@ -536,25 +676,32 @@ export async function pollActiveJifengFulfillments(input: {
           actorType: "SYSTEM",
           afterJson: {
             errorCode: "STATUS_POLL_FAILED",
+            failureCount,
             nextRetryAt: nextRetryAt.toISOString(),
+            providerErrorCode: failure.code,
+            retryable: failure.retryable,
           },
           beforeJson: { fulfillmentStatus: row.fulfillmentStatus },
           entityId: row.fulfillmentId,
           entityType: "SHIPMENT_FULFILLMENT",
           reason: "极风状态查询失败，已安排重试",
         });
-        await createSystemNotification(tx, {
-          deduplicationKey: `jifeng-poll-failed:${row.fulfillmentId}`,
-          entityId: row.fulfillmentId,
-          entityType: "SHIPMENT_FULFILLMENT",
-          message: "极风状态查询失败，系统已安排重试；远端订单不会因此重复创建。",
-          now,
-          severity: "WARNING",
-          title: "极风状态查询失败",
-          type: "JIFENG_POLL_FAILED",
-        });
+        if (!failure.retryable || failureCount >= STATUS_POLL_WARNING_THRESHOLD) {
+          await createSystemNotification(tx, {
+            deduplicationKey: `jifeng-poll-failed:${row.fulfillmentId}`,
+            entityId: row.fulfillmentId,
+            entityType: "SHIPMENT_FULFILLMENT",
+            message: failure.retryable
+              ? `极风状态查询已连续失败 ${failureCount} 次，系统已退避重试；远端订单不会因此重复创建。`
+              : "极风状态查询返回不可重试错误，请检查极风连接；远端订单不会因此重复创建。",
+            now,
+            severity: "WARNING",
+            title: "极风状态查询失败",
+            type: "JIFENG_POLL_FAILED",
+          });
+        }
       });
-      summary.exceptions += 1;
+      summary.pollFailures += 1;
     }
   }
   return summary;
