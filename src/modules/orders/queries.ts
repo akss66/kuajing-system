@@ -69,6 +69,7 @@ export async function listCustomerOrders(
         : and(
             eq(fulfillmentOrders.customerId, customerId),
             ne(fulfillmentOrders.status, "CANCELLED"),
+            ne(fulfillmentOrders.status, "EXPIRED"),
           ),
     )
     .orderBy(desc(fulfillmentOrders.createdAt));
@@ -196,6 +197,7 @@ export async function listAdminOrders(filters: AdminOrderFilters = {}) {
     conditions.push(eq(fulfillmentOrders.status, filters.status));
   } else {
     conditions.push(ne(fulfillmentOrders.status, "CANCELLED"));
+    conditions.push(ne(fulfillmentOrders.status, "EXPIRED"));
   }
   if (filters.customerId) conditions.push(eq(fulfillmentOrders.customerId, filters.customerId));
   if (filters.storeId) conditions.push(eq(fulfillmentOrders.storeId, filters.storeId));

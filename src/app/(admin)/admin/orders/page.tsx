@@ -75,6 +75,9 @@ export default async function AdminOrdersPage({
 
   const [orders, options] = await Promise.all([listAdminOrders(filters), listAdminOrderFilterOptions()]);
   const isCancelledView = filters.status === "CANCELLED";
+  const isExpiredView = filters.status === "EXPIRED";
+  const isHistoricalView = isCancelledView || isExpiredView;
+  const historyLabel = isExpiredView ? "超时" : "取消";
   const pendingPaymentCount = orders.filter((order) => order.status === "PENDING_PAYMENT").length;
   const exceptionCount = orders.filter((order) => order.status === "FULFILLMENT_EXCEPTION").length;
   const totalAmountFen = orders.reduce((sum, order) => sum + order.totalAmountFen, 0);
@@ -84,27 +87,27 @@ export default async function AdminOrdersPage({
       <PageHeading
         action={
           <Button asChild variant="outline">
-            <Link href={isCancelledView ? "/admin/orders" : "/admin/orders?status=CANCELLED"}>
-              {isCancelledView ? "返回有效拿货单" : "查看已取消拿货单"}
+            <Link href={isHistoricalView ? "/admin/orders" : "/admin/orders?status=CANCELLED"}>
+              {isHistoricalView ? "返回有效拿货单" : "查看已取消拿货单"}
             </Link>
           </Button>
         }
         description={
-          isCancelledView
-            ? "已取消拿货单仅用于审计追溯，不计入有效订单数量和经营金额。"
-            : "按客户、店铺、状态和日期查询有效拿货单；已取消记录单独归档。"
+          isHistoricalView
+            ? `已${historyLabel}拿货单仅用于审计追溯，不计入有效订单数量和经营金额。`
+            : "按客户、店铺、状态和日期查询有效拿货单；已取消和已超时记录单独归档。"
         }
-        title={isCancelledView ? "已取消拿货单" : "订单管理"}
+        title={isHistoricalView ? `已${historyLabel}拿货单` : "订单管理"}
       />
 
       <MetricStrip
         items={
-          isCancelledView
+          isHistoricalView
             ? [
-                { hint: "当前归档筛选下的取消记录", label: "已取消订单", value: String(orders.length) },
-                { hint: "取消记录中的原包裹数", label: "原包裹数", value: String(orders.reduce((sum, order) => sum + order.totalPackageCount, 0)) },
-                { hint: "取消记录中的原商品件数", label: "原商品件数", value: String(orders.reduce((sum, order) => sum + order.totalQuantity, 0)) },
-                { hint: "仅供审计，不计入经营金额", label: "取消前金额", value: money(totalAmountFen) },
+                { hint: `当前归档筛选下的${historyLabel}记录`, label: `已${historyLabel}订单`, value: String(orders.length) },
+                { hint: `${historyLabel}记录中的原包裹数`, label: "原包裹数", value: String(orders.reduce((sum, order) => sum + order.totalPackageCount, 0)) },
+                { hint: `${historyLabel}记录中的原商品件数`, label: "原商品件数", value: String(orders.reduce((sum, order) => sum + order.totalQuantity, 0)) },
+                { hint: "仅供审计，不计入经营金额", label: `${historyLabel}前金额`, value: money(totalAmountFen) },
               ]
             : [
                 { hint: "当前筛选条件下的有效订单数", label: "订单总数", value: String(orders.length) },
@@ -129,7 +132,7 @@ export default async function AdminOrdersPage({
         <WorkspacePanelHeader
           action={<PackageSearch className="size-4 text-primary" />}
           description={`当前条件共 ${orders.length} 条，最多显示 500 条。`}
-          title={isCancelledView ? "已取消拿货单" : "拿货单"}
+          title={isHistoricalView ? `已${historyLabel}拿货单` : "拿货单"}
         />
         <div className="hidden md:block">
           <ResponsiveDataTable>

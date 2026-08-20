@@ -9,6 +9,7 @@ import {
   fulfillmentOrders,
   inventoryBalances,
   inventoryReservations,
+  orderLines,
   orderShipments,
   paymentClaims,
   products,
@@ -25,7 +26,11 @@ import {
   expirePendingPaymentOrders,
   reviewOfflinePayment,
 } from "@/modules/orders/lifecycle";
-import { getCustomerOrderDetail } from "@/modules/orders/queries";
+import {
+  getCustomerOrderDetail,
+  listAdminOrders,
+  listCustomerOrders,
+} from "@/modules/orders/queries";
 
 const initialNow = new Date("2026-08-12T10:00:00.000Z");
 
@@ -493,7 +498,32 @@ describe("offline payment and order lifecycle", () => {
 
   test("expiration is idempotent and releases stale reservations", async () => {
     const expiredAt = new Date("2026-08-12T09:59:00.000Z");
-    const { customer, order, reservation } = await createOrder({ lockExpiresAt: expiredAt });
+    const { customer, order, reservation, sku, store } = await createOrder({ lockExpiresAt: expiredAt });
+    const [shipment] = await db
+      .insert(orderShipments)
+      .values({
+        externalOrderNo: `EXPIRED-PACKAGE-${crypto.randomUUID()}`,
+        orderId: order.id,
+        recipientPayloadEncrypted: "test-only-encrypted-payload",
+        storeId: store.id,
+      })
+      .returning();
+    const [line] = await db
+      .insert(orderLines)
+      .values({
+        externalSubOrderNo: `EXPIRED-LINE-${crypto.randomUUID()}`,
+        lineAmountFen: 500,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipment.id,
+        skuCodeSnapshot: sku.skuCode,
+        skuId: sku.id,
+        skuNameSnapshot: sku.name,
+        storeId: store.id,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5000,
+      })
+      .returning();
     await db.insert(paymentClaims).values({
       amountFen: 500,
       customerId: customer.id,
@@ -522,11 +552,28 @@ describe("offline payment and order lifecycle", () => {
       rejectionReason: "订单等待付款或核款超时",
       status: "REJECTED",
     });
+    await expect(
+      db
+        .select({ deduplicationActive: orderShipments.deduplicationActive })
+        .from(orderShipments)
+        .where(eq(orderShipments.id, shipment.id)),
+    ).resolves.toEqual([{ deduplicationActive: false }]);
+    await expect(
+      db
+        .select({ deduplicationActive: orderLines.deduplicationActive })
+        .from(orderLines)
+        .where(eq(orderLines.id, line.id)),
+    ).resolves.toEqual([{ deduplicationActive: false }]);
     expect(
       await db
         .select()
         .from(auditLogs)
         .where(eq(auditLogs.action, "FULFILLMENT_ORDER_EXPIRED")),
     ).toHaveLength(1);
+
+    expect((await listAdminOrders()).map((row) => row.id)).not.toContain(order.id);
+    expect((await listCustomerOrders(customer.id)).map((row) => row.id)).not.toContain(order.id);
+    expect((await listAdminOrders({ status: "EXPIRED" })).map((row) => row.id)).toContain(order.id);
+    expect((await listCustomerOrders(customer.id, "EXPIRED")).map((row) => row.id)).toContain(order.id);
   });
 });

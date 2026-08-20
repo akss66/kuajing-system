@@ -175,6 +175,28 @@ describe("order workspace hierarchy", () => {
     expect(within(card).getByRole("link", { name: "去付款" })).toHaveClass("min-h-11");
   });
 
+  it("presents expired admin orders as non-operating archive values", async () => {
+    queryMocks.listAdminOrders.mockResolvedValueOnce([
+      {
+        ...order,
+        customerCode: "C-001",
+        customerName: "客户一",
+        status: "EXPIRED",
+      },
+    ]);
+
+    render(
+      await AdminOrdersPage({
+        searchParams: Promise.resolve({ status: "EXPIRED" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "已超时拿货单" })).toBeVisible();
+    expect(screen.getByText("已超时订单")).toBeVisible();
+    expect(screen.getByText("超时前金额")).toBeVisible();
+    expect(screen.queryByText("订单金额")).not.toBeInTheDocument();
+  });
+
   it("presents cancelled customer orders as non-operating archive values", async () => {
     queryMocks.listCustomerOrders.mockResolvedValueOnce([
       { ...order, status: "CANCELLED" },
@@ -189,6 +211,23 @@ describe("order workspace hierarchy", () => {
     expect(screen.getByRole("heading", { level: 1, name: "已取消拿货单" })).toBeVisible();
     expect(screen.getByText("已取消订单")).toBeVisible();
     expect(screen.getByText("取消前金额")).toBeVisible();
+    expect(screen.queryByText("订单总额")).not.toBeInTheDocument();
+  });
+
+  it("presents expired customer orders as non-operating archive values", async () => {
+    queryMocks.listCustomerOrders.mockResolvedValueOnce([
+      { ...order, status: "EXPIRED" },
+    ]);
+
+    render(
+      await CustomerOrdersPage({
+        searchParams: Promise.resolve({ status: "EXPIRED" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "已超时拿货单" })).toBeVisible();
+    expect(screen.getByText("已超时订单")).toBeVisible();
+    expect(screen.getByText("超时前金额")).toBeVisible();
     expect(screen.queryByText("订单总额")).not.toBeInTheDocument();
   });
 
