@@ -10,6 +10,7 @@ vi.mock("@/modules/orders/pricing", async (importOriginal) => {
   >();
   return {
     ...actual,
+    PACKAGE_SHIPPING_FEE_FEN: 0,
     calculateOrderPricing: (input: { merchandiseAmountFen: number }) => ({
       merchandiseAmountFen: input.merchandiseAmountFen,
       shippingFeeFen: 0,
@@ -31,10 +32,12 @@ import {
   integrationOutbox,
   orderImportBatches,
   orderImportRows,
+  orderShipments,
   products,
   settlementBatchOrders,
   settlementBatches,
   settlementPaymentClaims,
+  shipmentCancellationAdjustments,
   shipmentFulfillments,
   skus,
   stores,
@@ -47,6 +50,7 @@ import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import { getSettlementBatchAllocation } from "@/modules/settlement/batch-allocation";
 import {
   expireSettlementBatches,
+  prepareSettlementForPackageCancellation,
   reportSettlementPayment,
   reviewSettlementPayment,
   withdrawSettlementPayment,
@@ -385,6 +389,182 @@ describe("bulk settlement wallet lifecycle", () => {
         customers
       restart identity cascade
     `));
+  });
+
+  test("package cancellation invalidates an unpaid mixed settlement quote and releases its wallet hold exactly once", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 500,
+      reason: "包裹取消预检测试充值",
+    });
+    const result = await submitFixture(fixture, 150);
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!))
+      .orderBy(asc(settlementBatchOrders.totalAmountFen))
+      .limit(1);
+    const preparedAt = new Date("2026-08-20T08:00:00.000Z");
+
+    const prepare = () =>
+      db.transaction((tx) =>
+        prepareSettlementForPackageCancellation(tx, {
+          actorId: "customer-auth",
+          actorType: "CUSTOMER",
+          now: preparedAt,
+          orderId: allocation.orderId,
+          reason: "取消其中一个包裹，原统一结算报价失效",
+        }),
+      );
+    const concurrentOutcomes = await Promise.all([prepare(), prepare()]);
+    expect(concurrentOutcomes.map(({ outcome }) => outcome).sort()).toEqual([
+      "ALREADY_INVALIDATED",
+      "INVALIDATED",
+    ]);
+    expect(
+      concurrentOutcomes.every(
+        ({ settlementBatchId }) => settlementBatchId === result.settlementBatchId,
+      ),
+    ).toBe(true);
+
+    const [batch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    expect(batch).toMatchObject({
+      closedAt: preparedAt,
+      offlineAmountFen: 250,
+      status: "CANCELLED",
+      totalAmountFen: 400,
+      walletAmountFen: 150,
+    });
+    const [hold] = await db
+      .select()
+      .from(walletHolds)
+      .where(eq(walletHolds.settlementBatchId, result.settlementBatchId!));
+    expect(hold).toMatchObject({
+      releasedAt: preparedAt,
+      status: "RELEASED",
+    });
+    expect(
+      (await db.select().from(fulfillmentOrders)).every(
+        (order) => order.status === "PENDING_PAYMENT" && order.paymentMode === null,
+      ),
+    ).toBe(true);
+    expect(await db.select().from(settlementPaymentClaims)).toEqual([]);
+    expect(
+      (await db.select().from(auditLogs)).filter(
+        (row) => row.action === "SETTLEMENT_INVALIDATED_BY_PACKAGE_CANCELLATION",
+      ),
+    ).toHaveLength(1);
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 250,
+        customerId: fixture.customer.id,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_NOT_REPORTABLE" });
+  });
+
+  test("package cancellation preflight blocks a reported settlement without mutating its claim or wallet hold", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "已申报批次取消预检测试充值",
+    });
+    const result = await submitFixture(fixture, 200);
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!));
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+
+    await expect(
+      db.transaction((tx) =>
+        prepareSettlementForPackageCancellation(tx, {
+          actorId: "customer-auth",
+          actorType: "CUSTOMER",
+          now: new Date("2026-08-20T08:00:00.000Z"),
+          orderId: allocation.orderId,
+          reason: "付款已申报后尝试取消包裹",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
+    });
+    await expect(
+      db
+        .select({ status: settlementBatches.status })
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, result.settlementBatchId!)),
+    ).resolves.toEqual([{ status: "PAYMENT_REPORTED" }]);
+    await expect(
+      db.select({ status: settlementPaymentClaims.status }).from(settlementPaymentClaims),
+    ).resolves.toEqual([{ status: "PENDING" }]);
+    await expect(
+      db.select({ status: walletHolds.status }).from(walletHolds),
+    ).resolves.toEqual([{ status: "ACTIVE" }]);
+  });
+
+  test("admin approval rejects a reported settlement whose package was cancelled remotely", async () => {
+    const fixture = await createSubmissionFixture([400]);
+    const result = await submitFixture(fixture, 0);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 400,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!));
+    const [shipment] = await db
+      .select()
+      .from(orderShipments)
+      .where(eq(orderShipments.orderId, allocation.orderId));
+    await db.insert(shipmentCancellationAdjustments).values({
+      actorId: null,
+      actorType: "SYSTEM",
+      customerId: fixture.customer.id,
+      merchandiseAmountFen: 400,
+      offlineAmountFen: 0,
+      orderId: allocation.orderId,
+      reason: "极风状态同步确认包裹已取消",
+      shipmentId: shipment.id,
+      shippingFeeFen: 0,
+      status: "NOT_PAID",
+      totalAmountFen: 400,
+      walletAmountFen: 0,
+    });
+    const admin = await createSettlementAdmin();
+
+    await expect(
+      reviewSettlementPayment({
+        adminUserId: admin.id,
+        decision: "APPROVE",
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_ORDERS_NOT_PENDING" });
+    await expect(
+      db
+        .select({ status: settlementBatches.status })
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, result.settlementBatchId!)),
+    ).resolves.toEqual([{ status: "PAYMENT_REPORTED" }]);
+    await expect(
+      db.select({ status: settlementPaymentClaims.status }).from(settlementPaymentClaims),
+    ).resolves.toEqual([{ status: "PENDING" }]);
   });
 
   test("pure wallet funding debits each order and immediately marks every order paid", async () => {
@@ -1984,30 +2164,22 @@ describe("unified offline settlement lifecycle", () => {
           orderId: order.id,
           reason: "尝试单独取消",
         }),
-      ).rejects.toMatchObject({ code: "SETTLEMENT_CLAIM_PENDING" });
+      ).rejects.toMatchObject({
+        code: "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
+      });
     }
     expect((await db.select().from(fulfillmentOrders))[0].status).toBe("PENDING_PAYMENT");
   });
 
-  test.each(["APPROVE", "EXPIRE"] as const)(
-    "allocated cancellation contends with %s in canonical batch-to-order order without deadlock",
-    async (operation) => {
+  test(
+    "allocated cancellation contends with expiry in canonical batch-to-order order without deadlock",
+    async () => {
       const fixture = await createSubmissionFixture([300]);
       const result = await submitFixture(fixture, 0);
       const [order] = await db
         .select()
         .from(fulfillmentOrders)
         .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
-      const reportedAt = new Date();
-      if (operation === "APPROVE") {
-        await reportSettlementPayment({
-          actorUserId: "customer-auth",
-          amountFen: 300,
-          customerId: fixture.customer.id,
-          now: reportedAt,
-          settlementBatchId: result.settlementBatchId!,
-        });
-      }
       const blocker = await startOrderRowBlocker(order.id);
       const cancel = () => cancelFulfillmentOrder({
           actorType: "ADMIN",
@@ -2015,28 +2187,15 @@ describe("unified offline settlement lifecycle", () => {
           orderId: order.id,
           reason: "race cancellation",
         });
-      const compete = async () =>
-        operation === "APPROVE"
-          ? reviewSettlementPayment({
-              adminUserId: (await createSettlementAdmin()).id,
-              decision: "APPROVE",
-              settlementBatchId: result.settlementBatchId!,
-            })
-          : expireSettlementBatches(
-              new Date((await db.select().from(settlementBatches).where(eq(settlementBatches.id, result.settlementBatchId!)))[0].paymentDueAt.getTime()),
-            );
+      const compete = async () => expireSettlementBatches(
+        new Date((await db.select().from(settlementBatches).where(eq(settlementBatches.id, result.settlementBatchId!)))[0].paymentDueAt.getTime()),
+      );
       let cancellation!: ReturnType<typeof cancel>;
       let competing!: ReturnType<typeof compete>;
       try {
-        if (operation === "APPROVE") {
-          cancellation = cancel();
-          await waitForLockDescendants(blocker.backendPid, 1);
-          competing = compete();
-        } else {
-          competing = compete();
-          await waitForLockDescendants(blocker.backendPid, 1);
-          cancellation = cancel();
-        }
+        competing = compete();
+        await waitForLockDescendants(blocker.backendPid, 1);
+        cancellation = cancel();
         await waitForLockDescendants(blocker.backendPid, 2);
       } finally {
         blocker.release();
@@ -2061,9 +2220,7 @@ describe("unified offline settlement lifecycle", () => {
         .from(fulfillmentOrders)
         .where(eq(fulfillmentOrders.id, order.id));
       expect(
-        operation === "APPROVE"
-          ? [["PAID", "PAID_PENDING_FULFILLMENT"], ["PENDING_PAYMENT", "CANCELLED"]]
-          : [["EXPIRED", "EXPIRED"], ["PENDING_PAYMENT", "CANCELLED"]],
+        [["EXPIRED", "EXPIRED"], ["PENDING_PAYMENT", "CANCELLED"]],
       ).toContainEqual([savedBatch.status, savedOrder.status]);
     },
   );

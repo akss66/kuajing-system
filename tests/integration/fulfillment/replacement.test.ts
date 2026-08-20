@@ -24,6 +24,8 @@ import {
   orderShipments,
   products,
   replacementRequests,
+  settlementBatchOrders,
+  settlementBatches,
   shipmentFulfillments,
   skus,
   stores,
@@ -131,7 +133,7 @@ async function createShippedFixture() {
     shippedAt: new Date(),
     status: "SHIPPED",
   });
-  return { admin, order, shipment, sku, store };
+  return { admin, customer, order, shipment, sku, store };
 }
 
 describe("replacement fulfillment", () => {
@@ -330,6 +332,56 @@ describe("replacement fulfillment", () => {
         (entry) => entry.action === "JIFENG_SHIPMENT_CANCELLED",
       ),
     ).toBe(true);
+  });
+
+  test("cancels a replacement package without changing its paid unified settlement", async () => {
+    const fixture = await createShippedFixture();
+    const [batch] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `SET-REPL-${crypto.randomUUID().slice(0, 8)}`,
+        closedAt: new Date("2026-08-20T01:00:00.000Z"),
+        customerId: fixture.customer.id,
+        idempotencyKey: `replacement-${crypto.randomUUID()}`,
+        offlineAmountFen: 900,
+        paidAt: new Date("2026-08-20T01:00:00.000Z"),
+        paymentDueAt: new Date("2026-08-20T05:00:00.000Z"),
+        status: "PAID",
+        totalAmountFen: 900,
+        walletAmountFen: 0,
+      })
+      .returning();
+    await db.insert(settlementBatchOrders).values({
+      customerId: fixture.customer.id,
+      offlineAmountFen: 900,
+      orderId: fixture.order.id,
+      settlementBatchId: batch.id,
+      totalAmountFen: 900,
+      walletAmountFen: 0,
+    });
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "验证已结算订单补发取消",
+    });
+
+    await expect(
+      cancelJifengShipment({
+        actorUserId: "auth-admin-replacement",
+        reason: "补发不再需要",
+        shipmentId: created.replacementShipmentId,
+      }),
+    ).resolves.toEqual({ status: "CANCELLED" });
+
+    expect((await db.select().from(replacementRequests))[0].status).toBe("CANCELLED");
+    await expect(
+      db
+        .select({ status: settlementBatches.status })
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, batch.id)),
+    ).resolves.toEqual([{ status: "PAID" }]);
   });
 
   test("does not submit a second cancellation while one is already in progress", async () => {

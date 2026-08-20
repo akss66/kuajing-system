@@ -80,7 +80,14 @@ export default async function AdminOrdersPage({
   const historyLabel = isExpiredView ? "超时" : "取消";
   const pendingPaymentCount = orders.filter((order) => order.status === "PENDING_PAYMENT").length;
   const exceptionCount = orders.filter((order) => order.status === "FULFILLMENT_EXCEPTION").length;
-  const totalAmountFen = orders.reduce((sum, order) => sum + order.totalAmountFen, 0);
+  const totalAmountFen = orders.reduce(
+    (sum, order) =>
+      sum +
+      (isHistoricalView
+        ? order.totalAmountFen
+        : (order.netAmountFen ?? order.totalAmountFen)),
+    0,
+  );
 
   return (
     <div className="space-y-5">
@@ -167,12 +174,16 @@ export default async function AdminOrdersPage({
                         <Badge className={badgeClass(order.status)} variant="secondary">
                           {statuses.find((status) => status.value === order.status)?.label}
                         </Badge>
+                        {order.cancellationState === "PARTIAL" ? <Badge className="ml-1 bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
                         {order.lockExpiresAt ? <p className="mt-1 text-xs text-muted">锁定至 {dateTime(order.lockExpiresAt)}</p> : null}
                       </TableCell>
                       <TableCell>
                         {order.totalPackageCount} 包 / {order.totalQuantity} 件
                       </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">{money(order.totalAmountFen)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}
+                        {(order.adjustedAmountFen ?? 0) > 0 && !isHistoricalView ? <p className="mt-1 text-xs font-normal text-muted">原 {money(order.totalAmountFen)}</p> : null}
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-2">
                           <Button asChild size="sm" variant="outline">
@@ -215,6 +226,7 @@ export default async function AdminOrdersPage({
                   <Badge className={badgeClass(order.status)} variant="secondary">
                     {statuses.find((status) => status.value === order.status)?.label}
                   </Badge>
+                  {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
@@ -226,7 +238,7 @@ export default async function AdminOrdersPage({
                   <div>
                     <p className="text-xs text-muted">数量 / 金额</p>
                     <p className="mt-1 font-semibold text-ink">
-                      {order.totalQuantity} 件 · {money(order.totalAmountFen)}
+                      {order.totalQuantity} 件 · {money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}
                     </p>
                   </div>
                 </div>

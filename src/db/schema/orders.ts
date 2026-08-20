@@ -50,6 +50,11 @@ export const fulfillmentOrderStatus = pgEnum("fulfillment_order_status", [
   "EXPIRED",
 ]);
 
+export const fulfillmentOrderCancellationState = pgEnum(
+  "fulfillment_order_cancellation_state",
+  ["NONE", "PARTIAL", "ALL"],
+);
+
 export const fulfillmentPaymentMode = pgEnum("fulfillment_payment_mode", [
   "WALLET",
   "DIRECT_OFFLINE",
@@ -67,6 +72,11 @@ export const walletTransactionType = pgEnum("wallet_transaction_type", [
   "ORDER_DEBIT",
   "ORDER_REFUND",
 ]);
+
+export const shipmentCancellationAdjustmentStatus = pgEnum(
+  "shipment_cancellation_adjustment_status",
+  ["NOT_PAID", "PENDING_OFFLINE", "COMPLETED"],
+);
 
 export const paymentClaimStatus = pgEnum("payment_claim_status", [
   "PENDING",
@@ -318,6 +328,9 @@ export const fulfillmentOrders = pgTable(
     status: fulfillmentOrderStatus("status")
       .default("PENDING_PAYMENT")
       .notNull(),
+    cancellationState: fulfillmentOrderCancellationState("cancellation_state")
+      .default("NONE")
+      .notNull(),
     paymentMode: fulfillmentPaymentMode("payment_mode"),
     totalAmountFen: integer("total_amount_fen").notNull(),
     totalPackageCount: integer("total_package_count").notNull(),
@@ -376,6 +389,10 @@ export const fulfillmentOrders = pgTable(
     check(
       "fulfillment_orders_cancel_reason_required",
       sql`${table.status} <> 'CANCELLED' or nullif(trim(${table.cancelReason}), '') is not null`,
+    ),
+    check(
+      "fulfillment_orders_cancellation_state_matches_status",
+      sql`(${table.cancellationState} = 'ALL' and ${table.status} = 'CANCELLED') or (${table.cancellationState} <> 'ALL' and ${table.status} <> 'CANCELLED')`,
     ),
     check(
       "fulfillment_orders_paid_mode_required",
@@ -839,6 +856,7 @@ export const walletTransactions = pgTable(
     orderId: uuid("order_id").references(() => fulfillmentOrders.id, {
       onDelete: "restrict",
     }),
+    shipmentId: uuid("shipment_id"),
     transactionType: walletTransactionType("transaction_type").notNull(),
     beforeBalanceFen: integer("before_balance_fen").notNull(),
     deltaFen: integer("delta_fen").notNull(),
@@ -876,17 +894,99 @@ export const walletTransactions = pgTable(
       columns: [table.orderId, table.customerId],
       foreignColumns: [fulfillmentOrders.id, fulfillmentOrders.customerId],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "wallet_transactions_shipment_order_fk",
+      columns: [table.shipmentId, table.orderId],
+      foreignColumns: [orderShipments.id, orderShipments.orderId],
+    }).onDelete("restrict"),
+    check(
+      "wallet_transactions_shipment_refund_only",
+      sql`${table.shipmentId} is null or ${table.transactionType} = 'ORDER_REFUND'`,
+    ),
     uniqueIndex("wallet_transactions_order_debit_unique")
       .on(table.orderId)
       .where(sql`${table.transactionType} = 'ORDER_DEBIT'`),
     uniqueIndex("wallet_transactions_order_refund_unique")
       .on(table.orderId)
-      .where(sql`${table.transactionType} = 'ORDER_REFUND'`),
+      .where(
+        sql`${table.transactionType} = 'ORDER_REFUND' and ${table.shipmentId} is null`,
+      ),
+    uniqueIndex("wallet_transactions_shipment_refund_unique")
+      .on(table.shipmentId)
+      .where(
+        sql`${table.transactionType} = 'ORDER_REFUND' and ${table.shipmentId} is not null`,
+      ),
     index("wallet_transactions_customer_created_index").on(
       table.customerId,
       table.createdAt,
     ),
     index("wallet_transactions_created_index").on(table.createdAt),
+  ],
+);
+
+export const shipmentCancellationAdjustments = pgTable(
+  "shipment_cancellation_adjustments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shipmentId: uuid("shipment_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    customerId: uuid("customer_id").notNull(),
+    merchandiseAmountFen: integer("merchandise_amount_fen").notNull(),
+    shippingFeeFen: integer("shipping_fee_fen").notNull(),
+    totalAmountFen: integer("total_amount_fen").notNull(),
+    walletAmountFen: integer("wallet_amount_fen").notNull(),
+    offlineAmountFen: integer("offline_amount_fen").notNull(),
+    status: shipmentCancellationAdjustmentStatus("status").notNull(),
+    reason: text("reason").notNull(),
+    actorType: actorType("actor_type").notNull(),
+    actorId: text("actor_id"),
+    offlineCompletedAt: timestamp("offline_completed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    offlineCompletedByAdminUserId: uuid("offline_completed_by_admin_user_id").references(
+      () => adminUsers.id,
+      { onDelete: "restrict" },
+    ),
+    offlineCompletionNote: text("offline_completion_note"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("shipment_cancellation_adjustments_shipment_unique").on(table.shipmentId),
+    foreignKey({
+      name: "shipment_cancellation_adjustments_shipment_order_fk",
+      columns: [table.shipmentId, table.orderId],
+      foreignColumns: [orderShipments.id, orderShipments.orderId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "shipment_cancellation_adjustments_order_customer_fk",
+      columns: [table.orderId, table.customerId],
+      foreignColumns: [fulfillmentOrders.id, fulfillmentOrders.customerId],
+    }).onDelete("restrict"),
+    check(
+      "shipment_cancellation_adjustments_amounts_positive",
+      sql`${table.merchandiseAmountFen} >= 0 and ${table.shippingFeeFen} >= 0 and ${table.totalAmountFen} > 0`,
+    ),
+    check(
+      "shipment_cancellation_adjustments_total_equation",
+      sql`${table.totalAmountFen} = ${table.merchandiseAmountFen} + ${table.shippingFeeFen}`,
+    ),
+    check(
+      "shipment_cancellation_adjustments_payment_allocation",
+      sql`${table.walletAmountFen} >= 0 and ${table.offlineAmountFen} >= 0 and ((${table.status} = 'NOT_PAID' and ${table.walletAmountFen} = 0 and ${table.offlineAmountFen} = 0) or (${table.status} <> 'NOT_PAID' and ${table.totalAmountFen} = ${table.walletAmountFen} + ${table.offlineAmountFen}))`,
+    ),
+    check(
+      "shipment_cancellation_adjustments_offline_state",
+      sql`(${table.status} = 'NOT_PAID' and ${table.offlineCompletedAt} is null and ${table.offlineCompletedByAdminUserId} is null) or (${table.offlineAmountFen} = 0 and ${table.status} = 'COMPLETED' and ${table.offlineCompletedAt} is null and ${table.offlineCompletedByAdminUserId} is null) or (${table.offlineAmountFen} > 0 and ((${table.status} = 'PENDING_OFFLINE' and ${table.offlineCompletedAt} is null and ${table.offlineCompletedByAdminUserId} is null) or (${table.status} = 'COMPLETED' and ${table.offlineCompletedAt} is not null and ${table.offlineCompletedByAdminUserId} is not null)))`,
+    ),
+    index("shipment_cancellation_adjustments_order_created_index").on(
+      table.orderId,
+      table.createdAt,
+    ),
+    index("shipment_cancellation_adjustments_status_created_index").on(
+      table.status,
+      table.createdAt,
+    ),
   ],
 );
 

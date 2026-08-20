@@ -30,7 +30,7 @@ export function CustomerOrderActions({ order }: { order: CustomerOrderDetail }) 
               付款金额（元）
               <Input
                 className="min-h-11 tabular-nums"
-                defaultValue={(order.totalAmountFen / 100).toFixed(2)}
+                defaultValue={((order.netAmountFen ?? order.totalAmountFen) / 100).toFixed(2)}
                 inputMode="decimal"
                 name="amountYuan"
                 required

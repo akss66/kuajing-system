@@ -8,6 +8,7 @@ import {
   orderShipments,
   paymentClaims,
   replacementRequests,
+  shipmentCancellationAdjustments,
   shipmentFulfillments,
   stores,
   walletTransactions,
@@ -35,6 +36,14 @@ export type AdminOrderFilters = {
   storeId?: string;
 };
 
+const adjustedAmountFen = sql<number>`coalesce((
+  select sum(adjustment.total_amount_fen)
+  from shipment_cancellation_adjustments adjustment
+  where adjustment.order_id = ${fulfillmentOrders.id}
+), 0)::int`;
+
+const netAmountFen = sql<number>`(${fulfillmentOrders.totalAmountFen} - ${adjustedAmountFen})::int`;
+
 function isIsoDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -48,12 +57,15 @@ export async function listCustomerOrders(
   return db
     .select({
       createdAt: fulfillmentOrders.createdAt,
+      cancellationState: fulfillmentOrders.cancellationState,
       id: fulfillmentOrders.id,
       lockExpiresAt: fulfillmentOrders.lockExpiresAt,
       orderNumber: fulfillmentOrders.orderNumber,
       paymentMode: fulfillmentOrders.paymentMode,
       status: fulfillmentOrders.status,
       storeName: stores.name,
+      adjustedAmountFen,
+      netAmountFen,
       totalAmountFen: fulfillmentOrders.totalAmountFen,
       totalPackageCount: fulfillmentOrders.totalPackageCount,
       totalQuantity: fulfillmentOrders.totalQuantity,
@@ -79,6 +91,7 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
   const [order] = await db
     .select({
       cancelReason: fulfillmentOrders.cancelReason,
+      cancellationState: fulfillmentOrders.cancellationState,
       createdAt: fulfillmentOrders.createdAt,
       id: fulfillmentOrders.id,
       lockExpiresAt: fulfillmentOrders.lockExpiresAt,
@@ -102,7 +115,7 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
     .limit(1);
   if (!order) return null;
 
-  const [lines, paymentClaimRows, shipments, refundRows] = await Promise.all([
+  const [lines, paymentClaimRows, shipments, refundRows, cancellationAdjustments] = await Promise.all([
     db
       .select({
         externalSku: orderLines.externalSku,
@@ -154,15 +167,45 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
           eq(walletTransactions.transactionType, "ORDER_REFUND"),
         ),
       )
+      .orderBy(desc(walletTransactions.createdAt))
       .limit(1),
+    db
+      .select({
+        createdAt: shipmentCancellationAdjustments.createdAt,
+        merchandiseAmountFen: shipmentCancellationAdjustments.merchandiseAmountFen,
+        offlineAmountFen: shipmentCancellationAdjustments.offlineAmountFen,
+        offlineCompletedAt: shipmentCancellationAdjustments.offlineCompletedAt,
+        shipmentId: shipmentCancellationAdjustments.shipmentId,
+        shippingFeeFen: shipmentCancellationAdjustments.shippingFeeFen,
+        status: shipmentCancellationAdjustments.status,
+        totalAmountFen: shipmentCancellationAdjustments.totalAmountFen,
+        walletAmountFen: shipmentCancellationAdjustments.walletAmountFen,
+      })
+      .from(shipmentCancellationAdjustments)
+      .where(eq(shipmentCancellationAdjustments.orderId, order.id))
+      .orderBy(shipmentCancellationAdjustments.createdAt),
   ]);
+
+  const adjustedAmountFen = cancellationAdjustments.reduce(
+    (sum, adjustment) => sum + adjustment.totalAmountFen,
+    0,
+  );
 
   return {
     ...order,
+    adjustedAmountFen,
+    cancellationAdjustments,
     latestPaymentClaim: paymentClaimRows[0] ?? null,
     lines,
-    refundedAt: refundRows[0]?.refundedAt ?? null,
-    shipments,
+    netAmountFen: order.totalAmountFen - adjustedAmountFen,
+    refundedAt:
+      order.cancellationState === "ALL" ? (refundRows[0]?.refundedAt ?? null) : null,
+    shipments: shipments.map((shipment) => ({
+      ...shipment,
+      cancellationAdjustment:
+        cancellationAdjustments.find((adjustment) => adjustment.shipmentId === shipment.id) ??
+        null,
+    })),
   };
 }
 
@@ -218,6 +261,7 @@ export async function listAdminOrders(filters: AdminOrderFilters = {}) {
   return db
     .select({
       cancelReason: fulfillmentOrders.cancelReason,
+      cancellationState: fulfillmentOrders.cancellationState,
       createdAt: fulfillmentOrders.createdAt,
       customerCode: customers.code,
       customerName: customers.name,
@@ -227,6 +271,8 @@ export async function listAdminOrders(filters: AdminOrderFilters = {}) {
       paymentMode: fulfillmentOrders.paymentMode,
       status: fulfillmentOrders.status,
       storeName: stores.name,
+      adjustedAmountFen,
+      netAmountFen,
       totalAmountFen: fulfillmentOrders.totalAmountFen,
       totalPackageCount: fulfillmentOrders.totalPackageCount,
       totalQuantity: fulfillmentOrders.totalQuantity,
@@ -265,6 +311,7 @@ export async function getAdminOrderDetail(orderId: string) {
   const [order] = await db
     .select({
       cancelReason: fulfillmentOrders.cancelReason,
+      cancellationState: fulfillmentOrders.cancellationState,
       createdAt: fulfillmentOrders.createdAt,
       customerCode: customers.code,
       customerName: customers.name,
@@ -285,7 +332,7 @@ export async function getAdminOrderDetail(orderId: string) {
     .limit(1);
   if (!order) return null;
 
-  const [shipments, lines, refundRows] = await Promise.all([
+  const [shipments, lines, refundRows, cancellationAdjustments] = await Promise.all([
     db
       .select({
         attemptCount: shipmentFulfillments.attemptCount,
@@ -342,14 +389,44 @@ export async function getAdminOrderDetail(orderId: string) {
           eq(walletTransactions.transactionType, "ORDER_REFUND"),
         ),
       )
+      .orderBy(desc(walletTransactions.createdAt))
       .limit(1),
+    db
+      .select({
+        createdAt: shipmentCancellationAdjustments.createdAt,
+        id: shipmentCancellationAdjustments.id,
+        merchandiseAmountFen: shipmentCancellationAdjustments.merchandiseAmountFen,
+        offlineAmountFen: shipmentCancellationAdjustments.offlineAmountFen,
+        offlineCompletedAt: shipmentCancellationAdjustments.offlineCompletedAt,
+        offlineCompletionNote: shipmentCancellationAdjustments.offlineCompletionNote,
+        shipmentId: shipmentCancellationAdjustments.shipmentId,
+        shippingFeeFen: shipmentCancellationAdjustments.shippingFeeFen,
+        status: shipmentCancellationAdjustments.status,
+        totalAmountFen: shipmentCancellationAdjustments.totalAmountFen,
+        walletAmountFen: shipmentCancellationAdjustments.walletAmountFen,
+      })
+      .from(shipmentCancellationAdjustments)
+      .where(eq(shipmentCancellationAdjustments.orderId, orderId))
+      .orderBy(shipmentCancellationAdjustments.createdAt),
   ]);
+
+  const adjustedAmountFen = cancellationAdjustments.reduce(
+    (sum, adjustment) => sum + adjustment.totalAmountFen,
+    0,
+  );
 
   return {
     ...order,
-    refundedAt: refundRows[0]?.refundedAt ?? null,
+    adjustedAmountFen,
+    cancellationAdjustments,
+    netAmountFen: order.totalAmountFen - adjustedAmountFen,
+    refundedAt:
+      order.cancellationState === "ALL" ? (refundRows[0]?.refundedAt ?? null) : null,
     shipments: shipments.map((shipment) => ({
       ...shipment,
+      cancellationAdjustment:
+        cancellationAdjustments.find((adjustment) => adjustment.shipmentId === shipment.id) ??
+        null,
       lines: lines.filter((line) => line.shipmentId === shipment.id),
     })),
   };

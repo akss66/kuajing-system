@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db, type DbTransaction } from "@/db/client";
 import {
@@ -16,18 +16,30 @@ import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refreshParentFulfillmentStatus } from "@/modules/fulfillment/order-rollup";
 import { inventoryReasonLabel } from "@/modules/inventory/types";
 import { createSystemNotification } from "@/modules/notifications/service";
+import {
+  recordPackageCancellationAdjustment,
+} from "@/modules/fulfillment/package-cancellation-adjustment";
+import { prepareSettlementForConfirmedRemoteCancellation } from "@/modules/settlement/batch-service";
 
-type StatusSource = "POLL" | "WEBHOOK";
+type StatusSource = "MANUAL" | "POLL" | "WEBHOOK";
 
 const ACTIVE_STATUS_POLL_INTERVAL_MS = 5 * 60_000;
 const EXCEPTION_STATUS_POLL_INTERVAL_MS = 30 * 60_000;
 const STATUS_POLL_LEASE_MS = 2 * 60_000;
 const STATUS_POLL_MAX_BACKOFF_MS = 6 * 60 * 60_000;
 const STATUS_POLL_WARNING_THRESHOLD = 3;
+const STATUS_POLL_NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 
 export type JifengOrderStatusPort = {
   getOrder(input: { erpNo: string }): Promise<JifengOrderDetail>;
 };
+
+export class JifengStatusRefreshError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "JifengStatusRefreshError";
+  }
+}
 
 function parsedShippedAt(value: string | undefined, fallback: Date) {
   if (!value) return fallback;
@@ -64,12 +76,11 @@ function statusPollRetryAt(input: {
   now: Date;
   retryable: boolean;
 }) {
-  const delayMs = input.retryable
-    ? Math.min(
-        ACTIVE_STATUS_POLL_INTERVAL_MS * 2 ** (input.failureCount - 1),
-        STATUS_POLL_MAX_BACKOFF_MS,
-      )
-    : EXCEPTION_STATUS_POLL_INTERVAL_MS;
+  if (!input.retryable) return STATUS_POLL_NEVER_RETRY_AT;
+  const delayMs = Math.min(
+    ACTIVE_STATUS_POLL_INTERVAL_MS * 2 ** (input.failureCount - 1),
+    STATUS_POLL_MAX_BACKOFF_MS,
+  );
   return new Date(input.now.getTime() + delayMs);
 }
 
@@ -79,7 +90,7 @@ function clearedStatusPollState(input: {
   source: StatusSource;
 }) {
   return {
-    ...(input.source === "POLL" ? { lastStatusPollAt: input.now } : {}),
+    ...(input.source !== "WEBHOOK" ? { lastStatusPollAt: input.now } : {}),
     lastStatusPollErrorCode: null,
     lastStatusPollErrorMessage: null,
     nextRetryAt: input.nextRetryAt,
@@ -97,14 +108,21 @@ export async function applyJifengOrderStatus(input: {
   const now = input.now ?? new Date();
 
   const apply = async (tx: DbTransaction) => {
-    const references = await tx.execute<{ orderId: string }>(sql`
-      select s.order_id as "orderId"
+    const references = await tx.execute<{ kind: string; orderId: string }>(sql`
+      select s.kind, s.order_id as "orderId"
       from shipment_fulfillments f
       inner join order_shipments s on s.id = f.shipment_id
       where f.erp_no = ${input.detail.erpNo}
     `);
     const reference = references[0];
     if (!reference) throw new Error("未找到对应的极风履约包裹");
+    if (input.detail.status === 9 && reference.kind === "NORMAL") {
+      await prepareSettlementForConfirmedRemoteCancellation(tx, {
+        now,
+        orderId: reference.orderId,
+        reason: "极风状态同步确认包裹已取消",
+      });
+    }
     await tx.execute(sql`
       select id
       from fulfillment_orders
@@ -112,6 +130,7 @@ export async function applyJifengOrderStatus(input: {
       for update
     `);
     const rows = await tx.execute<{
+      cancellationAdjustmentId: string | null;
       fulfillmentCancelledAt: Date | string | null;
       fulfillmentId: string;
       fulfillmentStatus: string;
@@ -122,6 +141,7 @@ export async function applyJifengOrderStatus(input: {
       shipmentId: string;
     }>(sql`
       select
+        adjustment.id as "cancellationAdjustmentId",
         f.cancelled_at as "fulfillmentCancelledAt",
         f.id as "fulfillmentId",
         f.status as "fulfillmentStatus",
@@ -134,6 +154,7 @@ export async function applyJifengOrderStatus(input: {
       inner join order_shipments s on s.id = f.shipment_id
       inner join fulfillment_orders o on o.id = s.order_id
       left join replacement_requests r on r.replacement_shipment_id = s.id
+      left join shipment_cancellation_adjustments adjustment on adjustment.shipment_id = s.id
       where f.erp_no = ${input.detail.erpNo}
       for update of f, s
     `);
@@ -159,10 +180,16 @@ export async function applyJifengOrderStatus(input: {
       current.fulfillmentStatus === "CANCELLED" &&
       input.detail.status === 9 &&
       (current.replacementRequestId !== null ||
-        current.orderStatus === "FULFILLMENT_EXCEPTION")
+        current.cancellationAdjustmentId !== null)
     ) {
+      const orderStatus = current.replacementRequestId
+        ? current.orderStatus
+        : await refreshParentFulfillmentStatus(tx, {
+            now,
+            orderId: current.orderId,
+          });
       return {
-        orderStatus: current.orderStatus,
+        orderStatus,
         status: "ALREADY_CANCELLED" as const,
       };
     }
@@ -409,6 +436,29 @@ export async function applyJifengOrderStatus(input: {
     }
 
     if (input.detail.status === 9) {
+      const priorCancellationRows =
+        current.fulfillmentStatus === "CANCELLED"
+          ? await tx.execute<{ inventoryAlreadyReleased: boolean }>(sql`
+              select exists (
+                select 1
+                from audit_logs
+                where (
+                  entity_type = 'ORDER_SHIPMENT'
+                  and entity_id = ${current.shipmentId}
+                  and action in (
+                    'JIFENG_SHIPMENT_CANCELLED',
+                    'SHIPMENT_CANCELLED_BEFORE_SUBMISSION'
+                  )
+                ) or (
+                  entity_type = 'FULFILLMENT_ORDER'
+                  and entity_id = ${current.orderId}
+                  and action = 'FULFILLMENT_ORDER_CANCELLED'
+                )
+              ) as "inventoryAlreadyReleased"
+            `)
+          : [];
+      const inventoryAlreadyReleased =
+        priorCancellationRows[0]?.inventoryAlreadyReleased ?? false;
       const quantities = await tx.execute<{ quantity: number; skuId: string }>(sql`
         select sku_id as "skuId", sum(quantity)::int as quantity
         from order_lines
@@ -420,7 +470,7 @@ export async function applyJifengOrderStatus(input: {
         ? "REPLACEMENT_REQUEST"
         : "FULFILLMENT_ORDER";
       const referenceId = current.replacementRequestId ?? current.orderId;
-      for (const item of quantities) {
+      for (const item of inventoryAlreadyReleased ? [] : quantities) {
         const reservationRows = await tx.execute<{ id: string; quantity: number }>(sql`
           select id, quantity
           from inventory_reservations
@@ -474,6 +524,16 @@ export async function applyJifengOrderStatus(input: {
           .update(replacementRequests)
           .set({ status: "CANCELLED", updatedAt: now })
           .where(eq(replacementRequests.id, current.replacementRequestId));
+      } else {
+        await recordPackageCancellationAdjustment(tx, {
+          actorId: null,
+          actorType: "SYSTEM",
+          financialAuthorization: "CONFIRMED_REMOTE_CANCELLATION",
+          now,
+          orderId: current.orderId,
+          reason: "极风状态同步确认包裹已取消",
+          shipmentId: current.shipmentId,
+        });
       }
       const orderStatus = current.replacementRequestId
         ? current.orderStatus
@@ -558,6 +618,127 @@ export async function applyJifengOrderStatus(input: {
   return existingTx ? apply(existingTx) : db.transaction(apply);
 }
 
+export async function refreshJifengShipmentStatus(input: {
+  client: JifengOrderStatusPort;
+  now?: Date;
+  shipmentId: string;
+}) {
+  const now = input.now ?? new Date();
+  const claimToken = crypto.randomUUID();
+  const staleLeaseCutoff = new Date(now.getTime() - STATUS_POLL_LEASE_MS);
+  const claimed = await db
+    .update(shipmentFulfillments)
+    .set({
+      statusPollClaimToken: claimToken,
+      statusPollLockedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      sql`${shipmentFulfillments.shipmentId} = ${input.shipmentId}
+        and ${shipmentFulfillments.status} in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCELLED', 'SHIPPED')
+        and (
+          ${shipmentFulfillments.statusPollLockedAt} is null
+          or ${shipmentFulfillments.statusPollLockedAt} <= ${staleLeaseCutoff.toISOString()}::timestamptz
+        )`,
+    )
+    .returning({
+      erpNo: shipmentFulfillments.erpNo,
+      id: shipmentFulfillments.id,
+    });
+  const claim = claimed[0];
+  if (!claim) {
+    const rows = await db
+      .select({
+        id: shipmentFulfillments.id,
+        lockedAt: shipmentFulfillments.statusPollLockedAt,
+        status: shipmentFulfillments.status,
+      })
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, input.shipmentId))
+      .limit(1);
+    const current = rows[0];
+    if (!current) {
+      throw new JifengStatusRefreshError(
+        "FULFILLMENT_NOT_FOUND",
+        "未找到该包裹的极风履约记录",
+      );
+    }
+    if (
+      current.lockedAt &&
+      new Date(current.lockedAt).getTime() > staleLeaseCutoff.getTime()
+    ) {
+      throw new JifengStatusRefreshError(
+        "STATUS_REFRESH_IN_PROGRESS",
+        "该包裹正在同步极风状态，请稍后再试",
+      );
+    }
+    throw new JifengStatusRefreshError(
+      "STATUS_NOT_REFRESHABLE",
+      `当前履约状态 ${current.status} 不能立即查询极风`,
+    );
+  }
+  const references = await db.execute<{ orderId: string }>(sql`
+    select shipment.order_id as "orderId"
+    from shipment_fulfillments fulfillment
+    inner join order_shipments shipment on shipment.id = fulfillment.shipment_id
+    where fulfillment.id = ${claim.id}
+  `);
+  const reference = references[0];
+  if (!reference) {
+    throw new JifengStatusRefreshError(
+      "FULFILLMENT_NOT_FOUND",
+      "未找到该包裹的极风履约记录",
+    );
+  }
+
+  try {
+    const detail = await input.client.getOrder({ erpNo: claim.erpNo });
+    if (detail.erpNo !== claim.erpNo) {
+      throw new JifengApiError({
+        code: "INVALID_RESPONSE",
+        message: "极风状态查询返回了不匹配的包裹标识",
+        retryable: true,
+      });
+    }
+    return await db.transaction(async (tx) => {
+      const owned = await tx.execute<{ id: string }>(sql`
+        select id
+        from shipment_fulfillments
+        where id = ${claim.id}
+          and status_poll_claim_token = ${claimToken}
+        for update
+      `);
+      if (!owned[0]) {
+        throw new JifengStatusRefreshError(
+          "STATUS_REFRESH_STALE",
+          "本次极风状态查询租约已失效，请重新查询",
+        );
+      }
+      const result = await applyJifengOrderStatus({
+        detail,
+        now,
+        source: "MANUAL",
+      }, tx);
+      return { ...result, orderId: reference.orderId };
+    });
+  } catch (error) {
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        statusPollClaimToken: null,
+        statusPollLockedAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(shipmentFulfillments.id, claim.id),
+          eq(shipmentFulfillments.statusPollClaimToken, claimToken),
+        ),
+      );
+    throw error;
+  }
+}
+
 export async function pollActiveJifengFulfillments(input: {
   client: JifengOrderStatusPort;
   limit?: number;
@@ -626,6 +807,13 @@ export async function pollActiveJifengFulfillments(input: {
   for (const fulfillment of active) {
     try {
       const detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
+      if (detail.erpNo !== fulfillment.erpNo) {
+        throw new JifengApiError({
+          code: "INVALID_RESPONSE",
+          message: "极风状态查询返回了不匹配的包裹标识",
+          retryable: true,
+        });
+      }
       const result = await db.transaction(async (tx) => {
         const claimed = await tx.execute<{ id: string }>(sql`
           select id

@@ -79,7 +79,11 @@ export default async function CustomerOrdersPage({
   });
 
   const totalAmountFen = orders.reduce(
-    (sum, order) => sum + order.totalAmountFen,
+    (sum, order) =>
+      sum +
+      (isHistoricalView
+        ? order.totalAmountFen
+        : (order.netAmountFen ?? order.totalAmountFen)),
     0,
   );
   const totalPackages = orders.reduce(
@@ -172,6 +176,7 @@ export default async function CustomerOrdersPage({
                   <span className="flex flex-wrap items-center gap-2">
                     <strong className="text-ink">{order.orderNumber}</strong>
                     <Badge variant="secondary">{labels[order.status]}</Badge>
+                    {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
                   </span>
                   <span className="mt-1 block text-sm text-muted">
                     {order.storeName} · {order.totalPackageCount} 包裹 · {order.totalQuantity} 件
@@ -179,7 +184,7 @@ export default async function CustomerOrdersPage({
                 </span>
                 <span className="shrink-0 text-right">
                   <strong className="block tabular-nums text-ink">
-                    {money(order.totalAmountFen)}
+                    {money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}
                   </strong>
                   <ArrowRight className="ml-auto mt-2 size-4 text-primary" />
                 </span>
@@ -202,11 +207,12 @@ export default async function CustomerOrdersPage({
                       <p className="mt-1 text-sm text-muted">{order.storeName}</p>
                     </div>
                     <Badge variant="secondary">{labels[order.status]}</Badge>
+                    {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-xs text-muted">金额</p>
-                      <p className="mt-1 font-semibold tabular-nums text-ink">{money(order.totalAmountFen)}</p>
+                      <p className="mt-1 font-semibold tabular-nums text-ink">{money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted">包裹 / 件数</p>

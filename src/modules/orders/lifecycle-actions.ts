@@ -58,7 +58,8 @@ function validationState(error: z.ZodError): ActionState {
 }
 
 function lifecycleErrorState(error: unknown, fallback: string): ActionState {
-  return error instanceof OrderLifecycleError
+  return error instanceof OrderLifecycleError ||
+    (error instanceof Error && error.name === "SettlementBatchError")
     ? { message: error.message, status: "error" }
     : { message: fallback, status: "error" };
 }

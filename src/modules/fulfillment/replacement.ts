@@ -16,8 +16,13 @@ import { JifengApiError } from "@/integrations/jifeng/client";
 import { reserveInventory } from "@/modules/inventory/service";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { createSystemNotification } from "@/modules/notifications/service";
+import {
+  assertSettlementAllowsPackageCancellation,
+  prepareSettlementForPackageCancellation,
+} from "@/modules/settlement/batch-service";
 
 import { refreshParentFulfillmentStatus } from "./order-rollup";
+import { recordPackageCancellationAdjustment } from "./package-cancellation-adjustment";
 
 export class ReplacementError extends Error {
   constructor(
@@ -324,6 +329,14 @@ async function finalizeShipmentCancellation(
       .set({ status: "CANCELLED", updatedAt: input.now })
       .where(eq(replacementRequests.id, input.claim.replacementRequestId));
   } else {
+    await recordPackageCancellationAdjustment(tx, {
+      actorId: input.actorUserId,
+      actorType: "ADMIN",
+      now: input.now,
+      orderId: input.claim.orderId,
+      reason: input.reason,
+      shipmentId: input.shipmentId,
+    });
     await refreshParentFulfillmentStatus(tx, {
       now: input.now,
       orderId: input.claim.orderId,
@@ -366,14 +379,28 @@ export async function cancelJifengShipment(input: {
     throw new ReplacementError("REASON_TOO_LONG", "取消原因不能超过 1000 个字符");
   }
   const now = input.now ?? new Date();
-  const references = await db.execute<{ orderId: string }>(sql`
-    select order_id as "orderId"
-    from order_shipments
-    where id = ${input.shipmentId}
+  const references = await db.execute<{
+    kind: string;
+    orderId: string;
+    status: string;
+  }>(sql`
+    select s.kind, s.order_id as "orderId", f.status
+    from order_shipments s
+    inner join shipment_fulfillments f on f.shipment_id = s.id
+    where s.id = ${input.shipmentId}
   `);
   const reference = references[0];
   if (!reference) throw new ReplacementError("SHIPMENT_NOT_FOUND", "未找到极风包裹");
+  if (reference.status === "SHIPPED") {
+    throw new ReplacementError("ALREADY_SHIPPED", "极风已发货包裹不能取消");
+  }
+  if (reference.status === "CANCELLED") {
+    return { status: "ALREADY_CANCELLED" as const };
+  }
   const claimed = await db.transaction(async (tx) => {
+    if (reference.kind === "NORMAL") {
+      await assertSettlementAllowsPackageCancellation(tx, reference.orderId);
+    }
     await tx.execute(sql`
       select id
       from fulfillment_orders
@@ -449,6 +476,15 @@ export async function cancelJifengShipment(input: {
       row.submittedAt === null &&
       (outbox?.attemptCount ?? 0) === 0;
     if (localOnly) {
+      if (!row.replacementRequestId) {
+        await prepareSettlementForPackageCancellation(tx, {
+          actorId: input.actorUserId,
+          actorType: "ADMIN",
+          now,
+          orderId: row.orderId,
+          reason,
+        });
+      }
       await finalizeShipmentCancellation(tx, {
         actorUserId: input.actorUserId,
         claim: row,
@@ -543,6 +579,13 @@ export async function cancelJifengShipment(input: {
 
   return db.transaction(async (tx) => {
     if (!claimed.replacementRequestId) {
+      await prepareSettlementForPackageCancellation(tx, {
+        actorId: input.actorUserId,
+        actorType: "ADMIN",
+        now,
+        orderId: claimed.orderId,
+        reason,
+      });
       await tx.execute(sql`
         select id
         from fulfillment_orders

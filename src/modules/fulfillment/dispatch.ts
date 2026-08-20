@@ -729,6 +729,17 @@ async function reconcileBeforeCreateRetry(input: {
   }
   try {
     const detail = await input.client.getOrder({ erpNo: inspected.erpNo });
+    if (detail.erpNo !== inspected.erpNo) {
+      const outcome = await markReconciliationRequired(
+        inspected,
+        input.eventId,
+        input.now,
+        "ERP_NO_MISMATCH",
+      );
+      if (outcome === "TERMINAL") return "COMPLETED" as const;
+      if (outcome === "STALE") return "STALE" as const;
+      return "RECONCILIATION_REQUIRED" as const;
+    }
     const outcome = await finalizeRemoteOrder(
       inspected,
       input.eventId,
@@ -995,15 +1006,18 @@ export async function processJifengCreateOrderEvent(input: {
         entityType: "FULFILLMENT_ORDER",
         reason: "极风履约提交失败，已记录安全错误摘要",
       });
-      if (claimed.attemptNumber >= 3) {
+      if (!requiresReconciliation || claimed.attemptNumber >= 3) {
+        const permanentFailure = !requiresReconciliation;
         await createSystemNotification(tx, {
           deduplicationKey: `jifeng-submit-failed:${claimed.fulfillmentId}`,
           entityId: claimed.fulfillmentId,
           entityType: "SHIPMENT_FULFILLMENT",
-          message: `极风推单已失败 ${claimed.attemptNumber} 次，请检查配置或在后台重试。`,
+          message: permanentFailure
+            ? "极风拒绝了该包裹，请处理错误原因后在后台手动重试。"
+            : `极风推单已失败 ${claimed.attemptNumber} 次，请检查配置或在后台重试。`,
           now,
           severity: "ERROR",
-          title: "极风推单连续失败",
+          title: permanentFailure ? "极风推单需要人工处理" : "极风推单连续失败",
           type: "JIFENG_SUBMIT_FAILED",
         });
       }
@@ -1096,16 +1110,22 @@ export async function retryJifengShipment(input: {
       select id from fulfillment_orders where id = ${reference.orderId} for update
     `);
     const rows = await tx.execute<{
+      externalOrderNo: string | null;
       fulfillmentId: string;
+      jifengStatus: number | null;
       lastErrorCode: string | null;
       orderId: string;
       replacementRequestId: string | null;
       status: string;
+      submittedAt: Date | string | null;
     }>(sql`
       select
+        f.external_order_no as "externalOrderNo",
         f.id as "fulfillmentId",
+        f.jifeng_status as "jifengStatus",
         f.last_error_code as "lastErrorCode",
         f.status,
+        f.submitted_at as "submittedAt",
         s.order_id as "orderId",
         r.id as "replacementRequestId"
       from shipment_fulfillments f
@@ -1129,6 +1149,30 @@ export async function retryJifengShipment(input: {
         "FULFILLMENT_NOT_FAILED",
         "只有异常包裹可以重试",
       );
+    }
+    if (
+      fulfillment.submittedAt !== null ||
+      fulfillment.externalOrderNo !== null ||
+      fulfillment.jifengStatus !== null
+    ) {
+      await tx
+        .update(shipmentFulfillments)
+        .set({ nextRetryAt: now, updatedAt: now })
+        .where(eq(shipmentFulfillments.id, fulfillment.fulfillmentId));
+      await tx.insert(auditLogs).values({
+        action: "JIFENG_SHIPMENT_RETRY_REQUESTED",
+        actorId: input.actorUserId,
+        actorType: "ADMIN",
+        afterJson: {
+          recoveryMode: "STATUS_QUERY",
+          status: fulfillment.status,
+        },
+        beforeJson: { status: fulfillment.status },
+        entityId: input.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        reason,
+      });
+      return { status: "STATUS_REFRESH_SCHEDULED" as const };
     }
     const eventRows = await tx.execute<{
       claimToken: string | null;

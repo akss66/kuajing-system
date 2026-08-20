@@ -8,7 +8,8 @@ describe("deriveParentFulfillmentStatus", () => {
     { expected: "FULFILLING", statuses: ["PENDING", "SUBMITTED"] },
     { expected: "SHIPPED", statuses: ["SHIPPED", "SHIPPED"] },
     { expected: "FULFILLMENT_EXCEPTION", statuses: ["PENDING", "EXCEPTION"] },
-    { expected: "FULFILLMENT_EXCEPTION", statuses: ["SHIPPED", "CANCELLED"] },
+    { expected: "SHIPPED", statuses: ["SHIPPED", "CANCELLED"] },
+    { expected: "CANCELLED", statuses: ["CANCELLED", "CANCELLED"] },
   ])("derives $expected from $statuses", ({ expected, statuses }) => {
     expect(deriveParentFulfillmentStatus(statuses)).toBe(expected);
   });

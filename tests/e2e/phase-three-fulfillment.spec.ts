@@ -13,6 +13,7 @@ import {
   orderShipments,
   products,
   replacementRequests,
+  shipmentCancellationAdjustments,
   shipmentFulfillments,
   skus,
   stores,
@@ -32,6 +33,10 @@ async function seedShippedOrder() {
     .insert(customers)
     .values({ code: `FUL-${suffix}`, name: `履约客户 ${suffix}` })
     .returning();
+  const customerUser = await createManagedUser({
+    customerId: customer.id,
+    role: "user",
+  });
   const [store] = await db
     .insert(stores)
     .values({ customerId: customer.id, name: `TEMU 渥太华 ${suffix}` })
@@ -60,7 +65,7 @@ async function seedShippedOrder() {
       source: "MANUAL",
       status: "SHIPPED",
       storeId: store.id,
-      totalAmountFen: 900,
+      totalAmountFen: 2_200,
       totalPackageCount: 1,
       totalQuantity: 2,
     })
@@ -112,7 +117,7 @@ async function seedShippedOrder() {
     shippedAt: new Date(),
     status: "SHIPPED",
   });
-  return { admin, adminProfile, order, shipment, sku };
+  return { admin, adminProfile, customerUser, order, shipment, sku };
 }
 
 test("administrator can inspect a shipped package and create a replacement @desktop-only", async ({
@@ -130,7 +135,7 @@ test("administrator can inspect a shipped package and create a replacement @desk
   await expect(page.getByRole("link", { name: "返回订单列表" })).toBeVisible();
   await expect(page.getByText("包裹数", { exact: true })).toHaveCount(1);
   await expect(page.getByText("商品件数", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("实际成交额", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("当前净额", { exact: true })).toHaveCount(1);
   await expect(page.getByText("创建时间", { exact: true })).toHaveCount(1);
   await expect(page.getByText(`ERP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
   await expect(page.getByText(`CP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
@@ -191,4 +196,69 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
     jifengSummary.getByText("仍需配置开发者凭证，之后由超级管理员完成官方授权。"),
   ).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+test("cancelled accepted package shows its merchandise and ¥13 shipping adjustment and admin can complete the offline refund @desktop-only", async ({
+  page,
+}) => {
+  const fixture = await seedShippedOrder();
+  const cancelledAt = new Date();
+  await db
+    .update(fulfillmentOrders)
+    .set({
+      cancellationState: "ALL",
+      cancelledAt,
+      cancelReason: "极风接单后取消",
+      status: "CANCELLED",
+    })
+    .where(eq(fulfillmentOrders.id, fixture.order.id));
+  await db
+    .update(orderShipments)
+    .set({ shippedAt: null, trackingNumber: null })
+    .where(eq(orderShipments.id, fixture.shipment.id));
+  await db
+    .update(shipmentFulfillments)
+    .set({ jifengStatus: 9, shippedAt: null, status: "CANCELLED" })
+    .where(eq(shipmentFulfillments.shipmentId, fixture.shipment.id));
+  const [adjustment] = await db
+    .insert(shipmentCancellationAdjustments)
+    .values({
+      actorId: fixture.adminProfile.id,
+      actorType: "ADMIN",
+      customerId: fixture.order.customerId,
+      merchandiseAmountFen: 900,
+      offlineAmountFen: 2_200,
+      orderId: fixture.order.id,
+      reason: "极风接单后取消",
+      shipmentId: fixture.shipment.id,
+      shippingFeeFen: 1_300,
+      status: "PENDING_OFFLINE",
+      totalAmountFen: 2_200,
+      walletAmountFen: 0,
+    })
+    .returning();
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 30_000 });
+  await page.goto(`/portal/orders/${fixture.order.id}`);
+  await expect(page.getByRole("heading", { name: "取消与退款" })).toBeVisible();
+  await expect(page.getByText("商品 ¥9.00 + 物流费 ¥13.00")).toBeVisible();
+  await expect(page.getByText("线下退款处理中")).toBeVisible();
+  await expect(page.getByText("PENDING_OFFLINE")).toHaveCount(0);
+
+  await page.context().clearCookies();
+  await loginThroughUi(page, fixture.admin);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
+  await page.goto(`/admin/orders/${fixture.order.id}`);
+  await expect(page.getByText("待确认线下退款")).toBeVisible();
+  await page.getByLabel("退款凭证或备注").fill("E2E 微信退款流水");
+  await page.getByRole("button", { name: "确认线下退款完成" }).click();
+  await expect(page.getByText("退款处理完成")).toBeVisible();
+  await expect.poll(async () => {
+    const [row] = await db
+      .select({ status: shipmentCancellationAdjustments.status })
+      .from(shipmentCancellationAdjustments)
+      .where(eq(shipmentCancellationAdjustments.id, adjustment.id));
+    return row?.status;
+  }).toBe("COMPLETED");
 });

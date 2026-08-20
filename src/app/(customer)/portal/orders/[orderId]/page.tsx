@@ -46,6 +46,7 @@ export default async function CustomerOrderDetailPage({
   if (!order) notFound();
 
   const paid = ["PAID_PENDING_FULFILLMENT", "FULFILLING", "SHIPPED"].includes(order.status);
+  const cancellationAdjustments = order.cancellationAdjustments ?? [];
 
   return (
     <div className="space-y-5">
@@ -66,11 +67,13 @@ export default async function CustomerOrderDetailPage({
         <Badge className={paid ? "bg-success/10 text-success" : "bg-warning/10 text-warning"} variant="secondary">
           {labels[order.status]}
         </Badge>
+        {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
       </div>
 
       <MetricStrip
         items={[
-          { label: "实际金额", value: money(order.totalAmountFen) },
+          { hint: (order.adjustedAmountFen ?? 0) > 0 ? `原始金额 ${money(order.totalAmountFen)}` : undefined, label: "当前净额", value: money(order.netAmountFen ?? order.totalAmountFen) },
+          { hint: "被取消包裹的商品额与每包 13 元物流费", label: "取消调整", value: `-${money(order.adjustedAmountFen ?? 0)}` },
           { label: "包裹数", value: String(order.totalPackageCount) },
           { label: "商品件数", value: String(order.totalQuantity) },
           { hint: "履约与付款状态见下方", label: "订单状态", tone: paid ? "success" : "warning", value: labels[order.status] },
@@ -89,6 +92,33 @@ export default async function CustomerOrderDetailPage({
       <OrderStatusPanel order={order} />
 
       <CustomerOrderActions order={order} />
+
+      {cancellationAdjustments.length > 0 ? (
+        <WorkspacePanel className="overflow-hidden">
+          <WorkspacePanelHeader
+            description="拿货单保留导入批次原始金额；取消包裹按商品金额与每包 13 元物流费单独冲减或退款。"
+            title="取消与退款"
+          />
+          <div className="divide-y divide-border">
+            {cancellationAdjustments.map((adjustment, index) => (
+              <article className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5" key={adjustment.shipmentId}>
+                <div>
+                  <p className="font-semibold text-ink">取消包裹 {index + 1} · {money(adjustment.totalAmountFen)}</p>
+                  <p className="mt-1 text-xs text-muted">商品 {money(adjustment.merchandiseAmountFen)} + 物流费 {money(adjustment.shippingFeeFen)}</p>
+                  {adjustment.status !== "NOT_PAID" ? <p className="mt-1 text-xs text-muted">钱包退回 {money(adjustment.walletAmountFen)} · 线下退款 {money(adjustment.offlineAmountFen)}</p> : null}
+                </div>
+                <Badge className="w-fit bg-warning/10 text-warning" variant="secondary">
+                  {adjustment.status === "NOT_PAID"
+                    ? "已冲减应付金额"
+                    : adjustment.status === "PENDING_OFFLINE"
+                      ? "线下退款处理中"
+                      : "退款处理完成"}
+                </Badge>
+              </article>
+            ))}
+          </div>
+        </WorkspacePanel>
+      ) : null}
 
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader

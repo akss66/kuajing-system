@@ -10,7 +10,6 @@ import {
   settlementBatches,
   settlementPaymentClaims,
 } from "@/db/schema";
-import { enqueuePaidOrdersForFulfillment } from "@/modules/fulfillment/dispatch";
 import { createSystemNotification } from "@/modules/notifications/service";
 import {
   WalletValidationError,
@@ -59,6 +58,20 @@ export type SettlementBatchView = {
   totalAmountFen: number;
   walletAmountFen: number;
 };
+
+export type PackageCancellationSettlementPreparation =
+  | {
+      outcome: "NO_SETTLEMENT";
+      settlementBatchId: null;
+    }
+  | {
+      outcome:
+        | "ALREADY_INVALIDATED"
+        | "INVALIDATED"
+        | "PAYMENT_RECONCILIATION_REQUIRED"
+        | "TERMINAL";
+      settlementBatchId: string;
+    };
 
 function asDate(value: Date | string | null): Date | null {
   return value === null ? null : value instanceof Date ? value : new Date(value);
@@ -165,15 +178,46 @@ async function assertAllOrdersPending(
   tx: DbTransaction,
   settlementBatchId: string,
 ) {
-  const rows = await tx.execute<{ id: string; status: string }>(sql`
-    select o.id, o.status
+  const rows = await tx.execute<{
+    cancellationAdjusted: boolean;
+    cancellationPending: boolean;
+    cancellationState: string;
+    id: string;
+    status: string;
+  }>(sql`
+    select
+      o.id,
+      o.status,
+      o.cancellation_state as "cancellationState",
+      exists (
+        select 1
+        from shipment_cancellation_adjustments adjustment
+        where adjustment.order_id = o.id
+      ) as "cancellationAdjusted",
+      exists (
+        select 1
+        from order_shipments shipment
+        inner join shipment_fulfillments fulfillment
+          on fulfillment.shipment_id = shipment.id
+        where shipment.order_id = o.id
+          and fulfillment.status = 'CANCEL_PENDING'
+      ) as "cancellationPending"
     from settlement_batch_orders allocation
     inner join fulfillment_orders o on o.id = allocation.order_id
     where allocation.settlement_batch_id = ${settlementBatchId}
     order by o.id
     for update of o
   `);
-  if (rows.length === 0 || rows.some((row) => row.status !== "PENDING_PAYMENT")) {
+  if (
+    rows.length === 0 ||
+    rows.some(
+      (row) =>
+        row.status !== "PENDING_PAYMENT" ||
+        row.cancellationAdjusted ||
+        row.cancellationPending ||
+        row.cancellationState !== "NONE",
+    )
+  ) {
     throw new SettlementBatchError(
       "SETTLEMENT_ORDERS_NOT_PENDING",
       "结算批次中的拿货单当前不能申报或审核付款",
@@ -242,6 +286,203 @@ async function notifySettlement(
     title: input.title,
     type: `SETTLEMENT_${input.event.toUpperCase()}`,
   });
+}
+
+/**
+ * Invalidates an unpaid unified-settlement quote before a package cancellation.
+ *
+ * Settlement totals and per-order allocations are checkout snapshots. Mutating them
+ * in place would make audit history ambiguous and cannot represent a zero-value
+ * allocation with the current schema. A package-level price change therefore closes
+ * the unpaid quote and releases its wallet hold. The still-active orders remain
+ * PENDING_PAYMENT and can be paid independently at their adjusted payable amounts.
+ *
+ * Call this only in the transaction that finalizes a confirmed cancellation.
+ * Remote cancellation claims use assertSettlementAllowsPackageCancellation first,
+ * leaving the quote and wallet hold intact if the third-party request fails.
+ */
+export async function prepareSettlementForPackageCancellation(
+  tx: DbTransaction,
+  input: {
+    actorId: string | null;
+    actorType: "ADMIN" | "CUSTOMER" | "SYSTEM";
+    now: Date;
+    orderId: string;
+    reason: string;
+  },
+): Promise<PackageCancellationSettlementPreparation> {
+  const reason = requiredText(
+    input.reason,
+    "PACKAGE_CANCELLATION_REASON_REQUIRED",
+    "取消包裹必须填写原因",
+  );
+  const [reference] = await tx
+    .select({ settlementBatchId: settlementBatchOrders.settlementBatchId })
+    .from(settlementBatchOrders)
+    .where(eq(settlementBatchOrders.orderId, input.orderId))
+    .limit(1);
+  if (!reference) {
+    return { outcome: "NO_SETTLEMENT", settlementBatchId: null };
+  }
+
+  const batch = await lockBatch(tx, reference.settlementBatchId);
+  if (batch.status === "PAYMENT_REPORTED") {
+    throw new SettlementBatchError(
+      "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
+      "该包裹所属统一结算已申报付款，请先撤回整笔付款声明再取消包裹",
+    );
+  }
+  if (batch.status === "PAID") {
+    return {
+      outcome: "TERMINAL",
+      settlementBatchId: reference.settlementBatchId,
+    };
+  }
+  if (batch.status === "CANCELLED") {
+    return {
+      outcome: "ALREADY_INVALIDATED",
+      settlementBatchId: reference.settlementBatchId,
+    };
+  }
+  if (batch.status !== "PENDING_PAYMENT") {
+    return {
+      outcome: "TERMINAL",
+      settlementBatchId: reference.settlementBatchId,
+    };
+  }
+
+  const claim = await pendingClaim(tx, reference.settlementBatchId);
+  if (claim) {
+    throw new SettlementBatchError(
+      "SETTLEMENT_STATE_INVALID",
+      "统一结算付款状态异常，取消包裹前需要人工核对",
+    );
+  }
+  const invalidationReason = `包裹取消导致统一结算报价失效：${reason}`;
+  if (batch.walletAmountFen > 0) {
+    await releaseWalletHold(tx, {
+      actorType: input.actorType,
+      actorUserId: input.actorId ?? "package-cancellation-system",
+      customerId: batch.customerId,
+      now: input.now,
+      reason: invalidationReason,
+      settlementBatchId: reference.settlementBatchId,
+    });
+  }
+  await tx
+    .update(settlementBatches)
+    .set({
+      closedAt: input.now,
+      status: "CANCELLED",
+      statusReason: invalidationReason,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(settlementBatches.id, reference.settlementBatchId),
+        eq(settlementBatches.status, "PENDING_PAYMENT"),
+      ),
+    );
+  await auditBatch(tx, {
+    action: "SETTLEMENT_INVALIDATED_BY_PACKAGE_CANCELLATION",
+    actorId: input.actorId,
+    actorType: input.actorType,
+    afterJson: {
+      status: "CANCELLED",
+      walletHoldReleasedFen: batch.walletAmountFen,
+    },
+    beforeJson: {
+      offlineAmountFen: batch.offlineAmountFen,
+      status: batch.status,
+      totalAmountFen: batch.totalAmountFen,
+      walletAmountFen: batch.walletAmountFen,
+    },
+    reason: invalidationReason,
+    settlementBatchId: reference.settlementBatchId,
+  });
+  await notifySettlement(tx, {
+    event: "package-cancellation-invalidated",
+    message: "包裹取消使原统一结算金额失效，钱包冻结已释放；其余拿货单请按当前应付金额重新付款。",
+    now: input.now,
+    settlementBatchId: reference.settlementBatchId,
+    severity: "WARNING",
+    title: "统一结算已失效",
+  });
+  return {
+    outcome: "INVALIDATED",
+    settlementBatchId: reference.settlementBatchId,
+  };
+}
+
+/**
+ * Reconciles funding after Jifeng has already confirmed a normal package as
+ * cancelled. Unlike an operator-requested cancellation, this path cannot reject
+ * the remote fact. An unpaid quote is invalidated; a reported payment remains
+ * frozen for explicit whole-batch review and emits an error notification.
+ */
+export async function prepareSettlementForConfirmedRemoteCancellation(
+  tx: DbTransaction,
+  input: {
+    now: Date;
+    orderId: string;
+    reason: string;
+  },
+): Promise<PackageCancellationSettlementPreparation> {
+  const [reference] = await tx
+    .select({ settlementBatchId: settlementBatchOrders.settlementBatchId })
+    .from(settlementBatchOrders)
+    .where(eq(settlementBatchOrders.orderId, input.orderId))
+    .limit(1);
+  if (!reference) {
+    return { outcome: "NO_SETTLEMENT", settlementBatchId: null };
+  }
+  const batch = await lockBatch(tx, reference.settlementBatchId);
+  if (batch.status !== "PAYMENT_REPORTED") {
+    return prepareSettlementForPackageCancellation(tx, {
+      actorId: null,
+      actorType: "SYSTEM",
+      now: input.now,
+      orderId: input.orderId,
+      reason: input.reason,
+    });
+  }
+  await notifySettlement(tx, {
+    event: "remote-cancellation-reconciliation-required",
+    message:
+      "极风已取消统一结算中的包裹，但整批付款正在审核。系统已停止批准该旧金额，请人工撤回或驳回整批付款并重新结算。",
+    now: input.now,
+    settlementBatchId: reference.settlementBatchId,
+    severity: "ERROR",
+    title: "统一结算需要人工对账",
+  });
+  return {
+    outcome: "PAYMENT_RECONCILIATION_REQUIRED",
+    settlementBatchId: reference.settlementBatchId,
+  };
+}
+
+/**
+ * Serializes payment declaration against a remote package-cancellation claim
+ * without changing the quote. The quote is invalidated only after Jifeng has
+ * confirmed the cancellation, so a failed remote request leaves funding intact.
+ */
+export async function assertSettlementAllowsPackageCancellation(
+  tx: DbTransaction,
+  orderId: string,
+) {
+  const [reference] = await tx
+    .select({ settlementBatchId: settlementBatchOrders.settlementBatchId })
+    .from(settlementBatchOrders)
+    .where(eq(settlementBatchOrders.orderId, orderId))
+    .limit(1);
+  if (!reference) return;
+  const batch = await lockBatch(tx, reference.settlementBatchId);
+  if (batch.status === "PAYMENT_REPORTED") {
+    throw new SettlementBatchError(
+      "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
+      "该包裹所属统一结算已申报付款，请先撤回整笔付款声明再取消包裹",
+    );
+  }
 }
 
 export async function reportSettlementPayment(input: {
@@ -393,6 +634,7 @@ async function releaseTerminalBatch(
       input.orderStatus === "CANCELLED"
         ? {
             cancelReason: input.reason,
+            cancellationState: "ALL" as const,
             cancelledAt: input.now,
             lockExpiresAt: null,
             status: "CANCELLED",
@@ -694,6 +936,9 @@ export async function reviewSettlementPayment(input: {
   });
   if (outcome === "DEADLINE_EXPIRED") throwReviewDeadlineExpired();
   if (input.decision === "APPROVE") {
+    const { enqueuePaidOrdersForFulfillment } = await import(
+      "@/modules/fulfillment/dispatch"
+    );
     await enqueuePaidOrdersForFulfillment({ now });
   }
 }

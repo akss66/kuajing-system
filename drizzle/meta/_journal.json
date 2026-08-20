@@ -197,6 +197,13 @@
       "when": 1787200946985,
       "tag": "0027_expired_order_deduplication",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1787203106633,
+      "tag": "0028_package_cancellation_adjustments",
+      "breakpoints": true
     }
   ]
 }

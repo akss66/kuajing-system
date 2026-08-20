@@ -18,6 +18,7 @@ import {
   shipmentFulfillments,
   skus,
   stores,
+  systemNotifications,
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
@@ -146,7 +147,7 @@ async function createShipmentFixture(
       paymentMode: status === "PAID_PENDING_FULFILLMENT" ? "DIRECT_OFFLINE" : null,
       status,
       storeId: store.id,
-      totalAmountFen: 900,
+      totalAmountFen: 2_200,
       totalPackageCount: 1,
       totalQuantity: 2,
     })
@@ -209,7 +210,7 @@ async function addSiblingShipment(
   await db
     .update(fulfillmentOrders)
     .set({
-      totalAmountFen: 1_350,
+      totalAmountFen: 3_950,
       totalPackageCount: 2,
       totalQuantity: 3,
     })
@@ -541,6 +542,19 @@ describe("paid order Jifeng dispatch", () => {
     expect(
       fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
     ).toMatchObject({ lastErrorCode: "50026", status: "EXCEPTION" });
+    const [permanentFailureNotification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(
+        eq(
+          systemNotifications.entityId,
+          fulfillments.find((row) => row.shipmentId === fixture.shipment.id)!.id,
+        ),
+      );
+    expect(permanentFailureNotification).toMatchObject({
+      severity: "ERROR",
+      type: "JIFENG_SUBMIT_FAILED",
+    });
     expect(
       fulfillments.find((row) => row.shipmentId === sibling.id),
     ).toMatchObject({ lastErrorCode: null, status: "SUBMITTED" });
@@ -593,7 +607,7 @@ describe("paid order Jifeng dispatch", () => {
       .select()
       .from(fulfillmentOrders)
       .where(eq(fulfillmentOrders.id, fixture.order.id));
-    expect(savedOrder.status).toBe("FULFILLMENT_EXCEPTION");
+    expect(savedOrder.status).toBe("PAID_PENDING_FULFILLMENT");
     const [reservation] = await db
       .select()
       .from(inventoryReservations)
@@ -923,6 +937,63 @@ describe("paid order Jifeng dispatch", () => {
       externalOrderNo: "JF-REMOTE-1",
       status: "FULFILLING",
     });
+  });
+
+  test("rejects a reconciliation response for a different ERP number without mutating either package", async () => {
+    const first = await createShipmentFixture();
+    const second = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const events = await db.select().from(integrationOutbox);
+    const firstEvent = events.find(
+      (event) => event.aggregateId === first.shipment.id,
+    );
+    expect(firstEvent).toBeDefined();
+
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          throw new JifengApiError({
+            code: "TIMEOUT",
+            message: "create outcome unknown",
+            retryable: true,
+          });
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: firstEvent!.id,
+    });
+
+    const result = await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          throw new Error("reconciliation must not create again");
+        },
+        async getOrder() {
+          return {
+            erpNo: `TZX-${second.shipment.id.replaceAll("-", "")}`,
+            orderNo: "JF-WRONG-ORDER",
+            status: 6,
+          };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: firstEvent!.id,
+    });
+
+    expect(result).toEqual({ status: "RECONCILIATION_REQUIRED" });
+    const fulfillments = await db.select().from(shipmentFulfillments);
+    expect(
+      fulfillments.find((row) => row.shipmentId === first.shipment.id),
+    ).toMatchObject({ status: "EXCEPTION" });
+    expect(
+      fulfillments.find((row) => row.shipmentId === second.shipment.id),
+    ).toMatchObject({ externalOrderNo: null, status: "PENDING" });
+    const [savedEvent] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.id, firstEvent!.id));
+    expect(savedEvent).toMatchObject({ status: "FAILED" });
+    expect(savedEvent.lastErrorCode).toContain("RECONCILIATION_REQUIRED");
   });
 
   test.each(["50019", "50038"])(
@@ -1602,6 +1673,55 @@ describe("paid order Jifeng dispatch", () => {
       .from(fulfillmentOrders)
       .where(eq(fulfillmentOrders.id, order.id));
     expect(savedOrder.status).toBe("FULFILLING");
+  });
+
+  test("manual recovery of a remotely submitted warehouse exception schedules a status query without reopening create", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    await processJifengCreateOrderEvent({
+      client: {
+        async createOrder() {
+          return { data: null };
+        },
+      },
+      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      eventId: event.id,
+      now: new Date("2026-08-20T04:00:00.000Z"),
+    });
+    const [submitted] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    await applyJifengOrderStatus({
+      detail: { erpNo: submitted.erpNo, errorCode: 50038, status: 8 },
+      now: new Date("2026-08-20T04:05:00.000Z"),
+      source: "POLL",
+    });
+    const retryAt = new Date("2026-08-20T04:06:00.000Z");
+
+    await expect(
+      retryJifengShipment({
+        actorUserId: "admin-user",
+        now: retryAt,
+        reason: "仓库异常已处理，立即重新查询",
+        shipmentId: shipment.id,
+      }),
+    ).resolves.toEqual({ status: "STATUS_REFRESH_SCHEDULED" });
+    const [savedEvent] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.id, event.id));
+    expect(savedEvent).toMatchObject({ status: "COMPLETED" });
+    const [savedFulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    expect(savedFulfillment).toMatchObject({
+      jifengStatus: 8,
+      nextRetryAt: retryAt,
+      status: "EXCEPTION",
+    });
   });
 
   test("never retries create after Jifeng success followed by a persistence error", async () => {
