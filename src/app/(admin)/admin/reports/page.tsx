@@ -50,7 +50,6 @@ export default async function ReportsPage({
     report.stores.length > 0 ||
     report.replacements.length > 0 ||
     hasTrendData ||
-    coverageRisks.length > 0 ||
     Object.values(report.funds).some((value) => value !== 0);
 
   return (
