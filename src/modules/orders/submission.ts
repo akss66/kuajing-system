@@ -18,6 +18,7 @@ import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
+import { lockActiveOrderUniqueKeys } from "./import-conflict-lock";
 import { calculateOrderPricing } from "./pricing";
 
 export const UNPAID_ORDER_LOCK_MS = 2 * 60 * 60 * 1_000;
@@ -202,20 +203,54 @@ export async function submitTemuImportBatch(input: {
       row.externalSubOrderNo ? [row.externalSubOrderNo] : [],
     );
     if (subOrderNumbers.length) {
-      const existingRows = await tx
-        .select({ externalSubOrderNo: orderLines.externalSubOrderNo })
-        .from(orderLines)
-        .where(
-          and(
-            eq(orderLines.storeId, batch.storeId),
-            eq(orderLines.deduplicationActive, true),
-            inArray(orderLines.externalSubOrderNo, subOrderNumbers),
+      const externalOrderNumbers = readyRows.flatMap((row) =>
+        row.externalOrderNo ? [row.externalOrderNo] : [],
+      );
+      await lockActiveOrderUniqueKeys(tx, [
+        {
+          externalOrderNumbers,
+          externalSubOrderNumbers: subOrderNumbers,
+          storeId: batch.storeId,
+        },
+      ]);
+      const [existingRows, existingShipments] = await Promise.all([
+        tx
+          .select({ externalSubOrderNo: orderLines.externalSubOrderNo })
+          .from(orderLines)
+          .where(
+            and(
+              eq(orderLines.storeId, batch.storeId),
+              eq(orderLines.deduplicationActive, true),
+              inArray(orderLines.externalSubOrderNo, subOrderNumbers),
+            ),
           ),
-        );
+        tx
+          .select({ externalOrderNo: orderShipments.externalOrderNo })
+          .from(orderShipments)
+          .where(
+            and(
+              eq(orderShipments.storeId, batch.storeId),
+              eq(orderShipments.deduplicationActive, true),
+              inArray(orderShipments.externalOrderNo, externalOrderNumbers),
+            ),
+          ),
+      ]);
+      const existingExternalOrders = new Set(
+        existingShipments.map((row) => row.externalOrderNo),
+      );
       const newlyDuplicate = new Set(
-        existingRows.flatMap((row) =>
-          row.externalSubOrderNo ? [row.externalSubOrderNo] : [],
-        ),
+        [
+          ...existingRows.flatMap((row) =>
+            row.externalSubOrderNo ? [row.externalSubOrderNo] : [],
+          ),
+          ...readyRows.flatMap((row) =>
+            row.externalOrderNo &&
+            row.externalSubOrderNo &&
+            existingExternalOrders.has(row.externalOrderNo)
+              ? [row.externalSubOrderNo]
+              : [],
+          ),
+        ],
       );
       if (newlyDuplicate.size) {
         await tx

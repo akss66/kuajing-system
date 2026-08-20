@@ -116,6 +116,7 @@ describe("TEMU order workbook parser", () => {
     });
 
     const classified = classifyTemuRows(parsed, {
+      duplicateExternalOrderNumbers: new Set(),
       duplicateSubOrderNumbers: new Set(["SUB-10001-2"]),
       skuIdByExactAlias: new Map([["STORE-SKU-BLACK", "sku-internal-1"]]),
     });
@@ -190,5 +191,35 @@ describe("TEMU order workbook parser", () => {
       rowNumber: 2,
       code: "INVALID_QUANTITY",
     });
+  });
+
+  it("rejects every line in a package when its recipient details conflict", async () => {
+    const parsed = await parseTemuOrderWorkbook({
+      buffer: await buildWorkbook([
+        {},
+        {
+          子订单号: "SUB-10001-2",
+          收货人姓名: "Different Recipient",
+          收货人联系方式: "+1 416 555 0199",
+          详细地址1: "200 Different Road",
+        },
+      ]),
+      fileName: "conflicting-recipient.xlsx",
+    });
+
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.issues).toEqual([
+      expect.objectContaining({
+        code: "MISMATCHED_ORDER_RECIPIENT",
+        rowNumber: 2,
+      }),
+      expect.objectContaining({
+        code: "MISMATCHED_ORDER_RECIPIENT",
+        rowNumber: 3,
+      }),
+    ]);
+    expect(JSON.stringify(parsed.issues)).not.toContain("Different Recipient");
+    expect(JSON.stringify(parsed.issues)).not.toContain("+1 416 555 0199");
+    expect(JSON.stringify(parsed.issues)).not.toContain("200 Different Road");
   });
 });

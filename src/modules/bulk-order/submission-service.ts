@@ -28,6 +28,7 @@ import {
   createFulfillmentOrderNumber,
   UNPAID_ORDER_LOCK_MS,
 } from "@/modules/orders/submission";
+import { lockActiveOrderUniqueKeys } from "@/modules/orders/import-conflict-lock";
 import { calculateOrderPricing } from "@/modules/orders/pricing";
 import {
   applyBulkSettlementWallet,
@@ -838,35 +839,90 @@ export async function submitBulkDraft(
       ),
       subOrderNos: candidateSubOrders,
     });
+    await lockActiveOrderUniqueKeys(
+      tx,
+      selectedGroups.flatMap((group) => {
+        const work = candidateByGroup.get(group.id);
+        return work
+          ? [
+              {
+                externalOrderNumbers: work.rows.map(
+                  (row) => row.externalOrderNo,
+                ),
+                externalSubOrderNumbers: work.rows.map(
+                  (row) => row.externalSubOrderNo,
+                ),
+                storeId: group.storeId,
+              },
+            ]
+          : [];
+      }),
+    );
     if (candidateSubOrders.length > 0) {
-      const existingLines = await tx
-        .select({
-          externalSubOrderNo: orderLines.externalSubOrderNo,
-          storeId: orderLines.storeId,
-        })
-        .from(orderLines)
-        .innerJoin(
-          fulfillmentOrders,
-          eq(fulfillmentOrders.id, orderLines.orderId),
-        )
-        .where(
-          and(
-            eq(fulfillmentOrders.customerId, input.customerId),
-            eq(orderLines.deduplicationActive, true),
-            inArray(orderLines.externalSubOrderNo, candidateSubOrders),
+      const candidateExternalOrders = [
+        ...new Set(
+          [...candidateByGroup.values()].flatMap((work) =>
+            work.rows.map((row) => row.externalOrderNo),
           ),
-        );
+        ),
+      ];
+      const [existingLines, existingShipments] = await Promise.all([
+        tx
+          .select({
+            externalSubOrderNo: orderLines.externalSubOrderNo,
+            storeId: orderLines.storeId,
+          })
+          .from(orderLines)
+          .innerJoin(
+            fulfillmentOrders,
+            eq(fulfillmentOrders.id, orderLines.orderId),
+          )
+          .where(
+            and(
+              eq(fulfillmentOrders.customerId, input.customerId),
+              eq(orderLines.deduplicationActive, true),
+              inArray(orderLines.externalSubOrderNo, candidateSubOrders),
+            ),
+          ),
+        tx
+          .select({
+            externalOrderNo: orderShipments.externalOrderNo,
+            storeId: orderShipments.storeId,
+          })
+          .from(orderShipments)
+          .innerJoin(
+            fulfillmentOrders,
+            eq(fulfillmentOrders.id, orderShipments.orderId),
+          )
+          .where(
+            and(
+              eq(fulfillmentOrders.customerId, input.customerId),
+              eq(orderShipments.deduplicationActive, true),
+              inArray(
+                orderShipments.externalOrderNo,
+                candidateExternalOrders,
+              ),
+            ),
+          ),
+      ]);
       for (const group of selectedGroups) {
         const work = candidateByGroup.get(group.id);
         if (!work) continue;
         const subOrders = new Set(
           work.rows.map((row) => row.externalSubOrderNo),
         );
-        const conflicts = existingLines.filter(
+        const externalOrders = new Set(
+          work.rows.map((row) => row.externalOrderNo),
+        );
+        const lineConflicts = existingLines.filter(
           (line) =>
             line.externalSubOrderNo && subOrders.has(line.externalSubOrderNo),
         );
-        if (conflicts.some((line) => line.storeId !== group.storeId)) {
+        const shipmentConflicts = existingShipments.filter((shipment) =>
+          externalOrders.has(shipment.externalOrderNo),
+        );
+        const conflicts = [...lineConflicts, ...shipmentConflicts];
+        if (conflicts.some((row) => row.storeId !== group.storeId)) {
           failedByGroup.set(group.id, "CROSS_STORE_CONFLICT");
           candidateByGroup.delete(group.id);
         } else if (conflicts.length > 0) {

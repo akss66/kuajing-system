@@ -17,6 +17,7 @@ import {
   orderImportBatches,
   orderImportRows,
   orderLines,
+  orderShipments,
   skuAliases,
   skus,
   stores,
@@ -154,25 +155,68 @@ async function duplicateSubOrders(
   );
 }
 
+async function duplicateExternalOrders(
+  tx: DbTransaction,
+  storeId: string,
+  externalOrderNumbers: readonly string[],
+) {
+  if (externalOrderNumbers.length === 0) return new Set<string>();
+
+  const duplicates = await tx
+    .select({ externalOrderNo: orderShipments.externalOrderNo })
+    .from(orderShipments)
+    .where(
+      and(
+        eq(orderShipments.storeId, storeId),
+        eq(orderShipments.deduplicationActive, true),
+        inArray(
+          orderShipments.externalOrderNo,
+          [...new Set(externalOrderNumbers)],
+        ),
+      ),
+    );
+
+  return new Set(duplicates.map((row) => row.externalOrderNo));
+}
+
 function classifiedRowsForStorage(
   classified: ClassifiedTemuResult,
   piiKey: Buffer,
 ) {
-  const parsedRows = classified.rows.map((row) => ({
-    batchId: "",
-    errorCode: null,
-    errorMessage: null,
-    externalOrderNo: row.externalOrderNo,
-    externalSku: row.externalSku,
-    externalSubOrderNo: row.externalSubOrderNo,
-    productAttributes: row.productAttributes,
-    productName: row.productName,
-    quantity: row.quantity,
-    recipientPayloadEncrypted: encryptPii(row.recipient, piiKey),
-    resolvedSkuId: row.resolvedSkuId,
-    rowNumber: row.rowNumber,
-    status: row.status,
-  }));
+  const recipientByExternalOrder = new Map<
+    string,
+    { encrypted: string; serialized: string }
+  >();
+  const parsedRows = classified.rows.map((row) => {
+    const serializedRecipient = JSON.stringify(row.recipient);
+    const existingRecipient = recipientByExternalOrder.get(row.externalOrderNo);
+    const recipientPayloadEncrypted =
+      existingRecipient?.serialized === serializedRecipient
+        ? existingRecipient.encrypted
+        : encryptPii(row.recipient, piiKey);
+    if (!existingRecipient) {
+      recipientByExternalOrder.set(row.externalOrderNo, {
+        encrypted: recipientPayloadEncrypted,
+        serialized: serializedRecipient,
+      });
+    }
+
+    return {
+      batchId: "",
+      errorCode: null,
+      errorMessage: null,
+      externalOrderNo: row.externalOrderNo,
+      externalSku: row.externalSku,
+      externalSubOrderNo: row.externalSubOrderNo,
+      productAttributes: row.productAttributes,
+      productName: row.productName,
+      quantity: row.quantity,
+      recipientPayloadEncrypted,
+      resolvedSkuId: row.resolvedSkuId,
+      rowNumber: row.rowNumber,
+      status: row.status,
+    };
+  });
   const invalidRows = classified.issues.map((issue) => ({
     batchId: "",
     errorCode: issue.code,
@@ -272,7 +316,11 @@ export async function createTemuImportPreviewInTransaction(
     throw new ImportPreviewError("EMPTY_DATA", "Excel 文件中没有订单数据");
   }
 
-  const [skuIdByExternalSku, duplicateSubOrderNumbers] = await Promise.all([
+  const [
+    skuIdByExternalSku,
+    duplicateSubOrderNumbers,
+    duplicateExternalOrderNumbers,
+  ] = await Promise.all([
     exactSkuResolutionMap(
       tx,
       input.storeId,
@@ -283,8 +331,14 @@ export async function createTemuImportPreviewInTransaction(
       input.storeId,
       parsed.rows.map((row) => row.externalSubOrderNo),
     ),
+    duplicateExternalOrders(
+      tx,
+      input.storeId,
+      parsed.rows.map((row) => row.externalOrderNo),
+    ),
   ]);
   const classified = classifyTemuRows(parsed, {
+    duplicateExternalOrderNumbers,
     duplicateSubOrderNumbers,
     skuIdByExactAlias: skuIdByExternalSku,
   });

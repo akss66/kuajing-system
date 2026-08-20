@@ -9,6 +9,7 @@ import {
   orderImportBatches,
   orderImportRows,
   orderLines,
+  orderShipments,
   products,
   skuAliases,
   skus,
@@ -132,7 +133,7 @@ async function createFixture() {
     unitPriceFen: 500,
   });
 
-  return { customer, otherCustomer, otherStore, sku, store };
+  return { customer, existingOrder, otherCustomer, otherStore, sku, store };
 }
 
 describe("customer-scoped TEMU import preview", () => {
@@ -240,6 +241,101 @@ describe("customer-scoped TEMU import preview", () => {
         unknownSku: 0,
       },
     });
+  });
+
+  test("marks later occurrences of the same sub-order in one workbook as duplicates", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        { 子订单号: "SUB-REPEATED-IN-FILE" },
+        {
+          订单号: "PO-20002",
+          子订单号: "SUB-REPEATED-IN-FILE",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "repeated-sub-order.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    expect(preview.summary).toEqual({
+      total: 2,
+      ready: 1,
+      duplicate: 1,
+      unknownSku: 0,
+      invalid: 0,
+    });
+    expect(preview.rows.map((row) => row.status)).toEqual([
+      "READY",
+      "DUPLICATE",
+    ]);
+  });
+
+  test("marks every row in an already active external order as duplicate", async () => {
+    const fixture = await createFixture();
+    await db.insert(orderShipments).values({
+      externalOrderNo: "PO-ACTIVE-PACKAGE",
+      orderId: fixture.existingOrder.id,
+      recipientPayloadEncrypted: "encrypted-recipient",
+      storeId: fixture.store.id,
+    });
+
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          订单号: "PO-ACTIVE-PACKAGE",
+          子订单号: "SUB-NEW-IN-ACTIVE-PACKAGE-1",
+        },
+        {
+          订单号: "PO-ACTIVE-PACKAGE",
+          子订单号: "SUB-NEW-IN-ACTIVE-PACKAGE-2",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "active-package.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    expect(preview.summary).toEqual({
+      total: 2,
+      ready: 0,
+      duplicate: 2,
+      unknownSku: 0,
+      invalid: 0,
+    });
+    expect(preview.rows.map((row) => row.status)).toEqual([
+      "DUPLICATE",
+      "DUPLICATE",
+    ]);
+  });
+
+  test("stores one encrypted recipient envelope for every line in the same package", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        { 子订单号: "SUB-MIXED-1" },
+        { 子订单号: "SUB-MIXED-2" },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "mixed-package.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    const rows = await db
+      .select({
+        recipientPayloadEncrypted: orderImportRows.recipientPayloadEncrypted,
+      })
+      .from(orderImportRows)
+      .where(sql`${orderImportRows.batchId} = ${preview.batchId}`)
+      .orderBy(orderImportRows.rowNumber);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].recipientPayloadEncrypted).toBe(
+      rows[1].recipientPayloadEncrypted,
+    );
   });
 
   test("resolves an active standard SKU code when no alias exists", async () => {

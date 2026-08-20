@@ -266,6 +266,150 @@ describe("atomic TEMU take-order submission", () => {
     expect(submitAudits).toHaveLength(1);
   });
 
+  test("serializes concurrent previews with the same active sub-order into one stable submission", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const sku = await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-SKU-A",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const [firstPreview, secondPreview] = await Promise.all([
+      createPreview({ customerId: customer.id, rows: [{}], storeId: store.id }),
+      createPreview({ customerId: customer.id, rows: [{}], storeId: store.id }),
+    ]);
+
+    const submissions = await Promise.allSettled(
+      [firstPreview, secondPreview].map((preview) =>
+        submitTemuImportBatch({
+          actorUserId: "auth-customer-submit",
+          batchId: preview.batchId,
+          customerId: customer.id,
+        }),
+      ),
+    );
+
+    expect(
+      submissions.filter((submission) => submission.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = submissions.find(
+      (submission) => submission.status === "rejected",
+    );
+    expect(rejected).toMatchObject({
+      reason: {
+        code: "NO_READY_ROWS",
+        message: "没有可提交的新订单",
+        name: "OrderSubmissionError",
+      },
+      status: "rejected",
+    });
+    expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
+    expect(await db.select().from(orderLines)).toHaveLength(1);
+    expect(await db.select().from(orderShipments)).toHaveLength(1);
+    const reservations = await db.select().from(inventoryReservations);
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0]).toMatchObject({ quantity: 1, skuId: sku.id });
+    expect(await getAvailableQuantity(db, sku.id)).toBe(9);
+  });
+
+  test("serializes concurrent previews with one external order and different sub-orders", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const sku = await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-SKU-A",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const [firstPreview, secondPreview] = await Promise.all([
+      createPreview({
+        customerId: customer.id,
+        rows: [{ 子订单号: "SUB-SAME-PACKAGE-1" }],
+        storeId: store.id,
+      }),
+      createPreview({
+        customerId: customer.id,
+        rows: [{ 子订单号: "SUB-SAME-PACKAGE-2" }],
+        storeId: store.id,
+      }),
+    ]);
+
+    const submissions = await Promise.allSettled(
+      [firstPreview, secondPreview].map((preview) =>
+        submitTemuImportBatch({
+          actorUserId: "auth-customer-submit",
+          batchId: preview.batchId,
+          customerId: customer.id,
+        }),
+      ),
+    );
+
+    expect(
+      submissions.filter((submission) => submission.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      submissions.find((submission) => submission.status === "rejected"),
+    ).toMatchObject({
+      reason: {
+        code: "NO_READY_ROWS",
+        message: "没有可提交的新订单",
+        name: "OrderSubmissionError",
+      },
+      status: "rejected",
+    });
+    expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
+    expect(await db.select().from(orderShipments)).toHaveLength(1);
+    expect(await db.select().from(orderLines)).toHaveLength(1);
+    const reservations = await db.select().from(inventoryReservations);
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0]).toMatchObject({ quantity: 1, skuId: sku.id });
+    expect(await getAvailableQuantity(db, sku.id)).toBe(9);
+  });
+
+  test("treats a new sub-order under an active external order as a stable duplicate", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const sku = await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "EXT-SKU-A",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const firstPreview = await createPreview({
+      customerId: customer.id,
+      rows: [{}],
+      storeId: store.id,
+    });
+    await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: firstPreview.batchId,
+      customerId: customer.id,
+    });
+    const secondPreview = await createPreview({
+      customerId: customer.id,
+      rows: [{ 子订单号: "SUB-SUBMIT-NEW" }],
+      storeId: store.id,
+    });
+
+    await expect(
+      submitTemuImportBatch({
+        actorUserId: "auth-customer-submit",
+        batchId: secondPreview.batchId,
+        customerId: customer.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "NO_READY_ROWS",
+      message: "没有可提交的新订单",
+      name: "OrderSubmissionError",
+    });
+    expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
+    expect(await db.select().from(orderShipments)).toHaveLength(1);
+    expect(await db.select().from(orderLines)).toHaveLength(1);
+    expect(await db.select().from(inventoryReservations)).toHaveLength(1);
+    expect(await getAvailableQuantity(db, sku.id)).toBe(9);
+  });
+
   test("a cancelled order releases duplicate protection for an identical re-import", async () => {
     const { customer, store } = await createCustomerAndStore();
     await createSku({
@@ -337,6 +481,7 @@ describe("atomic TEMU take-order submission", () => {
     await db
       .update(fulfillmentOrders)
       .set({
+        cancellationState: "ALL",
         cancelReason: "结算批次直接取消路径",
         status: "CANCELLED",
       })

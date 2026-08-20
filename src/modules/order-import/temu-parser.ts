@@ -78,7 +78,8 @@ export type TemuParseIssueCode =
   | "MISSING_EXTERNAL_SKU"
   | "INVALID_QUANTITY"
   | "INVALID_RECIPIENT"
-  | "INVALID_CANADA_ADDRESS";
+  | "INVALID_CANADA_ADDRESS"
+  | "MISMATCHED_ORDER_RECIPIENT";
 
 export type TemuParseIssue = {
   rowNumber: number;
@@ -337,20 +338,56 @@ export async function parseTemuOrderWorkbook(input: {
     }
   }
 
+  const recipientByOrder = new Map<string, string>();
+  const conflictingOrders = new Set<string>();
+  for (const row of rows) {
+    const recipient = JSON.stringify(row.recipient);
+    const existingRecipient = recipientByOrder.get(row.externalOrderNo);
+    if (existingRecipient !== undefined && existingRecipient !== recipient) {
+      conflictingOrders.add(row.externalOrderNo);
+    } else if (existingRecipient === undefined) {
+      recipientByOrder.set(row.externalOrderNo, recipient);
+    }
+  }
+  if (conflictingOrders.size > 0) {
+    const acceptedRows: ParsedTemuRow[] = [];
+    for (const row of rows) {
+      if (conflictingOrders.has(row.externalOrderNo)) {
+        issues.push(
+          invalid(
+            row.rowNumber,
+            "MISMATCHED_ORDER_RECIPIENT",
+            `第 ${row.rowNumber} 行与同一订单的收件信息不一致`,
+          ),
+        );
+      } else {
+        acceptedRows.push(row);
+      }
+    }
+    issues.sort((first, second) => first.rowNumber - second.rowNumber);
+    return { rows: acceptedRows, issues };
+  }
+
   return { rows, issues };
 }
 
 export function classifyTemuRows(
   parsed: TemuParseResult,
   input: {
+    duplicateExternalOrderNumbers: ReadonlySet<string>;
     duplicateSubOrderNumbers: ReadonlySet<string>;
     skuIdByExactAlias: ReadonlyMap<string, string>;
   },
 ): ClassifiedTemuResult {
+  const seenSubOrderNumbers = new Set(input.duplicateSubOrderNumbers);
   const rows = parsed.rows.map<ClassifiedTemuRow>((row) => {
-    if (input.duplicateSubOrderNumbers.has(row.externalSubOrderNo)) {
+    if (
+      input.duplicateExternalOrderNumbers.has(row.externalOrderNo) ||
+      seenSubOrderNumbers.has(row.externalSubOrderNo)
+    ) {
       return { ...row, status: "DUPLICATE", resolvedSkuId: null };
     }
+    seenSubOrderNumbers.add(row.externalSubOrderNo);
 
     const resolvedSkuId = input.skuIdByExactAlias.get(row.externalSku) ?? null;
     return {

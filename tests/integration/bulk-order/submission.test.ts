@@ -24,6 +24,7 @@ import {
   stores,
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
+import { submitTemuImportBatch } from "@/modules/orders/submission";
 
 type SeedRow = {
   externalOrderNo?: string | null;
@@ -288,6 +289,77 @@ describe("atomic partial bulk submission", () => {
         customers
       restart identity cascade
     `));
+  });
+
+  test("serializes single and bulk submissions sharing the same active order keys", async () => {
+    const fixture = await createDraftFixture(["cross-path"]);
+    const group = fixture.groups.get("cross-path")!;
+    const sku = await createSku({ code: "CROSS-PATH", stock: 10 });
+    const sharedRow = {
+      externalOrderNo: "PO-CROSS-PATH",
+      externalSubOrderNo: "SUB-CROSS-PATH",
+      resolvedSkuId: sku.id,
+      rowNumber: 2,
+    };
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [sharedRow],
+      storeId: group.storeId,
+    });
+    const singleBatch = await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [sharedRow],
+      storeId: group.storeId,
+    });
+    await db
+      .update(orderImportBatches)
+      .set({ storeGroupId: null })
+      .where(eq(orderImportBatches.id, singleBatch.id));
+
+    const [singleSubmission, bulkSubmission] = await Promise.allSettled([
+      submitTemuImportBatch({
+        actorUserId: "cross-path-customer",
+        batchId: singleBatch.id,
+        customerId: fixture.customer.id,
+      }),
+      submitBulkDraft({
+        actorUserId: "cross-path-customer",
+        customerId: fixture.customer.id,
+        draftId: fixture.draft.id,
+        idempotencyKey: "cross-path-concurrency",
+        requestedWalletFen: 0,
+        selectedGroupIds: [group.id],
+      }),
+    ]);
+
+    expect(bulkSubmission.status).toBe("fulfilled");
+    if (singleSubmission.status === "fulfilled") {
+      expect(bulkSubmission).toMatchObject({
+        status: "fulfilled",
+        value: {
+          createdOrders: [],
+          failedGroups: [{ groupId: group.id, status: "DUPLICATE_CHANGED" }],
+        },
+      });
+    } else {
+      expect(singleSubmission.reason).toMatchObject({
+        code: "NO_READY_ROWS",
+        message: "没有可提交的新订单",
+        name: "OrderSubmissionError",
+      });
+      expect(bulkSubmission).toMatchObject({
+        status: "fulfilled",
+        value: { createdOrders: [{ groupId: group.id }], failedGroups: [] },
+      });
+    }
+    expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
+    expect(await db.select().from(orderShipments)).toHaveLength(1);
+    expect(await db.select().from(orderLines)).toHaveLength(1);
+    const reservations = await db.select().from(inventoryReservations);
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0]).toMatchObject({ quantity: 1, skuId: sku.id });
   });
 
   test("creates eight store orders, keeps two groups affected by one short SKU repairable, and is idempotent", async () => {
