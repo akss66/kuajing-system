@@ -175,6 +175,23 @@ describe("order workspace hierarchy", () => {
     expect(within(card).getByRole("link", { name: "去付款" })).toHaveClass("min-h-11");
   });
 
+  it("presents cancelled customer orders as non-operating archive values", async () => {
+    queryMocks.listCustomerOrders.mockResolvedValueOnce([
+      { ...order, status: "CANCELLED" },
+    ]);
+
+    render(
+      await CustomerOrdersPage({
+        searchParams: Promise.resolve({ status: "CANCELLED" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "已取消拿货单" })).toBeVisible();
+    expect(screen.getByText("已取消订单")).toBeVisible();
+    expect(screen.getByText("取消前金额")).toBeVisible();
+    expect(screen.queryByText("订单总额")).not.toBeInTheDocument();
+  });
+
   it("localizes the pending payment review stage in the shared detail timeline", async () => {
     queryMocks.getCustomerOrderDetail.mockResolvedValue({
       ...order,

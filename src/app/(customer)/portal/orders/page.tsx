@@ -59,6 +59,7 @@ export default async function CustomerOrdersPage({
     status: selectedStatus && selectedStatus in labels ? selectedStatus : undefined,
   };
   const pendingOnly = filters.status === "PENDING_PAYMENT";
+  const isCancelledView = filters.status === "CANCELLED";
   const allOrders = await listCustomerOrders(
     principal.customerId,
     filters.status as AdminOrderStatus | undefined,
@@ -92,23 +93,54 @@ export default async function CustomerOrdersPage({
       <PageHeading
         breadcrumbs={[
           { href: "/portal", label: "商家中心" },
-          { label: pendingOnly ? "待付款订单" : "我的订单" },
+          {
+            label: pendingOnly
+              ? "待付款订单"
+              : isCancelledView
+                ? "已取消拿货单"
+                : "我的订单",
+          },
         ]}
         description={
           pendingOnly
             ? "这里只显示等待线下付款的订单，便于统一进入付款结算。"
+            : isCancelledView
+              ? "已取消拿货单仅用于历史追溯，不计入有效订单数量和金额。"
             : "查看订单金额、包裹数量、付款状态与后续履约进度。"
         }
-        title={pendingOnly ? "待付款订单" : "我的订单"}
+        title={
+          pendingOnly
+            ? "待付款订单"
+            : isCancelledView
+              ? "已取消拿货单"
+              : "我的订单"
+        }
       />
 
       <MetricStrip
-        items={[
-          { label: "订单数", value: `${orders.length}` },
-          { label: "包裹数", value: `${totalPackages}` },
-          { label: "商品件数", value: `${totalQuantity}` },
-          { label: "订单总额", value: money(totalAmountFen) },
-        ]}
+        items={
+          isCancelledView
+            ? [
+                {
+                  hint: "当前筛选下的历史取消记录",
+                  label: "已取消订单",
+                  value: `${orders.length}`,
+                },
+                { hint: "取消记录中的原包裹数", label: "原包裹数", value: `${totalPackages}` },
+                { hint: "取消记录中的原商品件数", label: "原商品件数", value: `${totalQuantity}` },
+                {
+                  hint: "仅供历史核对，不计入有效订单金额",
+                  label: "取消前金额",
+                  value: money(totalAmountFen),
+                },
+              ]
+            : [
+                { label: "订单数", value: `${orders.length}` },
+                { label: "包裹数", value: `${totalPackages}` },
+                { label: "商品件数", value: `${totalQuantity}` },
+                { label: "订单总额", value: money(totalAmountFen) },
+              ]
+        }
       />
 
       <OrderFilterBar
@@ -119,7 +151,7 @@ export default async function CustomerOrdersPage({
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
           description="点击任一订单可查看付款记录、库存锁定与明细状态。"
-          title={pendingOnly ? "待付款清单" : "订单列表"}
+          title={pendingOnly ? "待付款清单" : isCancelledView ? "已取消拿货单" : "订单列表"}
         />
         {orders.length ? (
           <>
