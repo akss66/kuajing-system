@@ -24,13 +24,16 @@ const configMocks = vi.hoisted(() => ({
 }));
 
 const serviceMocks = vi.hoisted(() => ({
+  applyCatalogFieldRefresh: vi.fn(),
   confirmCargoMigration: vi.fn(),
+  createCatalogFieldRefreshService: vi.fn(),
   createCargoPreflight: vi.fn(),
   createFeishuCargoMigrationService: vi.fn(),
 }));
 
 const queryMocks = vi.hoisted(() => ({
   findCargoMigrationRunConfirmationSummary: vi.fn(),
+  findLatestImportedCargoRefreshBaseline: vi.fn(),
 }));
 
 const outboxMocks = vi.hoisted(() => ({
@@ -66,9 +69,15 @@ vi.mock("@/modules/feishu/migration-service", () => ({
   createFeishuCargoMigrationService:
     serviceMocks.createFeishuCargoMigrationService,
 }));
+vi.mock("@/modules/feishu/catalog-field-refresh", () => ({
+  createCatalogFieldRefreshService:
+    serviceMocks.createCatalogFieldRefreshService,
+}));
 vi.mock("@/modules/feishu/queries", () => ({
   findCargoMigrationRunConfirmationSummary:
     queryMocks.findCargoMigrationRunConfirmationSummary,
+  findLatestImportedCargoRefreshBaseline:
+    queryMocks.findLatestImportedCargoRefreshBaseline,
 }));
 vi.mock("@/modules/feishu/outbox", () => ({
   enqueueCargoSyncEvent: outboxMocks.enqueueCargoSyncEvent,
@@ -79,6 +88,7 @@ import {
   confirmCargoMigrationAction,
   createCargoPreflightAction,
   retryFeishuCargoSyncAction,
+  syncFeishuCatalogFieldsAction,
   testFeishuConnectionAction,
 } from "@/modules/feishu/actions";
 
@@ -94,9 +104,12 @@ describe("feishu admin actions", () => {
     configMocks.readFeishuApiBaseUrl.mockReset();
     configMocks.readFeishuConfig.mockReset();
     serviceMocks.confirmCargoMigration.mockReset();
+    serviceMocks.applyCatalogFieldRefresh.mockReset();
+    serviceMocks.createCatalogFieldRefreshService.mockReset();
     serviceMocks.createCargoPreflight.mockReset();
     serviceMocks.createFeishuCargoMigrationService.mockReset();
     queryMocks.findCargoMigrationRunConfirmationSummary.mockReset();
+    queryMocks.findLatestImportedCargoRefreshBaseline.mockReset();
     outboxMocks.enqueueCargoSyncEvent.mockReset();
     constructorMocks.FeishuClient.mockClear();
     Object.values(clientMocks).forEach((mock) => mock.mockReset());
@@ -126,6 +139,17 @@ describe("feishu admin actions", () => {
     serviceMocks.createFeishuCargoMigrationService.mockReturnValue({
       confirmCargoMigration: serviceMocks.confirmCargoMigration,
       createCargoPreflight: serviceMocks.createCargoPreflight,
+    });
+    serviceMocks.createCatalogFieldRefreshService.mockReturnValue({
+      apply: serviceMocks.applyCatalogFieldRefresh,
+    });
+    queryMocks.findLatestImportedCargoRefreshBaseline.mockResolvedValue({
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+      expectedSkuCount: 140,
+      expectedSourceSequenceCount: 74,
+      sourceSheetId: "sheet-source-a",
     });
     queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue({
       blockingIssueCount: 0,
@@ -465,5 +489,141 @@ describe("feishu admin actions", () => {
       confirmCargoMigrationAction({ status: "idle" }, formData),
     ).rejects.toThrow("FORBIDDEN_ADMIN");
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
+  });
+
+  it("stops before configuration, database, or Feishu access when catalog sync is unauthorized", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
+
+    await expect(
+      syncFeishuCatalogFieldsAction({ status: "idle" }, new FormData()),
+    ).rejects.toThrow("FORBIDDEN_ADMIN");
+
+    expect(configMocks.readFeishuConfig).not.toHaveBeenCalled();
+    expect(queryMocks.findLatestImportedCargoRefreshBaseline).not.toHaveBeenCalled();
+    expect(serviceMocks.createCatalogFieldRefreshService).not.toHaveBeenCalled();
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+  });
+
+  it("refreshes existing catalog fields from the trusted imported baseline without writing Feishu", async () => {
+    serviceMocks.applyCatalogFieldRefresh.mockResolvedValue({
+      cargoPricePlaceholders: [
+        {
+          skuCode: "TZX-076",
+          sourceRowNumber: 141,
+          unitPriceMilliYuan: 99_000,
+        },
+      ],
+      matchedSkuCount: 140,
+      productsToMerge: 2,
+      skuCount: 140,
+      sourceSequenceCount: 74,
+    });
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "飞书货盘同步完成：已更新 74 个商品来源、140 个 SKU 的字段；库存数量保持不变。",
+      status: "success",
+    });
+    expect(serviceMocks.applyCatalogFieldRefresh).toHaveBeenCalledWith({
+      actorUserId: "super-admin-user-1",
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+      client: clientMocks,
+      expectedSkuCount: 140,
+      expectedSourceSequenceCount: 74,
+      reason: "超级管理员一键同步飞书货盘商品字段",
+      sourceSheetId: "sheet-source-a",
+      sourceWikiToken: "wiki-source-token",
+    });
+    expect(clientMocks.writeRange).not.toHaveBeenCalled();
+    expect(clientMocks.writeImage).not.toHaveBeenCalled();
+    expect(clientMocks.setRangeStyle).not.toHaveBeenCalled();
+    expect(clientMocks.updateDimension).not.toHaveBeenCalled();
+    expect(clientMocks.updateSheetProperties).not.toHaveBeenCalled();
+    expect(clientMocks.createFilter).not.toHaveBeenCalled();
+    expect(cacheMocks.revalidatePath.mock.calls).toEqual([
+      ["/admin/system/integrations"],
+      ["/admin/catalog"],
+      ["/admin/inventory"],
+    ]);
+  });
+
+  it("requires an imported baseline before reading configuration or calling Feishu", async () => {
+    queryMocks.findLatestImportedCargoRefreshBaseline.mockResolvedValue(null);
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "尚无已导入的飞书货盘基线，请先完成首批导入。",
+      status: "error",
+    });
+    expect(configMocks.readFeishuConfig).not.toHaveBeenCalled();
+    expect(serviceMocks.applyCatalogFieldRefresh).not.toHaveBeenCalled();
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["SKU_SET_MISMATCH", "SKU 集合"],
+    ["PRODUCT_GROUPING_CONFLICT", "商品分组"],
+    ["SOURCE_SEQUENCE_COUNT_MISMATCH", "商品数量"],
+    ["SKU_COUNT_MISMATCH", "SKU 数量"],
+    ["PARSER_BLOCKING_ISSUES", "阻断问题"],
+  ])("maps catalog refresh failure %s to safe Chinese", async (code, label) => {
+    serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(new Error(code));
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.message).toContain(label);
+    expect(result.message).not.toContain(code);
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("does not expose third-party error codes or tokens from a failed refresh", async () => {
+    serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(
+      new Error("FeishuApiError code=999 token=secret-value"),
+    );
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "暂时无法读取飞书货盘，请稍后重试；本次未修改商品或库存。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("999");
+    expect(result.message).not.toContain("secret-value");
+  });
+
+  it("does not expose database details when the imported baseline cannot be read", async () => {
+    queryMocks.findLatestImportedCargoRefreshBaseline.mockRejectedValue(
+      new Error("postgres password=secret-value relation=internal_table"),
+    );
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "暂时无法读取飞书货盘，请稍后重试；本次未修改商品或库存。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("secret-value");
+    expect(configMocks.readFeishuConfig).not.toHaveBeenCalled();
+    expect(serviceMocks.applyCatalogFieldRefresh).not.toHaveBeenCalled();
   });
 });

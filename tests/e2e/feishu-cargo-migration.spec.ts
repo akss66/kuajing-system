@@ -103,6 +103,18 @@ class FakeFeishuServer {
     });
   }
 
+  updateSourceCell(skuCode: string, heading: string, value: unknown) {
+    const headingIndex = this.dataset.values[0]?.indexOf(heading) ?? -1;
+    const skuIndex = this.dataset.values[0]?.indexOf("SKU") ?? -1;
+    const row = this.dataset.values.find(
+      (candidate, index) => index > 0 && candidate[skuIndex] === skuCode,
+    );
+    if (headingIndex < 0 || skuIndex < 0 || !row) {
+      throw new Error(`Unable to update ${heading} for ${skuCode}`);
+    }
+    row[headingIndex] = value;
+  }
+
   private async handle(request: IncomingMessage, response: ServerResponse) {
     const method = request.method ?? "GET";
     const url = new URL(request.url ?? "/", FEISHU_BASE_URL);
@@ -598,6 +610,41 @@ test.describe.serial("Feishu cargo migration", () => {
 
     expect(await db.select({ id: integrationOutbox.id }).from(integrationOutbox)).toEqual([]);
     await expect(drawer.getByRole("button", { name: /同步目标测试表/ })).toHaveCount(0);
+    expect(fakeServer.sourceWrites).toEqual([]);
+    expect(fakeServer.targetWrites).toEqual([]);
+
+    const [inventoryBeforeRefresh] = await db
+      .select({ totalQuantity: inventoryBalances.totalQuantity })
+      .from(inventoryBalances)
+      .innerJoin(skus, eq(inventoryBalances.skuId, skus.id))
+      .where(eq(skus.skuCode, "TZX-034-1"));
+    fakeServer.updateSourceCell(
+      "TZX-034-1",
+      "规格",
+      "飞书一键同步后的新规格",
+    );
+
+    await page.reload();
+    drawer = await openFeishuDrawer(page);
+    await drawer
+      .getByRole("button", { name: "一键同步飞书货盘" })
+      .click();
+    await expect(
+      drawer.getByText(/飞书货盘同步完成：已更新 74 个商品来源、140 个 SKU/),
+    ).toBeVisible();
+
+    const [refreshedSku] = await db
+      .select({
+        specification: skus.specification,
+        totalQuantity: inventoryBalances.totalQuantity,
+      })
+      .from(skus)
+      .innerJoin(inventoryBalances, eq(inventoryBalances.skuId, skus.id))
+      .where(eq(skus.skuCode, "TZX-034-1"));
+    expect(refreshedSku).toEqual({
+      specification: "飞书一键同步后的新规格",
+      totalQuantity: inventoryBeforeRefresh?.totalQuantity,
+    });
     expect(fakeServer.sourceWrites).toEqual([]);
     expect(fakeServer.targetWrites).toEqual([]);
 

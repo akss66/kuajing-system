@@ -30,9 +30,12 @@ import {
   confirmCargoMigrationAction,
   createCargoPreflightAction,
   retryFeishuCargoSyncAction,
+  syncFeishuCatalogFieldsAction,
   testFeishuConnectionAction,
 } from "@/modules/feishu/actions";
 import {
+  findLatestImportedCargoRefreshBaseline,
+  getLatestCatalogFieldRefreshState,
   getLatestCargoMigrationRun,
   getLatestCargoTargetSyncState,
 } from "@/modules/feishu/queries";
@@ -115,7 +118,15 @@ export default async function IntegrationsPage() {
   const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
   const jifengConfiguration = inspectJifengConfiguration();
 
-  const [connection, recent, latestMigrationRun, sourceSheetDiscovery, targetSyncState] =
+  const [
+    connection,
+    recent,
+    latestMigrationRun,
+    sourceSheetDiscovery,
+    targetSyncState,
+    catalogRefreshBaseline,
+    catalogRefreshState,
+  ] =
     await Promise.all([
       canManageJifeng
         ? getJifengConnectionAdminView()
@@ -135,6 +146,12 @@ export default async function IntegrationsPage() {
       getLatestCargoMigrationRun(),
       loadSourceSheetDiscovery(principal.kind, feishuConfigured),
       getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
+      canManageJifeng
+        ? findLatestImportedCargoRefreshBaseline()
+        : Promise.resolve(null),
+      canManageJifeng
+        ? getLatestCatalogFieldRefreshState()
+        : Promise.resolve({ lastUpdatedLabel: null }),
     ]);
 
   const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
@@ -262,7 +279,9 @@ export default async function IntegrationsPage() {
                   cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}
+                  hasImportedCargoBaseline={Boolean(catalogRefreshBaseline)}
                   latestMigrationRun={latestMigrationRun}
+                  latestCatalogRefreshLabel={catalogRefreshState.lastUpdatedLabel}
                   readOnlyConnectionMessage="源货盘连接验证全程只读，系统不会向原业务表写入。"
                   retryFeishuCargoSyncAction={retryFeishuCargoSyncAction}
                   selectedSourceSheetId={feishuConfig?.sourceSheetId ?? null}
@@ -270,6 +289,7 @@ export default async function IntegrationsPage() {
                   sourceSheetDiscoveryMessage={sourceSheetDiscovery.message}
                   sourceSheetDiscoveryStatus={sourceSheetDiscovery.status}
                   sourceSheetOptions={sourceSheetDiscovery.sourceSheetOptions}
+                  syncFeishuCatalogFieldsAction={syncFeishuCatalogFieldsAction}
                   targetConfigured={targetConfigured}
                   targetSyncState={targetSyncState}
                   testFeishuConnectionAction={testFeishuConnectionAction}

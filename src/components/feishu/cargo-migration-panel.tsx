@@ -1,5 +1,6 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
 import { useActionState, useMemo, useRef, useState } from "react";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
@@ -43,7 +44,9 @@ export type CargoMigrationPanelProps = {
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
+  hasImportedCargoBaseline: boolean;
   latestMigrationRun: CargoMigrationPanelRun | null;
+  latestCatalogRefreshLabel: string | null;
   readOnlyConnectionMessage: string;
   retryFeishuCargoSyncAction: ManagedAction;
   selectedSourceSheetId: string | null;
@@ -51,6 +54,7 @@ export type CargoMigrationPanelProps = {
   sourceSheetDiscoveryMessage: string | null;
   sourceSheetDiscoveryStatus: "error" | "idle" | "ready";
   sourceSheetOptions: SourceSheetOption[];
+  syncFeishuCatalogFieldsAction: ManagedAction;
   targetConfigured: boolean;
   targetSyncState: CargoMigrationTargetSyncState;
   testFeishuConnectionAction: ManagedAction;
@@ -96,7 +100,9 @@ export function CargoMigrationPanel({
   cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
+  hasImportedCargoBaseline,
   latestMigrationRun,
+  latestCatalogRefreshLabel,
   readOnlyConnectionMessage,
   retryFeishuCargoSyncAction,
   selectedSourceSheetId,
@@ -104,6 +110,7 @@ export function CargoMigrationPanel({
   sourceSheetDiscoveryMessage,
   sourceSheetDiscoveryStatus,
   sourceSheetOptions,
+  syncFeishuCatalogFieldsAction,
   targetConfigured,
   targetSyncState,
   testFeishuConnectionAction,
@@ -112,6 +119,8 @@ export function CargoMigrationPanel({
     createCargoPreflightAction,
     INITIAL_ACTION_STATE as CargoMigrationActionState,
   );
+  const [catalogSyncState, catalogSyncFormAction, catalogSyncPending] =
+    useActionState(syncFeishuCatalogFieldsAction, INITIAL_ACTION_STATE);
   const [selectedSheetId, setSelectedSheetId] = useState(() => {
     if (selectedSourceSheetId) return selectedSourceSheetId;
     return sourceSheetOptions.length === 1 ? sourceSheetOptions[0].sheetId : "";
@@ -366,6 +375,51 @@ export function CargoMigrationPanel({
       </WorkspacePanel>
 
       {migrationSetupPanel}
+
+      {actorKind === "SUPER_ADMIN" && hasImportedCargoBaseline ? (
+        <WorkspacePanel>
+          <WorkspacePanelHeader
+            description="从飞书源货盘读取最新商品字段，并立即更新系统中的既有商品与 SKU。"
+            title="飞书货盘一键同步"
+          />
+          <form action={catalogSyncFormAction} className="space-y-4 px-4 py-4 sm:px-5">
+            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>
+                本操作不会覆盖库存数量，不会新增或删除 SKU，也不会写入飞书。
+              </p>
+              <p>
+                仅当飞书与已导入基线的商品和 SKU 数量、SKU 集合完全一致时，才会更新名称、规格、价格、重量、链接及可售状态等字段。
+              </p>
+              <p>
+                最近同步：{latestCatalogRefreshLabel ?? "尚未执行"}
+              </p>
+            </div>
+            <div
+              aria-atomic="true"
+              aria-live="polite"
+              className={cn(
+                catalogSyncState.message && "rounded-lg border px-3 py-2 text-sm",
+                catalogSyncState.message &&
+                  actionStateMessageClass(catalogSyncState.status),
+              )}
+              role="status"
+            >
+              {catalogSyncState.message ?? ""}
+            </div>
+            <button
+              aria-busy={catalogSyncPending}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
+              disabled={catalogSyncPending || !sourceConfigured}
+              type="submit"
+            >
+              {catalogSyncPending ? (
+                <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+              ) : null}
+              {catalogSyncPending ? "正在同步" : "一键同步飞书货盘"}
+            </button>
+          </form>
+        </WorkspacePanel>
+      ) : null}
 
       <WorkspacePanel>
         <WorkspacePanelHeader

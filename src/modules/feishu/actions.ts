@@ -16,12 +16,21 @@ import {
 import { requireAdmin, requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
+import {
+  createCatalogFieldRefreshService,
+  type CatalogFieldRefreshPreview,
+} from "./catalog-field-refresh";
 import { createFeishuCargoMigrationService } from "./migration-service";
 import { enqueueCargoSyncEvent } from "./outbox";
-import { findCargoMigrationRunConfirmationSummary } from "./queries";
+import {
+  findCargoMigrationRunConfirmationSummary,
+  findLatestImportedCargoRefreshBaseline,
+} from "./queries";
 import type { FeishuSourceSheet } from "./source-reader";
 
 const INTEGRATIONS_PATH = "/admin/system/integrations";
+const CATALOG_PATH = "/admin/catalog";
+const INVENTORY_PATH = "/admin/inventory";
 
 const READ_ONLY_CONFIRM_MESSAGE =
   "系统数据库导入尚未启用，需显式设置 FEISHU_CARGO_IMPORT_ENABLED=true 后才允许确认首批导入；飞书源表仍保持只读。";
@@ -79,6 +88,72 @@ function mapMigrationErrorMessage(error: KnownMigrationError) {
 
 function isKnownMigrationError(error: unknown): error is KnownMigrationError {
   return error instanceof Error && "code" in error;
+}
+
+function mapCatalogRefreshErrorMessage(error: unknown) {
+  const code = error instanceof Error ? error.message : "";
+  switch (code) {
+    case "SKU_SET_MISMATCH":
+      return "飞书货盘与系统的 SKU 集合不一致，本次未更新。请先核对新增或缺失的 SKU。";
+    case "PRODUCT_GROUPING_CONFLICT":
+      return "飞书货盘的商品分组与系统现有归属冲突，本次未更新。请先核对 SKU 的商品归属。";
+    case "SOURCE_SEQUENCE_COUNT_MISMATCH":
+      return "飞书货盘的商品数量与已导入基线不一致，本次未更新。请先核对货盘结构。";
+    case "SKU_COUNT_MISMATCH":
+      return "飞书货盘的 SKU 数量与已导入基线不一致，本次未更新。请先核对新增或缺失的 SKU。";
+    case "PARSER_BLOCKING_ISSUES":
+      return "飞书货盘存在无法解析的阻断问题，本次未更新。请先修正货盘内容。";
+    case "SOURCE_SHEET_SELECTION_REQUIRED":
+      return "已导入基线缺少明确的源工作表，本次未更新。请联系系统维护人员核对配置。";
+    default:
+      return "暂时无法读取飞书货盘，请稍后重试；本次未修改商品或库存。";
+  }
+}
+
+export async function syncFeishuCatalogFieldsAction(
+  _previousState: ActionState,
+  _formData: FormData,
+): Promise<ActionState> {
+  void _previousState;
+  void _formData;
+  const actor = await requireSuperAdmin();
+
+  let result: CatalogFieldRefreshPreview;
+  try {
+    const baseline = await findLatestImportedCargoRefreshBaseline();
+    if (!baseline) {
+      return {
+        message: "尚无已导入的飞书货盘基线，请先完成首批导入。",
+        status: "error",
+      };
+    }
+
+    const { client, config } = createFeishuClient();
+    const service = createCatalogFieldRefreshService();
+    result = await service.apply({
+      actorUserId: actor.userId,
+      cargoPricePlaceholders: baseline.cargoPricePlaceholders,
+      client,
+      expectedSkuCount: baseline.expectedSkuCount,
+      expectedSourceSequenceCount: baseline.expectedSourceSequenceCount,
+      reason: "超级管理员一键同步飞书货盘商品字段",
+      sourceSheetId: baseline.sourceSheetId,
+      sourceWikiToken: config.sourceWikiToken,
+    });
+  } catch (error) {
+    return {
+      message: mapCatalogRefreshErrorMessage(error),
+      status: "error",
+    };
+  }
+
+  revalidatePath(INTEGRATIONS_PATH);
+  revalidatePath(CATALOG_PATH);
+  revalidatePath(INVENTORY_PATH);
+  return {
+    message: `飞书货盘同步完成：已更新 ${result.sourceSequenceCount} 个商品来源、${result.skuCount} 个 SKU 的字段；库存数量保持不变。`,
+    status: "success",
+  };
 }
 
 export async function retryFeishuCargoSyncAction(

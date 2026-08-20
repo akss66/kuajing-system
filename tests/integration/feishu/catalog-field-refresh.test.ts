@@ -73,6 +73,20 @@ function createCargoPricePlaceholderValues() {
   return values;
 }
 
+function createSpecificationValues(specification: string) {
+  const values = structuredClone(buildFieldAlignedCargoSourceFixture().value);
+  const skuIndex = values[0].indexOf("SKU");
+  const specificationIndex = values[0].indexOf("规格");
+  const row = values.find(
+    (candidate, index) => index > 0 && candidate[skuIndex] === "TZX-034-1",
+  );
+  if (skuIndex < 0 || specificationIndex < 0 || !row) {
+    throw new Error("FIELD_ALIGNED_SPECIFICATION_FIXTURE_SETUP_FAILED");
+  }
+  row[specificationIndex] = specification;
+  return values;
+}
+
 function createReadOnlyClient(
   values: unknown[][] = buildFieldAlignedCargoSourceFixture().value,
 ): CatalogFieldRefreshReadPort {
@@ -162,6 +176,62 @@ afterEach(async () => {
 });
 
 describe("catalog field refresh", () => {
+  test("serializes the Feishu read with apply so an older slow response cannot overwrite a newer click", async () => {
+    await seedCatalog();
+    const olderClient = createReadOnlyClient(createSpecificationValues("旧快照"));
+    const newerClient = createReadOnlyClient(createSpecificationValues("新快照"));
+    const originalRead = olderClient.readRangeDetails;
+    let releaseOlderRead!: () => void;
+    let signalOlderReadStarted!: () => void;
+    const olderReadGate = new Promise<void>((resolve) => {
+      releaseOlderRead = resolve;
+    });
+    const olderReadStarted = new Promise<void>((resolve) => {
+      signalOlderReadStarted = resolve;
+    });
+    olderClient.readRangeDetails = async (input) => {
+      signalOlderReadStarted();
+      await olderReadGate;
+      return await originalRead(input);
+    };
+    const service = createCatalogFieldRefreshService();
+
+    const olderApply = service.apply({
+      actorUserId: "older-refresh",
+      client: olderClient,
+      ...validInput,
+    });
+    await olderReadStarted;
+    const newerApply = service.apply({
+      actorUserId: "newer-refresh",
+      client: newerClient,
+      ...validInput,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    releaseOlderRead();
+    await Promise.all([olderApply, newerApply]);
+
+    const [row] = await db
+      .select({ specification: skus.specification })
+      .from(skus)
+      .where(eq(skus.skuCode, "TZX-034-1"));
+    expect(row?.specification).toBe("新快照");
+  });
+
+  test("treats an audited imported price as a fallback when Feishu later provides a real value", async () => {
+    await seedCatalog();
+    const service = createCatalogFieldRefreshService();
+
+    await expect(service.apply({
+      actorUserId: "refresh-actor",
+      cargoPricePlaceholders: [
+        { skuCode: "TZX-076", unitPriceMilliYuan: 99_000 },
+      ],
+      client: createReadOnlyClient(),
+      ...validInput,
+    })).resolves.toMatchObject({ cargoPricePlaceholders: [] });
+  });
+
   test("returns and audits only the parser-applied cargo price placeholder", async () => {
     const values = createCargoPricePlaceholderValues();
     const cargoPricePlaceholders = [
@@ -238,6 +308,35 @@ describe("catalog field refresh", () => {
       products: await db.select().from(products).orderBy(asc(products.id)),
       skus: await db.select().from(skus).orderBy(asc(skus.id)),
     }).toEqual(beforeCatalogFacts);
+  });
+
+  test("rejects crossed product grouping instead of reusing one canonical product twice", async () => {
+    const { canonicalProductId } = await seedCatalog();
+    const [foreignSku] = await db
+      .select({ id: skus.id })
+      .from(skus)
+      .where(eq(skus.skuCode, "TZX-035-1"));
+    expect(foreignSku).toBeDefined();
+    await db
+      .update(skus)
+      .set({ productId: canonicalProductId })
+      .where(eq(skus.id, foreignSku.id));
+    const before = {
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    };
+
+    await expect(
+      createCatalogFieldRefreshService().apply({
+        actorUserId: "refresh-actor",
+        client: createReadOnlyClient(),
+        ...validInput,
+      }),
+    ).rejects.toThrow("PRODUCT_GROUPING_CONFLICT");
+    expect({
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    }).toEqual(before);
   });
 
   test("blocks preview when one source sequence reuses a different TZX product number", async () => {

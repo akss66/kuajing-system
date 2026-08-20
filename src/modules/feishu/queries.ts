@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db, type DbTransaction } from "@/db/client";
 import {
   adminUsers,
+  auditLogs,
   authUsers,
   catalogAssets,
   feishuCargoMigrationRuns,
@@ -12,6 +13,7 @@ import {
 } from "@/db/schema";
 
 import type {
+  CargoPricePlaceholder,
   CargoInheritedField,
   MigrationIssue,
   MigrationSummary,
@@ -186,6 +188,22 @@ export type CargoMigrationTargetSyncState = {
   tone: "danger" | "default" | "success" | "warning";
 };
 
+export type ImportedCargoRefreshBaseline = {
+  cargoPricePlaceholders: CargoPricePlaceholder[];
+  expectedSkuCount: number;
+  expectedSourceSequenceCount: number;
+  sourceSheetId: string;
+};
+
+export type CatalogFieldRefreshState = {
+  lastUpdatedLabel: string | null;
+};
+
+const auditedCargoPricePlaceholder = {
+  skuCode: "TZX-076",
+  unitPriceMilliYuan: 99_000,
+} as const satisfies CargoPricePlaceholder;
+
 export async function findActiveSuperAdminMirrorId(
   database: DatabaseLike,
   actorUserId: string,
@@ -326,6 +344,54 @@ export async function importedMigrationExists(
     .where(conditions)
     .limit(1);
   return Boolean(run);
+}
+
+export async function findLatestImportedCargoRefreshBaseline() {
+  const [run] = await db
+    .select({
+      normalizedRowsJson: feishuCargoMigrationRuns.normalizedRowsJson,
+      sourceSheetId: feishuCargoMigrationRuns.sourceSheetId,
+      summaryJson: feishuCargoMigrationRuns.summaryJson,
+    })
+    .from(feishuCargoMigrationRuns)
+    .where(eq(feishuCargoMigrationRuns.status, "IMPORTED"))
+    .orderBy(desc(feishuCargoMigrationRuns.importedAt))
+    .limit(1);
+  if (!run) return null;
+
+  const rows = run.normalizedRowsJson as NormalizedCargoRow[];
+  const summary = withSourceSequenceCount(
+    run.summaryJson as Omit<MigrationSummary, "sourceSequenceCount"> &
+      Partial<Pick<MigrationSummary, "sourceSequenceCount">>,
+  );
+  const auditedPlaceholderWasImported = rows.some(
+    (row) =>
+      row.skuCode === auditedCargoPricePlaceholder.skuCode &&
+      row.cargoUnitPriceMilliYuan ===
+        auditedCargoPricePlaceholder.unitPriceMilliYuan,
+  );
+
+  return {
+    cargoPricePlaceholders: auditedPlaceholderWasImported
+      ? [{ ...auditedCargoPricePlaceholder }]
+      : [],
+    expectedSkuCount: summary.skuCount,
+    expectedSourceSequenceCount: summary.sourceSequenceCount,
+    sourceSheetId: run.sourceSheetId,
+  } satisfies ImportedCargoRefreshBaseline;
+}
+
+export async function getLatestCatalogFieldRefreshState() {
+  const [event] = await db
+    .select({ createdAt: auditLogs.createdAt })
+    .from(auditLogs)
+    .where(eq(auditLogs.action, "CATALOG_FIELDS_REFRESHED_FROM_FEISHU"))
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(1);
+
+  return {
+    lastUpdatedLabel: formatDateTime(event?.createdAt ?? null),
+  } satisfies CatalogFieldRefreshState;
 }
 
 export async function catalogAssetExistsForDigest(

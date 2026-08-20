@@ -2,8 +2,16 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CargoMigrationPanel,
@@ -60,6 +68,7 @@ function createProps(
     actorKind: "SUPER_ADMIN",
     cargoImportEnabled: true,
     createCargoPreflightAction: idleAction,
+    hasImportedCargoBaseline: true,
     latestMigrationRun: {
       blockingIssueCount: 0,
       createdAtLabel: "2026/08/13 14:10",
@@ -87,6 +96,7 @@ function createProps(
     },
     readOnlyConnectionMessage:
       "已验证源货盘和目标测试表配置，所有写入仍只会发送到目标测试表。",
+    latestCatalogRefreshLabel: "2026/08/20 15:30",
     cargoWritesEnabled: true,
     retryFeishuCargoSyncAction: idleAction,
     selectedSourceSheetId: null,
@@ -94,6 +104,7 @@ function createProps(
     sourceSheetDiscoveryMessage: null,
     sourceSheetDiscoveryStatus: "ready",
     sourceSheetOptions: [],
+    syncFeishuCatalogFieldsAction: idleAction,
     targetConfigured: true,
     targetSyncState: {
       canRetry: false,
@@ -138,6 +149,74 @@ describe("CargoMigrationPanel", () => {
     expect(
       screen.queryByRole("button", { name: "确认迁移 74 个SKU" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers super admins a one-click read-only source sync after an imported baseline exists", () => {
+    render(<CargoMigrationPanel {...createProps()} />);
+
+    expect(
+      screen.getByRole("button", { name: "一键同步飞书货盘" }),
+    ).toBeEnabled();
+    expect(screen.getByText(/不会覆盖库存数量/)).toBeVisible();
+    expect(screen.getByText(/不会新增或删除 SKU/)).toBeVisible();
+    expect(screen.getByText(/不会写入飞书/)).toBeVisible();
+    expect(screen.getByText("最近同步：2026/08/20 15:30")).toBeVisible();
+    expect(document.querySelector('[aria-live="polite"]')).not.toBeNull();
+  });
+
+  it("hides one-click catalog sync until an imported baseline exists", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          hasImportedCargoBaseline: false,
+          latestCatalogRefreshLabel: null,
+        })}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("disables one-click catalog sync and announces progress while pending", async () => {
+    let finishSync!: (state: { message: string; status: "success" }) => void;
+    const syncAction = vi.fn(
+      async () =>
+        await new Promise<{ message: string; status: "success" }>((resolve) => {
+          finishSync = resolve;
+        }),
+    );
+    render(
+      <CargoMigrationPanel
+        {...createProps({ syncFeishuCatalogFieldsAction: syncAction })}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "一键同步飞书货盘" }),
+    );
+
+    const pendingButton = await screen.findByRole("button", {
+      name: "正在同步",
+    });
+    expect(pendingButton).toBeDisabled();
+    expect(pendingButton).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => {
+      finishSync({ message: "同步完成", status: "success" });
+    });
+    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+      "同步完成",
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "一键同步飞书货盘" }),
+      ).toBeEnabled(),
+    );
   });
 
   it("shows immediate multi-sheet selection for super admins before preflight can start", () => {

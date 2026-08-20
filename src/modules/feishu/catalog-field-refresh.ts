@@ -74,9 +74,22 @@ async function prepareSource(input: {
   });
   if ("status" in snapshot) fail(snapshot.status);
 
-  const parsed = parseLegacyCargoSheet(snapshot.values, {
+  let parsed = parseLegacyCargoSheet(snapshot.values, {
     cargoPricePlaceholders: input.cargoPricePlaceholders,
   });
+  const blockingIssues = parsed.issues.filter(
+    (issue) => issue.severity === "BLOCKING",
+  );
+  const placeholderWasOnlyUnneeded =
+    blockingIssues.length > 0 &&
+    blockingIssues.every(
+      (issue) =>
+        issue.code === "CARGO_PRICE_PLACEHOLDER_NOT_NEEDED" ||
+        issue.code === "CARGO_PRICE_PLACEHOLDER_UNUSED",
+    );
+  if (placeholderWasOnlyUnneeded) {
+    parsed = parseLegacyCargoSheet(snapshot.values);
+  }
   if (parsed.issues.some((issue) => issue.severity === "BLOCKING")) {
     fail("PARSER_BLOCKING_ISSUES");
   }
@@ -131,6 +144,7 @@ async function buildRefreshPlan(
 
   const groups: RefreshGroup[] = [];
   const involvedProductIds = new Set<string>();
+  const selectedCanonicalProductIds = new Set<string>();
   let productsToMerge = 0;
   for (const [sourceSequence, rows] of rowsBySequence) {
     const skuCountByProductId = new Map<string, number>();
@@ -146,6 +160,10 @@ async function buildRefreshPlan(
     );
     const canonicalProductId = candidates[0]?.[0];
     if (!canonicalProductId) fail(`MISSING_PRODUCT_FOR_SOURCE_SEQUENCE:${sourceSequence}`);
+    if (selectedCanonicalProductIds.has(canonicalProductId)) {
+      fail("PRODUCT_GROUPING_CONFLICT");
+    }
+    selectedCanonicalProductIds.add(canonicalProductId);
     productsToMerge += candidates.length - 1;
     groups.push({ canonicalProductId, rows });
   }
@@ -257,12 +275,15 @@ export function createCatalogFieldRefreshService(database: typeof db = db) {
     }): Promise<CatalogFieldRefreshPreview> {
       const reason = input.reason.trim();
       if (!reason) fail("OPERATOR_REASON_REQUIRED");
-      const source = await prepareSource(input);
 
       return await database.transaction(async (transaction) => {
         await transaction.execute(
           sql`select pg_advisory_xact_lock(hashtext('feishu-catalog-field-refresh'))`,
         );
+        // Keep the remote read inside the same serialized critical section as
+        // the database apply. Otherwise a slow older response can acquire the
+        // lock after a newer response and overwrite the fresher catalog state.
+        const source = await prepareSource(input);
         const plan = await buildRefreshPlan(transaction, source);
         await applyPlan({
           actorUserId: input.actorUserId,

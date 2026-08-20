@@ -83,9 +83,14 @@ vi.mock("@/modules/feishu/actions", () => ({
   confirmCargoMigrationAction: vi.fn(),
   createCargoPreflightAction: vi.fn(),
   retryFeishuCargoSyncAction: vi.fn(),
+  syncFeishuCatalogFieldsAction: vi.fn(),
   testFeishuConnectionAction: vi.fn(),
 }));
 vi.mock("@/modules/feishu/queries", () => ({
+  findLatestImportedCargoRefreshBaseline: vi.fn().mockResolvedValue(null),
+  getLatestCatalogFieldRefreshState: vi
+    .fn()
+    .mockResolvedValue({ lastUpdatedLabel: null }),
   getLatestCargoMigrationRun: vi.fn().mockResolvedValue(null),
   getLatestCargoTargetSyncState: vi.fn().mockResolvedValue({
     canRetry: false,
