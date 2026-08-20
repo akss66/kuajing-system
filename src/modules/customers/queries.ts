@@ -53,6 +53,7 @@ export async function listCustomerManagementRows(): Promise<CustomerManagementLi
         )::int as pending_payment_fen,
         count(*) filter (
           where submitted_at >= now() - interval '30 days'
+            and status not in ('CANCELLED', 'EXPIRED')
         )::int as recent_order_count,
         count(*) filter (
           where status = 'FULFILLMENT_EXCEPTION'
@@ -144,7 +145,10 @@ export async function getCustomerManagementDetail(customerId: string) {
             Number,
           ),
         recentOrderCount:
-          sql<number>`count(*) filter (where ${fulfillmentOrders.submittedAt} >= now() - interval '30 days')::int`.mapWith(
+          sql<number>`count(*) filter (
+            where ${fulfillmentOrders.submittedAt} >= now() - interval '30 days'
+              and ${fulfillmentOrders.status} not in ('CANCELLED', 'EXPIRED')
+          )::int`.mapWith(
             Number,
           ),
       })

@@ -157,6 +157,18 @@ test("returns one exact management row per customer without multiplying wallet, 
       totalQuantity: 1,
     },
     {
+      cancelledAt: new Date(now - 30 * 60 * 1_000),
+      cancelReason: "测试取消，不计入有效订单",
+      customerId: north.id,
+      orderNumber: "NORTH-CANCELLED-RECENT",
+      status: "CANCELLED",
+      storeId: storeId("华北一店"),
+      submittedAt: new Date(now - 30 * 60 * 1_000),
+      totalAmountFen: 99_999,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    },
+    {
       customerId: south.id,
       orderNumber: "SOUTH-PENDING-RECENT",
       status: "PENDING_PAYMENT",
@@ -333,13 +345,20 @@ test("returns exact isolated customer detail summaries and at most 20 determinis
   const targetOrders = Array.from({ length: 22 }, (_, index) => {
     const sequence = index + 1;
     const pending = sequence <= 3;
+    const cancelled = sequence === 4;
 
     return {
+      cancelledAt: cancelled ? submittedAt : null,
+      cancelReason: cancelled ? "测试取消，不计入有效订单" : null,
       customerId: customer.id,
       id: `10000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
       orderNumber: `DETAIL-${String(sequence).padStart(2, "0")}`,
       paymentMode: pending ? null : ("WALLET" as const),
-      status: pending ? ("PENDING_PAYMENT" as const) : ("SHIPPED" as const),
+      status: pending
+        ? ("PENDING_PAYMENT" as const)
+        : cancelled
+          ? ("CANCELLED" as const)
+          : ("SHIPPED" as const),
       storeId: sequence % 2 === 0 ? secondStore.id : firstStore.id,
       submittedAt,
       totalAmountFen: pending ? sequence * 100 : 1_000 + sequence,
@@ -410,7 +429,7 @@ test("returns exact isolated customer detail summaries and at most 20 determinis
   expect(detail.summary).toEqual({
     balanceFen: 123_456,
     pendingPaymentFen: 1_000,
-    recentOrderCount: 22,
+    recentOrderCount: 21,
     storeCount: 2,
   });
   expect(detail.recentOrders).toHaveLength(20);

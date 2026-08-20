@@ -133,6 +133,7 @@ export async function getCustomerTaskDashboard(
         count("order".id) filter (
           where "order".submitted_at >= ${recentRange.fromUtc.toISOString()}::timestamptz
             and "order".submitted_at < ${recentRange.toExclusiveUtc.toISOString()}::timestamptz
+            and "order".status not in ('CANCELLED', 'EXPIRED')
         ) as "recentOrderCount",
         count("order".id) filter (
           where "order".status = 'PENDING_PAYMENT'

@@ -365,6 +365,18 @@ describe("dashboard queries", () => {
           totalQuantity: 1,
         },
         {
+          cancelledAt: new Date("2026-08-13T08:00:00.000Z"),
+          cancelReason: "测试取消，不计入有效订单",
+          customerId: customer.id,
+          orderNumber: `TASK-CANCELLED-${suffix}`,
+          status: "CANCELLED",
+          storeId: mainStore.id,
+          submittedAt: new Date("2026-08-13T07:30:00.000Z"),
+          totalAmountFen: 99_999,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        },
+        {
           customerId: otherCustomer.id,
           lockExpiresAt: new Date("2026-08-14T00:00:00.000Z"),
           orderNumber: `OTHER-PENDING-${suffix}`,
