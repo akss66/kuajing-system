@@ -11,6 +11,9 @@ import {
   paymentClaims,
   products,
   replacementRequests,
+  settlementBatches,
+  settlementPaymentClaims,
+  shipmentCancellationAdjustments,
   skus,
   stores,
   walletTransactions,
@@ -70,7 +73,7 @@ describe("operations reports", () => {
     const inRange = new Date("2026-08-11T15:00:00.000Z");
     const recipient = "encrypted-recipient";
 
-    const [directOrder, walletOrder, , unshippedOrder] = await db
+    const [directOrder, walletOrder, , unshippedOrder, cancelledOfflineOrder] = await db
       .insert(fulfillmentOrders)
       .values([
         {
@@ -120,16 +123,32 @@ describe("operations reports", () => {
           totalPackageCount: 1,
           totalQuantity: 5,
         },
+        {
+          cancelledAt: inRange,
+          cancelReason: "已接单后整单取消",
+          cancellationState: "ALL",
+          customerId: customer.id,
+          orderNumber: `R-CANCELLED-OFFLINE-${suffix}`,
+          paidAt: inRange,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "CANCELLED",
+          storeId: storeA.id,
+          submittedAt: inRange,
+          totalAmountFen: 1_800,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        },
       ])
       .returning();
 
-    const [directShipment, walletShipment, replacementShipment, unshippedShipment] = await db
+    const [directShipment, walletShipment, replacementShipment, unshippedShipment, cancelledOfflineShipment] = await db
       .insert(orderShipments)
       .values([
         { externalOrderNo: `EXT-D-${suffix}`, orderId: directOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeA.id },
         { externalOrderNo: `EXT-W-${suffix}`, orderId: walletOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeB.id },
         { externalOrderNo: `EXT-R-${suffix}`, kind: "REPLACEMENT", orderId: directOrder.id, recipientPayloadEncrypted: recipient, shippedAt: inRange, storeId: storeA.id },
         { externalOrderNo: `EXT-U-${suffix}`, orderId: unshippedOrder.id, recipientPayloadEncrypted: recipient, storeId: storeA.id },
+        { externalOrderNo: `EXT-CANCELLED-${suffix}`, orderId: cancelledOfflineOrder.id, recipientPayloadEncrypted: recipient, storeId: storeA.id },
       ])
       .returning();
     await db.insert(orderLines).values([
@@ -153,6 +172,45 @@ describe("operations reports", () => {
       reviewedAt: inRange,
       reviewedByAdminUserId: admin.id,
       status: "APPROVED",
+    });
+    const [paidSettlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `R-SETTLEMENT-${suffix}`,
+        customerId: customer.id,
+        idempotencyKey: `report:${suffix}`,
+        offlineAmountFen: 600,
+        paidAt: inRange,
+        paymentDueAt: new Date("2026-08-12T04:00:00.000Z"),
+        paymentReportedAt: inRange,
+        status: "PAID",
+        totalAmountFen: 600,
+        walletAmountFen: 0,
+      })
+      .returning();
+    await db.insert(settlementPaymentClaims).values({
+      amountFen: 600,
+      customerId: customer.id,
+      reviewedAt: inRange,
+      reviewedByAdminUserId: admin.id,
+      settlementBatchId: paidSettlement.id,
+      status: "APPROVED",
+    });
+    await db.insert(shipmentCancellationAdjustments).values({
+      actorId: admin.id,
+      actorType: "ADMIN",
+      customerId: customer.id,
+      merchandiseAmountFen: 500,
+      offlineAmountFen: 1_800,
+      offlineCompletedAt: inRange,
+      offlineCompletedByAdminUserId: admin.id,
+      orderId: cancelledOfflineOrder.id,
+      reason: "极风接单后取消，线下退款完成",
+      shipmentId: cancelledOfflineShipment.id,
+      shippingFeeFen: 1_300,
+      status: "COMPLETED",
+      totalAmountFen: 1_800,
+      walletAmountFen: 0,
     });
     await db.insert(walletTransactions).values([
       { actorType: "ADMIN", afterBalanceFen: 2_000, beforeBalanceFen: 0, customerId: customer.id, deltaFen: 2_000, reason: "充值", transactionType: "ADMIN_CREDIT", createdAt: inRange },
@@ -185,7 +243,8 @@ describe("operations reports", () => {
     expect(report.funds).toEqual({
       adminCreditsFen: 2_000,
       adminDebitsFen: 100,
-      approvedOfflineFen: 900,
+      approvedOfflineFen: 1_500,
+      completedOfflineRefundsFen: 1_800,
       orderDebitsFen: 700,
       orderRefundsFen: 700,
       pendingReceivableFen: 1_200,

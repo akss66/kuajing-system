@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 
 import { CustomerDetailWorkspace } from "@/components/customers/customer-detail-workspace";
 import { getCustomerManagementDetail } from "@/modules/customers/queries";
+import { requireAdmin } from "@/modules/identity/guards";
 
 export default async function CustomerDetailPage(props: {
   params: Promise<{ customerId: string }>;
 }) {
+  const principal = await requireAdmin();
   const { customerId } = await props.params;
   let detail: Awaited<ReturnType<typeof getCustomerManagementDetail>>;
 
@@ -18,5 +20,10 @@ export default async function CustomerDetailPage(props: {
     throw error;
   }
 
-  return <CustomerDetailWorkspace detail={detail} />;
+  return (
+    <CustomerDetailWorkspace
+      canGovernAccounts={principal.kind === "SUPER_ADMIN"}
+      detail={detail}
+    />
+  );
 }

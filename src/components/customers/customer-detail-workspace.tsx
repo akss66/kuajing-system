@@ -127,7 +127,13 @@ function CustomerStatusForm({ customer }: { customer: ManagedCustomer }) {
   );
 }
 
-function CustomerEditDrawer({ customer }: { customer: ManagedCustomer }) {
+function CustomerEditDrawer({
+  canGovernAccounts,
+  customer,
+}: {
+  canGovernAccounts: boolean;
+  customer: ManagedCustomer;
+}) {
   return (
     <EntityDrawer
       description="客户资料维护与启停操作分区呈现。"
@@ -143,20 +149,28 @@ function CustomerEditDrawer({ customer }: { customer: ManagedCustomer }) {
       <DrawerSection description="更新客户身份与联系方式，所有变更都需要填写原因。" title="基本资料">
         <CustomerProfileForm customer={customer} />
       </DrawerSection>
-      <DangerZone
-        description={
-          customer.status === "ACTIVE"
-            ? "停用将同步关闭客户登录并撤销现有会话；必须填写审计原因并再次确认。"
-            : "恢复后客户账号可以重新登录；必须填写审计原因并再次确认。"
-        }
-      >
-        <CustomerStatusForm customer={customer} />
-      </DangerZone>
+      {canGovernAccounts ? (
+        <DangerZone
+          description={
+            customer.status === "ACTIVE"
+              ? "停用将同步关闭客户登录并撤销现有会话；必须填写审计原因并再次确认。"
+              : "恢复后客户账号可以重新登录；必须填写审计原因并再次确认。"
+          }
+        >
+          <CustomerStatusForm customer={customer} />
+        </DangerZone>
+      ) : null}
     </EntityDrawer>
   );
 }
 
-function OverviewTab({ detail }: { detail: CustomerDetail }) {
+function OverviewTab({
+  canGovernAccounts,
+  detail,
+}: {
+  canGovernAccounts: boolean;
+  detail: CustomerDetail;
+}) {
   return (
     <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
       <WorkspacePanel aria-labelledby="customer-profile-heading" className="p-4 sm:p-5">
@@ -188,12 +202,14 @@ function OverviewTab({ detail }: { detail: CustomerDetail }) {
         ) : (
           <p className="mt-5 text-sm text-warning">尚未同步可登录账号，请前往账号管理排查。</p>
         )}
-        <Button asChild className="mt-5 min-h-11 w-full sm:w-auto" variant="outline">
-          <Link href={`/admin/accounts?customerId=${detail.customer.id}`}>
-            前往账号管理
-            <ExternalLink aria-hidden="true" />
-          </Link>
-        </Button>
+        {canGovernAccounts ? (
+          <Button asChild className="mt-5 min-h-11 w-full sm:w-auto" variant="outline">
+            <Link href={`/admin/accounts?customerId=${detail.customer.id}`}>
+              前往账号管理
+              <ExternalLink aria-hidden="true" />
+            </Link>
+          </Button>
+        ) : null}
       </WorkspacePanel>
     </div>
   );
@@ -256,7 +272,14 @@ function OrdersTab({ orders }: { orders: CustomerDetail["recentOrders"] }) {
                 <p className="mt-1 truncate text-xs text-muted-foreground">{order.storeName} · {dateTime(order.submittedAt)}（渥太华）</p>
               </div>
               <Badge className="w-fit" variant="secondary">{getAdminSettlementOrderStatusLabel(order.status)}</Badge>
-              <p className="font-semibold tabular-nums text-foreground sm:text-right">{money(order.totalAmountFen)}</p>
+              <div className="sm:text-right">
+                <p className="font-semibold tabular-nums text-foreground">{money(order.netAmountFen)}</p>
+                {order.adjustedAmountFen > 0 ? (
+                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                    原始金额 {money(order.totalAmountFen)}
+                  </p>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
@@ -316,14 +339,23 @@ function EmptyState({ description, title }: { description: string; title: string
   );
 }
 
-export function CustomerDetailWorkspace({ detail }: { detail: CustomerDetail }) {
+export function CustomerDetailWorkspace({
+  canGovernAccounts = true,
+  detail,
+}: {
+  canGovernAccounts?: boolean;
+  detail: CustomerDetail;
+}) {
   return (
     <div className="min-w-0 space-y-5">
       <PageHeading
         action={
           <div className="flex items-center gap-3">
             <StatusBadge status={detail.customer.status} />
-            <CustomerEditDrawer customer={detail.customer} />
+            <CustomerEditDrawer
+              canGovernAccounts={canGovernAccounts}
+              customer={detail.customer}
+            />
           </div>
         }
         breadcrumbs={[
@@ -353,7 +385,9 @@ export function CustomerDetailWorkspace({ detail }: { detail: CustomerDetail }) 
             <TabsTrigger className="min-h-11 px-3" value="transactions"><WalletCards aria-hidden="true" />资金记录</TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="overview"><OverviewTab detail={detail} /></TabsContent>
+        <TabsContent value="overview">
+          <OverviewTab canGovernAccounts={canGovernAccounts} detail={detail} />
+        </TabsContent>
         <TabsContent value="stores"><StoresTab detail={detail} /></TabsContent>
         <TabsContent value="orders"><OrdersTab orders={detail.recentOrders} /></TabsContent>
         <TabsContent value="transactions"><TransactionsTab transactions={detail.recentTransactions} /></TabsContent>

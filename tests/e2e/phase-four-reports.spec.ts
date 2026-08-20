@@ -56,7 +56,7 @@ async function seedReportFixture() {
       status: "SHIPPED",
       storeId: store.id,
       submittedAt: now,
-      totalAmountFen: 900,
+      totalAmountFen: 2_200,
       totalPackageCount: 1,
       totalQuantity: 2,
     })
@@ -95,6 +95,7 @@ test("administrator can read the shipped SKU and store report @desktop-only", as
   await expect(page.getByRole("heading", { name: "近 7 天经营趋势" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "SKU 出库排名" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "库存覆盖风险" })).toBeVisible();
+  await expect(page.getByText("商品销售额（不含物流费）")).toBeVisible();
   await expect(page.locator("h1")).toHaveCount(1);
   await expect(page.locator('[data-metric-strip]')).toHaveCount(0);
   await expect(

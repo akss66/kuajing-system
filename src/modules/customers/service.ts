@@ -16,12 +16,12 @@ import type {
   AdminPrincipal,
   SuperAdminPrincipal,
 } from "@/modules/identity/principal";
-import { maskEmail } from "@/shared/privacy";
+import { maskEmail, maskName, maskWechat } from "@/shared/privacy";
 
 import { getCustomerManagementDetail as getCustomerManagementDetailQuery } from "./queries";
 
 export type ProvisionCustomerInput = {
-  actorId: string;
+  actor: SuperAdminPrincipal;
   code: string;
   customerName: string;
   email: string;
@@ -37,12 +37,22 @@ export class CustomerManagementError extends Error {
   constructor(
     public readonly code:
       | "CUSTOMER_NOT_FOUND"
+      | "FORBIDDEN_SUPER_ADMIN"
       | "STORE_NOT_FOUND"
       | "INVALID_REASON",
     message: string,
   ) {
     super(message);
     this.name = "CustomerManagementError";
+  }
+}
+
+function assertSuperAdmin(actor: CustomerManagerActor) {
+  if (actor.kind !== "SUPER_ADMIN") {
+    throw new CustomerManagementError(
+      "FORBIDDEN_SUPER_ADMIN",
+      "Only the super admin can govern customer login accounts",
+    );
   }
 }
 
@@ -57,6 +67,7 @@ function assertReason(reason: string) {
 export async function provisionCustomerWithStore(
   input: ProvisionCustomerInput,
 ): Promise<{ customerId: string; storeId: string; userId: string }> {
+  assertSuperAdmin(input.actor);
   const reason = assertReason(input.reason);
   const passwordHash = await hashPassword(input.password);
   const userId = crypto.randomUUID();
@@ -93,7 +104,7 @@ export async function provisionCustomerWithStore(
     });
     await tx.insert(auditLogs).values({
       action: "CUSTOMER_CREATED",
-      actorId: input.actorId,
+      actorId: input.actor.userId,
       actorType: "ADMIN",
       afterJson: {
         customerName: input.customerName,
@@ -152,14 +163,20 @@ export async function updateCustomer(input: {
       actorType: "ADMIN",
       afterJson: {
         code: input.code.trim(),
-        contactName: input.contactName?.trim() || null,
-        contactWechat: input.contactWechat?.trim() || null,
+        contactName: input.contactName?.trim()
+          ? maskName(input.contactName)
+          : null,
+        contactWechat: input.contactWechat?.trim()
+          ? maskWechat(input.contactWechat)
+          : null,
         name: input.name.trim(),
       },
       beforeJson: {
         code: customer.code,
-        contactName: customer.contactName,
-        contactWechat: customer.contactWechat,
+        contactName: customer.contactName ? maskName(customer.contactName) : null,
+        contactWechat: customer.contactWechat
+          ? maskWechat(customer.contactWechat)
+          : null,
         name: customer.name,
       },
       entityId: input.customerId,
@@ -175,6 +192,7 @@ export async function setCustomerStatus(input: {
   reason: string;
   status: ManagedStatus;
 }) {
+  assertSuperAdmin(input.actor);
   const banned = input.status === "DISABLED";
   const reason = assertReason(input.reason);
 

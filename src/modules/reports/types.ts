@@ -25,6 +25,7 @@ export type FundsReport = {
   adminCreditsFen: number;
   adminDebitsFen: number;
   approvedOfflineFen: number;
+  completedOfflineRefundsFen: number;
   orderDebitsFen: number;
   orderRefundsFen: number;
   pendingReceivableFen: number;

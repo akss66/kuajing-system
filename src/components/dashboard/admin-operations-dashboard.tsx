@@ -66,7 +66,7 @@ export function AdminOperationsDashboard({
   dashboard: AdminDashboardData;
 }) {
   const hasTrend = dashboard.sevenDaySeries.some(
-    (point) => point.orderCount > 0 || point.gmvFen > 0,
+    (point) => point.orderCount > 0 || point.netOrderAmountFen > 0,
   );
   const quickActions = [
     { href: "/admin/settlement-batches?status=PAYMENT_REPORTED", icon: ClipboardCheck, label: "审核收款" },
@@ -83,7 +83,7 @@ export function AdminOperationsDashboard({
           <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
             {[
               { icon: ShoppingBag, label: "今日订单", value: `${dashboard.todayOrderCount} 单` },
-              { icon: ReceiptText, label: "成交金额", value: money.format(dashboard.todayGmvFen / 100) },
+              { icon: ReceiptText, label: "下单净额", value: money.format(dashboard.todayNetOrderAmountFen / 100) },
               { icon: PackageCheck, label: "今日已发货", value: `${dashboard.todayShippedCount} 单` },
               { icon: Boxes, label: "待发货", value: `${dashboard.pendingFulfillmentCount} 单` },
             ].map((item) => (
@@ -139,10 +139,10 @@ export function AdminOperationsDashboard({
       </section>
 
       <section aria-labelledby="operations-trend-title" className="space-y-3">
-        <SectionHeading description="成交趋势与实际出库排行使用同一 7 日窗口。" id="operations-trend-title" title="近 7 天趋势" />
+        <SectionHeading description="下单趋势与实际出库排行使用同一 7 日窗口。" id="operations-trend-title" title="近 7 天趋势" />
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.75fr)]">
           <WorkspacePanel className="min-w-0 overflow-hidden">
-            <WorkspacePanelHeader description="订单按提交日，排行按正常包裹发货日统计。" title="订单与成交金额" />
+            <WorkspacePanelHeader description="拿货单按提交日及取消调整后的当前净额统计；排行按正常包裹发货日统计。" title="拿货单与下单净额" />
             {hasTrend ? (
               <div className="px-2 pb-3 pt-2 sm:px-4">
                 <SevenDayTrend series={dashboard.sevenDaySeries} />

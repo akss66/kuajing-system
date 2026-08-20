@@ -62,7 +62,7 @@ export function OperationsReportTrend({
               boxShadow: "0 8px 24px rgba(23, 36, 35, 0.12)",
             }}
             formatter={(value, name) =>
-              name === "销售额"
+              name === "商品销售额"
                 ? [money.format(Number(value)), name]
                 : [`${Number(value)} 单`, name]
             }
@@ -72,7 +72,7 @@ export function OperationsReportTrend({
             dataKey="revenueYuan"
             fill="var(--tzx-primary-soft)"
             fillOpacity={0.8}
-            name="销售额"
+            name="商品销售额"
             stroke="var(--tzx-primary)"
             strokeWidth={2}
             type="monotone"
@@ -82,7 +82,7 @@ export function OperationsReportTrend({
             activeDot={{ r: 4 }}
             dataKey="orderCount"
             dot={{ fill: "var(--merchant-panel)", r: 3, strokeWidth: 2 }}
-            name="订单数"
+            name="涉及拿货单数"
             stroke="var(--tzx-info)"
             strokeWidth={2}
             type="monotone"

@@ -33,15 +33,15 @@ describe("operations dashboards", () => {
           pendingFulfillmentCount: 4,
           pendingPaymentReviewCount: 5,
           sevenDaySeries: [
-            { date: "2026-08-07", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-08", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-09", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-10", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-11", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-12", gmvFen: 0, orderCount: 0 },
-            { date: "2026-08-13", gmvFen: 0, orderCount: 0 },
+            { date: "2026-08-07", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-08", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-09", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-10", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-11", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-12", netOrderAmountFen: 0, orderCount: 0 },
+            { date: "2026-08-13", netOrderAmountFen: 0, orderCount: 0 },
           ],
-          todayGmvFen: 12_345,
+          todayNetOrderAmountFen: 12_345,
           todayOrderCount: 6,
           todayShippedCount: 7,
           topSkus: [],
@@ -56,6 +56,9 @@ describe("operations dashboards", () => {
     expect(screen.getByRole("heading", { name: "快捷处理" })).toBeVisible();
     expect(screen.getByText("暂无趋势数据")).toBeVisible();
     expect(screen.getByText("¥123.45")).toBeVisible();
+    expect(screen.getByText("下单净额")).toBeVisible();
+    expect(screen.getByText("拿货单与下单净额")).toBeVisible();
+    expect(document.body).not.toHaveTextContent("成交金额");
     expect(screen.getByRole("link", { name: /审核收款/ })).toHaveAttribute(
       "href",
       "/admin/settlement-batches?status=PAYMENT_REPORTED",

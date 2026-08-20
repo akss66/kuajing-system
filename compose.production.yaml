@@ -19,6 +19,7 @@ x-app: &app
     JIFENG_CLIENT_ID: ${JIFENG_CLIENT_ID:-}
     JIFENG_CLIENT_SECRET: ${JIFENG_CLIENT_SECRET:-}
     JIFENG_TOKEN_ENCRYPTION_KEY: ${JIFENG_TOKEN_ENCRYPTION_KEY:-}
+    WORKER_HEALTH_FILE: /tmp/tongzhouxing-worker-health.json
   init: true
   restart: unless-stopped
   security_opt:
@@ -91,7 +92,16 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      disable: true
+      test:
+        - CMD
+        - node
+        - --import
+        - tsx
+        - src/jobs/worker-health.ts
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
     mem_limit: 640m
     volumes:
       - catalog_assets:/app/data/catalog-assets

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireAdmin } from "@/modules/identity/guards";
+import { requireAdmin, requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
 import {
@@ -169,7 +169,7 @@ export async function createCustomerWithStoreAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const principal = await requireAdmin();
+  const principal = await requireSuperAdmin();
   const parsed = createCustomerSchema.safeParse({
     code: formData.get("code"),
     customerName: formData.get("customerName"),
@@ -184,7 +184,7 @@ export async function createCustomerWithStoreAction(
 
   try {
     await provisionCustomerWithStore({
-      actorId: principal.userId,
+      actor: principal,
       ...parsed.data,
       email: parsed.data.email.trim().toLowerCase(),
     });
@@ -317,7 +317,7 @@ export async function setCustomerStatusAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const actor = await requireAdmin();
+  const actor = await requireSuperAdmin();
   const parsed = customerStatusSchema.safeParse({
     customerId: formData.get("customerId"),
     reason: formData.get("reason"),

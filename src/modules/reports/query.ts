@@ -19,7 +19,7 @@ function number(value: number | string | null | undefined) {
 }
 
 export async function getOperationsReport(window: ReportWindow): Promise<OperationsReport> {
-  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, receivableRows, trendRows] =
+  const [skuRows, storeRows, replacementRows, walletRows, offlineRows, offlineRefundRows, receivableRows, trendRows] =
     await Promise.all([
       db.execute<{
         quantity: number | string;
@@ -100,18 +100,39 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
           and created_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
       db.execute<{ approvedOfflineFen: number | string }>(sql`
-        select coalesce(sum(amount_fen), 0) as "approvedOfflineFen"
-        from payment_claims
-        where status = 'APPROVED'
-          and reviewed_at >= ${window.fromUtc.toISOString()}::timestamptz
-          and reviewed_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
+        select coalesce(sum(approved.amount_fen), 0) as "approvedOfflineFen"
+        from (
+          select amount_fen, reviewed_at
+          from payment_claims
+          where status = 'APPROVED'
+
+          union all
+
+          select amount_fen, reviewed_at
+          from settlement_payment_claims
+          where status = 'APPROVED'
+        ) approved
+        where approved.reviewed_at >= ${window.fromUtc.toISOString()}::timestamptz
+          and approved.reviewed_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
+      `),
+      db.execute<{ completedOfflineRefundsFen: number | string }>(sql`
+        select coalesce(sum(offline_amount_fen), 0) as "completedOfflineRefundsFen"
+        from shipment_cancellation_adjustments
+        where status = 'COMPLETED'
+          and offline_amount_fen > 0
+          and offline_completed_at >= ${window.fromUtc.toISOString()}::timestamptz
+          and offline_completed_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
       db.execute<{ pendingReceivableFen: number | string }>(sql`
-        select coalesce(sum(total_amount_fen), 0) as "pendingReceivableFen"
-        from fulfillment_orders
-        where status = 'PENDING_PAYMENT'
-          and submitted_at >= ${window.fromUtc.toISOString()}::timestamptz
-          and submitted_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
+        select coalesce(sum("order".total_amount_fen - coalesce((
+          select sum(adjustment.total_amount_fen)
+          from shipment_cancellation_adjustments adjustment
+          where adjustment.order_id = "order".id
+        ), 0)), 0) as "pendingReceivableFen"
+        from fulfillment_orders "order"
+        where "order".status = 'PENDING_PAYMENT'
+          and "order".submitted_at >= ${window.fromUtc.toISOString()}::timestamptz
+          and "order".submitted_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
       db.execute<{
         date: string | Date;
@@ -157,6 +178,9 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
     adminCreditsFen: number(wallet?.adminCreditsFen),
     adminDebitsFen: number(wallet?.adminDebitsFen),
     approvedOfflineFen: number(offlineRows[0]?.approvedOfflineFen),
+    completedOfflineRefundsFen: number(
+      offlineRefundRows[0]?.completedOfflineRefundsFen,
+    ),
     orderDebitsFen: number(wallet?.orderDebitsFen),
     orderRefundsFen: number(wallet?.orderRefundsFen),
     pendingReceivableFen: number(receivableRows[0]?.pendingReceivableFen),

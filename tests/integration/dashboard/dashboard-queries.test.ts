@@ -274,18 +274,18 @@ describe("dashboard queries", () => {
       importExceptionCount: 1,
       pendingFulfillmentCount: 1,
       pendingPaymentReviewCount: 2,
-      todayGmvFen: 6_000,
+      todayNetOrderAmountFen: 6_000,
       todayOrderCount: 3,
       todayShippedCount: 1,
     });
     expect(dashboard.sevenDaySeries).toEqual([
-      { date: "2026-08-07", gmvFen: 0, orderCount: 0 },
-      { date: "2026-08-08", gmvFen: 0, orderCount: 0 },
-      { date: "2026-08-09", gmvFen: 0, orderCount: 0 },
-      { date: "2026-08-10", gmvFen: 0, orderCount: 0 },
-      { date: "2026-08-11", gmvFen: 0, orderCount: 0 },
-      { date: "2026-08-12", gmvFen: 1_400, orderCount: 1 },
-      { date: "2026-08-13", gmvFen: 6_000, orderCount: 3 },
+      { date: "2026-08-07", netOrderAmountFen: 0, orderCount: 0 },
+      { date: "2026-08-08", netOrderAmountFen: 0, orderCount: 0 },
+      { date: "2026-08-09", netOrderAmountFen: 0, orderCount: 0 },
+      { date: "2026-08-10", netOrderAmountFen: 0, orderCount: 0 },
+      { date: "2026-08-11", netOrderAmountFen: 0, orderCount: 0 },
+      { date: "2026-08-12", netOrderAmountFen: 1_400, orderCount: 1 },
+      { date: "2026-08-13", netOrderAmountFen: 6_000, orderCount: 3 },
     ]);
     expect(dashboard.topSkus).toEqual([
       expect.objectContaining({
@@ -296,7 +296,7 @@ describe("dashboard queries", () => {
     ]);
     expect(dashboard.topStores).toEqual([
       expect.objectContaining({
-        gmvFen: 3_600,
+        merchandiseRevenueFen: 3_600,
         orderCount: 2,
         storeName: store.name,
       }),
@@ -367,6 +367,7 @@ describe("dashboard queries", () => {
         {
           cancelledAt: new Date("2026-08-13T08:00:00.000Z"),
           cancelReason: "测试取消，不计入有效订单",
+          cancellationState: "ALL",
           customerId: customer.id,
           orderNumber: `TASK-CANCELLED-${suffix}`,
           status: "CANCELLED",

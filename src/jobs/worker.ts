@@ -1,5 +1,9 @@
 import { PgBoss } from "pg-boss";
 
+import {
+  areExpectedWorkersActive,
+  createWorkerHealthMonitor,
+} from "@/jobs/worker-health";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canProcessFeishuBot,
@@ -27,6 +31,17 @@ const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
 const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
 const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
 const boss = new PgBoss(connectionString);
+const expectedWorkerQueues = [
+  EXPIRE_PENDING_ORDERS_QUEUE,
+  EXPIRE_SETTLEMENT_BATCHES_QUEUE,
+  JIFENG_FULFILLMENT_QUEUE,
+  STOCK_COVERAGE_ALERT_QUEUE,
+];
+const workerHealth = createWorkerHealthMonitor({
+  schedulerProbe: () =>
+    areExpectedWorkersActive(boss.getWipData(), expectedWorkerQueues),
+});
+workerHealth.start();
 
 boss.on("error", (error) => {
   console.error("[worker] pg-boss error", safeLogError(error));
@@ -106,6 +121,7 @@ if (hasAnyFeishuConfiguration) {
       );
       return result;
     });
+    expectedWorkerQueues.push(FEISHU_SYNC_QUEUE);
     console.info(
       `[worker] Feishu jobs enabled: cargo=${cargoWriterEnabled ? "on" : "off"} bot=${botEnabled ? "on" : "off"}`,
     );
@@ -116,6 +132,7 @@ if (hasAnyFeishuConfiguration) {
   console.info("[worker] Feishu jobs disabled: credentials not configured");
 }
 
+workerHealth.markReady();
 console.info("[worker] background jobs started");
 
 let stopping = false;
@@ -123,7 +140,13 @@ async function stopWorker(signal: string) {
   if (stopping) return;
   stopping = true;
   console.info(`[worker] received ${signal}, stopping`);
+  try {
+    workerHealth.markStopping();
+  } catch {
+    console.error("[worker] failed to publish stopping health state");
+  }
   await boss.stop({ close: true, graceful: true, timeout: 30_000 });
+  workerHealth.stop();
   process.exit(0);
 }
 

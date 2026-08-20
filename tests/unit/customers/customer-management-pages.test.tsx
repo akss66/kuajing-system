@@ -9,6 +9,9 @@ const detailQueryMocks = vi.hoisted(() => ({
   getCustomerManagementDetail: vi.fn(),
   listCustomerManagementRows: vi.fn(),
 }));
+const guardMocks = vi.hoisted(() => ({
+  requireAdmin: vi.fn(),
+}));
 
 vi.mock("@/modules/customers/actions", () => ({
   createCustomerWithStoreAction: vi.fn(),
@@ -35,6 +38,7 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("@/modules/customers/queries", () => detailQueryMocks);
+vi.mock("@/modules/identity/guards", () => guardMocks);
 
 import CustomerDetailPage from "@/app/(admin)/admin/customers/[customerId]/page";
 import CustomersPage from "@/app/(admin)/admin/customers/page";
@@ -43,6 +47,24 @@ describe("customer management pages", () => {
   beforeEach(() => {
     detailQueryMocks.getCustomerManagementDetail.mockReset();
     detailQueryMocks.listCustomerManagementRows.mockReset();
+    guardMocks.requireAdmin.mockReset();
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+  });
+
+  it("does not expose customer account creation to an ordinary administrator", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "ADMIN",
+      userId: "ordinary-admin-auth-user",
+    });
+    detailQueryMocks.listCustomerManagementRows.mockResolvedValue([]);
+
+    render(await CustomersPage());
+
+    expect(screen.queryByRole("button", { name: "新建客户" })).not.toBeInTheDocument();
+    expect(screen.getByText("请联系超级管理员创建客户登录账号。")).toBeVisible();
   });
 
   afterEach(() => {
@@ -199,7 +221,9 @@ describe("customer management pages", () => {
       },
       recentOrders: [
         {
+          adjustedAmountFen: 0,
           id: "order-1",
+          netAmountFen: 12_300,
           orderNumber: "ORDER-20260813-001",
           status: "PENDING_PAYMENT",
           storeName: "华北一店",
@@ -294,5 +318,25 @@ describe("customer management pages", () => {
     expect(within(storeDrawer).getByLabelText("店铺名称")).toHaveValue("华北二店");
     expect(within(storeDrawer).getByRole("button", { name: "保存店铺资料" })).toBeEnabled();
     expect(within(storeDrawer).getByRole("button", { name: "恢复店铺" })).toBeEnabled();
+
+    cleanup();
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "ADMIN",
+      userId: "ordinary-admin-auth-user",
+    });
+    render(
+      await CustomerDetailPage({
+        params: Promise.resolve({ customerId: "customer-1" }),
+      }),
+    );
+    expect(screen.queryByRole("link", { name: "前往账号管理" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "编辑客户" }));
+    const ordinaryAdminDrawer = await screen.findByRole("dialog", { name: "编辑客户" });
+    expect(
+      within(ordinaryAdminDrawer).getByRole("button", { name: "保存客户资料" }),
+    ).toBeEnabled();
+    expect(
+      within(ordinaryAdminDrawer).queryByRole("button", { name: "停用客户" }),
+    ).not.toBeInTheDocument();
   });
 });

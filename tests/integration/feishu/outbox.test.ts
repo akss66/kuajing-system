@@ -520,6 +520,67 @@ describe("Feishu integration outbox", () => {
     ).toEqual(["RETRYABLE_FAILURE", "SUCCESS"]);
   });
 
+  test("dead-letters an exhausted retryable event and raises an in-app alert without recursive bot work", async () => {
+    setFeishuWriterEnv();
+    const now = new Date("2026-08-12T06:40:00.000Z");
+    await enqueueFeishuCargoSync({ now, reason: "retry-exhaustion" });
+    await db.execute(sql`
+      update integration_outbox
+      set attempt_count = 7
+      where target = 'FEISHU_SHEET'
+    `);
+
+    await processFeishuOutbox({
+      botClient: { async sendTextMessage() {} },
+      cargoClient: {
+        async createFilter() {},
+        async readRange() {
+          throw new FeishuApiError("HTTP_503", "飞书接口网络响应异常（503）", true);
+        },
+        async setRangeStyle() {},
+        async updateDimension() {},
+        async updateSheetProperties() {},
+        async writeImage() {},
+        async writeRange() {},
+      },
+      config: {
+        cargoWritesEnabled: true,
+        sourceWikiToken: "wiki-1",
+        internalChatId: "chat-1",
+        targetSheetId: "sheet-1",
+        targetSpreadsheetToken: "spreadsheet-target",
+      },
+      now,
+      sourceClient: {
+        async resolveWikiSpreadsheet() {
+          return { spreadsheetToken: "spreadsheet-source" };
+        },
+      },
+    });
+
+    const [event] = await db.select().from(integrationOutbox);
+    expect(event).toMatchObject({
+      attemptCount: 8,
+      lastErrorCode: "RETRY_EXHAUSTED:HTTP_503",
+      status: "FAILED",
+    });
+    expect(event.nextAttemptAt.toISOString()).toBe("9999-12-31T23:59:59.999Z");
+    expect(await db.select().from(integrationAttempts)).toEqual([
+      expect.objectContaining({
+        attemptNumber: 8,
+        errorCode: "RETRY_EXHAUSTED:HTTP_503",
+        outcome: "PERMANENT_FAILURE",
+      }),
+    ]);
+    expect(await db.select().from(systemNotifications)).toEqual([
+      expect.objectContaining({
+        severity: "ERROR",
+        type: "FEISHU_OUTBOX_DEAD_LETTER",
+      }),
+    ]);
+    expect(await db.select().from(integrationOutbox)).toHaveLength(1);
+  });
+
   test("does not enqueue cargo events when target writing is disabled", async () => {
     setFeishuSourceOnlyEnv();
     const now = new Date("2026-08-12T07:00:00.000Z");

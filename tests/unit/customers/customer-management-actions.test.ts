@@ -6,6 +6,7 @@ const cacheMocks = vi.hoisted(() => ({
 
 const guardMocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
+  requireSuperAdmin: vi.fn(),
 }));
 
 const serviceMocks = vi.hoisted(() => ({
@@ -34,6 +35,7 @@ describe("customer management actions", () => {
   beforeEach(() => {
     cacheMocks.revalidatePath.mockReset();
     guardMocks.requireAdmin.mockReset();
+    guardMocks.requireSuperAdmin.mockReset();
     serviceMocks.createStore.mockReset();
     serviceMocks.provisionCustomerWithStore.mockReset();
     serviceMocks.setCustomerStatus.mockReset();
@@ -45,6 +47,43 @@ describe("customer management actions", () => {
       kind: "SUPER_ADMIN",
       userId: "super-admin-auth-user",
     });
+    guardMocks.requireSuperAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-auth-user",
+    });
+  });
+
+  it("requires a super administrator to provision a customer login account", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(
+      Object.assign(new Error("FORBIDDEN_ADMIN"), { code: "FORBIDDEN_ADMIN" }),
+    );
+    const formData = new FormData();
+    formData.set("code", "NEW-CUSTOMER");
+    formData.set("customerName", "Provisioned Customer");
+    formData.set("email", "new-customer@test.local");
+    formData.set("password", "valid-customer-password-2026");
+    formData.set("reason", "Open the first managed storefront");
+    formData.set("storeName", "First Store");
+
+    await expect(
+      createCustomerWithStoreAction({ status: "idle" }, formData),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_ADMIN" });
+    expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
+  });
+
+  it("requires a super administrator to change customer login status", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(
+      Object.assign(new Error("FORBIDDEN_ADMIN"), { code: "FORBIDDEN_ADMIN" }),
+    );
+    const formData = new FormData();
+    formData.set("customerId", "55555555-5555-4555-8555-555555555555");
+    formData.set("status", "DISABLED");
+    formData.set("reason", "Compliance hold");
+
+    await expect(
+      setCustomerStatusAction({ status: "idle" }, formData),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_ADMIN" });
+    expect(serviceMocks.setCustomerStatus).not.toHaveBeenCalled();
   });
 
   it("forwards customer updates to the service and revalidates the customer screens", async () => {
@@ -181,7 +220,7 @@ describe("customer management actions", () => {
 
     expect(result).toEqual({ message: "客户与首家店铺已创建。", status: "success" });
     expect(serviceMocks.provisionCustomerWithStore).toHaveBeenCalledWith({
-      actorId: "super-admin-auth-user",
+      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
       code: "NEW-CUSTOMER",
       customerName: "Provisioned Customer",
       email: "new-customer@test.local",

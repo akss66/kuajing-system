@@ -2,8 +2,10 @@ import { sql } from "drizzle-orm";
 import { beforeAll } from "vitest";
 
 import { db } from "@/db/client";
+import { assertCurrentE2ETestDatabase } from "../e2e/support/test-database";
 
 beforeAll(async () => {
+  await assertCurrentE2ETestDatabase(db, "Vitest integration reset");
   await db.execute(sql.raw(`
     truncate table
       system_notifications,

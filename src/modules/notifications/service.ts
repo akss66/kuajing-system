@@ -7,6 +7,7 @@ export async function createSystemNotification(
   tx: DbTransaction,
   input: {
     deduplicationKey: string;
+    delivery?: "IN_APP_AND_FEISHU" | "IN_APP_ONLY";
     entityId?: string;
     entityType?: string;
     message: string;
@@ -49,19 +50,21 @@ export async function createSystemNotification(
       occurrenceCount: systemNotifications.occurrenceCount,
     });
 
-  await tx.insert(integrationOutbox).values({
-    aggregateId: notification.id,
-    aggregateType: "SYSTEM_NOTIFICATION",
-    eventType: "FEISHU_NOTIFICATION",
-    idempotencyKey: `feishu:bot:notification:${notification.id}:${notification.occurrenceCount}`,
-    nextAttemptAt: now,
-    payload: {
-      message: input.message,
-      notificationId: notification.id,
-      severity: input.severity,
-      title: input.title,
-    },
-    target: "FEISHU_BOT",
-  });
+  if (input.delivery !== "IN_APP_ONLY") {
+    await tx.insert(integrationOutbox).values({
+      aggregateId: notification.id,
+      aggregateType: "SYSTEM_NOTIFICATION",
+      eventType: "FEISHU_NOTIFICATION",
+      idempotencyKey: `feishu:bot:notification:${notification.id}:${notification.occurrenceCount}`,
+      nextAttemptAt: now,
+      payload: {
+        message: input.message,
+        notificationId: notification.id,
+        severity: input.severity,
+        title: input.title,
+      },
+      target: "FEISHU_BOT",
+    });
+  }
   return notification;
 }

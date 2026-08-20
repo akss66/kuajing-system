@@ -12,8 +12,8 @@ export type AdminOperationsDashboard = {
   importExceptionCount: number;
   pendingFulfillmentCount: number;
   pendingPaymentReviewCount: number;
-  sevenDaySeries: Array<{ date: string; gmvFen: number; orderCount: number }>;
-  todayGmvFen: number;
+  sevenDaySeries: Array<{ date: string; netOrderAmountFen: number; orderCount: number }>;
+  todayNetOrderAmountFen: number;
   todayOrderCount: number;
   todayShippedCount: number;
   topSkus: Array<{
@@ -24,7 +24,7 @@ export type AdminOperationsDashboard = {
     skuName: string;
   }>;
   topStores: Array<{
-    gmvFen: number;
+    merchandiseRevenueFen: number;
     orderCount: number;
     storeId: string;
     storeName: string;
@@ -45,7 +45,7 @@ export async function getAdminOperationsDashboard(
       importExceptionCount: number | string;
       pendingFulfillmentCount: number | string;
       pendingPaymentReviewCount: number | string;
-      todayGmvFen: number | string;
+      todayNetOrderAmountFen: number | string;
       todayOrderCount: number | string;
       todayShippedCount: number | string;
     }>(sql`
@@ -55,11 +55,15 @@ export async function getAdminOperationsDashboard(
             and submitted_at < ${todayRange.toExclusiveUtc.toISOString()}::timestamptz
             and status not in ('CANCELLED', 'EXPIRED')
         ) as "todayOrderCount",
-        coalesce(sum(total_amount_fen) filter (
+        coalesce(sum(total_amount_fen - coalesce((
+          select sum(adjustment.total_amount_fen)
+          from shipment_cancellation_adjustments adjustment
+          where adjustment.order_id = fulfillment_orders.id
+        ), 0)) filter (
           where submitted_at >= ${todayRange.fromUtc.toISOString()}::timestamptz
             and submitted_at < ${todayRange.toExclusiveUtc.toISOString()}::timestamptz
             and status not in ('CANCELLED', 'EXPIRED')
-        ), 0) as "todayGmvFen",
+        ), 0) as "todayNetOrderAmountFen",
         (
           select count(distinct shipment.order_id)
           from order_shipments shipment
@@ -84,13 +88,17 @@ export async function getAdminOperationsDashboard(
     `),
     db.execute<{
       date: string | Date;
-      gmvFen: number | string;
+      netOrderAmountFen: number | string;
       orderCount: number | string;
     }>(sql`
       select
         (submitted_at at time zone ${BUSINESS_TIME_ZONE})::date as date,
         count(*) as "orderCount",
-        coalesce(sum(total_amount_fen), 0) as "gmvFen"
+        coalesce(sum(total_amount_fen - coalesce((
+          select sum(adjustment.total_amount_fen)
+          from shipment_cancellation_adjustments adjustment
+          where adjustment.order_id = fulfillment_orders.id
+        ), 0)), 0) as "netOrderAmountFen"
       from fulfillment_orders
       where submitted_at >= ${sevenDayRange.fromUtc.toISOString()}::timestamptz
         and submitted_at < ${sevenDayRange.toExclusiveUtc.toISOString()}::timestamptz
@@ -110,7 +118,10 @@ export async function getAdminOperationsDashboard(
           : String(row.date);
       return [
         date,
-        { gmvFen: Number(row.gmvFen), orderCount: Number(row.orderCount) },
+        {
+          netOrderAmountFen: Number(row.netOrderAmountFen),
+          orderCount: Number(row.orderCount),
+        },
       ] as const;
     }),
   );
@@ -130,15 +141,15 @@ export async function getAdminOperationsDashboard(
     pendingPaymentReviewCount: Number(summary?.pendingPaymentReviewCount ?? 0),
     sevenDaySeries: dates.map((date) => ({
       date,
-      gmvFen: trendByDate.get(date)?.gmvFen ?? 0,
+      netOrderAmountFen: trendByDate.get(date)?.netOrderAmountFen ?? 0,
       orderCount: trendByDate.get(date)?.orderCount ?? 0,
     })),
-    todayGmvFen: Number(summary?.todayGmvFen ?? 0),
+    todayNetOrderAmountFen: Number(summary?.todayNetOrderAmountFen ?? 0),
     todayOrderCount: Number(summary?.todayOrderCount ?? 0),
     todayShippedCount: Number(summary?.todayShippedCount ?? 0),
     topSkus: operations.skuSales.slice(0, 5),
     topStores: operations.stores.slice(0, 5).map((store) => ({
-      gmvFen: store.revenueFen,
+      merchandiseRevenueFen: store.revenueFen,
       orderCount: store.orderCount,
       storeId: store.storeId,
       storeName: store.storeName,

@@ -19,7 +19,13 @@ type StoreCountFilter = "ALL" | "NONE" | "ONE" | "MULTIPLE";
 type AccountStatusFilter = "ALL" | "ACTIVE" | "DISABLED" | "MISSING";
 type ExceptionFilter = "ALL" | "WITH" | "WITHOUT";
 
-export function CustomerListWorkspace({ rows }: { rows: CustomerManagementListRow[] }) {
+export function CustomerListWorkspace({
+  canGovernAccounts = true,
+  rows,
+}: {
+  canGovernAccounts?: boolean;
+  rows: CustomerManagementListRow[];
+}) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<CustomerStatusFilter>("ALL");
   const [storeCount, setStoreCount] = useState<StoreCountFilter>("ALL");
@@ -65,7 +71,7 @@ export function CustomerListWorkspace({ rows }: { rows: CustomerManagementListRo
   return (
     <div className="min-w-0 space-y-6">
       <PageHeading
-        action={<CreateCustomerDrawer />}
+        action={canGovernAccounts ? <CreateCustomerDrawer /> : undefined}
         breadcrumbs={[{ href: "/admin", label: "管理工作台" }, { label: "客户与店铺" }]}
         description="集中查看客户账号、店铺覆盖、账户余额与近期履约风险。"
         title="客户与店铺"
@@ -73,8 +79,12 @@ export function CustomerListWorkspace({ rows }: { rows: CustomerManagementListRo
 
       {rows.length === 0 ? (
         <ActionableEmptyState
-          action={<CreateCustomerDrawer first />}
-          description="先创建客户、唯一登录账号与首家店铺，之后即可在这里跟踪资金和订单。"
+          action={canGovernAccounts ? <CreateCustomerDrawer first /> : undefined}
+          description={
+            canGovernAccounts
+              ? "先创建客户、唯一登录账号与首家店铺，之后即可在这里跟踪资金和订单。"
+              : "请联系超级管理员创建客户登录账号。"
+          }
           kind="initial"
           title="暂无客户"
         />

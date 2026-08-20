@@ -38,11 +38,11 @@ export function SevenDayTrend({
   const chartData = series.map((point) => ({
     ...point,
     dateLabel: dateLabel(point.date),
-    gmvYuan: point.gmvFen / 100,
+    netOrderAmountYuan: point.netOrderAmountFen / 100,
   }));
 
   return (
-    <div className="h-64 min-w-0" role="img" aria-label="近 7 天订单与成交金额趋势图">
+    <div className="h-64 min-w-0" role="img" aria-label="近 7 天拿货单与下单净额趋势图">
       <ResponsiveContainer height="100%" width="100%">
         <ComposedChart data={chartData} margin={{ bottom: 0, left: -12, right: 8, top: 12 }}>
           <CartesianGrid stroke="var(--merchant-panel-border)" strokeDasharray="3 4" vertical={false} />
@@ -54,7 +54,7 @@ export function SevenDayTrend({
             tickLine={false}
             yAxisId="orders"
           />
-          <YAxis hide orientation="right" yAxisId="gmv" />
+          <YAxis hide orientation="right" yAxisId="netAmount" />
           <Tooltip
             contentStyle={{
               background: "var(--merchant-panel)",
@@ -63,21 +63,21 @@ export function SevenDayTrend({
               boxShadow: "0 8px 24px rgba(23, 36, 35, 0.12)",
             }}
             formatter={(value, name) =>
-              name === "成交金额"
+              name === "下单净额"
                 ? [money.format(Number(value)), name]
                 : [`${Number(value)} 单`, name]
             }
             labelFormatter={(_, payload) => payload[0]?.payload.date ?? ""}
           />
           <Area
-            dataKey="gmvYuan"
+            dataKey="netOrderAmountYuan"
             fill="var(--tzx-primary-soft)"
             fillOpacity={0.8}
-            name="成交金额"
+            name="下单净额"
             stroke="var(--tzx-primary)"
             strokeWidth={2}
             type="monotone"
-            yAxisId="gmv"
+            yAxisId="netAmount"
           />
           <Line
             activeDot={{ r: 4 }}

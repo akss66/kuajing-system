@@ -5,6 +5,7 @@ import {
   customerUsers,
   customers,
   fulfillmentOrders,
+  shipmentCancellationAdjustments,
   stores,
   walletAccounts,
   walletTransactions,
@@ -48,7 +49,11 @@ export async function listCustomerManagementRows(): Promise<CustomerManagementLi
       select
         customer_id,
         coalesce(
-          sum(total_amount_fen) filter (where status = 'PENDING_PAYMENT'),
+          sum(total_amount_fen - coalesce((
+            select sum(adjustment.total_amount_fen)
+            from shipment_cancellation_adjustments adjustment
+            where adjustment.order_id = fulfillment_orders.id
+          ), 0)) filter (where status = 'PENDING_PAYMENT'),
           0
         )::int as pending_payment_fen,
         count(*) filter (
@@ -138,25 +143,36 @@ export async function getCustomerManagementDetail(customerId: string) {
       })
       .from(stores)
       .where(eq(stores.customerId, customerId)),
+    db.execute<{
+      pendingPaymentFen: number | string;
+      recentOrderCount: number | string;
+    }>(sql`
+      select
+        coalesce(sum("order".total_amount_fen - coalesce((
+            select sum(adjustment.total_amount_fen)
+            from shipment_cancellation_adjustments adjustment
+            where adjustment.order_id = "order".id
+          ), 0)) filter (where "order".status = 'PENDING_PAYMENT'), 0)::int as "pendingPaymentFen",
+        count(*) filter (
+          where "order".submitted_at >= now() - interval '30 days'
+            and "order".status not in ('CANCELLED', 'EXPIRED')
+        )::int as "recentOrderCount"
+      from fulfillment_orders "order"
+      where "order".customer_id = ${customerId}
+    `),
     db
       .select({
-        pendingPaymentFen:
-          sql<number>`coalesce(sum(${fulfillmentOrders.totalAmountFen}) filter (where ${fulfillmentOrders.status} = 'PENDING_PAYMENT'), 0)::int`.mapWith(
-            Number,
-          ),
-        recentOrderCount:
-          sql<number>`count(*) filter (
-            where ${fulfillmentOrders.submittedAt} >= now() - interval '30 days'
-              and ${fulfillmentOrders.status} not in ('CANCELLED', 'EXPIRED')
-          )::int`.mapWith(
-            Number,
-          ),
-      })
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.customerId, customerId)),
-    db
-      .select({
+        adjustedAmountFen: sql<number>`coalesce((
+          select sum(${shipmentCancellationAdjustments.totalAmountFen})
+          from ${shipmentCancellationAdjustments}
+          where ${shipmentCancellationAdjustments.orderId} = ${fulfillmentOrders.id}
+        ), 0)::int`.mapWith(Number),
         id: fulfillmentOrders.id,
+        netAmountFen: sql<number>`(${fulfillmentOrders.totalAmountFen} - coalesce((
+          select sum(${shipmentCancellationAdjustments.totalAmountFen})
+          from ${shipmentCancellationAdjustments}
+          where ${shipmentCancellationAdjustments.orderId} = ${fulfillmentOrders.id}
+        ), 0))::int`.mapWith(Number),
         orderNumber: fulfillmentOrders.orderNumber,
         status: fulfillmentOrders.status,
         storeName: stores.name,
@@ -199,8 +215,8 @@ export async function getCustomerManagementDetail(customerId: string) {
     stores: customerStores,
     summary: {
       balanceFen: wallet?.balanceFen ?? 0,
-      pendingPaymentFen: orderSummary?.pendingPaymentFen ?? 0,
-      recentOrderCount: orderSummary?.recentOrderCount ?? 0,
+      pendingPaymentFen: Number(orderSummary?.pendingPaymentFen ?? 0),
+      recentOrderCount: Number(orderSummary?.recentOrderCount ?? 0),
       storeCount: storeSummary?.storeCount ?? 0,
     },
   };

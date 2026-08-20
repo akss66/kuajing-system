@@ -85,11 +85,15 @@ export async function getCustomerTaskDashboard(
             and payment_declared_at is null
         ) as "pendingPaymentCount",
         (
-          select coalesce(sum(total_amount_fen), 0)
-          from fulfillment_orders
-          where customer_id = ${customerId}
-            and status = 'PENDING_PAYMENT'
-            and payment_declared_at is null
+          select coalesce(sum("order".total_amount_fen - coalesce((
+            select sum(adjustment.total_amount_fen)
+            from shipment_cancellation_adjustments adjustment
+            where adjustment.order_id = "order".id
+          ), 0)), 0)
+          from fulfillment_orders "order"
+          where "order".customer_id = ${customerId}
+            and "order".status = 'PENDING_PAYMENT'
+            and "order".payment_declared_at is null
         ) as "pendingPaymentFen",
         (
           (select count(*) from payment_claims where customer_id = ${customerId} and status = 'PENDING') +
@@ -139,7 +143,11 @@ export async function getCustomerTaskDashboard(
           where "order".status = 'PENDING_PAYMENT'
             and "order".payment_declared_at is null
         ) as "pendingPaymentCount",
-        coalesce(sum("order".total_amount_fen) filter (
+        coalesce(sum("order".total_amount_fen - coalesce((
+          select sum(adjustment.total_amount_fen)
+          from shipment_cancellation_adjustments adjustment
+          where adjustment.order_id = "order".id
+        ), 0)) filter (
           where "order".status = 'PENDING_PAYMENT'
             and "order".payment_declared_at is null
         ), 0) as "pendingPaymentFen",

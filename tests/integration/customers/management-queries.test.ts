@@ -6,6 +6,8 @@ import {
   customerUsers,
   customers,
   fulfillmentOrders,
+  orderShipments,
+  shipmentCancellationAdjustments,
   stores,
   walletAccounts,
   walletTransactions,
@@ -17,12 +19,81 @@ import {
 
 afterEach(async () => {
   await db.delete(walletTransactions);
+  await db.delete(shipmentCancellationAdjustments);
+  await db.delete(orderShipments);
   await db.delete(fulfillmentOrders);
   await db.delete(customerUsers);
   await db.delete(authUsers);
   await db.delete(stores);
   await db.delete(walletAccounts);
   await db.delete(customers);
+});
+
+test("uses current net amounts after a pending order package is cancelled", async () => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: `NET-${suffix}`, name: "部分取消客户" })
+    .returning();
+  const [store] = await db
+    .insert(stores)
+    .values({ customerId: customer.id, name: `部分取消店铺 ${suffix}` })
+    .returning();
+  const [order] = await db
+    .insert(fulfillmentOrders)
+    .values({
+      cancellationState: "PARTIAL",
+      customerId: customer.id,
+      orderNumber: `NET-ORDER-${suffix}`,
+      status: "PENDING_PAYMENT",
+      storeId: store.id,
+      totalAmountFen: 3_800,
+      totalPackageCount: 2,
+      totalQuantity: 2,
+    })
+    .returning();
+  const [cancelledShipment] = await db
+    .insert(orderShipments)
+    .values({
+      externalOrderNo: `NET-CANCELLED-${suffix}`,
+      orderId: order.id,
+      recipientPayloadEncrypted: "encrypted",
+      storeId: store.id,
+    })
+    .returning();
+  await db.insert(orderShipments).values({
+    externalOrderNo: `NET-ACTIVE-${suffix}`,
+    orderId: order.id,
+    recipientPayloadEncrypted: "encrypted",
+    storeId: store.id,
+  });
+  await db.insert(shipmentCancellationAdjustments).values({
+    actorId: "customer-user",
+    actorType: "CUSTOMER",
+    customerId: customer.id,
+    merchandiseAmountFen: 600,
+    offlineAmountFen: 0,
+    orderId: order.id,
+    reason: "付款前取消一个包裹",
+    shipmentId: cancelledShipment.id,
+    shippingFeeFen: 1_300,
+    status: "NOT_PAID",
+    totalAmountFen: 1_900,
+    walletAmountFen: 0,
+  });
+
+  const [row] = await listCustomerManagementRows();
+  const detail = await getCustomerManagementDetail(customer.id);
+
+  expect(row.pendingPaymentFen).toBe(1_900);
+  expect(detail.summary.pendingPaymentFen).toBe(1_900);
+  expect(detail.recentOrders).toEqual([
+    expect.objectContaining({
+      adjustedAmountFen: 1_900,
+      netAmountFen: 1_900,
+      totalAmountFen: 3_800,
+    }),
+  ]);
 });
 
 test("uses the newest customer mirror when duplicate rows exist and still returns one customer row", async () => {
@@ -158,6 +229,7 @@ test("returns one exact management row per customer without multiplying wallet, 
     },
     {
       cancelledAt: new Date(now - 30 * 60 * 1_000),
+      cancellationState: "ALL",
       cancelReason: "测试取消，不计入有效订单",
       customerId: north.id,
       orderNumber: "NORTH-CANCELLED-RECENT",
@@ -349,6 +421,7 @@ test("returns exact isolated customer detail summaries and at most 20 determinis
 
     return {
       cancelledAt: cancelled ? submittedAt : null,
+      cancellationState: cancelled ? ("ALL" as const) : ("NONE" as const),
       cancelReason: cancelled ? "测试取消，不计入有效订单" : null,
       customerId: customer.id,
       id: `10000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
@@ -434,7 +507,9 @@ test("returns exact isolated customer detail summaries and at most 20 determinis
   });
   expect(detail.recentOrders).toHaveLength(20);
   expect(detail.recentOrders[0]).toEqual({
+    adjustedAmountFen: 0,
     id: "10000000-0000-4000-8000-000000000022",
+    netAmountFen: 1_022,
     orderNumber: "DETAIL-22",
     status: "SHIPPED",
     storeName: "详情二店",

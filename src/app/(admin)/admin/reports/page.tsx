@@ -115,11 +115,11 @@ export default async function ReportsPage({
             <h2 className="flex items-center gap-2 text-base font-semibold text-foreground" id="report-trend-title">
               <BarChart3 aria-hidden="true" className="size-4 text-primary" />近 7 天经营趋势
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">按实际发货日观察订单与销售额变化。</p>
+            <p className="mt-1 text-sm text-muted-foreground">按实际发货日观察涉及拿货单与商品销售额变化；同一拿货单跨日发货时会出现在多个日期，不含每包 13 元物流费。</p>
           </div>
           <dl className="hidden gap-5 text-right sm:flex">
             <div><dt className="text-xs text-muted-foreground">已发货订单</dt><dd className="mt-1 font-semibold tabular-nums">{report.summary.orderCount}</dd></div>
-            <div><dt className="text-xs text-muted-foreground">实际销售额</dt><dd className="mt-1 font-semibold tabular-nums">{money(report.summary.revenueFen)}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">商品销售额（不含物流费）</dt><dd className="mt-1 font-semibold tabular-nums">{money(report.summary.revenueFen)}</dd></div>
           </dl>
         </div>
         {hasTrendData ? <OperationsReportTrend series={report.trend} /> : <p className="py-8 text-sm text-muted-foreground">所选日期内暂无可绘制的发货趋势。</p>}
@@ -127,7 +127,7 @@ export default async function ReportsPage({
 
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
-          description="按普通包裹实际出库数量排序。收入使用订单保存的实际成交价。"
+          description="按普通包裹实际出库数量排序。商品销售额使用订单快照价，不含每包 13 元物流费。"
           title={<span className="flex items-center gap-2"><Trophy aria-hidden="true" className="size-4 text-primary" />SKU 出库排名</span>}
         />
         <ResponsiveDataTable>
@@ -138,7 +138,7 @@ export default async function ReportsPage({
                 <TableHead>SKU</TableHead>
                 <TableHead>名称</TableHead>
                 <TableHead className="text-right">出库件数</TableHead>
-                <TableHead className="text-right">销售额</TableHead>
+                <TableHead className="text-right">商品销售额</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -199,7 +199,7 @@ export default async function ReportsPage({
                 <TableHead className="text-right">订单</TableHead>
                 <TableHead className="text-right">包裹</TableHead>
                 <TableHead className="text-right">件数</TableHead>
-                <TableHead className="text-right">销售额</TableHead>
+                <TableHead className="text-right">商品销售额</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -263,7 +263,7 @@ export default async function ReportsPage({
 
         <WorkspacePanel className="overflow-hidden">
           <WorkspacePanelHeader
-            description="物流费为加元，不混入本表。"
+            description="余额按流水时间、线下收款按核准时间、线下退款按完成时间统计；极风物流费为加元，不混入本表。"
             title="人民币资金"
           />
           <dl className="divide-y divide-border px-4 sm:px-5">
@@ -271,7 +271,8 @@ export default async function ReportsPage({
               ["余额充值", report.funds.adminCreditsFen],
               ["余额人工扣减", report.funds.adminDebitsFen],
               ["订单余额消费", report.funds.orderDebitsFen],
-              ["订单退款", report.funds.orderRefundsFen],
+              ["余额退款", report.funds.orderRefundsFen],
+              ["已完成线下退款", report.funds.completedOfflineRefundsFen],
               ["已确认线下付款", report.funds.approvedOfflineFen],
               ["待收款", report.funds.pendingReceivableFen],
             ].map(([label, value]) => (

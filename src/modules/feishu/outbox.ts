@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import type { DbTransaction } from "@/db/client";
 import { integrationAttempts, integrationOutbox } from "@/db/schema";
 import { FeishuApiError } from "@/integrations/feishu/client";
+import { createSystemNotification } from "@/modules/notifications/service";
 import {
   canProcessFeishuBot,
   canWriteFeishuCargo,
@@ -39,6 +40,7 @@ type FeishuSourceResolverPort = {
 
 const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 const OUTBOX_LEASE_MS = 15 * 60_000;
+const OUTBOX_MAX_ATTEMPTS = 8;
 
 type ClaimedEvent = {
   attemptNumber: number;
@@ -186,16 +188,25 @@ async function markEventsFailed(
   return db.transaction(async (tx) => {
     const failed: ClaimedEvent[] = [];
     for (const event of events) {
+      const retryExhausted =
+        failure.retryable && event.attemptNumber >= OUTBOX_MAX_ATTEMPTS;
+      const deadLettered = !failure.retryable || retryExhausted;
+      const finalCode = retryExhausted
+        ? `RETRY_EXHAUSTED:${failure.code}`.slice(0, 80)
+        : failure.code;
+      const finalMessage = retryExhausted
+        ? "飞书任务连续重试仍失败，已停止自动重试，需要人工处理"
+        : failure.message;
       const [updated] = await tx
         .update(integrationOutbox)
         .set({
           claimToken: null,
-          lastErrorCode: failure.code,
-          lastErrorMessage: failure.message,
+          lastErrorCode: finalCode,
+          lastErrorMessage: finalMessage,
           lockedAt: null,
-          nextAttemptAt: failure.retryable
-            ? retryAt(now, event.attemptNumber)
-            : NEVER_RETRY_AT,
+          nextAttemptAt: deadLettered
+            ? NEVER_RETRY_AT
+            : retryAt(now, event.attemptNumber),
           status: "FAILED",
           updatedAt: now,
         })
@@ -208,17 +219,37 @@ async function markEventsFailed(
         )
         .returning({ id: integrationOutbox.id });
       if (updated) failed.push(event);
+      if (updated && deadLettered) {
+        await createSystemNotification(tx, {
+          deduplicationKey: `feishu-outbox-dead-letter:${event.id}`,
+          delivery: "IN_APP_ONLY",
+          entityId: event.id,
+          entityType: "INTEGRATION_OUTBOX",
+          message: `飞书任务已停止自动重试（${finalCode}），请检查连接或目标配置后人工处理。`,
+          now,
+          severity: "ERROR",
+          title: "飞书任务进入死信",
+          type: "FEISHU_OUTBOX_DEAD_LETTER",
+        });
+      }
     }
     if (failed.length > 0) {
       await tx.insert(integrationAttempts).values(
         failed.map((event) => ({
           attemptNumber: event.attemptNumber,
-          errorCode: failure.code,
-          errorMessage: failure.message,
+          errorCode:
+            failure.retryable && event.attemptNumber >= OUTBOX_MAX_ATTEMPTS
+              ? `RETRY_EXHAUSTED:${failure.code}`.slice(0, 80)
+              : failure.code,
+          errorMessage:
+            failure.retryable && event.attemptNumber >= OUTBOX_MAX_ATTEMPTS
+              ? "飞书任务连续重试仍失败，已停止自动重试，需要人工处理"
+              : failure.message,
           finishedAt: now,
-          outcome: failure.retryable
-            ? ("RETRYABLE_FAILURE" as const)
-            : ("PERMANENT_FAILURE" as const),
+          outcome:
+            failure.retryable && event.attemptNumber < OUTBOX_MAX_ATTEMPTS
+              ? ("RETRYABLE_FAILURE" as const)
+              : ("PERMANENT_FAILURE" as const),
           outboxEventId: event.id,
           startedAt: now,
         })),
