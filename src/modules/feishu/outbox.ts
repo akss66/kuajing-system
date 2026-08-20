@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import type { DbTransaction } from "@/db/client";
@@ -38,6 +38,14 @@ type FeishuSourceResolverPort = {
 };
 
 const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
+const OUTBOX_LEASE_MS = 15 * 60_000;
+
+type ClaimedEvent = {
+  attemptNumber: number;
+  claimToken: string;
+  id: string;
+  payload: Record<string, unknown>;
+};
 
 function isCargoWriterEnabledInEnvironment(
   environment: Record<string, string | undefined> = process.env,
@@ -123,106 +131,170 @@ function retryAt(now: Date, attemptNumber: number) {
 }
 
 async function markEventsCompleted(
-  ids: string[],
-  attempts: Map<string, number>,
+  events: ClaimedEvent[],
   now: Date,
   responseMetadata: Record<string, unknown>,
 ) {
-  if (ids.length === 0) return;
-  await db.transaction(async (tx) => {
-    await tx
-      .update(integrationOutbox)
-      .set({
-        completedAt: now,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        lockedAt: null,
-        status: "COMPLETED",
-        updatedAt: now,
-      })
-      .where(inArray(integrationOutbox.id, ids));
-    await tx.insert(integrationAttempts).values(
-      ids.map((id) => ({
-        attemptNumber: attempts.get(id)!,
-        finishedAt: now,
-        outcome: "SUCCESS" as const,
-        outboxEventId: id,
-        responseMetadata,
-        startedAt: now,
-      })),
-    );
+  if (events.length === 0) return 0;
+  return db.transaction(async (tx) => {
+    const completed: ClaimedEvent[] = [];
+    for (const event of events) {
+      const [updated] = await tx
+        .update(integrationOutbox)
+        .set({
+          claimToken: null,
+          completedAt: now,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lockedAt: null,
+          status: "COMPLETED",
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(integrationOutbox.id, event.id),
+            eq(integrationOutbox.claimToken, event.claimToken),
+            eq(integrationOutbox.status, "PROCESSING"),
+          ),
+        )
+        .returning({ id: integrationOutbox.id });
+      if (updated) completed.push(event);
+    }
+    if (completed.length > 0) {
+      await tx.insert(integrationAttempts).values(
+        completed.map((event) => ({
+          attemptNumber: event.attemptNumber,
+          finishedAt: now,
+          outcome: "SUCCESS" as const,
+          outboxEventId: event.id,
+          responseMetadata,
+          startedAt: now,
+        })),
+      );
+    }
+    return completed.length;
   });
 }
 
 async function markEventsFailed(
-  ids: string[],
-  attempts: Map<string, number>,
+  events: ClaimedEvent[],
   error: unknown,
   now: Date,
 ) {
-  if (ids.length === 0) return;
+  if (events.length === 0) return 0;
   const failure = safeError(error);
-  await db.transaction(async (tx) => {
-    for (const id of ids) {
-      const attemptNumber = attempts.get(id) ?? 1;
-      await tx
+  return db.transaction(async (tx) => {
+    const failed: ClaimedEvent[] = [];
+    for (const event of events) {
+      const [updated] = await tx
         .update(integrationOutbox)
         .set({
+          claimToken: null,
           lastErrorCode: failure.code,
           lastErrorMessage: failure.message,
           lockedAt: null,
           nextAttemptAt: failure.retryable
-            ? retryAt(now, attemptNumber)
+            ? retryAt(now, event.attemptNumber)
             : NEVER_RETRY_AT,
           status: "FAILED",
           updatedAt: now,
         })
-        .where(eq(integrationOutbox.id, id));
+        .where(
+          and(
+            eq(integrationOutbox.id, event.id),
+            eq(integrationOutbox.claimToken, event.claimToken),
+            eq(integrationOutbox.status, "PROCESSING"),
+          ),
+        )
+        .returning({ id: integrationOutbox.id });
+      if (updated) failed.push(event);
     }
-    await tx.insert(integrationAttempts).values(
-      ids.map((id) => ({
-        attemptNumber: attempts.get(id)!,
-        errorCode: failure.code,
-        errorMessage: failure.message,
-        finishedAt: now,
-        outcome: failure.retryable
-          ? ("RETRYABLE_FAILURE" as const)
-          : ("PERMANENT_FAILURE" as const),
-        outboxEventId: id,
-        startedAt: now,
-      })),
-    );
+    if (failed.length > 0) {
+      await tx.insert(integrationAttempts).values(
+        failed.map((event) => ({
+          attemptNumber: event.attemptNumber,
+          errorCode: failure.code,
+          errorMessage: failure.message,
+          finishedAt: now,
+          outcome: failure.retryable
+            ? ("RETRYABLE_FAILURE" as const)
+            : ("PERMANENT_FAILURE" as const),
+          outboxEventId: event.id,
+          startedAt: now,
+        })),
+      );
+    }
+    return failed.length;
   });
 }
 
 async function claimEvents(target: "FEISHU_SHEET" | "FEISHU_BOT", now: Date) {
+  const staleLeaseCutoff = new Date(now.getTime() - OUTBOX_LEASE_MS);
   return db.transaction(async (tx) => {
     const rows = await tx.execute<{
       attemptCount: number;
       id: string;
+      lockedAt: Date | string | null;
       payload: Record<string, unknown>;
+      status: string;
     }>(sql`
-      select id, attempt_count as "attemptCount", payload
+      select
+        id,
+        attempt_count as "attemptCount",
+        locked_at as "lockedAt",
+        payload,
+        status
       from integration_outbox
       where target = ${target}
-        and status in ('PENDING', 'FAILED')
-        and next_attempt_at <= ${now.toISOString()}::timestamptz
+        and (
+          (
+            status in ('PENDING', 'FAILED')
+            and next_attempt_at <= ${now.toISOString()}::timestamptz
+          )
+          or (
+            status = 'PROCESSING'
+            and (
+              locked_at is null
+              or locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz
+            )
+          )
+        )
       order by next_attempt_at, id
       for update skip locked
       limit 200
     `);
+    const claimed: ClaimedEvent[] = [];
     for (const row of rows) {
+      const claimToken = crypto.randomUUID();
+      if (row.status === "PROCESSING" && row.attemptCount > 0) {
+        await tx.insert(integrationAttempts).values({
+          attemptNumber: row.attemptCount,
+          errorCode: "STALE_PROCESSING",
+          errorMessage: "Outbox processing lease expired before completion",
+          finishedAt: now,
+          outcome: "RETRYABLE_FAILURE",
+          outboxEventId: row.id,
+          startedAt: row.lockedAt ? new Date(row.lockedAt) : now,
+        });
+      }
       await tx
         .update(integrationOutbox)
         .set({
           attemptCount: row.attemptCount + 1,
+          claimToken,
           lockedAt: now,
           status: "PROCESSING",
           updatedAt: now,
         })
         .where(eq(integrationOutbox.id, row.id));
+      claimed.push({
+        attemptNumber: row.attemptCount + 1,
+        claimToken,
+        id: row.id,
+        payload: row.payload,
+      });
     }
-    return rows.map((row) => ({ ...row, attemptNumber: row.attemptCount + 1 }));
+    return claimed;
   });
 }
 
@@ -242,10 +314,6 @@ export async function processFeishuOutbox(input: {
   if (canWriteFeishuCargo(input.config)) {
     const cargoEvents = await claimEvents("FEISHU_SHEET", now);
     if (cargoEvents.length > 0) {
-      const ids = cargoEvents.map((event) => event.id);
-      const attempts = new Map(
-        cargoEvents.map((event) => [event.id, event.attemptNumber]),
-      );
       try {
         const { spreadsheetToken: sourceSpreadsheetToken } =
           await sourceClient.resolveWikiSpreadsheet(
@@ -259,15 +327,13 @@ export async function processFeishuOutbox(input: {
             targetSpreadsheetToken: input.config.targetSpreadsheetToken!,
           },
         });
-        await markEventsCompleted(ids, attempts, now, {
+        summary.cargoCompleted = await markEventsCompleted(cargoEvents, now, {
           imageCount: result.imageCount,
           rowCount: result.rowCount,
           targetSheetId: result.targetSheetId,
         });
-        summary.cargoCompleted = ids.length;
       } catch (error) {
-        await markEventsFailed(ids, attempts, error, now);
-        summary.failed += ids.length;
+        summary.failed += await markEventsFailed(cargoEvents, error, now);
       }
     }
   }
@@ -275,7 +341,6 @@ export async function processFeishuOutbox(input: {
   if (canProcessFeishuBot(input.config)) {
     const botEvents = await claimEvents("FEISHU_BOT", now);
     for (const event of botEvents) {
-      const attempts = new Map([[event.id, event.attemptNumber]]);
       const title = String(event.payload.title ?? "系统通知");
       const message = String(event.payload.message ?? "请登录系统查看详情");
       try {
@@ -283,11 +348,9 @@ export async function processFeishuOutbox(input: {
           chatId: input.config.internalChatId!,
           text: `【同舟行跨境】${title}\n${message}`,
         });
-        await markEventsCompleted([event.id], attempts, now, {});
-        summary.botCompleted += 1;
+        summary.botCompleted += await markEventsCompleted([event], now, {});
       } catch (error) {
-        await markEventsFailed([event.id], attempts, error, now);
-        summary.failed += 1;
+        summary.failed += await markEventsFailed([event], error, now);
       }
     }
   }

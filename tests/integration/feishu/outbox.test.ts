@@ -86,6 +86,92 @@ describe("Feishu integration outbox", () => {
     replaceProcessEnv(originalEnv);
   });
 
+  test("reclaims an expired processing lease and rejects the stale worker result", async () => {
+    const firstNow = new Date("2026-08-20T03:00:00.000Z");
+    await db.transaction((tx) =>
+      createSystemNotification(tx, {
+        deduplicationKey: "lease-recovery-notification",
+        message: "需要可靠送达的通知",
+        now: firstNow,
+        severity: "WARNING",
+        title: "租约恢复测试",
+        type: "LEASE_RECOVERY_TEST",
+      }),
+    );
+
+    let releaseFirstSend!: () => void;
+    const firstSendReleased = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    let firstSendStarted!: () => void;
+    const firstSendClaimed = new Promise<void>((resolve) => {
+      firstSendStarted = resolve;
+    });
+    const cargoClient = {
+      async createFilter() {},
+      async readRange() {
+        return [];
+      },
+      async setRangeStyle() {},
+      async updateDimension() {},
+      async updateSheetProperties() {},
+      async writeImage() {},
+      async writeRange() {},
+    };
+    const config = {
+      cargoWritesEnabled: false,
+      internalChatId: "chat-lease-recovery",
+      sourceWikiToken: "wiki-lease-recovery",
+    };
+
+    const staleWorker = processFeishuOutbox({
+      botClient: {
+        async sendTextMessage() {
+          firstSendStarted();
+          await firstSendReleased;
+        },
+      },
+      cargoClient,
+      config,
+      now: firstNow,
+    });
+    await firstSendClaimed;
+
+    let recoverySendCount = 0;
+    const recoveredWorker = await processFeishuOutbox({
+      botClient: {
+        async sendTextMessage() {
+          recoverySendCount += 1;
+        },
+      },
+      cargoClient,
+      config,
+      now: new Date("2026-08-20T03:16:00.000Z"),
+    });
+    releaseFirstSend();
+    const staleResult = await staleWorker;
+
+    expect(recoveredWorker).toEqual({ botCompleted: 1, cargoCompleted: 0, failed: 0 });
+    expect(staleResult).toEqual({ botCompleted: 0, cargoCompleted: 0, failed: 0 });
+    expect(recoverySendCount).toBe(1);
+    expect(await db.select().from(integrationOutbox)).toEqual([
+      expect.objectContaining({
+        attemptCount: 2,
+        claimToken: null,
+        lockedAt: null,
+        status: "COMPLETED",
+      }),
+    ]);
+    expect(await db.select().from(integrationAttempts)).toEqual([
+      expect.objectContaining({
+        attemptNumber: 1,
+        errorCode: "STALE_PROCESSING",
+        outcome: "RETRYABLE_FAILURE",
+      }),
+      expect.objectContaining({ attemptNumber: 2, outcome: "SUCCESS" }),
+    ]);
+  });
+
   test("pushes sanitized messages, resolves the source once, and coalesces cargo events into one target-only sync", async () => {
     setFeishuWriterEnv();
     const now = new Date("2026-08-12T05:10:00.000Z");
