@@ -10,6 +10,7 @@ export default defineConfig([
     ".claude/**",
     ".codex/**",
     ".codex-temp/**",
+    ".e2e-apps/**",
     ".grok/**",
     ".impeccable/**",
     ".next/**",
