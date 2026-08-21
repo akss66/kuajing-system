@@ -15,7 +15,10 @@ import type { JifengOrderDetail } from "@/integrations/jifeng/types";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { refreshParentFulfillmentStatus } from "@/modules/fulfillment/order-rollup";
 import { inventoryReasonLabel } from "@/modules/inventory/types";
-import { createSystemNotification } from "@/modules/notifications/service";
+import {
+  createSystemNotification,
+  resolveSystemNotifications,
+} from "@/modules/notifications/service";
 import {
   recordPackageCancellationAdjustment,
 } from "@/modules/fulfillment/package-cancellation-adjustment";
@@ -25,10 +28,13 @@ type StatusSource = "MANUAL" | "POLL" | "WEBHOOK";
 
 const ACTIVE_STATUS_POLL_INTERVAL_MS = 5 * 60_000;
 const EXCEPTION_STATUS_POLL_INTERVAL_MS = 30 * 60_000;
+const SHIPPED_METADATA_POLL_INTERVAL_MS = 6 * 60 * 60_000;
 const STATUS_POLL_LEASE_MS = 2 * 60_000;
 const STATUS_POLL_MAX_BACKOFF_MS = 6 * 60 * 60_000;
 const STATUS_POLL_WARNING_THRESHOLD = 3;
 const STATUS_POLL_NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
+const CANCEL_CONFIRMATION_TIMEOUT_MS = 6 * 60 * 60_000;
+const CANCEL_CONFIRMATION_TIMEOUT_CODE = "CANCEL_CONFIRMATION_TIMEOUT";
 
 export type JifengOrderStatusPort = {
   getOrder(input: { erpNo: string }): Promise<JifengOrderDetail>;
@@ -41,10 +47,10 @@ export class JifengStatusRefreshError extends Error {
   }
 }
 
-function parsedShippedAt(value: string | undefined, fallback: Date) {
-  if (!value) return fallback;
+function parsedRemoteShippedAt(value: string | undefined) {
+  if (!value) return null;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function logisticsCurrency(value: string | undefined) {
@@ -100,6 +106,56 @@ function clearedStatusPollState(input: {
   };
 }
 
+function cancellationConfirmationPolicy(requestedAt: Date, now: Date) {
+  const elapsedMs = Math.max(0, now.getTime() - requestedAt.getTime());
+  if (elapsedMs < 15 * 60_000) return { delayMs: 60_000, timedOut: false };
+  if (elapsedMs < 60 * 60_000) return { delayMs: 5 * 60_000, timedOut: false };
+  if (elapsedMs < CANCEL_CONFIRMATION_TIMEOUT_MS) {
+    return { delayMs: 30 * 60_000, timedOut: false };
+  }
+  return { delayMs: 2 * 60 * 60_000, timedOut: true };
+}
+
+function shippedMetadataPollAt(input: {
+  feeMinor: number | null;
+  fulfillmentShippedAt: Date | null;
+  now: Date;
+  shipmentShippedAt: Date | null;
+  trackingNumber: string | null;
+}) {
+  return input.feeMinor === null ||
+    !input.trackingNumber?.trim() ||
+    input.fulfillmentShippedAt === null ||
+    input.shipmentShippedAt === null
+    ? new Date(input.now.getTime() + SHIPPED_METADATA_POLL_INTERVAL_MS)
+    : null;
+}
+
+async function resolveJifengExceptionIncident(
+  tx: DbTransaction,
+  input: {
+    fulfillmentId: string;
+    jifengStatus: number | null;
+    now: Date;
+    priorStatus: string;
+  },
+) {
+  if (
+    input.priorStatus !== "EXCEPTION" ||
+    ![8, 11].includes(input.jifengStatus ?? -1)
+  ) {
+    return;
+  }
+  await resolveSystemNotifications(tx, {
+    deduplicationKeys: [
+      `jifeng-exception:${input.fulfillmentId}`,
+      `jifeng-exception:${input.fulfillmentId}:8`,
+      `jifeng-exception:${input.fulfillmentId}:11`,
+    ],
+    now: input.now,
+  });
+}
+
 export async function applyJifengOrderStatus(input: {
   detail: JifengOrderDetail;
   now?: Date;
@@ -131,22 +187,48 @@ export async function applyJifengOrderStatus(input: {
     `);
     const rows = await tx.execute<{
       cancellationAdjustmentId: string | null;
+      cancellationRequestedAt: Date | string | null;
       fulfillmentCancelledAt: Date | string | null;
       fulfillmentId: string;
       fulfillmentStatus: string;
+      fulfillmentNextRetryAt: Date | string | null;
+      fulfillmentShippedAt: Date | string | null;
+      jifengStatus: number | null;
       kind: string;
+      lastErrorCode: string | null;
+      logisticsCurrency: string | null;
+      logisticsFeeMinor: number | null;
       orderId: string;
       orderStatus: string;
       replacementRequestId: string | null;
       shipmentId: string;
+      shipmentShippedAt: Date | string | null;
+      trackingNumber: string | null;
     }>(sql`
       select
         adjustment.id as "cancellationAdjustmentId",
+        (
+          select log.created_at
+          from audit_logs log
+          where log.entity_type = 'ORDER_SHIPMENT'
+            and log.entity_id = s.id::text
+            and log.action = 'JIFENG_SHIPMENT_CANCEL_REQUESTED'
+          order by log.created_at desc
+          limit 1
+        ) as "cancellationRequestedAt",
         f.cancelled_at as "fulfillmentCancelledAt",
         f.id as "fulfillmentId",
         f.status as "fulfillmentStatus",
+        f.next_retry_at as "fulfillmentNextRetryAt",
+        f.shipped_at as "fulfillmentShippedAt",
+        f.jifeng_status as "jifengStatus",
+        f.last_error_code as "lastErrorCode",
         s.id as "shipmentId",
+        s.shipped_at as "shipmentShippedAt",
         s.kind,
+        s.logistics_currency as "logisticsCurrency",
+        s.logistics_fee_minor as "logisticsFeeMinor",
+        s.tracking_number as "trackingNumber",
         o.id as "orderId",
         o.status as "orderStatus",
         r.id as "replacementRequestId"
@@ -162,6 +244,55 @@ export async function applyJifengOrderStatus(input: {
     if (!current) throw new Error("未找到对应的极风履约包裹");
 
     if (current.fulfillmentStatus === "SHIPPED") {
+      const receivedShippedMetadata = input.detail.status === 7;
+      const detailFeeMinor =
+        receivedShippedMetadata && input.detail.logisticsFee !== undefined
+          ? Math.round(input.detail.logisticsFee * 100)
+          : null;
+      const trackingNumber =
+        current.trackingNumber?.trim() ||
+        (receivedShippedMetadata ? input.detail.trackingNo?.trim() || null : null);
+      const feeMinor = current.logisticsFeeMinor ?? detailFeeMinor;
+      const detailShippedAt = receivedShippedMetadata
+        ? parsedRemoteShippedAt(input.detail.shippedTime)
+        : null;
+      const fulfillmentShippedAt =
+        detailShippedAt ??
+        (current.fulfillmentShippedAt
+          ? new Date(current.fulfillmentShippedAt)
+          : null);
+      const shipmentShippedAt =
+        detailShippedAt ??
+        (current.shipmentShippedAt ? new Date(current.shipmentShippedAt) : null);
+      const nextRetryAt = shippedMetadataPollAt({
+        feeMinor,
+        fulfillmentShippedAt,
+        now,
+        shipmentShippedAt,
+        trackingNumber,
+      });
+      if (receivedShippedMetadata) {
+        await tx
+          .update(orderShipments)
+          .set({
+            logisticsCurrency:
+              current.logisticsCurrency ??
+              (feeMinor === null ? null : logisticsCurrency(input.detail.currency)),
+            logisticsFeeMinor: feeMinor,
+            shippedAt: shipmentShippedAt,
+            trackingNumber,
+            updatedAt: now,
+          })
+          .where(eq(orderShipments.id, current.shipmentId));
+      }
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt, now, source: input.source }),
+          shippedAt: fulfillmentShippedAt,
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
       return {
         orderStatus: current.orderStatus as "FULFILLING" | "SHIPPED",
         status: "ALREADY_SHIPPED" as const,
@@ -171,6 +302,13 @@ export async function applyJifengOrderStatus(input: {
       current.fulfillmentStatus === "CANCELLED" &&
       input.detail.status !== 9
     ) {
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
       await tx.insert(auditLogs).values({
         action: "JIFENG_CANCELLED_REMOTE_STATUS_CONFLICT",
         actorId: null,
@@ -206,20 +344,44 @@ export async function applyJifengOrderStatus(input: {
       input.detail.status !== 7 &&
       input.detail.status !== 9
     ) {
-      const nextRetryAt = new Date(now.getTime() + 60_000);
+      const requestedAt = current.cancellationRequestedAt
+        ? new Date(current.cancellationRequestedAt)
+        : current.fulfillmentNextRetryAt
+          ? new Date(current.fulfillmentNextRetryAt)
+          : now;
+      const policy = cancellationConfirmationPolicy(requestedAt, now);
+      const nextRetryAt = new Date(now.getTime() + policy.delayMs);
+      const timedOutForFirstTime =
+        policy.timedOut && current.lastErrorCode !== CANCEL_CONFIRMATION_TIMEOUT_CODE;
       await tx
         .update(shipmentFulfillments)
         .set({
           ...clearedStatusPollState({ nextRetryAt, now, source: input.source }),
           externalOrderNo: input.detail.orderNo ?? null,
           jifengStatus: input.detail.status,
-          lastErrorCode: "CANCEL_CONFIRMATION_PENDING",
-          lastErrorMessage: "极风已接收取消请求，等待远端状态确认",
+          lastErrorCode: policy.timedOut
+            ? CANCEL_CONFIRMATION_TIMEOUT_CODE
+            : "CANCEL_CONFIRMATION_PENDING",
+          lastErrorMessage: policy.timedOut
+            ? "极风取消请求超过 6 小时仍未确认，系统将低频继续核对"
+            : "极风已接收取消请求，等待远端状态确认",
           nextRetryAt,
           status: "CANCEL_PENDING",
           updatedAt: now,
         })
         .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      if (timedOutForFirstTime) {
+        await createSystemNotification(tx, {
+          deduplicationKey: `jifeng-cancel-confirmation-timeout:${current.fulfillmentId}`,
+          entityId: current.shipmentId,
+          entityType: "ORDER_SHIPMENT",
+          message: "极风取消请求超过 6 小时仍未确认。系统会继续低频核对，请人工检查极风后台。",
+          now,
+          severity: "WARNING",
+          title: "极风取消确认超时",
+          type: "JIFENG_CANCEL_CONFIRMATION_TIMEOUT",
+        });
+      }
       return {
         orderStatus: current.orderStatus,
         status: "CANCEL_PENDING" as const,
@@ -231,6 +393,13 @@ export async function applyJifengOrderStatus(input: {
       (current.replacementRequestId !== null ||
         current.cancellationAdjustmentId !== null)
     ) {
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
       const orderStatus = current.replacementRequestId
         ? current.orderStatus
         : await refreshParentFulfillmentStatus(tx, {
@@ -341,11 +510,18 @@ export async function applyJifengOrderStatus(input: {
         }
       }
 
-      const shippedAt = parsedShippedAt(input.detail.shippedTime, now);
+      const shippedAt = parsedRemoteShippedAt(input.detail.shippedTime);
       const feeMinor =
         input.detail.logisticsFee === undefined
           ? null
           : Math.round(input.detail.logisticsFee * 100);
+      const nextRetryAt = shippedMetadataPollAt({
+        feeMinor,
+        fulfillmentShippedAt: shippedAt,
+        now,
+        shipmentShippedAt: shippedAt,
+        trackingNumber: input.detail.trackingNo?.trim() || null,
+      });
       await tx
         .update(orderShipments)
         .set({
@@ -353,19 +529,19 @@ export async function applyJifengOrderStatus(input: {
             feeMinor === null ? null : logisticsCurrency(input.detail.currency),
           logisticsFeeMinor: feeMinor,
           shippedAt,
-          trackingNumber: input.detail.trackingNo ?? null,
+          trackingNumber: input.detail.trackingNo?.trim() || null,
           updatedAt: now,
         })
         .where(eq(orderShipments.id, current.shipmentId));
       await tx
         .update(shipmentFulfillments)
         .set({
-          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
+          ...clearedStatusPollState({ nextRetryAt, now, source: input.source }),
           externalOrderNo: input.detail.orderNo ?? null,
           jifengStatus: 7,
           lastErrorCode: null,
           lastErrorMessage: null,
-          nextRetryAt: null,
+          nextRetryAt,
           shippedAt,
           status: "SHIPPED",
           updatedAt: now,
@@ -384,6 +560,12 @@ export async function applyJifengOrderStatus(input: {
             now,
             orderId: current.orderId,
           });
+      await resolveJifengExceptionIncident(tx, {
+        fulfillmentId: current.fulfillmentId,
+        jifengStatus: current.jifengStatus,
+        now,
+        priorStatus: current.fulfillmentStatus,
+      });
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_SHIPPED",
         actorId: null,
@@ -423,6 +605,9 @@ export async function applyJifengOrderStatus(input: {
     }
 
     if (input.detail.status === 8 || input.detail.status === 11) {
+      const isNewExceptionIncident =
+        current.fulfillmentStatus !== "EXCEPTION" ||
+        ![8, 11].includes(current.jifengStatus ?? -1);
       await tx
         .update(shipmentFulfillments)
         .set({
@@ -453,34 +638,36 @@ export async function applyJifengOrderStatus(input: {
             now,
             orderId: current.orderId,
           });
-      await tx.insert(auditLogs).values({
-        action: "JIFENG_FULFILLMENT_EXCEPTION",
-        actorId: null,
-        actorType: "SYSTEM",
-        afterJson: {
-          errorCode: input.detail.errorCode ?? null,
-          jifengStatus: input.detail.status,
-          orderStatus,
-          source: input.source,
-        },
-        beforeJson: {
-          fulfillmentStatus: current.fulfillmentStatus,
-          orderStatus: current.orderStatus,
-        },
-        entityId: current.shipmentId,
-        entityType: "ORDER_SHIPMENT",
-        reason: "极风返回仓库处理异常状态",
-      });
-      await createSystemNotification(tx, {
-        deduplicationKey: `jifeng-exception:${current.fulfillmentId}:${input.detail.status}`,
-        entityId: current.shipmentId,
-        entityType: "ORDER_SHIPMENT",
-        message: `极风包裹状态异常（状态码 ${input.detail.status}），请进入订单详情处理。`,
-        now,
-        severity: "ERROR",
-        title: "极风仓库处理异常",
-        type: "JIFENG_EXCEPTION",
-      });
+      if (isNewExceptionIncident) {
+        await tx.insert(auditLogs).values({
+          action: "JIFENG_FULFILLMENT_EXCEPTION",
+          actorId: null,
+          actorType: "SYSTEM",
+          afterJson: {
+            errorCode: input.detail.errorCode ?? null,
+            jifengStatus: input.detail.status,
+            orderStatus,
+            source: input.source,
+          },
+          beforeJson: {
+            fulfillmentStatus: current.fulfillmentStatus,
+            orderStatus: current.orderStatus,
+          },
+          entityId: current.shipmentId,
+          entityType: "ORDER_SHIPMENT",
+          reason: "极风返回仓库处理异常状态",
+        });
+        await createSystemNotification(tx, {
+          deduplicationKey: `jifeng-exception:${current.fulfillmentId}`,
+          entityId: current.shipmentId,
+          entityType: "ORDER_SHIPMENT",
+          message: `极风包裹状态异常（状态码 ${input.detail.status}），请进入订单详情处理。`,
+          now,
+          severity: "ERROR",
+          title: "极风仓库处理异常",
+          type: "JIFENG_EXCEPTION",
+        });
+      }
       return { orderStatus, status: "EXCEPTION" as const };
     }
 
@@ -590,6 +777,12 @@ export async function applyJifengOrderStatus(input: {
             now,
             orderId: current.orderId,
           });
+      await resolveJifengExceptionIncident(tx, {
+        fulfillmentId: current.fulfillmentId,
+        jifengStatus: current.jifengStatus,
+        now,
+        priorStatus: current.fulfillmentStatus,
+      });
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_CANCELLED",
         actorId: null,
@@ -627,6 +820,12 @@ export async function applyJifengOrderStatus(input: {
     }
 
     const status = "FULFILLING";
+    await resolveJifengExceptionIncident(tx, {
+      fulfillmentId: current.fulfillmentId,
+      jifengStatus: current.jifengStatus,
+      now,
+      priorStatus: current.fulfillmentStatus,
+    });
     await tx
       .update(shipmentFulfillments)
       .set({
@@ -804,32 +1003,51 @@ export async function pollActiveJifengFulfillments(input: {
     with due as (
       select id
       from shipment_fulfillments
-      where status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING')
-        and (
-          submitted_at is not null
-          or jifeng_status is not null
-          or exists (
-            select 1
-            from integration_outbox as create_event
-            where create_event.aggregate_id = shipment_fulfillments.shipment_id::text
-              and create_event.target = 'JIFENG'
-              and create_event.event_type = 'JIFENG_CREATE_ORDER'
-              and (
-                create_event.last_error_code in (
-                  'TIMEOUT',
-                  'NETWORK_ERROR',
-                  'INVALID_RESPONSE',
-                  'INTERNAL_ERROR',
-                  'POST_SUCCESS_PERSISTENCE_ERROR',
-                  'STALE_PROCESSING',
-                  '50019',
-                  '50038'
-                )
-                or left(create_event.last_error_code, 5) = 'HTTP_'
-                or left(create_event.last_error_code, 24) = 'RECONCILIATION_REQUIRED:'
+      where (
+          (
+            status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING')
+            and (
+              submitted_at is not null
+              or jifeng_status is not null
+              or exists (
+                select 1
+                from integration_outbox as create_event
+                where create_event.aggregate_id = shipment_fulfillments.shipment_id::text
+                  and create_event.target = 'JIFENG'
+                  and create_event.event_type = 'JIFENG_CREATE_ORDER'
+                  and (
+                    create_event.last_error_code in (
+                      'TIMEOUT',
+                      'NETWORK_ERROR',
+                      'INVALID_RESPONSE',
+                      'INTERNAL_ERROR',
+                      'POST_SUCCESS_PERSISTENCE_ERROR',
+                      'STALE_PROCESSING',
+                      '50019',
+                      '50038'
+                    )
+                    or left(create_event.last_error_code, 5) = 'HTTP_'
+                    or left(create_event.last_error_code, 24) = 'RECONCILIATION_REQUIRED:'
+                  )
               )
+            )
+          )
+          or (
+            status = 'SHIPPED'
+            and exists (
+              select 1
+              from order_shipments shipped_metadata
+              where shipped_metadata.id = shipment_fulfillments.shipment_id
+                and (
+                  shipped_metadata.logistics_fee_minor is null
+                  or nullif(trim(shipped_metadata.tracking_number), '') is null
+                  or shipped_metadata.shipped_at is null
+                  or shipment_fulfillments.shipped_at is null
+                )
+            )
           )
         )
+        and coalesce(last_error_code, '') <> 'REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH'
         and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
         and (
           status_poll_locked_at is null
@@ -898,11 +1116,14 @@ export async function pollActiveJifengFulfillments(input: {
         const row = locked[0];
         if (!row) return;
         const failureCount = row.statusPollFailureCount + 1;
-        const nextRetryAt = statusPollRetryAt({
-          failureCount,
-          now,
-          retryable: failure.retryable,
-        });
+        const nextRetryAt =
+          row.fulfillmentStatus === "SHIPPED" && failure.retryable
+            ? new Date(now.getTime() + SHIPPED_METADATA_POLL_INTERVAL_MS)
+            : statusPollRetryAt({
+                failureCount,
+                now,
+                retryable: failure.retryable,
+              });
         await tx
           .update(shipmentFulfillments)
           .set({

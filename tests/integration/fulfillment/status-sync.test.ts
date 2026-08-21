@@ -6,6 +6,7 @@ import {
   auditLogs,
   customers,
   fulfillmentOrders,
+  integrationOutbox,
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
@@ -341,6 +342,201 @@ describe("Jifeng order status convergence", () => {
     });
   });
 
+  test("emits one alert for an exception incident, resolves it on recovery, and reopens it on recurrence", async () => {
+    const fixture = await createTwoPackageFixture();
+    const fulfillment = fixture.fulfillments[0];
+
+    for (const [now, status] of [
+      [new Date("2026-08-21T01:00:00.000Z"), 8],
+      [new Date("2026-08-21T01:30:00.000Z"), 11],
+    ] as const) {
+      await applyJifengOrderStatus({
+        detail: { erpNo: fulfillment.erpNo, errorCode: 50038, status },
+        now,
+        source: "POLL",
+      });
+    }
+
+    let [notification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.entityId, fixture.shipments[0].id));
+    expect(notification).toMatchObject({ occurrenceCount: 1, status: "UNREAD" });
+    expect(
+      await db
+        .select()
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.target, "FEISHU_BOT")),
+    ).toHaveLength(1);
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fulfillment.erpNo, status: 2 },
+      now: new Date("2026-08-21T02:00:00.000Z"),
+      source: "POLL",
+    });
+    [notification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.entityId, fixture.shipments[0].id));
+    expect(notification.status).toBe("RESOLVED");
+    expect(notification.resolvedAt?.toISOString()).toBe(
+      "2026-08-21T02:00:00.000Z",
+    );
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fulfillment.erpNo, errorCode: 50038, status: 8 },
+      now: new Date("2026-08-21T03:00:00.000Z"),
+      source: "POLL",
+    });
+    [notification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.entityId, fixture.shipments[0].id));
+    expect(notification).toMatchObject({ occurrenceCount: 2, status: "UNREAD" });
+    expect(notification.resolvedAt).toBeNull();
+    expect(
+      await db
+        .select()
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.target, "FEISHU_BOT")),
+    ).toHaveLength(2);
+  });
+
+  test("backs off cancellation confirmation in stages and emits the timeout alert once", async () => {
+    const fixture = await createTwoPackageFixture();
+    const fulfillment = fixture.fulfillments[0];
+    const requestedAt = new Date("2026-08-21T00:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: requestedAt, status: "CANCEL_PENDING" })
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+    await db.insert(auditLogs).values({
+      action: "JIFENG_SHIPMENT_CANCEL_REQUESTED",
+      actorId: null,
+      actorType: "SYSTEM",
+      afterJson: { status: "CANCEL_PENDING" },
+      beforeJson: { status: "FULFILLING" },
+      createdAt: requestedAt,
+      entityId: fixture.shipments[0].id,
+      entityType: "ORDER_SHIPMENT",
+      reason: "测试取消确认退避",
+    });
+
+    for (const [now, expectedNext] of [
+      ["2026-08-21T00:01:00.000Z", "2026-08-21T00:02:00.000Z"],
+      ["2026-08-21T00:20:00.000Z", "2026-08-21T00:25:00.000Z"],
+      ["2026-08-21T02:00:00.000Z", "2026-08-21T02:30:00.000Z"],
+      ["2026-08-21T07:00:00.000Z", "2026-08-21T09:00:00.000Z"],
+      ["2026-08-21T09:00:00.000Z", "2026-08-21T11:00:00.000Z"],
+    ] as const) {
+      await applyJifengOrderStatus({
+        detail: { erpNo: fulfillment.erpNo, status: 2 },
+        now: new Date(now),
+        source: "POLL",
+      });
+      const [current] = await db
+        .select()
+        .from(shipmentFulfillments)
+        .where(eq(shipmentFulfillments.id, fulfillment.id));
+      expect(current.nextRetryAt?.toISOString()).toBe(expectedNext);
+    }
+
+    const timeoutNotifications = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.entityId, fixture.shipments[0].id));
+    expect(timeoutNotifications).toHaveLength(1);
+    expect(timeoutNotifications[0]).toMatchObject({
+      occurrenceCount: 1,
+      type: "JIFENG_CANCEL_CONFIRMATION_TIMEOUT",
+    });
+    expect(
+      await db
+        .select()
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.target, "FEISHU_BOT")),
+    ).toHaveLength(1);
+  });
+
+  test("replenishes missing shipped metadata without deducting inventory twice", async () => {
+    const fixture = await createTwoPackageFixture();
+    const fulfillment = fixture.fulfillments[0];
+    const firstObservedAt = new Date("2026-08-21T04:00:00.000Z");
+    const remoteShippedAt = new Date("2026-08-21T03:45:00.000Z");
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fulfillment.erpNo, status: 7 },
+      now: firstObservedAt,
+      source: "POLL",
+    });
+    let [current] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+    expect(current.nextRetryAt?.toISOString()).toBe("2026-08-21T10:00:00.000Z");
+    expect(current.shippedAt).toBeNull();
+    expect(
+      (
+        await db
+          .select()
+          .from(orderShipments)
+          .where(eq(orderShipments.id, fixture.shipments[0].id))
+      )[0].shippedAt,
+    ).toBeNull();
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(19);
+    expect(await db.select().from(inventoryMovements)).toHaveLength(1);
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-22T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+
+    let queryCount = 0;
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => {
+          queryCount += 1;
+          return {
+            currency: "CAD",
+            erpNo,
+            logisticsFee: 9.5,
+            shippedTime: remoteShippedAt.toISOString(),
+            status: 7,
+            trackingNo: "CP-LATE-TRACKING",
+          };
+        },
+      },
+      now: new Date("2026-08-21T10:00:00.000Z"),
+    });
+
+    expect(queryCount).toBe(1);
+    [current] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+    expect(current).toMatchObject({
+      nextRetryAt: null,
+      shippedAt: remoteShippedAt,
+      status: "SHIPPED",
+      statusPollClaimToken: null,
+      statusPollLockedAt: null,
+    });
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(19);
+    expect(await db.select().from(inventoryMovements)).toHaveLength(1);
+    expect(
+      (
+        await db
+          .select()
+          .from(orderShipments)
+          .where(eq(orderShipments.id, fixture.shipments[0].id))
+      )[0],
+    ).toMatchObject({
+      logisticsCurrency: "CAD",
+      logisticsFeeMinor: 950,
+      shippedAt: remoteShippedAt,
+      trackingNumber: "CP-LATE-TRACKING",
+    });
+  });
+
   test("releases only the cancelled package reservation and keeps the remaining package fulfilling", async () => {
     const fixture = await createTwoPackageFixture();
     const cancelledAt = new Date("2026-08-19T02:00:00.000Z");
@@ -599,6 +795,17 @@ describe("Jifeng order status convergence", () => {
           .where(eq(fulfillmentOrders.id, fixture.order.id))
       )[0],
     ).toMatchObject({ cancellationState: "PARTIAL", status: "FULFILLING" });
+    expect(
+      (
+        await db
+          .select()
+          .from(shipmentFulfillments)
+          .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id))
+      )[0],
+    ).toMatchObject({
+      statusPollClaimToken: null,
+      statusPollLockedAt: null,
+    });
   });
 
   test("marks the active remainder shipped when one package ships after its sibling was cancelled", async () => {
@@ -866,6 +1073,52 @@ describe("Jifeng order status convergence", () => {
       lastErrorCode: "50026",
       status: "EXCEPTION",
       submittedAt: null,
+    });
+  });
+
+  test("parks a remote-shipped inventory invariant failure across later poll cycles", async () => {
+    const fixture = await createTwoPackageFixture();
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        jifengStatus: 7,
+        lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+        lastErrorMessage: "极风显示已发货，但本地库存/锁定状态异常",
+        nextRetryAt: null,
+        status: "EXCEPTION",
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-22T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+    let queryCount = 0;
+
+    const client = {
+      getOrder: async ({ erpNo }: { erpNo: string }) => {
+        queryCount += 1;
+        return { erpNo, status: 7 };
+      },
+    };
+    await pollActiveJifengFulfillments({
+      client,
+      now: new Date("2026-08-21T05:00:00.000Z"),
+    });
+    await pollActiveJifengFulfillments({
+      client,
+      now: new Date("2026-08-21T11:00:00.000Z"),
+    });
+
+    expect(queryCount).toBe(0);
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    expect(fulfillment).toMatchObject({
+      lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+      status: "EXCEPTION",
+      statusPollClaimToken: null,
+      statusPollLockedAt: null,
     });
   });
 

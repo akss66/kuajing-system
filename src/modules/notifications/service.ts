@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 
 import type { DbTransaction } from "@/db/client";
 import { integrationOutbox, systemNotifications } from "@/db/schema";
@@ -67,4 +67,26 @@ export async function createSystemNotification(
     });
   }
   return notification;
+}
+
+export async function resolveSystemNotifications(
+  tx: DbTransaction,
+  input: {
+    deduplicationKeys: string[];
+    now?: Date;
+  },
+) {
+  if (input.deduplicationKeys.length === 0) return;
+  const now = input.now ?? new Date();
+  await tx
+    .update(systemNotifications)
+    .set({
+      resolvedAt: now,
+      status: "RESOLVED",
+      updatedAt: now,
+    })
+    .where(
+      sql`${inArray(systemNotifications.deduplicationKey, input.deduplicationKeys)}
+        and ${systemNotifications.status} <> 'RESOLVED'`,
+    );
 }
