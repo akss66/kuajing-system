@@ -225,6 +225,26 @@ export async function recordPackageCancellationAdjustment(
   let offlineAmountFen = 0;
   let status: "COMPLETED" | "NOT_PAID" | "PENDING_OFFLINE" = "NOT_PAID";
   if (row.paymentMode) {
+    // MIXED is batch-wide: an individual order may have a zero wallet
+    // allocation and therefore intentionally has no ORDER_DEBIT ledger row.
+    const [paidSettlementAllocation] = await tx
+      .select({
+        offlineAmountFen: settlementBatchOrders.offlineAmountFen,
+        totalAmountFen: settlementBatchOrders.totalAmountFen,
+        walletAmountFen: settlementBatchOrders.walletAmountFen,
+      })
+      .from(settlementBatchOrders)
+      .innerJoin(
+        settlementBatches,
+        eq(settlementBatches.id, settlementBatchOrders.settlementBatchId),
+      )
+      .where(
+        and(
+          eq(settlementBatchOrders.orderId, input.orderId),
+          eq(settlementBatches.status, "PAID"),
+        ),
+      )
+      .limit(1);
     const debitRows = await tx
       .select({ deltaFen: walletTransactions.deltaFen })
       .from(walletTransactions)
@@ -235,8 +255,31 @@ export async function recordPackageCancellationAdjustment(
         ),
       )
       .limit(1);
-    const walletPaidFen = -(debitRows[0]?.deltaFen ?? 0);
-    if (row.paymentMode !== "DIRECT_OFFLINE" && walletPaidFen <= 0) {
+    const walletPaidFen = paidSettlementAllocation
+      ? paidSettlementAllocation.walletAmountFen
+      : -(debitRows[0]?.deltaFen ?? 0);
+    if (paidSettlementAllocation) {
+      if (
+        paidSettlementAllocation.totalAmountFen !== row.totalAmountFen ||
+        paidSettlementAllocation.walletAmountFen +
+          paidSettlementAllocation.offlineAmountFen !==
+          row.totalAmountFen
+      ) {
+        throw new Error("统一结算订单分摊与拿货单金额不一致");
+      }
+      if (
+        paidSettlementAllocation.walletAmountFen > 0 &&
+        debitRows[0]?.deltaFen !== -paidSettlementAllocation.walletAmountFen
+      ) {
+        throw new Error("已付款统一结算拿货单缺少匹配的钱包扣款");
+      }
+      if (
+        paidSettlementAllocation.walletAmountFen === 0 &&
+        debitRows[0] !== undefined
+      ) {
+        throw new Error("统一结算零钱包分摊存在异常钱包扣款");
+      }
+    } else if (row.paymentMode !== "DIRECT_OFFLINE" && walletPaidFen <= 0) {
       throw new Error("已付款拿货单缺少原始钱包扣款");
     }
     const targetCumulativeWalletFen =

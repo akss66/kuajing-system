@@ -46,6 +46,7 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
+import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import { getSettlementBatchAllocation } from "@/modules/settlement/batch-allocation";
 import {
@@ -1694,6 +1695,199 @@ describe("unified offline settlement lifecycle", () => {
     `);
     expect(cancelledWork).toEqual([
       { fulfillmentStatus: "CANCELLED", outboxStatus: "PENDING" },
+    ]);
+  });
+
+  test("uses paid mixed-batch order allocations when cancelling zero- and positive-wallet orders", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 1,
+      reason: "zero allocation cancellation regression",
+    });
+    const result = await submitFixture(fixture, 1);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 399,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [zeroWalletAllocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(
+        sql`${settlementBatchOrders.settlementBatchId} = ${result.settlementBatchId}
+          and ${settlementBatchOrders.walletAmountFen} = 0`,
+      );
+    expect(zeroWalletAllocation).toBeDefined();
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(
+          sql`${walletTransactions.orderId} = ${zeroWalletAllocation.orderId}
+            and ${walletTransactions.transactionType} = 'ORDER_DEBIT'`,
+        ),
+    ).toEqual([]);
+
+    await expect(
+      cancelFulfillmentOrder({
+        actorType: "CUSTOMER",
+        actorUserId: "customer-auth",
+        customerId: fixture.customer.id,
+        orderId: zeroWalletAllocation.orderId,
+        reason: "cancel zero-wallet allocation",
+      }),
+    ).resolves.toEqual({
+      orderId: zeroWalletAllocation.orderId,
+      status: "CANCELLED",
+    });
+
+    await expect(
+      db
+        .select({
+          offlineAmountFen: shipmentCancellationAdjustments.offlineAmountFen,
+          status: shipmentCancellationAdjustments.status,
+          totalAmountFen: shipmentCancellationAdjustments.totalAmountFen,
+          walletAmountFen: shipmentCancellationAdjustments.walletAmountFen,
+        })
+        .from(shipmentCancellationAdjustments)
+        .where(eq(shipmentCancellationAdjustments.orderId, zeroWalletAllocation.orderId)),
+    ).resolves.toEqual([
+      {
+        offlineAmountFen: zeroWalletAllocation.totalAmountFen,
+        status: "PENDING_OFFLINE",
+        totalAmountFen: zeroWalletAllocation.totalAmountFen,
+        walletAmountFen: 0,
+      },
+    ]);
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(
+          sql`${walletTransactions.orderId} = ${zeroWalletAllocation.orderId}
+            and ${walletTransactions.transactionType} = 'ORDER_REFUND'`,
+        ),
+    ).toEqual([]);
+
+    const [positiveWalletAllocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(
+        sql`${settlementBatchOrders.settlementBatchId} = ${result.settlementBatchId}
+          and ${settlementBatchOrders.walletAmountFen} > 0`,
+      );
+    await db
+      .delete(walletTransactions)
+      .where(
+        sql`${walletTransactions.orderId} = ${positiveWalletAllocation.orderId}
+          and ${walletTransactions.transactionType} = 'ORDER_DEBIT'`,
+      );
+    await expect(
+      cancelFulfillmentOrder({
+        actorType: "CUSTOMER",
+        actorUserId: "customer-auth",
+        customerId: fixture.customer.id,
+        orderId: positiveWalletAllocation.orderId,
+        reason: "must not refund a missing positive wallet debit",
+      }),
+    ).rejects.toThrow("已付款统一结算拿货单缺少匹配的钱包扣款");
+    await expect(
+      db
+        .select()
+        .from(shipmentCancellationAdjustments)
+        .where(
+          eq(
+            shipmentCancellationAdjustments.orderId,
+            positiveWalletAllocation.orderId,
+          ),
+        ),
+    ).resolves.toEqual([]);
+  });
+
+  test("uses a zero wallet allocation when Jifeng status 9 confirms cancellation", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 1,
+      reason: "status 9 zero allocation regression",
+    });
+    const result = await submitFixture(fixture, 1);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 399,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    await reviewSettlementPayment({
+      adminUserId: admin.id,
+      decision: "APPROVE",
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const [zeroWalletAllocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(
+        sql`${settlementBatchOrders.settlementBatchId} = ${result.settlementBatchId}
+          and ${settlementBatchOrders.walletAmountFen} = 0`,
+      );
+    const [fulfillment] = await db
+      .select({
+        erpNo: shipmentFulfillments.erpNo,
+        id: shipmentFulfillments.id,
+      })
+      .from(shipmentFulfillments)
+      .innerJoin(
+        orderShipments,
+        eq(orderShipments.id, shipmentFulfillments.shipmentId),
+      )
+      .where(eq(orderShipments.orderId, zeroWalletAllocation.orderId));
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        externalOrderNo: "JF-ZERO-WALLET-CANCEL",
+        jifengStatus: 2,
+        status: "FULFILLING",
+        submittedAt: new Date("2026-08-20T09:00:00.000Z"),
+      })
+      .where(eq(shipmentFulfillments.id, fulfillment.id));
+
+    await expect(
+      applyJifengOrderStatus({
+        detail: {
+          erpNo: fulfillment.erpNo,
+          orderNo: "JF-ZERO-WALLET-CANCEL",
+          status: 9,
+        },
+        now: new Date("2026-08-20T09:01:00.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toMatchObject({ status: "CANCELLED" });
+    await expect(
+      db
+        .select({
+          offlineAmountFen: shipmentCancellationAdjustments.offlineAmountFen,
+          status: shipmentCancellationAdjustments.status,
+          walletAmountFen: shipmentCancellationAdjustments.walletAmountFen,
+        })
+        .from(shipmentCancellationAdjustments)
+        .where(eq(shipmentCancellationAdjustments.orderId, zeroWalletAllocation.orderId)),
+    ).resolves.toEqual([
+      {
+        offlineAmountFen: zeroWalletAllocation.totalAmountFen,
+        status: "PENDING_OFFLINE",
+        walletAmountFen: 0,
+      },
     ]);
   });
 
