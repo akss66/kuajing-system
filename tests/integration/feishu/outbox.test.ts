@@ -172,6 +172,182 @@ describe("Feishu integration outbox", () => {
     ]);
   });
 
+  test("dead-letters a stale eighth attempt without claiming or calling Feishu again", async () => {
+    const now = new Date("2026-08-20T04:00:00.000Z");
+    await db.transaction((tx) =>
+      createSystemNotification(tx, {
+        deduplicationKey: "stale-eighth-attempt",
+        message: "第八次发送后租约过期",
+        now: new Date("2026-08-20T03:40:00.000Z"),
+        severity: "ERROR",
+        title: "耗尽重试测试",
+        type: "STALE_EIGHTH_ATTEMPT_TEST",
+      }),
+    );
+    await db.execute(sql`
+      update integration_outbox
+      set
+        attempt_count = 8,
+        claim_token = ${crypto.randomUUID()},
+        locked_at = ${new Date("2026-08-20T03:44:00.000Z").toISOString()}::timestamptz,
+        status = 'PROCESSING'
+      where target = 'FEISHU_BOT'
+    `);
+    let sendCalls = 0;
+    const input = {
+      botClient: {
+        async sendTextMessage() {
+          sendCalls += 1;
+        },
+      },
+      cargoClient: {
+        async createFilter() {},
+        async readRange() {
+          return [];
+        },
+        async setRangeStyle() {},
+        async updateDimension() {},
+        async updateSheetProperties() {},
+        async writeImage() {},
+        async writeRange() {},
+      },
+      config: {
+        cargoWritesEnabled: false,
+        internalChatId: "chat-stale-eighth",
+        sourceWikiToken: "wiki-stale-eighth",
+      },
+    };
+
+    await expect(processFeishuOutbox({ ...input, now })).resolves.toEqual({
+      botCompleted: 0,
+      cargoCompleted: 0,
+      failed: 1,
+    });
+    await expect(
+      processFeishuOutbox({
+        ...input,
+        now: new Date("2026-08-20T04:01:00.000Z"),
+      }),
+    ).resolves.toEqual({ botCompleted: 0, cargoCompleted: 0, failed: 0 });
+
+    expect(sendCalls).toBe(0);
+    const [event] = await db.select().from(integrationOutbox);
+    expect(event).toMatchObject({
+      attemptCount: 8,
+      claimToken: null,
+      lastErrorCode: "RETRY_EXHAUSTED:STALE_PROCESSING",
+      lockedAt: null,
+      status: "FAILED",
+    });
+    expect(event.nextAttemptAt.toISOString()).toBe("9999-12-31T23:59:59.999Z");
+    expect(await db.select().from(integrationAttempts)).toEqual([
+      expect.objectContaining({
+        attemptNumber: 8,
+        errorCode: "RETRY_EXHAUSTED:STALE_PROCESSING",
+        outcome: "PERMANENT_FAILURE",
+      }),
+    ]);
+    const deadLetters = (await db.select().from(systemNotifications)).filter(
+      (notification) => notification.type === "FEISHU_OUTBOX_DEAD_LETTER",
+    );
+    expect(deadLetters).toEqual([
+      expect.objectContaining({ occurrenceCount: 1, severity: "ERROR" }),
+    ]);
+  });
+
+  test("claims bot events only when each send is ready so a stale worker cannot duplicate the backlog", async () => {
+    const firstCreatedAt = new Date("2026-08-20T05:00:00.000Z");
+    const secondCreatedAt = new Date("2026-08-20T05:00:00.001Z");
+    await db.transaction((tx) =>
+      createSystemNotification(tx, {
+        deduplicationKey: "immediate-claim-first",
+        message: "第一条消息",
+        now: firstCreatedAt,
+        severity: "WARNING",
+        title: "即时领取第一条",
+        type: "IMMEDIATE_CLAIM_FIRST",
+      }),
+    );
+    await db.transaction((tx) =>
+      createSystemNotification(tx, {
+        deduplicationKey: "immediate-claim-second",
+        message: "第二条消息",
+        now: secondCreatedAt,
+        severity: "WARNING",
+        title: "即时领取第二条",
+        type: "IMMEDIATE_CLAIM_SECOND",
+      }),
+    );
+
+    let releaseFirstSend!: () => void;
+    const firstSendReleased = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    let signalFirstSend!: () => void;
+    const firstSendStarted = new Promise<void>((resolve) => {
+      signalFirstSend = resolve;
+    });
+    const sends = new Map<string, number>();
+    const recordSend = (text: string) => {
+      const key = text.includes("即时领取第一条") ? "first" : "second";
+      sends.set(key, (sends.get(key) ?? 0) + 1);
+    };
+    const cargoClient = {
+      async createFilter() {},
+      async readRange() {
+        return [];
+      },
+      async setRangeStyle() {},
+      async updateDimension() {},
+      async updateSheetProperties() {},
+      async writeImage() {},
+      async writeRange() {},
+    };
+    const config = {
+      cargoWritesEnabled: false,
+      internalChatId: "chat-immediate-claim",
+      sourceWikiToken: "wiki-immediate-claim",
+    };
+    const staleWorker = processFeishuOutbox({
+      botClient: {
+        async sendTextMessage({ text }) {
+          recordSend(text);
+          if (text.includes("即时领取第一条")) {
+            signalFirstSend();
+            await firstSendReleased;
+          }
+        },
+      },
+      cargoClient,
+      config,
+      now: new Date("2026-08-20T05:00:00.002Z"),
+    });
+    await firstSendStarted;
+
+    const recoveredResult = await processFeishuOutbox({
+      botClient: {
+        async sendTextMessage({ text }) {
+          recordSend(text);
+        },
+      },
+      cargoClient,
+      config,
+      now: new Date("2026-08-20T05:16:00.002Z"),
+    });
+    releaseFirstSend();
+    const staleResult = await staleWorker;
+
+    expect(recoveredResult).toEqual({ botCompleted: 2, cargoCompleted: 0, failed: 0 });
+    expect(staleResult).toEqual({ botCompleted: 0, cargoCompleted: 0, failed: 0 });
+    expect(sends.get("first")).toBe(2);
+    expect(sends.get("second")).toBe(1);
+    expect(
+      (await db.select().from(integrationOutbox)).every(
+        (event) => event.status === "COMPLETED" && event.claimToken === null,
+      ),
+    ).toBe(true);
+  });
+
   test("pushes sanitized messages, resolves the source once, and coalesces cargo events into one target-only sync", async () => {
     setFeishuWriterEnv();
     const now = new Date("2026-08-12T05:10:00.000Z");

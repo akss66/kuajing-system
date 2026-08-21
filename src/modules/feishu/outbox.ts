@@ -41,6 +41,10 @@ type FeishuSourceResolverPort = {
 const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 const OUTBOX_LEASE_MS = 15 * 60_000;
 const OUTBOX_MAX_ATTEMPTS = 8;
+const OUTBOX_PROCESS_LIMIT = 200;
+const STALE_PROCESSING_EXHAUSTED_CODE = "RETRY_EXHAUSTED:STALE_PROCESSING";
+const STALE_PROCESSING_EXHAUSTED_MESSAGE =
+  "飞书任务第八次处理的租约已过期，已停止自动重试，需要人工确认是否已送达";
 
 type ClaimedEvent = {
   attemptNumber: number;
@@ -132,6 +136,23 @@ function retryAt(now: Date, attemptNumber: number) {
   return new Date(now.getTime() + delayMs);
 }
 
+async function createDeadLetterNotification(
+  tx: DbTransaction,
+  input: { errorCode: string; eventId: string; now: Date },
+) {
+  await createSystemNotification(tx, {
+    deduplicationKey: `feishu-outbox-dead-letter:${input.eventId}`,
+    delivery: "IN_APP_ONLY",
+    entityId: input.eventId,
+    entityType: "INTEGRATION_OUTBOX",
+    message: `飞书任务已停止自动重试（${input.errorCode}），请检查连接或目标配置后人工处理。`,
+    now: input.now,
+    severity: "ERROR",
+    title: "飞书任务进入死信",
+    type: "FEISHU_OUTBOX_DEAD_LETTER",
+  });
+}
+
 async function markEventsCompleted(
   events: ClaimedEvent[],
   now: Date,
@@ -220,16 +241,10 @@ async function markEventsFailed(
         .returning({ id: integrationOutbox.id });
       if (updated) failed.push(event);
       if (updated && deadLettered) {
-        await createSystemNotification(tx, {
-          deduplicationKey: `feishu-outbox-dead-letter:${event.id}`,
-          delivery: "IN_APP_ONLY",
-          entityId: event.id,
-          entityType: "INTEGRATION_OUTBOX",
-          message: `飞书任务已停止自动重试（${finalCode}），请检查连接或目标配置后人工处理。`,
+        await createDeadLetterNotification(tx, {
+          errorCode: finalCode,
+          eventId: event.id,
           now,
-          severity: "ERROR",
-          title: "飞书任务进入死信",
-          type: "FEISHU_OUTBOX_DEAD_LETTER",
         });
       }
     }
@@ -259,7 +274,11 @@ async function markEventsFailed(
   });
 }
 
-async function claimEvents(target: "FEISHU_SHEET" | "FEISHU_BOT", now: Date) {
+async function claimEvents(
+  target: "FEISHU_SHEET" | "FEISHU_BOT",
+  now: Date,
+  limit: number,
+) {
   const staleLeaseCutoff = new Date(now.getTime() - OUTBOX_LEASE_MS);
   return db.transaction(async (tx) => {
     const rows = await tx.execute<{
@@ -292,10 +311,44 @@ async function claimEvents(target: "FEISHU_SHEET" | "FEISHU_BOT", now: Date) {
         )
       order by next_attempt_at, id
       for update skip locked
-      limit 200
+      limit ${limit}
     `);
     const claimed: ClaimedEvent[] = [];
+    let permanentlyFailed = 0;
     for (const row of rows) {
+      if (
+        row.status === "PROCESSING" &&
+        row.attemptCount >= OUTBOX_MAX_ATTEMPTS
+      ) {
+        await tx
+          .update(integrationOutbox)
+          .set({
+            claimToken: null,
+            lastErrorCode: STALE_PROCESSING_EXHAUSTED_CODE,
+            lastErrorMessage: STALE_PROCESSING_EXHAUSTED_MESSAGE,
+            lockedAt: null,
+            nextAttemptAt: NEVER_RETRY_AT,
+            status: "FAILED",
+            updatedAt: now,
+          })
+          .where(eq(integrationOutbox.id, row.id));
+        await tx.insert(integrationAttempts).values({
+          attemptNumber: row.attemptCount,
+          errorCode: STALE_PROCESSING_EXHAUSTED_CODE,
+          errorMessage: STALE_PROCESSING_EXHAUSTED_MESSAGE,
+          finishedAt: now,
+          outcome: "PERMANENT_FAILURE",
+          outboxEventId: row.id,
+          startedAt: row.lockedAt ? new Date(row.lockedAt) : now,
+        });
+        await createDeadLetterNotification(tx, {
+          errorCode: STALE_PROCESSING_EXHAUSTED_CODE,
+          eventId: row.id,
+          now,
+        });
+        permanentlyFailed += 1;
+        continue;
+      }
       const claimToken = crypto.randomUUID();
       if (row.status === "PROCESSING" && row.attemptCount > 0) {
         await tx.insert(integrationAttempts).values({
@@ -325,7 +378,7 @@ async function claimEvents(target: "FEISHU_SHEET" | "FEISHU_BOT", now: Date) {
         payload: row.payload,
       });
     }
-    return claimed;
+    return { claimed, permanentlyFailed };
   });
 }
 
@@ -336,14 +389,20 @@ export async function processFeishuOutbox(input: {
   now?: Date;
   sourceClient?: FeishuSourceResolverPort;
 }) {
-  const now = input.now ?? new Date();
   const summary = { botCompleted: 0, cargoCompleted: 0, failed: 0 };
+  const operationNow = () => input.now ?? new Date();
   const sourceClient =
     input.sourceClient ??
     (input.cargoClient as FeishuCargoTargetPort & FeishuSourceResolverPort);
 
   if (canWriteFeishuCargo(input.config)) {
-    const cargoEvents = await claimEvents("FEISHU_SHEET", now);
+    const cargoClaim = await claimEvents(
+      "FEISHU_SHEET",
+      operationNow(),
+      OUTBOX_PROCESS_LIMIT,
+    );
+    summary.failed += cargoClaim.permanentlyFailed;
+    const cargoEvents = cargoClaim.claimed;
     if (cargoEvents.length > 0) {
       try {
         const { spreadsheetToken: sourceSpreadsheetToken } =
@@ -358,20 +417,34 @@ export async function processFeishuOutbox(input: {
             targetSpreadsheetToken: input.config.targetSpreadsheetToken!,
           },
         });
-        summary.cargoCompleted = await markEventsCompleted(cargoEvents, now, {
-          imageCount: result.imageCount,
-          rowCount: result.rowCount,
-          targetSheetId: result.targetSheetId,
-        });
+        summary.cargoCompleted = await markEventsCompleted(
+          cargoEvents,
+          operationNow(),
+          {
+            imageCount: result.imageCount,
+            rowCount: result.rowCount,
+            targetSheetId: result.targetSheetId,
+          },
+        );
       } catch (error) {
-        summary.failed += await markEventsFailed(cargoEvents, error, now);
+        summary.failed += await markEventsFailed(
+          cargoEvents,
+          error,
+          operationNow(),
+        );
       }
     }
   }
 
   if (canProcessFeishuBot(input.config)) {
-    const botEvents = await claimEvents("FEISHU_BOT", now);
-    for (const event of botEvents) {
+    for (let processed = 0; processed < OUTBOX_PROCESS_LIMIT; processed += 1) {
+      const botClaim = await claimEvents("FEISHU_BOT", operationNow(), 1);
+      summary.failed += botClaim.permanentlyFailed;
+      const event = botClaim.claimed[0];
+      if (!event) {
+        if (botClaim.permanentlyFailed > 0) continue;
+        break;
+      }
       const title = String(event.payload.title ?? "系统通知");
       const message = String(event.payload.message ?? "请登录系统查看详情");
       try {
@@ -379,9 +452,17 @@ export async function processFeishuOutbox(input: {
           chatId: input.config.internalChatId!,
           text: `【同舟行跨境】${title}\n${message}`,
         });
-        summary.botCompleted += await markEventsCompleted([event], now, {});
+        summary.botCompleted += await markEventsCompleted(
+          [event],
+          operationNow(),
+          {},
+        );
       } catch (error) {
-        summary.failed += await markEventsFailed([event], error, now);
+        summary.failed += await markEventsFailed(
+          [event],
+          error,
+          operationNow(),
+        );
       }
     }
   }
