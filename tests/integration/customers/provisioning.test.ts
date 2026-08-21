@@ -171,7 +171,9 @@ test("customer management detail returns the linked account summary and store co
     storeName: "Detail store",
   });
 
-  const detail = await getCustomerManagementDetail(result.customerId);
+  const detail = await getCustomerManagementDetail(result.customerId, {
+    includeAccountIdentity: true,
+  });
   expect(detail).toMatchObject({
     account: {
       email: email.toLowerCase(),

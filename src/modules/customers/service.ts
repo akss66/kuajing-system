@@ -122,8 +122,11 @@ export async function provisionCustomerWithStore(
   });
 }
 
-export async function getCustomerManagementDetail(customerId: string) {
-  return getCustomerManagementDetailQuery(customerId);
+export async function getCustomerManagementDetail(
+  customerId: string,
+  options: { includeAccountIdentity?: boolean } = {},
+) {
+  return getCustomerManagementDetailQuery(customerId, options);
 }
 
 export async function updateCustomer(input: {
