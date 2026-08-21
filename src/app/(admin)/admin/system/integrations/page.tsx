@@ -20,6 +20,7 @@ import { integrationOutbox } from "@/db/schema";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canImportFeishuCargo,
+  canMirrorFeishuCatalog,
   canWriteFeishuCargo,
   hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
@@ -168,6 +169,9 @@ export default async function IntegrationsPage() {
 
   const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
   const cargoImportEnabled = feishuConfig ? canImportFeishuCargo(feishuConfig) : false;
+  const catalogMirrorEnabled = feishuConfig
+    ? canMirrorFeishuCatalog(feishuConfig)
+    : false;
   const targetConfigured = feishuConfig
     ? hasFeishuCargoTargetConfig(feishuConfig)
     : false;
@@ -288,6 +292,7 @@ export default async function IntegrationsPage() {
                 <CargoMigrationPanel
                   actorKind={principal.kind}
                   cargoImportEnabled={cargoImportEnabled}
+                  catalogMirrorEnabled={catalogMirrorEnabled}
                   cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}

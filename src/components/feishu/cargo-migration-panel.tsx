@@ -42,6 +42,7 @@ type SourceSheetOption = {
 export type CargoMigrationPanelProps = {
   actorKind: ActorKind;
   cargoImportEnabled: boolean;
+  catalogMirrorEnabled: boolean;
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
@@ -101,6 +102,7 @@ function Field({
 export function CargoMigrationPanel({
   actorKind,
   cargoImportEnabled,
+  catalogMirrorEnabled,
   cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
@@ -337,7 +339,9 @@ export function CargoMigrationPanel({
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
-            飞书源货盘始终只读。确认只会写入本系统数据库；已有 SKU 的库存不会被覆盖，新 SKU 仅在首次创建时初始化库存。
+            {catalogMirrorEnabled
+              ? "飞书源货盘始终只读。迁移期全量镜像会覆盖本系统商品、SKU 与库存，并为每次库存校准留下流水。"
+              : "飞书源货盘始终只读。确认只会写入本系统数据库；已有 SKU 的库存不会被覆盖，新 SKU 仅在首次创建时初始化库存。"}
           </div>
           {showMetricSummary ? (
             <MetricStrip
@@ -393,19 +397,21 @@ export function CargoMigrationPanel({
 
       {migrationSetupPanel}
 
-      {actorKind === "SUPER_ADMIN" && importedCargoBaseline ? (
+      {actorKind === "SUPER_ADMIN" &&
+      importedCargoBaseline &&
+      catalogMirrorEnabled ? (
         <WorkspacePanel>
           <WorkspacePanelHeader
-            description="从飞书源货盘精确读取商品与 SKU；允许新增，并安全保留历史库存和订单。"
-            title="飞书货盘一键同步"
+            description="迁移期以飞书为唯一货盘来源，将商品、SKU、图片、字段和库存全量镜像到系统。"
+            title="飞书货盘迁移镜像"
           />
           <form action={catalogSyncFormAction} className="space-y-4 px-4 py-4 sm:px-5">
             <div className="space-y-2 text-sm leading-6 text-muted-foreground">
               <p>
-                飞书新增的 SKU 会同步创建；已有 SKU 的库存不会被覆盖，新 SKU 会按飞书库存首次初始化；本操作不会写入飞书。
+                飞书新增的 SKU 会同步创建；已有 SKU 的库存也会按飞书覆盖；本操作不会写入飞书。
               </p>
               <p>
-                空字段会保留为空，资料不完整的 SKU 会强制保持不可售。飞书中暂时缺失的 SKU 不会自动删除系统中的历史 SKU。
+                空字段会保留为空，资料不完整的 SKU 会强制保持不可售。飞书缺失的 SKU 会归档并清零，但不会物理删除历史记录。
               </p>
               <p>
                 最近同步：{latestCatalogRefreshLabel ?? "尚未执行"}

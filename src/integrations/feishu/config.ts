@@ -21,6 +21,7 @@ const configSchema = z
     FEISHU_CARGO_SOURCE_SHEET_ID: optionalString,
     FEISHU_CARGO_SOURCE_WIKI_TOKEN: z.string().trim().min(1),
     FEISHU_CARGO_IMPORT_ENABLED: optionalExactString,
+    FEISHU_CATALOG_MIRROR_ENABLED: optionalExactString,
     FEISHU_CARGO_WRITES_ENABLED: optionalExactString,
     FEISHU_CARGO_TARGET_SHEET_ID: optionalString,
     FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN: optionalString,
@@ -54,6 +55,7 @@ export type FeishuIntegrationConfig = {
   appId: string;
   appSecret: string;
   cargoImportEnabled: boolean;
+  catalogMirrorEnabled?: boolean;
   cargoWritesEnabled: boolean;
   sourceWikiToken: string;
   sourceSheetId?: string;
@@ -70,6 +72,10 @@ type FeishuCargoTargetConfig = {
 
 type FeishuCargoImportConfig = {
   cargoImportEnabled?: boolean;
+};
+
+type FeishuCatalogMirrorConfig = {
+  catalogMirrorEnabled?: boolean;
 };
 
 type FeishuBotConfig = Pick<FeishuIntegrationConfig, "internalChatId">;
@@ -114,6 +120,8 @@ export function readFeishuConfig(
     appId: parsed.data.FEISHU_APP_ID,
     appSecret: parsed.data.FEISHU_APP_SECRET,
     cargoImportEnabled: parsed.data.FEISHU_CARGO_IMPORT_ENABLED === "true",
+    catalogMirrorEnabled:
+      parsed.data.FEISHU_CATALOG_MIRROR_ENABLED === "true",
     cargoWritesEnabled: parsed.data.FEISHU_CARGO_WRITES_ENABLED === "true",
     internalChatId: parsed.data.FEISHU_INTERNAL_CHAT_ID,
     sourceSheetId: parsed.data.FEISHU_CARGO_SOURCE_SHEET_ID,
@@ -125,6 +133,10 @@ export function readFeishuConfig(
 
 export function canImportFeishuCargo(config: FeishuCargoImportConfig) {
   return config.cargoImportEnabled === true;
+}
+
+export function canMirrorFeishuCatalog(config: FeishuCatalogMirrorConfig) {
+  return config.catalogMirrorEnabled === true;
 }
 
 export function hasFeishuCargoTargetConfig(config: FeishuCargoTargetConfig) {

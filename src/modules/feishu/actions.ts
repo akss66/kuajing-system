@@ -8,6 +8,7 @@ import { db } from "@/db/client";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canImportFeishuCargo,
+  canMirrorFeishuCatalog,
   canWriteFeishuCargo,
   hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
@@ -43,8 +44,7 @@ export type CargoMigrationActionState = ActionState & {
   availableSourceSheets?: FeishuSourceSheet[];
 };
 
-function createFeishuClient() {
-  const config = readFeishuConfig();
+function createFeishuClient(config = readFeishuConfig()) {
   return {
     client: new FeishuClient({
       appId: config.appId,
@@ -111,6 +111,8 @@ function mapCatalogRefreshErrorMessage(error: unknown) {
       return "飞书货盘在同步期间发生了变化，本次未更新。请重新点击同步。";
     case "SOURCE_SYNC_SUPERSEDED":
       return "已有更新的一次飞书同步请求，本次较早请求已停止。请以最新同步结果为准。";
+    case "MIRROR_ACTIVE_RESERVATIONS":
+      return "系统当前存在活动库存占用，迁移镜像已安全停止。请先取消或完成相关订单后重试。";
     case "SOURCE_SHEET_SELECTION_REQUIRED":
       return "已导入基线缺少明确的源工作表，本次未更新。请联系系统维护人员核对配置。";
     default:
@@ -136,12 +138,20 @@ export async function syncFeishuCatalogFieldsAction(
       };
     }
 
-    const { client, config } = createFeishuClient();
+    const config = readFeishuConfig();
+    if (!canMirrorFeishuCatalog(config)) {
+      return {
+        message: "飞书迁移镜像功能当前已关闭。",
+        status: "error",
+      };
+    }
+    const { client } = createFeishuClient(config);
     const service = createCatalogFieldRefreshService();
     result = await service.apply({
       actorUserId: actor.userId,
       client,
-      reason: "超级管理员一键同步飞书货盘商品字段",
+      mode: "MIGRATION_MIRROR",
+      reason: "超级管理员执行迁移期飞书货盘全量镜像",
       sourceSheetId: baseline.sourceSheetId,
       sourceWikiToken: config.sourceWikiToken,
     });
@@ -155,7 +165,7 @@ export async function syncFeishuCatalogFieldsAction(
   revalidatePath(CATALOG_PATH);
   revalidatePath(INVENTORY_PATH);
   return {
-    message: `飞书货盘同步完成：共 ${result.skuCount} 个 SKU；新增 ${result.createdSkuCount} 个 SKU、${result.createdProductCount} 个商品，更新 ${result.matchedSkuCount} 个 SKU；${result.degradedSkuCount} 个资料不完整的 SKU 已保持不可售。已有库存未覆盖，新 SKU 已按飞书库存初始化。`,
+    message: `飞书迁移镜像完成：共 ${result.skuCount} 个 SKU；新增 ${result.createdSkuCount} 个 SKU、${result.createdProductCount} 个商品，更新 ${result.matchedSkuCount} 个 SKU，归档 ${result.archivedSkuCount} 个飞书缺失 SKU；${result.inventoryAdjustedSkuCount} 个 SKU 的库存已按飞书校准；${result.degradedSkuCount} 个资料不完整的 SKU 已保持不可售。`,
     status: "success",
   };
 }

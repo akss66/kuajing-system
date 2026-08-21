@@ -80,6 +80,7 @@ const commonWebServerEnvironment = {
   FEISHU_APP_SECRET:
     process.env.FEISHU_APP_SECRET ?? "e2e-feishu-app-secret",
   FEISHU_CARGO_IMPORT_ENABLED: "true",
+  FEISHU_CATALOG_MIRROR_ENABLED: "true",
   FEISHU_CARGO_SOURCE_WIKI_TOKEN:
     process.env.FEISHU_CARGO_SOURCE_WIKI_TOKEN ?? "wiki-source-token",
   FEISHU_CARGO_TARGET_SHEET_ID:

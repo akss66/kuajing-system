@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   assertSafeCargoTarget,
   canImportFeishuCargo,
+  canMirrorFeishuCatalog,
   canProcessFeishuBot,
   hasFeishuCargoTargetConfig,
   canWriteFeishuCargo,
@@ -12,6 +13,32 @@ import {
 } from "@/integrations/feishu/config";
 
 describe("Feishu integration config", () => {
+  test("enables migration mirror only for the exact temporary rollout flag", () => {
+    const base = {
+      FEISHU_APP_ID: "app",
+      FEISHU_APP_SECRET: "secret",
+      FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-source",
+    };
+
+    expect(
+      canMirrorFeishuCatalog(
+        readFeishuConfig({
+          ...base,
+          FEISHU_CATALOG_MIRROR_ENABLED: "true",
+        }),
+      ),
+    ).toBe(true);
+    for (const malformed of [undefined, "", "TRUE", " true ", "1", "false"]) {
+      expect(
+        canMirrorFeishuCatalog(
+          readFeishuConfig({
+            ...base,
+            FEISHU_CATALOG_MIRROR_ENABLED: malformed,
+          }),
+        ),
+      ).toBe(false);
+    }
+  });
   test("enables database import without enabling any Feishu write", () => {
     const config = readFeishuConfig({
       FEISHU_APP_ID: "app",
@@ -40,6 +67,7 @@ describe("Feishu integration config", () => {
       appId: "app",
       appSecret: "secret",
       cargoImportEnabled: false,
+      catalogMirrorEnabled: false,
       cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,
@@ -63,6 +91,7 @@ describe("Feishu integration config", () => {
       appId: "app",
       appSecret: "secret",
       cargoImportEnabled: false,
+      catalogMirrorEnabled: false,
       cargoWritesEnabled: false,
       internalChatId: undefined,
       sourceSheetId: undefined,

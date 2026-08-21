@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { db } from "@/db/client";
 import {
+  auditLogs,
   adminUsers,
   authUsers,
   customers,
@@ -326,6 +327,7 @@ afterEach(async () => {
     truncate table
       inventory_movements,
       inventory_stocktake_batches,
+      audit_logs,
       inventory_reservations,
       inventory_balances,
       replacement_requests,
@@ -518,6 +520,51 @@ describe("inventory movement read model", () => {
       movementId(901),
       movementId(801),
     ]);
+  });
+
+  test("classifies migration mirror corrections as Feishu and resolves their run", async () => {
+    const fixture = await createMovementFixture();
+    const mirrorRunId = movementId(1102);
+    await db.insert(auditLogs).values({
+      action: "CATALOG_FIELDS_REFRESH_STARTED_FROM_FEISHU",
+      actorId: fixture.operatorId,
+      actorType: "ADMIN",
+      afterJson: {},
+      beforeJson: {},
+      entityId: mirrorRunId,
+      entityType: "CATALOG",
+      reason: "迁移期人工镜像",
+    });
+    await db.insert(inventoryMovements).values({
+      actorId: fixture.operatorId,
+      actorType: "ADMIN",
+      afterQuantity: 45,
+      beforeQuantity: 50,
+      createdAt: new Date("2026-08-14T10:00:00.000Z"),
+      delta: -5,
+      id: movementId(1002),
+      movementType: "MANUAL_DECREASE",
+      reason: "飞书迁移镜像校准",
+      reasonCode: "STOCKTAKE_CORRECTION",
+      referenceId: mirrorRunId,
+      referenceType: "FEISHU_CATALOG_MIRROR",
+      skuId: fixture.primarySku.id,
+    });
+
+    const result = await listInventoryMovements({
+      pageSize: 100,
+      source: "FEISHU_MIGRATION",
+    });
+
+    expect(result.rows.find(({ id }) => id === movementId(1002))).toMatchObject({
+      reasonLabel: "飞书货盘镜像同步",
+      relation: {
+        href: "/admin/system/integrations",
+        id: mirrorRunId,
+        type: "FEISHU_MIGRATION",
+      },
+      source: "FEISHU_MIGRATION",
+    });
   });
 
   test("bounds non-finite and extreme pagination inputs", async () => {

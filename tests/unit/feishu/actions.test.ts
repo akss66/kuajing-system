@@ -16,6 +16,7 @@ const guardMocks = vi.hoisted(() => ({
 }));
 
 const configMocks = vi.hoisted(() => ({
+  canMirrorFeishuCatalog: vi.fn(),
   canImportFeishuCargo: vi.fn(),
   canWriteFeishuCargo: vi.fn(),
   hasFeishuCargoTargetConfig: vi.fn(),
@@ -99,6 +100,7 @@ describe("feishu admin actions", () => {
     guardMocks.requireAdmin.mockReset();
     guardMocks.requireSuperAdmin.mockReset();
     configMocks.canWriteFeishuCargo.mockReset();
+    configMocks.canMirrorFeishuCatalog.mockReset();
     configMocks.canImportFeishuCargo.mockReset();
     configMocks.hasFeishuCargoTargetConfig.mockReset();
     configMocks.readFeishuApiBaseUrl.mockReset();
@@ -123,6 +125,7 @@ describe("feishu admin actions", () => {
       userId: "super-admin-user-1",
     });
     configMocks.canWriteFeishuCargo.mockReturnValue(true);
+    configMocks.canMirrorFeishuCatalog.mockReturnValue(true);
     configMocks.canImportFeishuCargo.mockReturnValue(true);
     configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuApiBaseUrl.mockReturnValue("http://127.0.0.1:4010");
@@ -130,6 +133,7 @@ describe("feishu admin actions", () => {
       appId: "app-id",
       appSecret: "app-secret",
       cargoImportEnabled: true,
+      catalogMirrorEnabled: true,
       cargoWritesEnabled: true,
       sourceSheetId: undefined,
       sourceWikiToken: "wiki-source-token",
@@ -517,6 +521,8 @@ describe("feishu admin actions", () => {
       skuCount: 143,
       sourceSequenceCount: 76,
       warningCount: 7,
+      archivedSkuCount: 4,
+      inventoryAdjustedSkuCount: 12,
     });
 
     const result = await syncFeishuCatalogFieldsAction(
@@ -525,13 +531,14 @@ describe("feishu admin actions", () => {
     );
 
     expect(result).toEqual({
-      message: "飞书货盘同步完成：共 143 个 SKU；新增 3 个 SKU、2 个商品，更新 140 个 SKU；1 个资料不完整的 SKU 已保持不可售。已有库存未覆盖，新 SKU 已按飞书库存初始化。",
+      message: "飞书迁移镜像完成：共 143 个 SKU；新增 3 个 SKU、2 个商品，更新 140 个 SKU，归档 4 个飞书缺失 SKU；12 个 SKU 的库存已按飞书校准；1 个资料不完整的 SKU 已保持不可售。",
       status: "success",
     });
     expect(serviceMocks.applyCatalogFieldRefresh).toHaveBeenCalledWith({
       actorUserId: "super-admin-user-1",
       client: clientMocks,
-      reason: "超级管理员一键同步飞书货盘商品字段",
+      mode: "MIGRATION_MIRROR",
+      reason: "超级管理员执行迁移期飞书货盘全量镜像",
       sourceSheetId: "sheet-source-a",
       sourceWikiToken: "wiki-source-token",
     });
@@ -545,6 +552,22 @@ describe("feishu admin actions", () => {
       ["/admin/catalog"],
       ["/admin/inventory"],
     ]);
+  });
+
+  it("rejects migration mirror while its temporary rollout flag is disabled", async () => {
+    configMocks.canMirrorFeishuCatalog.mockReturnValue(false);
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "飞书迁移镜像功能当前已关闭。",
+      status: "error",
+    });
+    expect(serviceMocks.applyCatalogFieldRefresh).not.toHaveBeenCalled();
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
   });
 
   it("requires an imported baseline before reading configuration or calling Feishu", async () => {
@@ -571,6 +594,7 @@ describe("feishu admin actions", () => {
     ["SOURCE_IMAGE_DOWNLOAD_FAILED", "图片"],
     ["SOURCE_CHANGED_DURING_SYNC", "发生了变化"],
     ["SOURCE_SYNC_SUPERSEDED", "较早请求"],
+    ["MIRROR_ACTIVE_RESERVATIONS", "库存占用"],
   ])("maps catalog refresh failure %s to safe Chinese", async (code, label) => {
     serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(new Error(code));
 

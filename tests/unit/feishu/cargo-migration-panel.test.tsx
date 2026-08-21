@@ -75,6 +75,7 @@ function createProps(
   return {
     actorKind: "SUPER_ADMIN",
     cargoImportEnabled: true,
+    catalogMirrorEnabled: true,
     createCargoPreflightAction: idleAction,
     importedCargoBaseline: {
       importedAtLabel: "2026/08/13 14:12",
@@ -166,7 +167,7 @@ describe("CargoMigrationPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("offers super admins a one-click read-only source sync after an imported baseline exists", () => {
+  it("offers super admins a temporary full mirror after an imported baseline exists", () => {
     const props = createProps();
     render(
       <CargoMigrationPanel
@@ -183,11 +184,11 @@ describe("CargoMigrationPanel", () => {
     expect(
       screen.getByRole("button", { name: "一键同步飞书货盘" }),
     ).toBeEnabled();
-    expect(screen.getAllByText(/已有 SKU 的库存不会被覆盖/)).toHaveLength(2);
+    expect(screen.getByText(/已有 SKU 的库存也会按飞书覆盖/)).toBeVisible();
     expect(screen.getByText(/飞书新增的 SKU 会同步创建/)).toBeVisible();
     expect(screen.getByText(/空字段会保留为空/)).toBeVisible();
     expect(screen.getByText(/资料不完整的 SKU 会强制保持不可售/)).toBeVisible();
-    expect(screen.getByText(/不会自动删除系统中的历史 SKU/)).toBeVisible();
+    expect(screen.getByText(/飞书缺失的 SKU 会归档并清零/)).toBeVisible();
     expect(screen.getByText(/不会写入飞书/)).toBeVisible();
     expect(screen.getByText("最近同步：2026/08/20 15:30")).toBeVisible();
     expect(screen.getByText("首批导入时间：2026/08/13 14:12")).toBeVisible();
@@ -195,6 +196,20 @@ describe("CargoMigrationPanel", () => {
       screen.getByText("首批迁移记录更新：2026/08/13 14:12"),
     ).toBeVisible();
     expect(document.querySelector('[aria-live="polite"]')).not.toBeNull();
+  });
+
+  it("hides the temporary mirror after the rollout flag is disabled", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          catalogMirrorEnabled: false,
+        })}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides one-click catalog sync until an imported baseline exists", () => {

@@ -8,6 +8,7 @@ import {
   catalogAssets,
   inventoryBalances,
   inventoryMovements,
+  inventoryReservations,
   products,
   skus,
 } from "@/db/schema";
@@ -29,16 +30,22 @@ import {
 } from "./source-reader";
 
 export type CatalogFieldRefreshPreview = {
+  archivedSkuCount: number;
   cargoPricePlaceholders: AppliedCargoPricePlaceholder[];
   createdProductCount: number;
   createdSkuCount: number;
   degradedSkuCount: number;
   matchedSkuCount: number;
+  inventoryAdjustedSkuCount: number;
   productsToMerge: number;
   skuCount: number;
   sourceSequenceCount: number;
   warningCount: number;
 };
+
+export type CatalogFieldRefreshMode =
+  | "CATALOG_FIELDS_ONLY"
+  | "MIGRATION_MIRROR";
 
 export type CatalogFieldRefreshReadPort = Pick<
   FeishuSourcePort,
@@ -74,6 +81,7 @@ type RefreshPlan = CatalogFieldRefreshPreview & {
   existingSkuByCode: Map<string, ExistingSku>;
   groups: RefreshGroup[];
   involvedProductIds: string[];
+  systemOnlySkus: ExistingSku[];
   warnings: MigrationIssue[];
 };
 
@@ -212,7 +220,9 @@ async function buildRefreshPlan(
   const matchedSkuCount = source.rows.filter((row) =>
     existingSkuByCode.has(row.skuCode),
   ).length;
+  const sourceSkuCodes = new Set(source.rows.map((row) => row.skuCode));
   return {
+    archivedSkuCount: 0,
     cargoPricePlaceholders: [],
     createdProductCount,
     createdSkuCount: source.skuCount - matchedSkuCount,
@@ -221,10 +231,14 @@ async function buildRefreshPlan(
     existingSkuByCode,
     groups,
     involvedProductIds: [...involvedProductIds],
+    inventoryAdjustedSkuCount: 0,
     matchedSkuCount,
     productsToMerge,
     skuCount: source.skuCount,
     sourceSequenceCount: source.sourceSequenceCount,
+    systemOnlySkus: existingSkus.filter(
+      (row) => !sourceSkuCodes.has(row.skuCode),
+    ),
     warningCount: source.warnings.length,
     warnings: source.warnings,
   };
@@ -311,6 +325,23 @@ async function lockCatalogRefresh(database: DbTransaction) {
   await database.execute(
     sql`select pg_advisory_xact_lock(hashtext(${CATALOG_REFRESH_LOCK_NAME}))`,
   );
+}
+
+async function lockAndAssertMigrationMirrorInventory(
+  database: DbTransaction,
+) {
+  await database.execute(sql`
+    select sku_id
+    from inventory_balances
+    order by sku_id
+    for update
+  `);
+  const [activeReservation] = await database
+    .select({ id: inventoryReservations.id })
+    .from(inventoryReservations)
+    .where(eq(inventoryReservations.status, "ACTIVE"))
+    .limit(1);
+  if (activeReservation) fail("MIRROR_ACTIVE_RESERVATIONS");
 }
 
 async function registerRefreshAttempt(input: {
@@ -401,10 +432,11 @@ async function applyPlan(input: {
   actorUserId: string;
   assetBySkuCode: Map<string, { id: string; storageKey: string }>;
   database: DbTransaction;
+  mode: CatalogFieldRefreshMode;
   plan: RefreshPlan;
   reason: string;
   runId: string;
-}) {
+}): Promise<{ archivedSkuCount: number; inventoryAdjustedSkuCount: number }> {
   const now = new Date();
   if (input.plan.involvedProductIds.length > 0) {
     await input.database
@@ -413,7 +445,11 @@ async function applyPlan(input: {
       .where(inArray(products.id, input.plan.involvedProductIds));
   }
 
-  const insertedSkus: Array<{ row: ParsedCargoSyncRow; skuId: string }> = [];
+  const sourceSkuTargets: Array<{
+    isNew: boolean;
+    row: ParsedCargoSyncRow;
+    skuId: string;
+  }> = [];
   for (const group of input.plan.groups) {
     const parent = group.rows[0]!;
     let productId = group.canonicalProductId;
@@ -449,6 +485,7 @@ async function applyPlan(input: {
         linkText: parent.linkText,
         name: parent.productName,
         sourceSequence: parent.sourceSequence,
+        ...(input.mode === "MIGRATION_MIRROR" ? { status: "ACTIVE" as const } : {}),
         updatedAt: now,
       })
       .where(eq(products.id, productId));
@@ -457,6 +494,14 @@ async function applyPlan(input: {
       const asset = input.assetBySkuCode.get(row.skuCode) ?? null;
       const existingSku = input.plan.existingSkuByCode.get(row.skuCode);
       const metadataFor = (lifecycleStatus?: "ACTIVE" | "ARCHIVED") => ({
+        ...(input.mode === "MIGRATION_MIRROR"
+          ? {
+              archiveReason: null,
+              archivedAt: null,
+              archivedByAdminUserId: null,
+              lifecycleStatus: "ACTIVE" as const,
+            }
+          : {}),
         cargoUnitPriceMilliYuan: row.cargoUnitPriceMilliYuan,
         color: row.color,
         combination: row.combination,
@@ -468,7 +513,9 @@ async function applyPlan(input: {
         productId,
         productUrl: row.productUrl,
         saleStatus:
-          lifecycleStatus === "ARCHIVED" ? "NOT_SELLABLE" : row.saleStatus,
+          input.mode !== "MIGRATION_MIRROR" && lifecycleStatus === "ARCHIVED"
+            ? ("NOT_SELLABLE" as const)
+            : row.saleStatus,
         specification: row.specification,
         updatedAt: now,
         weightGrams: row.weightGrams,
@@ -478,6 +525,11 @@ async function applyPlan(input: {
           .update(skus)
           .set(metadataFor(existingSku.lifecycleStatus))
           .where(eq(skus.id, existingSku.id));
+        sourceSkuTargets.push({
+          isNew: false,
+          row,
+          skuId: existingSku.id,
+        });
       } else {
         const [createdSku] = await input.database
           .insert(skus)
@@ -485,7 +537,7 @@ async function applyPlan(input: {
           .onConflictDoNothing({ target: skus.skuCode })
           .returning({ id: skus.id });
         if (createdSku) {
-          insertedSkus.push({ row, skuId: createdSku.id });
+          sourceSkuTargets.push({ isNew: true, row, skuId: createdSku.id });
           continue;
         }
         const [concurrentSku] = await input.database
@@ -498,35 +550,134 @@ async function applyPlan(input: {
           .update(skus)
           .set(metadataFor(concurrentSku.lifecycleStatus))
           .where(eq(skus.id, concurrentSku.id));
+        sourceSkuTargets.push({
+          isNew: false,
+          row,
+          skuId: concurrentSku.id,
+        });
       }
     }
   }
 
-  if (insertedSkus.length > 0) {
+  const insertedSkus = sourceSkuTargets.filter((target) => target.isNew);
+  let archivedSkuCount = 0;
+  let inventoryAdjustedSkuCount = 0;
+  if (input.mode === "MIGRATION_MIRROR") {
+    const newlyArchivedIds = input.plan.systemOnlySkus
+      .filter((row) => row.lifecycleStatus === "ACTIVE")
+      .map((row) => row.id);
+    archivedSkuCount = newlyArchivedIds.length;
+    if (newlyArchivedIds.length > 0) {
+      await input.database
+        .update(skus)
+        .set({
+          archiveReason: "迁移期飞书货盘中已缺失",
+          archivedAt: now,
+          archivedByAdminUserId: input.actorUserId,
+          lifecycleStatus: "ARCHIVED",
+          saleStatus: "NOT_SELLABLE",
+          updatedAt: now,
+        })
+        .where(inArray(skus.id, newlyArchivedIds));
+    }
+
+    const mirrorTargets = [
+      ...sourceSkuTargets.map(({ isNew, row, skuId }) => ({
+        isNew,
+        skuId,
+        targetQuantity: row.totalQuantity ?? 0,
+      })),
+      ...input.plan.systemOnlySkus.map((row) => ({
+        isNew: false,
+        skuId: row.id,
+        targetQuantity: 0,
+      })),
+    ];
+    const balanceRows = mirrorTargets.length > 0
+      ? await input.database
+          .select({
+            skuId: inventoryBalances.skuId,
+            totalQuantity: inventoryBalances.totalQuantity,
+          })
+          .from(inventoryBalances)
+          .where(inArray(
+            inventoryBalances.skuId,
+            mirrorTargets.map((target) => target.skuId),
+          ))
+      : [];
+    const balanceBySkuId = new Map(
+      balanceRows.map((row) => [row.skuId, row.totalQuantity]),
+    );
+    const missingBalances = mirrorTargets.filter(
+      (target) => !balanceBySkuId.has(target.skuId),
+    );
+    if (missingBalances.length > 0) {
+      await input.database.insert(inventoryBalances).values(
+        missingBalances.map((target) => ({
+          skuId: target.skuId,
+          totalQuantity: target.targetQuantity,
+        })),
+      );
+    }
+
+    const movementRows = [];
+    for (const target of mirrorTargets) {
+      const beforeQuantity = balanceBySkuId.get(target.skuId) ?? 0;
+      const delta = target.targetQuantity - beforeQuantity;
+      if (delta === 0) continue;
+      inventoryAdjustedSkuCount += 1;
+      if (balanceBySkuId.has(target.skuId)) {
+        await input.database
+          .update(inventoryBalances)
+          .set({ totalQuantity: target.targetQuantity, updatedAt: now })
+          .where(eq(inventoryBalances.skuId, target.skuId));
+      }
+      const reasonCode = target.isNew
+        ? ("FEISHU_INITIAL_IMPORT" as const)
+        : ("STOCKTAKE_CORRECTION" as const);
+      movementRows.push({
+        actorId: input.actorUserId,
+        actorType: "ADMIN" as const,
+        afterQuantity: target.targetQuantity,
+        beforeQuantity,
+        delta,
+        movementType:
+          delta > 0 ? ("MANUAL_INCREASE" as const) : ("MANUAL_DECREASE" as const),
+        reason: inventoryReasonLabel(reasonCode),
+        reasonCode,
+        referenceId: input.runId,
+        referenceType: "FEISHU_CATALOG_MIRROR",
+        skuId: target.skuId,
+      });
+    }
+    if (movementRows.length > 0) {
+      await input.database.insert(inventoryMovements).values(movementRows);
+    }
+  } else if (insertedSkus.length > 0) {
     await input.database.insert(inventoryBalances).values(
       insertedSkus.map(({ row, skuId }) => ({
         skuId,
         totalQuantity: row.totalQuantity ?? 0,
       })),
     );
-  }
-  const movementRows = insertedSkus
-    .filter(({ row }) => (row.totalQuantity ?? 0) > 0)
-    .map(({ row, skuId }) => ({
-      actorId: input.actorUserId,
-      actorType: "ADMIN" as const,
-      afterQuantity: row.totalQuantity!,
-      beforeQuantity: 0,
-      delta: row.totalQuantity!,
-      movementType: "MANUAL_INCREASE" as const,
-      reason: inventoryReasonLabel("FEISHU_INITIAL_IMPORT"),
-      reasonCode: "FEISHU_INITIAL_IMPORT" as const,
-      referenceId: input.runId,
-      referenceType: "FEISHU_CATALOG_SYNC",
-      skuId,
-    }));
-  if (movementRows.length > 0) {
-    await input.database.insert(inventoryMovements).values(movementRows);
+    const movementRows = insertedSkus
+      .filter(({ row }) => (row.totalQuantity ?? 0) > 0)
+      .map(({ row, skuId }) => ({
+        actorId: input.actorUserId,
+        actorType: "ADMIN" as const,
+        afterQuantity: row.totalQuantity!,
+        beforeQuantity: 0,
+        delta: row.totalQuantity!,
+        movementType: "MANUAL_INCREASE" as const,
+        reason: inventoryReasonLabel("FEISHU_INITIAL_IMPORT"),
+        reasonCode: "FEISHU_INITIAL_IMPORT" as const,
+        referenceId: input.runId,
+        referenceType: "FEISHU_CATALOG_SYNC",
+        skuId,
+      }));
+    if (movementRows.length > 0) {
+      await input.database.insert(inventoryMovements).values(movementRows);
+    }
   }
 
   await input.database.insert(auditLogs).values({
@@ -534,10 +685,13 @@ async function applyPlan(input: {
     actorId: input.actorUserId,
     actorType: "ADMIN",
     afterJson: {
+      archivedSkuCount,
       createdProductCount: input.plan.createdProductCount,
       createdSkuCount: input.plan.createdSkuCount,
       degradedSkuCount: input.plan.degradedSkuCount,
+      inventoryAdjustedSkuCount,
       matchedSkuCount: input.plan.matchedSkuCount,
+      mode: input.mode,
       productsToMerge: input.plan.productsToMerge,
       skuCount: input.plan.skuCount,
       sourceSequenceCount: input.plan.sourceSequenceCount,
@@ -552,14 +706,23 @@ async function applyPlan(input: {
     entityType: "CATALOG",
     reason: input.reason,
   });
+  return { archivedSkuCount, inventoryAdjustedSkuCount };
 }
 
-function previewForPlan(plan: RefreshPlan): CatalogFieldRefreshPreview {
+function previewForPlan(
+  plan: RefreshPlan,
+  applied: { archivedSkuCount: number; inventoryAdjustedSkuCount: number } = {
+    archivedSkuCount: 0,
+    inventoryAdjustedSkuCount: 0,
+  },
+): CatalogFieldRefreshPreview {
   return {
+    archivedSkuCount: applied.archivedSkuCount,
     cargoPricePlaceholders: [],
     createdProductCount: plan.createdProductCount,
     createdSkuCount: plan.createdSkuCount,
     degradedSkuCount: plan.degradedSkuCount,
+    inventoryAdjustedSkuCount: applied.inventoryAdjustedSkuCount,
     matchedSkuCount: plan.matchedSkuCount,
     productsToMerge: plan.productsToMerge,
     skuCount: plan.skuCount,
@@ -579,6 +742,7 @@ export function createCatalogFieldRefreshService(
     async preview(input: {
       cargoPricePlaceholders?: readonly CargoPricePlaceholder[];
       client: CatalogFieldRefreshReadPort;
+      mode?: CatalogFieldRefreshMode;
       sourceSheetId: string;
       sourceWikiToken: string;
       expectedSourceSequenceCount?: number;
@@ -591,6 +755,7 @@ export function createCatalogFieldRefreshService(
       actorUserId: string;
       cargoPricePlaceholders?: readonly CargoPricePlaceholder[];
       client: CatalogFieldRefreshReadPort;
+      mode?: CatalogFieldRefreshMode;
       reason: string;
       sourceSheetId: string;
       sourceWikiToken: string;
@@ -601,6 +766,7 @@ export function createCatalogFieldRefreshService(
       if (!reason) fail("OPERATOR_REASON_REQUIRED");
 
       const runId = randomUUID();
+      const mode = input.mode ?? "CATALOG_FIELDS_ONLY";
       await registerRefreshAttempt({
         actorUserId: input.actorUserId,
         database,
@@ -623,20 +789,24 @@ export function createCatalogFieldRefreshService(
           await lockCatalogRefresh(transaction);
           await assertLatestRefreshAttempt(transaction, runId);
           const plan = await buildRefreshPlan(transaction, verifiedSource);
+          if (mode === "MIGRATION_MIRROR") {
+            await lockAndAssertMigrationMirrorInventory(transaction);
+          }
           const assetBySkuCode = await publishSourceAssets({
             assetDir,
             database: transaction,
             staged,
           });
-          await applyPlan({
+          const applied = await applyPlan({
             actorUserId: input.actorUserId,
             assetBySkuCode,
             database: transaction,
+            mode,
             plan,
             reason,
             runId,
           });
-          return previewForPlan(plan);
+          return previewForPlan(plan, applied);
         });
       } finally {
         await storage.discardStagedAssets(staged.runId).catch(() => undefined);

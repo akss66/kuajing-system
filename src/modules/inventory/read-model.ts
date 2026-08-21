@@ -15,6 +15,7 @@ import {
 
 import { db } from "@/db/client";
 import {
+  auditLogs,
   authUsers,
   feishuCargoMigrationRuns,
   fulfillmentOrders,
@@ -146,13 +147,10 @@ function sourcePredicates() {
     inventoryMovements.reasonCode,
     "OFFLINE_FULFILLMENT",
   );
-  const stocktakeMatch = or(
-    isNotNull(inventoryMovements.stocktakeBatchId),
-    eq(inventoryMovements.reasonCode, "STOCKTAKE_CORRECTION"),
-  )!;
   const feishuMigrationMatch = or(
     eq(inventoryMovements.reasonCode, "FEISHU_INITIAL_IMPORT"),
     eq(inventoryMovements.referenceType, "FEISHU_CARGO_MIGRATION"),
+    eq(inventoryMovements.referenceType, "FEISHU_CATALOG_MIRROR"),
   )!;
   const systemReversalMatch = or(
     eq(inventoryMovements.reasonCode, "SHIPMENT_REVERSAL"),
@@ -160,10 +158,14 @@ function sourcePredicates() {
   )!;
   const notMatched = (predicate: SQL) =>
     sql`not coalesce(${predicate}, false)`;
-  const feishuMigration = and(
-    notMatched(stocktakeMatch),
-    feishuMigrationMatch,
+  const stocktakeMatch = and(
+    or(
+      isNotNull(inventoryMovements.stocktakeBatchId),
+      eq(inventoryMovements.reasonCode, "STOCKTAKE_CORRECTION"),
+    )!,
+    notMatched(feishuMigrationMatch),
   )!;
+  const feishuMigration = feishuMigrationMatch;
   const offlineFulfillment = and(
     notMatched(stocktakeMatch),
     notMatched(feishuMigrationMatch),
@@ -204,7 +206,11 @@ function reasonLabel(
   reasonCode: InventoryMovementReasonCode,
   fallbackReason: string,
   delta: number,
+  referenceType: string | null,
 ) {
+  if (referenceType === "FEISHU_CATALOG_MIRROR") {
+    return "飞书货盘镜像同步";
+  }
   switch (reasonCode) {
     case "RESTOCK_RECEIPT":
       return "补货入库";
@@ -238,16 +244,17 @@ function movementSource(row: {
   stocktakeBatchId: string | null;
 }): InventoryMovementSource {
   if (
+    row.reasonCode === "FEISHU_INITIAL_IMPORT" ||
+    row.referenceType === "FEISHU_CARGO_MIGRATION" ||
+    row.referenceType === "FEISHU_CATALOG_MIRROR"
+  ) {
+    return "FEISHU_MIGRATION";
+  }
+  if (
     row.stocktakeBatchId ||
     row.reasonCode === "STOCKTAKE_CORRECTION"
   ) {
     return "STOCKTAKE";
-  }
-  if (
-    row.reasonCode === "FEISHU_INITIAL_IMPORT" ||
-    row.referenceType === "FEISHU_CARGO_MIGRATION"
-  ) {
-    return "FEISHU_MIGRATION";
   }
   if (row.reasonCode === "OFFLINE_FULFILLMENT") {
     return "ADMIN_OFFLINE_FULFILLMENT";
@@ -322,10 +329,13 @@ async function relationMap(rows: readonly {
   const feishuRunIds = rows
     .filter((row) => row.referenceType === "FEISHU_CARGO_MIGRATION")
     .flatMap((row) => (row.referenceId ? [row.referenceId] : []));
+  const mirrorRunIds = rows
+    .filter((row) => row.referenceType === "FEISHU_CATALOG_MIRROR")
+    .flatMap((row) => (row.referenceId ? [row.referenceId] : []));
   const stocktakeBatchIds = rows.flatMap((row) =>
     row.stocktakeBatchId ? [row.stocktakeBatchId] : [],
   );
-  const [shipments, feishuRuns, stocktakeBatches] = await Promise.all([
+  const [shipments, feishuRuns, mirrorRuns, stocktakeBatches] = await Promise.all([
     shipmentIds.length
       ? db
           .select({
@@ -353,6 +363,15 @@ async function relationMap(rows: readonly {
           .select({ id: feishuCargoMigrationRuns.id })
           .from(feishuCargoMigrationRuns)
           .where(inArray(feishuCargoMigrationRuns.id, feishuRunIds))
+      : [],
+    mirrorRunIds.length
+      ? db
+          .select({ id: auditLogs.entityId })
+          .from(auditLogs)
+          .where(and(
+            eq(auditLogs.action, "CATALOG_FIELDS_REFRESH_STARTED_FROM_FEISHU"),
+            inArray(auditLogs.entityId, mirrorRunIds),
+          ))
       : [],
     stocktakeBatchIds.length
       ? db
@@ -386,6 +405,14 @@ async function relationMap(rows: readonly {
       href: "/admin/system/integrations",
       id: run.id,
       label: `飞书迁移 · ${run.id.slice(0, 8)}`,
+      type: "FEISHU_MIGRATION",
+    });
+  }
+  for (const run of mirrorRuns) {
+    relations.set(`FEISHU_CATALOG_MIRROR:${run.id}`, {
+      href: "/admin/system/integrations",
+      id: run.id,
+      label: `飞书同步 · ${run.id.slice(0, 8)}`,
       type: "FEISHU_MIGRATION",
     });
   }
@@ -511,7 +538,12 @@ export async function listInventoryMovements(
               (row.actorType === "ADMIN" ? "未知管理员" : "未知操作人"),
       },
       reasonCode: row.reasonCode,
-      reasonLabel: reasonLabel(row.reasonCode, row.reason, row.delta),
+      reasonLabel: reasonLabel(
+        row.reasonCode,
+        row.reason,
+        row.delta,
+        row.referenceType,
+      ),
       relation: resolvedRelation(row, relations),
       remark: row.remark,
       skuCode: row.skuCode,

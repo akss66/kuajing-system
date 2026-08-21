@@ -613,16 +613,12 @@ test.describe.serial("Feishu cargo migration", () => {
     expect(fakeServer.sourceWrites).toEqual([]);
     expect(fakeServer.targetWrites).toEqual([]);
 
-    const [inventoryBeforeRefresh] = await db
-      .select({ totalQuantity: inventoryBalances.totalQuantity })
-      .from(inventoryBalances)
-      .innerJoin(skus, eq(inventoryBalances.skuId, skus.id))
-      .where(eq(skus.skuCode, "TZX-034-1"));
     fakeServer.updateSourceCell(
       "TZX-034-1",
       "规格",
       "飞书一键同步后的新规格",
     );
+    fakeServer.updateSourceCell("TZX-034-1", "总库存", "9");
 
     await page.reload();
     drawer = await openFeishuDrawer(page);
@@ -630,7 +626,7 @@ test.describe.serial("Feishu cargo migration", () => {
       .getByRole("button", { name: "一键同步飞书货盘" })
       .click();
     await expect(
-      drawer.getByText(/飞书货盘同步完成：共 140 个 SKU；新增 0 个 SKU、0 个商品，更新 140 个 SKU/),
+      drawer.getByText(/飞书迁移镜像完成：共 140 个 SKU；新增 0 个 SKU、0 个商品，更新 140 个 SKU/),
     ).toBeVisible({ timeout: 90_000 });
 
     const [refreshedSku] = await db
@@ -643,7 +639,7 @@ test.describe.serial("Feishu cargo migration", () => {
       .where(eq(skus.skuCode, "TZX-034-1"));
     expect(refreshedSku).toEqual({
       specification: "飞书一键同步后的新规格",
-      totalQuantity: inventoryBeforeRefresh?.totalQuantity,
+      totalQuantity: 9,
     });
     expect(fakeServer.sourceWrites).toEqual([]);
     expect(fakeServer.targetWrites).toEqual([]);

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -24,6 +24,7 @@ import {
   parseLegacyCargoSheet,
 } from "@/modules/feishu/cargo-parser";
 import type { CargoPricePlaceholder } from "@/modules/feishu/cargo-types";
+import { listInventoryMovements } from "@/modules/inventory/read-model";
 import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field-aligned-cargo-source";
 
 const sourceWikiToken = "read-only-wiki-token";
@@ -105,6 +106,20 @@ function createValuesWithoutSku(skuCode: string) {
     throw new Error("FIELD_ALIGNED_REMOVE_SKU_FIXTURE_SETUP_FAILED");
   }
   values.splice(rowIndex, 1);
+  return values;
+}
+
+function createValuesWithQuantity(skuCode: string, quantity: string) {
+  const values = structuredClone(buildFieldAlignedCargoSourceFixture().value);
+  const skuIndex = values[0].indexOf("SKU");
+  const quantityIndex = values[0].indexOf("总库存");
+  const row = values.find(
+    (candidate, index) => index > 0 && candidate[skuIndex] === skuCode,
+  );
+  if (skuIndex < 0 || quantityIndex < 0 || !row) {
+    throw new Error("FIELD_ALIGNED_QUANTITY_FIXTURE_SETUP_FAILED");
+  }
+  row[quantityIndex] = quantity;
   return values;
 }
 
@@ -497,6 +512,195 @@ describe("catalog field refresh", () => {
       }),
     ).resolves.toMatchObject({ createdProductCount: 0, createdSkuCount: 0 });
     expect(await readInventoryFacts()).toEqual(inventoryAfterFirstApply);
+  });
+
+  test("migration mirror overwrites inventory, archives missing SKUs, and records every correction", async () => {
+    const { protectedSkuId } = await seedCatalog();
+    await db
+      .update(inventoryReservations)
+      .set({ status: "RELEASED" })
+      .where(eq(inventoryReservations.skuId, protectedSkuId));
+    const [missingSku] = await db
+      .select({ id: skus.id })
+      .from(skus)
+      .where(eq(skus.skuCode, "TZX-074-1"));
+    await db
+      .insert(inventoryBalances)
+      .values({ skuId: missingSku.id, totalQuantity: 5 });
+
+    const result = await createCatalogFieldRefreshService({
+      assetDir: assetRoot,
+    }).apply({
+      actorUserId: "refresh-actor",
+      client: createReadOnlyClient(
+        createValuesWithoutSku("TZX-074-1").map((row, index, values) => {
+          if (index === 0) return row;
+          const skuIndex = values[0].indexOf("SKU");
+          const quantityIndex = values[0].indexOf("总库存");
+          if (row[skuIndex] === "TZX-034-1") row[quantityIndex] = "999";
+          return row;
+        }),
+      ),
+      mode: "MIGRATION_MIRROR",
+      ...validInput,
+    });
+
+    expect(result).toMatchObject({
+      archivedSkuCount: 1,
+      inventoryAdjustedSkuCount: 138,
+    });
+    await expect(
+      db
+        .select({
+          lifecycleStatus: skus.lifecycleStatus,
+          saleStatus: skus.saleStatus,
+        })
+        .from(skus)
+        .where(eq(skus.id, missingSku.id)),
+    ).resolves.toEqual([
+      { lifecycleStatus: "ARCHIVED", saleStatus: "NOT_SELLABLE" },
+    ]);
+    await expect(
+      db
+        .select({
+          skuId: inventoryBalances.skuId,
+          totalQuantity: inventoryBalances.totalQuantity,
+        })
+        .from(inventoryBalances)
+        .where(inArray(inventoryBalances.skuId, [protectedSkuId, missingSku.id]))
+        .orderBy(asc(inventoryBalances.totalQuantity)),
+    ).resolves.toEqual([
+      { skuId: missingSku.id, totalQuantity: 0 },
+      { skuId: protectedSkuId, totalQuantity: 999 },
+    ]);
+    await expect(
+      db
+        .select({
+          delta: inventoryMovements.delta,
+          reasonCode: inventoryMovements.reasonCode,
+          skuId: inventoryMovements.skuId,
+        })
+        .from(inventoryMovements)
+        .where(
+          and(
+            eq(inventoryMovements.reasonCode, "STOCKTAKE_CORRECTION"),
+            inArray(inventoryMovements.skuId, [protectedSkuId, missingSku.id]),
+          ),
+        )
+        .orderBy(asc(inventoryMovements.delta)),
+    ).resolves.toEqual([
+      {
+        delta: -5,
+        reasonCode: "STOCKTAKE_CORRECTION",
+        skuId: missingSku.id,
+      },
+      {
+        delta: 992,
+        reasonCode: "STOCKTAKE_CORRECTION",
+        skuId: protectedSkuId,
+      },
+    ]);
+    await expect(
+      listInventoryMovements({
+        pageSize: 100,
+        skuCode: "TZX-034-1",
+        source: "FEISHU_MIGRATION",
+      }),
+    ).resolves.toMatchObject({
+      rows: [
+        expect.objectContaining({
+          reasonLabel: "飞书货盘镜像同步",
+          relation: expect.objectContaining({
+            href: "/admin/system/integrations",
+            type: "FEISHU_MIGRATION",
+          }),
+          source: "FEISHU_MIGRATION",
+        }),
+      ],
+    });
+  });
+
+  test("migration mirror rejects active reservations and rolls back catalog and inventory changes", async () => {
+    await seedCatalog();
+    const before = {
+      inventory: await readInventoryFacts(),
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    };
+
+    await expect(
+      createCatalogFieldRefreshService({ assetDir: assetRoot }).apply({
+        actorUserId: "refresh-actor",
+        client: createReadOnlyClient(
+          createValuesWithQuantity("TZX-034-1", "999"),
+        ),
+        mode: "MIGRATION_MIRROR",
+        ...validInput,
+      }),
+    ).rejects.toThrow("MIRROR_ACTIVE_RESERVATIONS");
+    expect({
+      inventory: await readInventoryFacts(),
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    }).toEqual(before);
+  });
+
+  test("migration mirror reactivates a source product and SKU that were previously disabled", async () => {
+    const { protectedSkuId } = await seedCatalog();
+    await db
+      .update(inventoryReservations)
+      .set({ status: "RELEASED" })
+      .where(eq(inventoryReservations.skuId, protectedSkuId));
+    await db
+      .update(skus)
+      .set({
+        archiveReason: "temporarily removed",
+        archivedAt: new Date("2026-08-20T00:00:00.000Z"),
+        archivedByAdminUserId: "old-admin",
+        lifecycleStatus: "ARCHIVED",
+        saleStatus: "NOT_SELLABLE",
+      })
+      .where(eq(skus.id, protectedSkuId));
+    const [protectedSku] = await db
+      .select({ productId: skus.productId })
+      .from(skus)
+      .where(eq(skus.id, protectedSkuId));
+    await db
+      .update(products)
+      .set({ status: "DISABLED" })
+      .where(eq(products.id, protectedSku.productId));
+
+    await createCatalogFieldRefreshService({ assetDir: assetRoot }).apply({
+      actorUserId: "refresh-actor",
+      client: createReadOnlyClient(),
+      mode: "MIGRATION_MIRROR",
+      ...validInput,
+    });
+
+    await expect(
+      db
+        .select({
+          archiveReason: skus.archiveReason,
+          archivedAt: skus.archivedAt,
+          archivedByAdminUserId: skus.archivedByAdminUserId,
+          lifecycleStatus: skus.lifecycleStatus,
+        })
+        .from(skus)
+        .where(eq(skus.id, protectedSkuId)),
+    ).resolves.toEqual([
+      {
+        archiveReason: null,
+        archivedAt: null,
+        archivedByAdminUserId: null,
+        lifecycleStatus: "ACTIVE",
+      },
+    ]);
+    await expect(
+      db
+        .select({ status: products.status })
+        .from(products)
+        .where(eq(products.id, protectedSku.productId)),
+    ).resolves.toEqual([{ status: "ACTIVE" }]);
   });
 
   test("re-resolves products and SKUs created concurrently without resetting their inventory", async () => {

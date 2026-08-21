@@ -9,6 +9,7 @@
 - 不配置目标 spreadsheet/sheet，不创建飞书镜像表。
 - `compose.production.yaml` 必须把 `FEISHU_CARGO_WRITES_ENABLED` 硬编码为 `false`，环境文件不能覆盖。
 - `FEISHU_CARGO_IMPORT_ENABLED` 只控制“已确认的预检快照写入 PostgreSQL”，不控制飞书远程写入。
+- `FEISHU_CATALOG_MIRROR_ENABLED` 只用于正式业务切换前的临时全量镜像。为 `true` 时，超级管理员可把飞书商品、SKU 和库存覆盖到系统；正式业务开始前必须改回 `false`。
 - 只有超级管理员可以执行只读预检和数据库回填确认。
 - 没有新鲜的 `PREFLIGHT_READY` 结果、数据库备份或数量核验时，禁止打开数据库导入开关。
 
@@ -35,6 +36,7 @@ FEISHU_APP_SECRET=
 FEISHU_CARGO_SOURCE_WIKI_TOKEN=
 FEISHU_CARGO_SOURCE_SHEET_ID=
 FEISHU_CARGO_IMPORT_ENABLED=false
+FEISHU_CATALOG_MIRROR_ENABLED=false
 FEISHU_CARGO_WRITES_ENABLED=false
 FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN=
 FEISHU_CARGO_TARGET_SHEET_ID=
