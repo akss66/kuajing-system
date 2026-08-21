@@ -261,7 +261,7 @@ describe("playwright.config database isolation", () => {
       terminateOrder: ["normal", "jifeng"],
     });
     expect(plan.cleanup.root.replaceAll("\\", "/")).toMatch(
-      /\/\.next\/e2e-apps\/jifeng-e2e-dry-run$/,
+      /\/\.e2e-apps\/jifeng-e2e-dry-run$/,
     );
     expect(plan.processes).toMatchObject([
       {
@@ -289,7 +289,7 @@ describe("playwright.config database isolation", () => {
     expect(new Set(plan.processes.map(({ workspaceDistDir }) => workspaceDistDir)).size).toBe(2);
     for (const processPlan of plan.processes) {
       expect(processPlan.workspaceCwd.replaceAll("\\", "/")).toContain(
-        `/.next/e2e-apps/jifeng-e2e-dry-run/${processPlan.workspace}`,
+        `/.e2e-apps/jifeng-e2e-dry-run/${processPlan.workspace}`,
       );
       expect(processPlan.workspaceDistDir.replaceAll("\\", "/")).toBe(
         `${processPlan.workspaceCwd.replaceAll("\\", "/")}/.next`,

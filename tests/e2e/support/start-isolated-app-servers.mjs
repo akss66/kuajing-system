@@ -52,6 +52,7 @@ const EXCLUDED_WORKSPACE_INPUTS = [
   "user data",
 ];
 const CLEANUP_SIGNALS = ["SIGINT", "SIGTERM"];
+const RUNS_ROOT_DIRECTORY = ".e2e-apps";
 const RUN_DIRECTORY_PREFIX = "jifeng-e2e-";
 const RUN_MARKER_NAME = ".jifeng-e2e-run.json";
 const RUN_MARKER_OWNER = "start-isolated-app-servers";
@@ -105,12 +106,14 @@ function assertPathWithinProject(projectRoot, target, label) {
 function assertRunRoot(projectRoot, runRoot) {
   const e2eAppsRoot = assertPathWithinProject(
     projectRoot,
-    join(projectRoot, ".next", "e2e-apps"),
+    join(projectRoot, RUNS_ROOT_DIRECTORY),
     "E2E apps root",
   );
   const resolvedRunRoot = assertPathWithinProject(projectRoot, runRoot, "E2E run root");
   if (dirname(resolvedRunRoot) !== e2eAppsRoot || !/^[a-zA-Z0-9-]+$/.test(basename(resolvedRunRoot))) {
-    throw new Error("E2E run root must be one exact run-id directory under .next/e2e-apps");
+    throw new Error(
+      `E2E run root must be one exact run-id directory under ${RUNS_ROOT_DIRECTORY}`,
+    );
   }
   return resolvedRunRoot;
 }
@@ -163,7 +166,7 @@ function removeOwnedRunRoot(projectRoot, runRoot, options = {}) {
 }
 
 function cleanupStaleRunRoots(projectRoot) {
-  const appsRoot = join(projectRoot, ".next", "e2e-apps");
+  const appsRoot = join(projectRoot, RUNS_ROOT_DIRECTORY);
   if (!existsSync(appsRoot)) return;
   for (const entry of readdirSync(appsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.startsWith(RUN_DIRECTORY_PREFIX)) continue;
@@ -206,7 +209,7 @@ function createPlan(arguments_, sourceEnvironment, projectRoot) {
     : `${RUN_DIRECTORY_PREFIX}${process.pid}-${randomUUID()}`;
   const runRoot = assertRunRoot(
     projectRoot,
-    join(projectRoot, ".next", "e2e-apps", runId),
+    join(projectRoot, RUNS_ROOT_DIRECTORY, runId),
   );
   const jifengWorkspace = join(runRoot, "jifeng");
   const normalWorkspace = join(runRoot, "normal");
@@ -394,7 +397,7 @@ async function main() {
     if (!runName) throw new Error("--cleanup-owned-run requires an exact run directory name");
     const removed = removeOwnedRunRoot(
       projectRoot,
-      join(projectRoot, ".next", "e2e-apps", runName),
+      join(projectRoot, RUNS_ROOT_DIRECTORY, runName),
       { allowLegacy: true },
     );
     if (!removed) throw new Error(`Owned E2E run is still live: ${runName}`);

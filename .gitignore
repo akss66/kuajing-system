@@ -5,6 +5,7 @@
 !.env.example
 node_modules/
 .next/
+.e2e-apps/
 coverage/
 playwright-report/
 test-results/
