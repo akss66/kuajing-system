@@ -4,6 +4,12 @@ function assertInteger(value: number, message: string) {
   if (!Number.isSafeInteger(value)) throw new Error(message);
 }
 
+function safeBigIntToNumber(value: bigint, message: string) {
+  const result = Number(value);
+  assertInteger(result, message);
+  return result;
+}
+
 export function allocateWalletFen(
   orders: readonly AllocationOrder[],
   requestedFen: number,
@@ -37,11 +43,14 @@ export function allocateWalletFen(
       }));
   }
 
+  const walletTotalBigInt = BigInt(walletTotalFen);
+  const totalAmountBigInt = BigInt(totalAmountFen);
   const allocations = orders.map((order) => ({
     orderId: order.orderId,
     totalAmountFen: order.totalAmountFen,
-    walletFen: Math.floor(
-      (walletTotalFen * order.totalAmountFen) / totalAmountFen,
+    walletFen: safeBigIntToNumber(
+      (walletTotalBigInt * BigInt(order.totalAmountFen)) / totalAmountBigInt,
+      "余额分摊金额超过安全范围",
     ),
   }));
   let remainderFen =

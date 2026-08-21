@@ -2017,6 +2017,81 @@ describe("unified offline settlement lifecycle", () => {
     ).toEqual([]);
   });
 
+  test("admin rejection closes a reported batch after one order was cancelled externally", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    await adjustWalletBalance({
+      actorUserId: "wallet-admin",
+      customerId: fixture.customer.id,
+      deltaFen: 200,
+      reason: "外部取消后拒绝测试",
+    });
+    const result = await submitFixture(fixture, 200);
+    await reportSettlementPayment({
+      actorUserId: "customer-auth",
+      amountFen: 200,
+      customerId: fixture.customer.id,
+      settlementBatchId: result.settlementBatchId!,
+    });
+    const admin = await createSettlementAdmin();
+    const [cancelledAllocation] = await db
+      .select({ orderId: settlementBatchOrders.orderId })
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!))
+      .orderBy(asc(settlementBatchOrders.orderId))
+      .limit(1);
+    await db
+      .update(fulfillmentOrders)
+      .set({
+        cancelReason: "极风状态 9 确认取消",
+        cancellationState: "ALL",
+        cancelledAt: new Date(),
+        status: "CANCELLED",
+      })
+      .where(eq(fulfillmentOrders.id, cancelledAllocation.orderId));
+
+    const rejection = {
+      adminUserId: admin.id,
+      decision: "REJECT" as const,
+      rejectionReason: "极风已取消其中一单，关闭未到账付款声明",
+      settlementBatchId: result.settlementBatchId!,
+    };
+    await expect(reviewSettlementPayment(rejection)).resolves.toBeUndefined();
+    await expect(reviewSettlementPayment(rejection)).resolves.toBeUndefined();
+
+    const [batch] = await db
+      .select()
+      .from(settlementBatches)
+      .where(eq(settlementBatches.id, result.settlementBatchId!));
+    expect(batch).toMatchObject({
+      status: "REJECTED",
+      statusReason: rejection.rejectionReason,
+    });
+    const [claim] = await db
+      .select()
+      .from(settlementPaymentClaims)
+      .where(eq(settlementPaymentClaims.settlementBatchId, result.settlementBatchId!));
+    expect(claim).toMatchObject({
+      rejectionReason: rejection.rejectionReason,
+      status: "REJECTED",
+    });
+    const [hold] = await db
+      .select()
+      .from(walletHolds)
+      .where(eq(walletHolds.settlementBatchId, result.settlementBatchId!));
+    expect(hold).toMatchObject({ status: "RELEASED" });
+    const orders = await db
+      .select({ status: fulfillmentOrders.status })
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.customerId, fixture.customer.id));
+    expect(orders).toEqual([{ status: "CANCELLED" }, { status: "CANCELLED" }]);
+    expect(
+      await db
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.transactionType, "ORDER_DEBIT")),
+    ).toEqual([]);
+  });
+
   test("customer withdrawal is ownership-scoped, terminal and idempotent", async () => {
     const fixture = await createSubmissionFixture([400]);
     await adjustWalletBalance({

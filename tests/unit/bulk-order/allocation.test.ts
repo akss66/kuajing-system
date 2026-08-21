@@ -41,6 +41,29 @@ describe("allocateWalletFen", () => {
     ).toEqual([{ offlineFen: 0, orderId: "a", walletFen: 500 }]);
   });
 
+  it("金额乘积超过安全整数范围时仍按整数比例精确分摊", () => {
+    expect(
+      allocateWalletFen(
+        [
+          { orderId: "a", totalAmountFen: 523_944_800 },
+          { orderId: "b", totalAmountFen: 877_650_354 },
+        ],
+        1_193_474_773,
+      ),
+    ).toEqual([
+      {
+        offlineFen: 77_799_636,
+        orderId: "a",
+        walletFen: 446_145_164,
+      },
+      {
+        offlineFen: 130_320_745,
+        orderId: "b",
+        walletFen: 747_329_609,
+      },
+    ]);
+  });
+
   it("拒绝负金额、重复订单 ID 和空订单上的非零抵扣", () => {
     expect(() =>
       allocateWalletFen([{ orderId: "a", totalAmountFen: 1 }], -1),

@@ -838,8 +838,6 @@ export async function reviewSettlementPayment(input: {
     if (claim.amountFen !== batch.offlineAmountFen) {
       throw new SettlementBatchError("PAYMENT_AMOUNT_MISMATCH", "付款声明金额与线下待付金额不一致");
     }
-    await assertAllOrdersPending(tx, input.settlementBatchId);
-
     if (input.decision === "REJECT") {
       await tx
         .update(settlementPaymentClaims)
@@ -864,6 +862,7 @@ export async function reviewSettlementPayment(input: {
       return;
     }
 
+    await assertAllOrdersPending(tx, input.settlementBatchId);
     if (batch.walletAmountFen > 0) {
       try {
         await consumeWalletHold(tx, {
