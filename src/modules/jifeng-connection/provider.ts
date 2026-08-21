@@ -11,9 +11,9 @@ import {
 import type { JifengCredentials } from "@/integrations/jifeng/types";
 import {
   enqueuePaidOrdersForFulfillment,
-  processDueJifengCreateOrderEvents,
   type DispatchConfig,
 } from "@/modules/fulfillment/dispatch";
+import { processDueJifengExistingOrderMatches } from "@/modules/fulfillment/order-matching";
 import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
 
 import {
@@ -175,6 +175,26 @@ export async function getJifengReadClient(): Promise<JifengReadRuntime> {
     : readLegacyReadRuntime();
 }
 
+export async function getEnabledJifengLookupClient(): Promise<JifengReadRuntime> {
+  const stored = await readStoredRuntimeSource({
+    requireFulfillmentEnabled: true,
+  });
+  if (stored) {
+    return buildReadRuntime(stored.credentials, stored.onAuthenticationRejected);
+  }
+  if (process.env.JIFENG_LEGACY_FULFILLMENT_ENABLED !== "true") {
+    providerError(
+      "LEGACY_FULFILLMENT_DISABLED",
+      "Legacy Jifeng fulfillment is disabled",
+    );
+  }
+  return readLegacyReadRuntime();
+}
+
+export async function getEnabledJifengCancellationClient(): Promise<JifengReadRuntime> {
+  return getEnabledJifengLookupClient();
+}
+
 export async function getEnabledJifengWriteClient(): Promise<JifengWriteRuntime> {
   const stored = await readStoredRuntimeSource({
     requireFulfillmentEnabled: true,
@@ -214,9 +234,9 @@ async function pollWithReadClient() {
 }
 
 export async function runJifengFulfillmentCycle(): Promise<JifengCycleSummary> {
-  let runtime: JifengWriteRuntime;
+  let runtime: JifengReadRuntime;
   try {
-    runtime = await getEnabledJifengWriteClient();
+    runtime = await getEnabledJifengLookupClient();
   } catch (error) {
     if (!isUnavailableConnection(error)) throw error;
     return {
@@ -228,7 +248,7 @@ export async function runJifengFulfillmentCycle(): Promise<JifengCycleSummary> {
   }
 
   const enqueuedCount = await enqueuePaidOrdersForFulfillment();
-  const processed = await processDueJifengCreateOrderEvents(runtime);
+  const processed = await processDueJifengExistingOrderMatches(runtime);
   const statuses = await pollActiveJifengFulfillments({ client: runtime.client });
   return { enabled: true, enqueuedCount, processed, statuses };
 }

@@ -104,6 +104,7 @@ export type JifengOrderDetail = {
   errorMsg?: string;
   logisticsFee?: number;
   orderNo?: string;
+  platformOrderNo?: string;
   shippedTime?: string;
   status: number;
   trackingNo?: string;

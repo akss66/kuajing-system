@@ -6,6 +6,8 @@ import { adminUsers, auditLogs, jifengConnections } from "@/db/schema";
 import { JifengClient } from "@/integrations/jifeng/client";
 import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
 import {
+  getEnabledJifengCancellationClient,
+  getEnabledJifengLookupClient,
   getEnabledJifengWriteClient,
   getJifengReadClient,
 } from "@/modules/jifeng-connection/provider";
@@ -177,7 +179,7 @@ describe("Jifeng runtime credential provider", () => {
     expect(businessHeaders.get("userId")).toBe("refreshed-database-user");
   });
 
-  test("persists a managed write authentication rejection and never refreshes or replays", async () => {
+  test("persists a managed cancellation authentication rejection and never refreshes or replays", async () => {
     await insertConnection("ENABLED");
     const [before] = await db.select().from(jifengConnections);
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
@@ -191,22 +193,11 @@ describe("Jifeng runtime credential provider", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const runtime = await getEnabledJifengWriteClient();
+    const runtime = await getEnabledJifengCancellationClient();
     await expect(
-      runtime.client.createOrder({
-        buyerName: "Managed Buyer",
-        buyerPhone: "+1-416-555-0100",
+      runtime.client.cancelOrder({
+        deleteRecord: false,
         erpNo: "PROVIDER-MANAGED-AUTH",
-        packageType: 3,
-        platform: "other",
-        recipientAddress: "1 Test Street",
-        recipientCity: "Toronto",
-        recipientCountry: "CA",
-        recipientProvince: "ON",
-        skuList: [{ num: 1, sku: "MANAGED-SKU" }],
-        type: 1,
-        warehouse: "DB-WAREHOUSE",
-        zipCode: "M5V 2T6",
       }),
     ).rejects.toMatchObject({
       code: "REFRESH_REQUIRED",
@@ -215,7 +206,7 @@ describe("Jifeng runtime credential provider", () => {
     });
 
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
-      "/api/order/create",
+      "/api/order/cancel",
     ]);
     const [after] = await db.select().from(jifengConnections);
     expect(after).toMatchObject({
@@ -246,6 +237,40 @@ describe("Jifeng runtime credential provider", () => {
     await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
       code: "FULFILLMENT_DISABLED",
     });
+  });
+
+  test("allows enabled existing-order lookup without warehouse or logistics configuration", async () => {
+    await insertConnection("ENABLED", {
+      logisticsId: null,
+      warehouseCode: null,
+    });
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >(async () =>
+      Response.json({
+        code: 0,
+        data: {
+          erpNo: "REMOTE-ERP-LOOKUP",
+          orderNo: "JF-ORDER-LOOKUP",
+          platformOrderNo: "TEMU-ORDER-LOOKUP",
+          status: 2,
+        },
+        message: "SUCCESS",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = await getEnabledJifengLookupClient();
+    await expect(
+      runtime.client.getOrder({ platformOrderNo: "TEMU-ORDER-LOOKUP" }),
+    ).resolves.toMatchObject({
+      erpNo: "REMOTE-ERP-LOOKUP",
+      platformOrderNo: "TEMU-ORDER-LOOKUP",
+    });
+    expect(runtime).not.toHaveProperty("config");
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      "/api/order/get",
+    );
   });
 
   test("allows stored credentials for read-only reconciliation while fulfillment is disabled", async () => {

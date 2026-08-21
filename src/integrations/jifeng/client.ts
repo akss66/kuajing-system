@@ -55,6 +55,7 @@ const orderDetailSchema = z.object({
   errorMsg: nullableOptionalString,
   logisticsFee: nullableOptionalNonnegativeNumber,
   orderNo: nullableOptionalString,
+  platformOrderNo: nullableOptionalString,
   shippedTime: nullableOptionalString,
   status: z.coerce.number().int().min(1).max(11),
   trackingNo: nullableOptionalString,
@@ -126,9 +127,13 @@ export class JifengClient {
     this.timeoutMs = input.timeoutMs ?? 10_000;
   }
 
-  async createOrder(input: JifengCreateOrderInput) {
-    const response = await this.businessPost("/api/order/create", input);
-    return { data: response.data, requestId: response.requestId };
+  async createOrder(_input: JifengCreateOrderInput): Promise<never> {
+    void _input;
+    throw new JifengApiError({
+      code: "CREATE_DISABLED",
+      message: "系统已禁用创建极风订单，只允许匹配极风已有订单",
+      retryable: false,
+    });
   }
 
   async getOrder(input: {

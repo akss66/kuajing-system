@@ -417,24 +417,23 @@ describe("Jifeng API client", () => {
     expect(error).toMatchObject({ code: String(code), retryable });
   });
 
-  test("shows a safe actionable message for insufficient Jifeng warehouse stock", async () => {
+  test("refuses to call the Jifeng create endpoint after existing-order matching is enabled", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ code: 0, data: null }),
+    );
     const client = new JifengClient({
       credentials,
-      fetch: async () =>
-        Response.json({
-          code: 50026,
-          data: null,
-          message: "The inventory of SKU is insufficient",
-        }),
+      fetch: fetchMock,
     });
 
     await expect(
       client.createOrder({} as JifengCreateOrderInput),
     ).rejects.toMatchObject({
-      code: "50026",
-      message: "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存",
+      code: "CREATE_DISABLED",
+      message: "系统已禁用创建极风订单，只允许匹配极风已有订单",
       retryable: false,
     });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test.each([50018, 50060])(
@@ -457,4 +456,46 @@ describe("Jifeng API client", () => {
       );
     },
   );
+
+  test("queries Jifeng order by platform order number and submits platformOrderNo in request body", async () => {
+    const fetchMock = vi.fn<
+      (url: RequestInfo | URL, request?: RequestInit) => Promise<Response>
+    >(async () =>
+      Response.json({
+        code: 0,
+        data: {
+          currency: "CAD",
+          erpNo: "TZX-PLAT-001",
+          logisticsFee: 5.2,
+          orderNo: "TEMU-PLAT-001",
+          platformOrderNo: "TEMU-PLAT-001",
+          status: 6,
+          trackingNo: "T001PLAT",
+        },
+        message: "SUCCESS",
+        requestId: "platform-query",
+      }),
+    );
+    const client = new JifengClient({
+      credentials,
+      fetch: fetchMock,
+      nonce: () => "platform-query",
+      now: () => 1_692_889_556_000,
+    });
+
+    await expect(
+      client.getOrder({ platformOrderNo: "TEMU-PLAT-001" } as { platformOrderNo: string }),
+    ).resolves.toMatchObject({
+      erpNo: "TZX-PLAT-001",
+      orderNo: "TEMU-PLAT-001",
+      platformOrderNo: "TEMU-PLAT-001",
+      status: 6,
+    });
+
+    const [url, request] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://test.jfwms.com/api/order/get");
+    expect(JSON.parse(String(request?.body))).toEqual({
+      platformOrderNo: "TEMU-PLAT-001",
+    });
+  });
 });

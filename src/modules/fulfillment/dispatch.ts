@@ -1195,8 +1195,8 @@ export async function retryJifengShipment(input: {
     const event = eventRows[0];
     if (!event) {
       throw new JifengDispatchError(
-        "CREATE_EVENT_NOT_FOUND",
-        "未找到极风创建任务",
+        "MATCH_EVENT_NOT_FOUND",
+        "未找到极风已有订单匹配任务",
       );
     }
     if (
