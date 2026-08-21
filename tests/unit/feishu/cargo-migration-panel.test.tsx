@@ -68,7 +68,10 @@ function createProps(
     actorKind: "SUPER_ADMIN",
     cargoImportEnabled: true,
     createCargoPreflightAction: idleAction,
-    hasImportedCargoBaseline: true,
+    importedCargoBaseline: {
+      importedAtLabel: "2026/08/13 14:12",
+      updatedAtLabel: "2026/08/13 14:12",
+    },
     latestMigrationRun: {
       blockingIssueCount: 0,
       createdAtLabel: "2026/08/13 14:10",
@@ -155,7 +158,18 @@ describe("CargoMigrationPanel", () => {
   });
 
   it("offers super admins a one-click read-only source sync after an imported baseline exists", () => {
-    render(<CargoMigrationPanel {...createProps()} />);
+    const props = createProps();
+    render(
+      <CargoMigrationPanel
+        {...props}
+        latestMigrationRun={{
+          ...props.latestMigrationRun!,
+          importedAtLabel: "2026/08/13 14:12",
+          status: "IMPORTED",
+          statusLabel: "已导入",
+        }}
+      />,
+    );
 
     expect(
       screen.getByRole("button", { name: "一键同步飞书货盘" }),
@@ -167,6 +181,10 @@ describe("CargoMigrationPanel", () => {
     expect(screen.getByText(/不会自动删除系统中的历史 SKU/)).toBeVisible();
     expect(screen.getByText(/不会写入飞书/)).toBeVisible();
     expect(screen.getByText("最近同步：2026/08/20 15:30")).toBeVisible();
+    expect(screen.getByText("首批导入时间：2026/08/13 14:12")).toBeVisible();
+    expect(
+      screen.getByText("首批迁移记录更新：2026/08/13 14:12"),
+    ).toBeVisible();
     expect(document.querySelector('[aria-live="polite"]')).not.toBeNull();
   });
 
@@ -174,7 +192,7 @@ describe("CargoMigrationPanel", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
-          hasImportedCargoBaseline: false,
+          importedCargoBaseline: null,
           latestCatalogRefreshLabel: null,
         })}
       />,
@@ -182,6 +200,32 @@ describe("CargoMigrationPanel", () => {
 
     expect(
       screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps first-import controls closed when a newer preflight exists after import", () => {
+    const props = createProps();
+    render(
+      <CargoMigrationPanel
+        {...props}
+        latestCatalogRefreshLabel="2026/08/21 10:24"
+        latestMigrationRun={{
+          ...props.latestMigrationRun!,
+          updatedAtLabel: "2026/08/20 16:00",
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "开始只读预检" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("首批导入时间：2026/08/13 14:12")).toBeVisible();
+    expect(
+      screen.getByText("首批迁移记录更新：2026/08/13 14:12"),
+    ).toBeVisible();
+    expect(screen.getByText("最近同步：2026/08/21 10:24")).toBeVisible();
+    expect(
+      screen.queryByText("首批迁移记录更新：2026/08/20 16:00"),
     ).not.toBeInTheDocument();
   });
 
@@ -226,6 +270,7 @@ describe("CargoMigrationPanel", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
+          importedCargoBaseline: null,
           latestMigrationRun: null,
           sourceSheetOptions: [
             { index: 0, sheetId: "sheet-source-a", title: "货盘 A" },
@@ -254,6 +299,7 @@ describe("CargoMigrationPanel", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
+          importedCargoBaseline: null,
           latestMigrationRun: null,
           sourceSheetOptions: [
             { index: 0, sheetId: "sheet-source-a", title: "货盘 A" },
@@ -330,7 +376,11 @@ describe("CargoMigrationPanel", () => {
   });
 
   it("unlocks confirmation only after the exact phrase is entered", async () => {
-    render(<CargoMigrationPanel {...createProps()} />);
+    render(
+      <CargoMigrationPanel
+        {...createProps({ importedCargoBaseline: null })}
+      />,
+    );
 
     expect(screen.getAllByText("探险杯套装").length).toBeGreaterThan(0);
     expect(screen.queryByText("file-token-SKU-001")).not.toBeInTheDocument();
@@ -365,6 +415,7 @@ describe("CargoMigrationPanel", () => {
         {...createProps({
           cargoImportEnabled: false,
           cargoWritesEnabled: false,
+          importedCargoBaseline: null,
           selectedSourceSheetId: "sheet-source-a",
           targetConfigured: true,
         })}

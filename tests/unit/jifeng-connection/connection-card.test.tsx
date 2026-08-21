@@ -29,7 +29,12 @@ const pageMocks = vi.hoisted(() => {
   recentQuery.orderBy = vi.fn(() => recentQuery);
   recentQuery.limit = vi.fn().mockResolvedValue([]);
   return {
+    discoverFeishuSourceSheets: vi.fn(),
+    findLatestImportedCargoRefreshBaseline: vi.fn(),
     getAdminView: vi.fn(),
+    getLatestCatalogFieldRefreshState: vi.fn(),
+    getLatestCargoMigrationRun: vi.fn(),
+    getLatestCargoTargetSyncState: vi.fn(),
     getPublicStatus: vi.fn(),
     inspectConfiguration: vi.fn(),
     recentQuery,
@@ -87,21 +92,15 @@ vi.mock("@/modules/feishu/actions", () => ({
   testFeishuConnectionAction: vi.fn(),
 }));
 vi.mock("@/modules/feishu/queries", () => ({
-  findLatestImportedCargoRefreshBaseline: vi.fn().mockResolvedValue(null),
-  getLatestCatalogFieldRefreshState: vi
-    .fn()
-    .mockResolvedValue({ lastUpdatedLabel: null }),
-  getLatestCargoMigrationRun: vi.fn().mockResolvedValue(null),
-  getLatestCargoTargetSyncState: vi.fn().mockResolvedValue({
-    canRetry: false,
-    imageCount: null,
-    lastErrorMessage: null,
-    lastUpdatedLabel: null,
-    rowCount: null,
-    statusLabel: "等待配置",
-    targetSheetId: null,
-    tone: "default",
-  }),
+  findLatestImportedCargoRefreshBaseline:
+    pageMocks.findLatestImportedCargoRefreshBaseline,
+  getLatestCatalogFieldRefreshState:
+    pageMocks.getLatestCatalogFieldRefreshState,
+  getLatestCargoMigrationRun: pageMocks.getLatestCargoMigrationRun,
+  getLatestCargoTargetSyncState: pageMocks.getLatestCargoTargetSyncState,
+}));
+vi.mock("@/modules/feishu/source-reader", () => ({
+  discoverFeishuSourceSheets: pageMocks.discoverFeishuSourceSheets,
 }));
 
 import { JifengConnectionCard } from "@/components/integrations/jifeng-connection-card";
@@ -385,14 +384,44 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     pageMocks.getAdminView.mockReset();
     pageMocks.getPublicStatus.mockReset();
     pageMocks.inspectConfiguration.mockReset();
+    pageMocks.discoverFeishuSourceSheets.mockReset();
+    pageMocks.findLatestImportedCargoRefreshBaseline.mockReset();
+    pageMocks.getLatestCatalogFieldRefreshState.mockReset();
+    pageMocks.getLatestCargoMigrationRun.mockReset();
+    pageMocks.getLatestCargoTargetSyncState.mockReset();
     pageMocks.recentQuery.limit.mockClear();
     pageMocks.inspectConfiguration.mockReturnValue({
       developer: { configured: true, invalidFields: [], missingFields: [] },
       level: "DEVELOPER_ONLY",
     });
+    pageMocks.discoverFeishuSourceSheets.mockResolvedValue({
+      message: "已读取源工作表",
+      sheetOptions: [
+        { index: 0, sheetId: "source-sheet-a", title: "货盘" },
+      ],
+      status: "READY",
+    });
+    pageMocks.findLatestImportedCargoRefreshBaseline.mockResolvedValue(null);
+    pageMocks.getLatestCatalogFieldRefreshState.mockResolvedValue({
+      lastUpdatedLabel: null,
+    });
+    pageMocks.getLatestCargoMigrationRun.mockResolvedValue(null);
+    pageMocks.getLatestCargoTargetSyncState.mockResolvedValue({
+      canRetry: false,
+      imageCount: null,
+      lastErrorMessage: null,
+      lastUpdatedLabel: null,
+      rowCount: null,
+      statusLabel: "等待配置",
+      targetSheetId: null,
+      tone: "default",
+    });
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
 
   it("loads the redacted admin projection and controls for a super admin", async () => {
     pageMocks.requireAdmin.mockResolvedValue({
@@ -446,5 +475,43 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     expect(screen.getByText("只读状态")).toBeVisible();
     expect(screen.queryByRole("button", { name: "停用自动履约" })).not.toBeInTheDocument();
     expect(screen.queryByText("de***76")).not.toBeInTheDocument();
+  });
+
+  it("does not rediscover Feishu source sheets after the imported baseline exists", async () => {
+    vi.stubEnv("FEISHU_APP_ID", "app-id");
+    vi.stubEnv("FEISHU_APP_SECRET", "app-secret");
+    vi.stubEnv("FEISHU_CARGO_SOURCE_WIKI_TOKEN", "wiki-token");
+    pageMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-user",
+    });
+    pageMocks.getAdminView.mockResolvedValue(connection("READY_DISABLED"));
+    pageMocks.findLatestImportedCargoRefreshBaseline.mockResolvedValue({
+      cargoPricePlaceholders: [],
+      expectedSkuCount: 147,
+      expectedSourceSequenceCount: 83,
+      importedAtLabel: "2026/08/14 06:43",
+      sourceSheetId: "source-sheet-a",
+      updatedAtLabel: "2026/08/14 06:43",
+    });
+
+    render(await IntegrationsPage());
+
+    expect(pageMocks.discoverFeishuSourceSheets).not.toHaveBeenCalled();
+  });
+
+  it("still discovers Feishu source sheets before the imported baseline exists", async () => {
+    vi.stubEnv("FEISHU_APP_ID", "app-id");
+    vi.stubEnv("FEISHU_APP_SECRET", "app-secret");
+    vi.stubEnv("FEISHU_CARGO_SOURCE_WIKI_TOKEN", "wiki-token");
+    pageMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-user",
+    });
+    pageMocks.getAdminView.mockResolvedValue(connection("READY_DISABLED"));
+
+    render(await IntegrationsPage());
+
+    expect(pageMocks.discoverFeishuSourceSheets).toHaveBeenCalledOnce();
   });
 });

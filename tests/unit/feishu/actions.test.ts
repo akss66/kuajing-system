@@ -149,7 +149,9 @@ describe("feishu admin actions", () => {
       ],
       expectedSkuCount: 140,
       expectedSourceSequenceCount: 74,
+      importedAtLabel: "2026/08/14 06:43",
       sourceSheetId: "sheet-source-a",
+      updatedAtLabel: "2026/08/14 06:43",
     });
     queryMocks.findCargoMigrationRunConfirmationSummary.mockResolvedValue({
       blockingIssueCount: 0,

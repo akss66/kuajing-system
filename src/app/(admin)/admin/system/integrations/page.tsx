@@ -80,8 +80,13 @@ function safeErrorLabel(errorCode: string | null) {
 async function loadSourceSheetDiscovery(
   principalKind: "ADMIN" | "SUPER_ADMIN",
   feishuConfigured: boolean,
+  hasImportedCargoBaseline: boolean,
 ) {
-  if (principalKind !== "SUPER_ADMIN" || !feishuConfigured) {
+  if (
+    principalKind !== "SUPER_ADMIN" ||
+    !feishuConfigured ||
+    hasImportedCargoBaseline
+  ) {
     return {
       message: null,
       status: "idle" as const,
@@ -117,6 +122,9 @@ export default async function IntegrationsPage() {
   ]);
   const feishuConfig = feishuConfigured ? readFeishuConfig() : null;
   const jifengConfiguration = inspectJifengConfiguration();
+  const catalogRefreshBaselinePromise = canManageJifeng
+    ? findLatestImportedCargoRefreshBaseline()
+    : Promise.resolve(null);
 
   const [
     connection,
@@ -144,11 +152,15 @@ export default async function IntegrationsPage() {
         .orderBy(desc(integrationOutbox.updatedAt))
         .limit(10),
       getLatestCargoMigrationRun(),
-      loadSourceSheetDiscovery(principal.kind, feishuConfigured),
+      catalogRefreshBaselinePromise.then((baseline) =>
+        loadSourceSheetDiscovery(
+          principal.kind,
+          feishuConfigured,
+          Boolean(baseline),
+        ),
+      ),
       getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
-      canManageJifeng
-        ? findLatestImportedCargoRefreshBaseline()
-        : Promise.resolve(null),
+      catalogRefreshBaselinePromise,
       canManageJifeng
         ? getLatestCatalogFieldRefreshState()
         : Promise.resolve({ lastUpdatedLabel: null }),
@@ -279,7 +291,16 @@ export default async function IntegrationsPage() {
                   cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}
-                  hasImportedCargoBaseline={Boolean(catalogRefreshBaseline)}
+                  importedCargoBaseline={
+                    catalogRefreshBaseline
+                      ? {
+                          importedAtLabel:
+                            catalogRefreshBaseline.importedAtLabel,
+                          updatedAtLabel:
+                            catalogRefreshBaseline.updatedAtLabel,
+                        }
+                      : null
+                  }
                   latestMigrationRun={latestMigrationRun}
                   latestCatalogRefreshLabel={catalogRefreshState.lastUpdatedLabel}
                   readOnlyConnectionMessage="源货盘连接验证全程只读，系统不会向原业务表写入。"

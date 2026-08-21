@@ -60,6 +60,7 @@ async function seedImportedRun() {
       sourceSequenceCount: 76,
       totalQuantity: 999,
     },
+    updatedAt: new Date("2026-08-19T03:05:00.000Z"),
   });
 }
 
@@ -81,7 +82,9 @@ describe("Feishu catalog refresh queries", () => {
       ],
       expectedSkuCount: 140,
       expectedSourceSequenceCount: 76,
+      importedAtLabel: expect.any(String),
       sourceSheetId: "trusted-source-sheet",
+      updatedAtLabel: expect.any(String),
     });
   });
 

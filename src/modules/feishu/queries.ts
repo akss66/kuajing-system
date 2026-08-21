@@ -192,7 +192,9 @@ export type ImportedCargoRefreshBaseline = {
   cargoPricePlaceholders: CargoPricePlaceholder[];
   expectedSkuCount: number;
   expectedSourceSequenceCount: number;
+  importedAtLabel: string | null;
   sourceSheetId: string;
+  updatedAtLabel: string;
 };
 
 export type CatalogFieldRefreshState = {
@@ -349,9 +351,11 @@ export async function importedMigrationExists(
 export async function findLatestImportedCargoRefreshBaseline() {
   const [run] = await db
     .select({
+      importedAt: feishuCargoMigrationRuns.importedAt,
       normalizedRowsJson: feishuCargoMigrationRuns.normalizedRowsJson,
       sourceSheetId: feishuCargoMigrationRuns.sourceSheetId,
       summaryJson: feishuCargoMigrationRuns.summaryJson,
+      updatedAt: feishuCargoMigrationRuns.updatedAt,
     })
     .from(feishuCargoMigrationRuns)
     .where(eq(feishuCargoMigrationRuns.status, "IMPORTED"))
@@ -377,7 +381,9 @@ export async function findLatestImportedCargoRefreshBaseline() {
       : [],
     expectedSkuCount: summary.skuCount,
     expectedSourceSequenceCount: summary.sourceSequenceCount,
+    importedAtLabel: formatDateTime(run.importedAt),
     sourceSheetId: run.sourceSheetId,
+    updatedAtLabel: formatDateTime(run.updatedAt)!,
   } satisfies ImportedCargoRefreshBaseline;
 }
 

@@ -44,7 +44,10 @@ export type CargoMigrationPanelProps = {
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
-  hasImportedCargoBaseline: boolean;
+  importedCargoBaseline: {
+    importedAtLabel: string | null;
+    updatedAtLabel: string;
+  } | null;
   latestMigrationRun: CargoMigrationPanelRun | null;
   latestCatalogRefreshLabel: string | null;
   readOnlyConnectionMessage: string;
@@ -100,7 +103,7 @@ export function CargoMigrationPanel({
   cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
-  hasImportedCargoBaseline,
+  importedCargoBaseline,
   latestMigrationRun,
   latestCatalogRefreshLabel,
   readOnlyConnectionMessage,
@@ -140,7 +143,7 @@ export function CargoMigrationPanel({
     selectedSheetId ||
     selectedSourceSheetId ||
     (availableSourceSheets.length === 1 ? availableSourceSheets[0].sheetId : "");
-  const imported = latestMigrationRun?.status === "IMPORTED";
+  const imported = Boolean(importedCargoBaseline);
   const skuCount = latestMigrationRun?.summary.skuCount ?? 0;
   const expectedPhrase = `确认迁移${skuCount}个SKU`;
   const sourceDiscoveryFailed =
@@ -360,14 +363,14 @@ export function CargoMigrationPanel({
                 {targetSyncState.statusLabel}
               </Badge>
             ) : null}
-            {latestMigrationRun?.importedAtLabel ? (
+            {importedCargoBaseline?.importedAtLabel ? (
               <span className="text-xs text-muted-foreground">
-                导入时间：{latestMigrationRun.importedAtLabel}
+                首批导入时间：{importedCargoBaseline.importedAtLabel}
               </span>
             ) : null}
-            {latestMigrationRun?.updatedAtLabel ? (
+            {importedCargoBaseline?.updatedAtLabel ? (
               <span className="text-xs text-muted-foreground">
-                最近更新：{latestMigrationRun.updatedAtLabel}
+                首批迁移记录更新：{importedCargoBaseline.updatedAtLabel}
               </span>
             ) : null}
           </div>
@@ -376,7 +379,7 @@ export function CargoMigrationPanel({
 
       {migrationSetupPanel}
 
-      {actorKind === "SUPER_ADMIN" && hasImportedCargoBaseline ? (
+      {actorKind === "SUPER_ADMIN" && importedCargoBaseline ? (
         <WorkspacePanel>
           <WorkspacePanelHeader
             description="从飞书源货盘精确读取商品与 SKU；允许新增，并安全保留历史库存和订单。"
