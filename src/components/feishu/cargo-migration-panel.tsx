@@ -1,7 +1,8 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import { useActionState, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ActionForm } from "@/components/forms/action-form";
@@ -118,6 +119,7 @@ export function CargoMigrationPanel({
   targetSyncState,
   testFeishuConnectionAction,
 }: CargoMigrationPanelProps) {
+  const router = useRouter();
   const [preflightState, preflightFormAction, preflightPending] = useActionState(
     createCargoPreflightAction,
     INITIAL_ACTION_STATE as CargoMigrationActionState,
@@ -130,6 +132,18 @@ export function CargoMigrationPanel({
   });
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const confirmInputRef = useRef<HTMLInputElement>(null);
+  const refreshedCatalogSyncStateRef = useRef<ActionState | null>(null);
+
+  useEffect(() => {
+    if (
+      catalogSyncState.status !== "success" ||
+      refreshedCatalogSyncStateRef.current === catalogSyncState
+    ) {
+      return;
+    }
+    refreshedCatalogSyncStateRef.current = catalogSyncState;
+    router.refresh();
+  }, [catalogSyncState, router]);
 
   const availableSourceSheets = useMemo(
     () =>

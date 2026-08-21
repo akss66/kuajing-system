@@ -82,9 +82,9 @@ describe("Feishu catalog refresh queries", () => {
       ],
       expectedSkuCount: 140,
       expectedSourceSequenceCount: 76,
-      importedAtLabel: expect.any(String),
+      importedAtLabel: "2026/08/18 23:04",
       sourceSheetId: "trusted-source-sheet",
-      updatedAtLabel: expect.any(String),
+      updatedAtLabel: "2026/08/18 23:05",
     });
   });
 
@@ -116,7 +116,7 @@ describe("Feishu catalog refresh queries", () => {
 
     const state = await getLatestCatalogFieldRefreshState();
 
-    expect(state).toEqual({ lastUpdatedLabel: expect.any(String) });
+    expect(state).toEqual({ lastUpdatedLabel: "2026/08/19 22:00" });
     expect(Object.keys(state)).toEqual(["lastUpdatedLabel"]);
   });
 });

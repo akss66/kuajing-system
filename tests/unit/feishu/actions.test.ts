@@ -542,7 +542,6 @@ describe("feishu admin actions", () => {
     expect(clientMocks.updateSheetProperties).not.toHaveBeenCalled();
     expect(clientMocks.createFilter).not.toHaveBeenCalled();
     expect(cacheMocks.revalidatePath.mock.calls).toEqual([
-      ["/admin/system/integrations"],
       ["/admin/catalog"],
       ["/admin/inventory"],
     ]);

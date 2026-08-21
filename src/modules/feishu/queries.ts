@@ -11,6 +11,7 @@ import {
   products,
   skus,
 } from "@/db/schema";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import type {
   CargoPricePlaceholder,
@@ -63,6 +64,7 @@ function formatDateTime(value: Date | null) {
     month: "2-digit",
     day: "2-digit",
     year: "numeric",
+    timeZone: BUSINESS_TIME_ZONE,
   }).format(value);
 }
 

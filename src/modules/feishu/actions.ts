@@ -148,7 +148,6 @@ export async function syncFeishuCatalogFieldsAction(
     };
   }
 
-  revalidatePath(INTEGRATIONS_PATH);
   revalidatePath(CATALOG_PATH);
   revalidatePath(INVENTORY_PATH);
   return {

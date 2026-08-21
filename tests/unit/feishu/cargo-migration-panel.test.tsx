@@ -13,6 +13,14 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const navigationMocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => navigationMocks,
+}));
+
 import {
   CargoMigrationPanel,
   type CargoMigrationPanelProps,
@@ -127,6 +135,7 @@ function createProps(
 describe("CargoMigrationPanel", () => {
   afterEach(() => {
     cleanup();
+    navigationMocks.refresh.mockReset();
   });
 
   it("shows an ordinary admin the status view without discovery or first-import controls", () => {
@@ -264,6 +273,7 @@ describe("CargoMigrationPanel", () => {
         screen.getByRole("button", { name: "一键同步飞书货盘" }),
       ).toBeEnabled(),
     );
+    expect(navigationMocks.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("shows immediate multi-sheet selection for super admins before preflight can start", () => {

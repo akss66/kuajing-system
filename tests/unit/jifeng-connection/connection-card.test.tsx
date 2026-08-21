@@ -38,9 +38,14 @@ const pageMocks = vi.hoisted(() => {
     getPublicStatus: vi.fn(),
     inspectConfiguration: vi.fn(),
     recentQuery,
+    routerRefresh: vi.fn(),
     requireAdmin: vi.fn(),
   };
 });
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: pageMocks.routerRefresh }),
+}));
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
