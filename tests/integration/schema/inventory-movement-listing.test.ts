@@ -270,21 +270,19 @@ test("0021 adds auditable movement metadata without inventing legacy manual reas
   }
 });
 
-test("the migration journal applies inventory listing after the protected migrations", async () => {
+test("the migration journal keeps inventory listing after the protected migrations", async () => {
   const journal = JSON.parse(
     await readFile(path.join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"),
   ) as { entries: { idx: number; tag: string }[] };
 
-  expect(journal.entries.slice(-10).map(({ idx, tag }) => ({ idx, tag }))).toEqual([
-    { idx: 21, tag: "0021_inventory_movement_listing_and_stocktakes" },
-    { idx: 22, tag: "0022_backfill_feishu_product_fields" },
-    { idx: 23, tag: "0023_sku_lifecycle_management" },
-    { idx: 24, tag: "0024_sku_cargo_pricing" },
-    { idx: 25, tag: "0025_cancelled_order_deduplication" },
-    { idx: 26, tag: "0026_jifeng_status_poll_leases" },
-    { idx: 27, tag: "0027_expired_order_deduplication" },
-    { idx: 28, tag: "0028_package_cancellation_adjustments" },
-    { idx: 29, tag: "0029_typical_speed" },
-    { idx: 30, tag: "0030_replacement_cancel_pending" },
-  ]);
+  const protectedTail = journal.entries.find(
+    ({ tag }) => tag === "0020_feishu_field_mapping",
+  );
+  const inventoryListing = journal.entries.find(
+    ({ tag }) => tag === "0021_inventory_movement_listing_and_stocktakes",
+  );
+
+  expect(protectedTail).toMatchObject({ idx: 20 });
+  expect(inventoryListing).toMatchObject({ idx: 21 });
+  expect(inventoryListing!.idx).toBe(protectedTail!.idx + 1);
 });

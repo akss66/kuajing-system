@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 // Shipping-fee arithmetic is covered by the order and bulk-submission suites.
@@ -342,7 +342,7 @@ async function submitFixture(
   fixture: Awaited<ReturnType<typeof createSubmissionFixture>>,
   requestedWalletFen: number,
 ) {
-  return submitBulkDraft({
+  const result = await submitBulkDraft({
     actorUserId: "settlement-wallet-user",
     customerId: fixture.customer.id,
     draftId: fixture.draft.id,
@@ -350,6 +350,20 @@ async function submitFixture(
     requestedWalletFen,
     selectedGroupIds: fixture.groups.map((group) => group.id),
   });
+  const shipmentSnapshots = await db
+    .select({ shippingFeeFen: orderShipments.shippingFeeFen })
+    .from(orderShipments)
+    .where(
+      inArray(
+        orderShipments.orderId,
+        result.createdOrders.map((order) => order.orderId),
+      ),
+    );
+  expect(shipmentSnapshots).toHaveLength(result.createdOrders.length);
+  expect(shipmentSnapshots.every(({ shippingFeeFen }) => shippingFeeFen === 0)).toBe(
+    true,
+  );
+  return result;
 }
 
 describe("bulk settlement wallet lifecycle", () => {

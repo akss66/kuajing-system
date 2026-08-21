@@ -149,6 +149,7 @@ type PreparedGroup = {
   merchandiseAmountFen: number;
   orderId: string;
   orderNumber: string;
+  packageShippingFeeFen: number;
   quantityBySku: Map<string, number>;
   rows: ReadyRow[];
   shippingFeeFen: number;
@@ -1055,11 +1056,16 @@ export async function submitBulkDraft(
         work.rows.map((row) => row.externalOrderNo),
       ).size;
       let pricing: ReturnType<typeof calculateOrderPricing>;
+      let packageShippingFeeFen: number;
       try {
         pricing = calculateOrderPricing({
           merchandiseAmountFen,
           packageCount: totalPackageCount,
         });
+        packageShippingFeeFen = pricing.shippingFeeFen / totalPackageCount;
+        if (!Number.isSafeInteger(packageShippingFeeFen)) {
+          throw new RangeError("包裹运费无法精确分摊");
+        }
       } catch {
         failedByGroup.set(group.id, "INVALID");
         continue;
@@ -1070,6 +1076,7 @@ export async function submitBulkDraft(
         merchandiseAmountFen,
         orderId: crypto.randomUUID(),
         orderNumber: createFulfillmentOrderNumber(now),
+        packageShippingFeeFen,
         quantityBySku,
         rows: work.rows,
         shippingFeeFen: pricing.shippingFeeFen,
@@ -1132,6 +1139,7 @@ export async function submitBulkDraft(
           [...shipmentRows.values()].map((shipment) => ({
             ...shipment,
             orderId: prepared.orderId,
+            shippingFeeFen: prepared.packageShippingFeeFen,
             storeId: prepared.group.storeId,
           })),
         )
