@@ -21,20 +21,14 @@ import {
   systemNotifications,
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
-import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
 import { runJifengFulfillmentCycle } from "@/modules/jifeng-connection/provider";
 import {
   enqueuePaidOrdersForFulfillment,
-  JIFENG_RECONCILIATION_LEASE_MS,
-  processDueJifengCreateOrderEvents,
-  processJifengCreateOrderEvent,
   retryJifengShipment,
-  type JifengCreateOrderPort,
 } from "@/modules/fulfillment/dispatch";
 import { processJifengExistingOrderMatchEvent } from "@/modules/fulfillment/order-matching";
 import { cancelJifengShipment } from "@/modules/fulfillment/replacement";
-import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import type { TemuRecipient } from "@/modules/order-import/temu-parser";
 import { encryptPii } from "@/shared/pii-crypto";
@@ -309,71 +303,6 @@ describe("paid order Jifeng dispatch", () => {
     expect(savedOrder.status).toBe("FULFILLING");
   });
 
-  test("reconciles ambiguous remote state read-only while disabled and never claims new create work", async () => {
-    configureRuntimeEnvironment();
-    const existing = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [existingEvent] = await db
-      .select()
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.aggregateId, existing.shipment.id));
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "create result was ambiguous",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: existingEvent.id,
-      now: new Date(Date.now() - 10 * 60_000),
-    });
-    const pending = await createShipmentFixture();
-    await insertRuntimeConnection("READY_DISABLED");
-    const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
-      const erpNo = String(JSON.parse(String(request?.body)).erpNo);
-      return Response.json({
-        code: 0,
-        data: { erpNo, orderNo: "JF-EXISTING", status: 6 },
-        message: "SUCCESS",
-        requestId: "disabled-read-query",
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(runJifengFulfillmentCycle()).resolves.toMatchObject({
-      enabled: false,
-      enqueuedCount: 0,
-      statuses: { exceptions: 0, shipped: 0, synced: 1 },
-    });
-
-    const requestedPaths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
-    expect(requestedPaths).toEqual(["/api/order/get"]);
-    expect(requestedPaths).not.toContain("/api/order/create");
-    expect(requestedPaths).not.toContain("/api/order/cancel");
-    const outboxRows = await db.select().from(integrationOutbox);
-    expect(outboxRows).toHaveLength(1);
-    expect(outboxRows[0]).toMatchObject({
-      aggregateId: existing.shipment.id,
-      claimToken: null,
-      status: "FAILED",
-    });
-    expect(
-      outboxRows.some((row) => row.aggregateId === pending.shipment.id),
-    ).toBe(false);
-    const [reconciledFulfillment] = await db
-      .select()
-      .from(shipmentFulfillments)
-      .where(eq(shipmentFulfillments.shipmentId, existing.shipment.id));
-    expect(reconciledFulfillment).toMatchObject({
-      externalOrderNo: "JF-EXISTING",
-      status: "FULFILLING",
-    });
-  });
-
   test("enqueues each paid shipment once and never copies recipient PII into the outbox", async () => {
     const paid = await createShipmentFixture();
     await createShipmentFixture("PENDING_PAYMENT");
@@ -399,77 +328,6 @@ describe("paid order Jifeng dispatch", () => {
     });
     expect(JSON.stringify(outboxRows[0].payload)).not.toContain(recipient.phone);
     expect(JSON.stringify(outboxRows[0].payload)).not.toContain(recipient.addressLine1);
-  });
-
-  test("decrypts the address only when submitting and records a successful attempt", async () => {
-    const { order, shipment, sku, store } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    let submitted: JifengCreateOrderInput | undefined;
-    const client: JifengCreateOrderPort = {
-      async createOrder(input) {
-        submitted = input;
-        return { data: null, requestId: "request-success" };
-      },
-    };
-
-    const result = await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: new Date("2026-08-12T02:00:00.000Z"),
-    });
-
-    expect(result).toEqual({ status: "COMPLETED" });
-    expect(submitted).toMatchObject({
-      amount: 9,
-      buyerName: recipient.name,
-      buyerPhone: recipient.phone,
-      currency: "CNY",
-      erpNo: `TZX-${shipment.id.replaceAll("-", "")}`,
-      logisticsId: 310,
-      packageType: 3,
-      platform: "temu",
-      platformOrderNo: shipment.externalOrderNo,
-      recipientAddress: recipient.addressLine1,
-      recipientAddress2: recipient.addressLine2,
-      recipientArea: recipient.district,
-      recipientCity: recipient.city,
-      recipientCountry: "CA",
-      recipientEmail: recipient.email,
-      recipientProvince: recipient.province,
-      shopName: store.name,
-      type: 2,
-      warehouse: "CA-YYZ",
-      zipCode: recipient.postalCode,
-    });
-    expect(submitted?.skuList).toEqual([
-      { itemNameCn: sku.name, num: 2, sku: sku.skuCode, unitPrice: 4.5 },
-    ]);
-
-    const [updatedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    const [updatedEvent] = await db.select().from(integrationOutbox);
-    const [attempt] = await db.select().from(integrationAttempts);
-    const dispatchAudits = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "JIFENG_ORDER_SUBMITTED"));
-    expect(updatedOrder.status).toBe("FULFILLING");
-    expect(fulfillment).toMatchObject({ attemptCount: 1, status: "SUBMITTED" });
-    expect(fulfillment.nextRetryAt?.toISOString()).toBe(
-      "2026-08-12T02:05:00.000Z",
-    );
-    expect(updatedEvent).toMatchObject({ attemptCount: 1, status: "COMPLETED" });
-    expect(attempt).toMatchObject({
-      attemptNumber: 1,
-      outcome: "SUCCESS",
-      responseMetadata: { requestId: "request-success" },
-    });
-    expect(dispatchAudits).toHaveLength(1);
   });
 
   test("matches by the package order number and binds a different remote ERP number without create", async () => {
@@ -1045,6 +903,36 @@ describe("paid order Jifeng dispatch", () => {
     expect(getOrder).toHaveBeenCalledTimes(1);
   });
 
+  test("reclaims a processing match whose lease timestamp is missing", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    await db
+      .update(integrationOutbox)
+      .set({
+        claimToken: "00000000-0000-4000-8000-000000000001",
+        lockedAt: null,
+        status: "PROCESSING",
+      })
+      .where(eq(integrationOutbox.id, event.id));
+
+    await expect(
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-ORPHANED-CLAIM",
+              orderNo: "JF-ORPHANED-CLAIM",
+              platformOrderNo: shipment.externalOrderNo,
+              status: 2,
+            };
+          },
+        },
+        eventId: event.id,
+      }),
+    ).resolves.toEqual({ status: "MATCHED" });
+  });
+
   test("immediately applies shipped status, tracking, and inventory deduction when the matched order already shipped", async () => {
     const { order, shipment } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
@@ -1095,118 +983,97 @@ describe("paid order Jifeng dispatch", () => {
     expect(balance.totalQuantity).toBe(18);
   });
 
-  test("dispatches every package sequentially after the order enters fulfillment", async () => {
+  test("matches every package independently after the order enters fulfillment", async () => {
     const fixture = await createShipmentFixture();
     const sibling = await addSiblingShipment(fixture);
     expect(await enqueuePaidOrdersForFulfillment()).toBe(2);
     const events = await db.select().from(integrationOutbox);
-    const firstEvent = events.find(
-      (event) => event.aggregateId === fixture.shipment.id,
+    const getOrder = vi.fn(async ({ platformOrderNo }: { platformOrderNo: string }) => ({
+      erpNo: `REMOTE-${platformOrderNo}`,
+      orderNo: `JF-${platformOrderNo}`,
+      platformOrderNo,
+      status: 2,
+    }));
+
+    for (const event of events) {
+      await expect(
+        processJifengExistingOrderMatchEvent({
+          client: { getOrder },
+          eventId: event.id,
+        }),
+      ).resolves.toEqual({ status: "MATCHED" });
+    }
+
+    expect(getOrder).toHaveBeenCalledTimes(2);
+    expect(getOrder.mock.calls.map(([input]) => input.platformOrderNo).sort()).toEqual(
+      [fixture.shipment.externalOrderNo, sibling.externalOrderNo].sort(),
     );
-    const siblingEvent = events.find((event) => event.aggregateId === sibling.id);
-    expect(firstEvent).toBeDefined();
-    expect(siblingEvent).toBeDefined();
-    const createOrder = vi.fn(async () => ({ data: null }));
-
-    await expect(
-      processJifengCreateOrderEvent({
-        client: { createOrder },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: firstEvent!.id,
-      }),
-    ).resolves.toEqual({ status: "COMPLETED" });
-    await expect(
-      processJifengCreateOrderEvent({
-        client: { createOrder },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: siblingEvent!.id,
-      }),
-    ).resolves.toEqual({ status: "COMPLETED" });
-
-    expect(createOrder).toHaveBeenCalledTimes(2);
     const fulfillments = await db.select().from(shipmentFulfillments);
     expect(fulfillments).toHaveLength(2);
-    expect(fulfillments.every((row) => row.status === "SUBMITTED")).toBe(true);
+    expect(fulfillments.every((row) => row.status === "FULFILLING")).toBe(true);
   });
 
-  test("keeps sibling packages dispatchable after one package lacks Jifeng inventory", async () => {
+  test("keeps a missing sibling pending while another package matches", async () => {
     const fixture = await createShipmentFixture();
     const sibling = await addSiblingShipment(fixture);
     expect(await enqueuePaidOrdersForFulfillment()).toBe(2);
     const events = await db.select().from(integrationOutbox);
-    const failedEvent = events.find(
+    const missingEvent = events.find(
       (event) => event.aggregateId === fixture.shipment.id,
     );
     const siblingEvent = events.find((event) => event.aggregateId === sibling.id);
-    expect(failedEvent).toBeDefined();
+    expect(missingEvent).toBeDefined();
     expect(siblingEvent).toBeDefined();
-    const createOrder = vi.fn(async (input: JifengCreateOrderInput) => {
-      if (input.erpNo === `TZX-${fixture.shipment.id.replaceAll("-", "")}`) {
-        throw new JifengApiError({
-          code: "50026",
-          message: "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存",
-          retryable: false,
-        });
-      }
-      return { data: null };
-    });
 
     await expect(
-      processJifengCreateOrderEvent({
-        client: { createOrder },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: failedEvent!.id,
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            throw new JifengApiError({
+              code: "50017",
+              message: "existing order not found",
+              retryable: false,
+            });
+          },
+        },
+        eventId: missingEvent!.id,
       }),
-    ).resolves.toEqual({ status: "FAILED" });
+    ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
     await expect(
-      processJifengCreateOrderEvent({
-        client: { createOrder },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-SIBLING",
+              orderNo: "JF-SIBLING",
+              platformOrderNo: sibling.externalOrderNo,
+              status: 2,
+            };
+          },
+        },
         eventId: siblingEvent!.id,
       }),
-    ).resolves.toEqual({ status: "COMPLETED" });
+    ).resolves.toEqual({ status: "MATCHED" });
 
-    expect(createOrder).toHaveBeenCalledTimes(2);
     const fulfillments = await db.select().from(shipmentFulfillments);
     expect(
       fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
-    ).toMatchObject({ lastErrorCode: "50026", status: "EXCEPTION" });
-    const [permanentFailureNotification] = await db
-      .select()
-      .from(systemNotifications)
-      .where(
-        eq(
-          systemNotifications.entityId,
-          fulfillments.find((row) => row.shipmentId === fixture.shipment.id)!.id,
-        ),
-      );
-    expect(permanentFailureNotification).toMatchObject({
-      severity: "ERROR",
-      type: "JIFENG_SUBMIT_FAILED",
-    });
+    ).toMatchObject({ lastErrorCode: "50017", status: "PENDING" });
     expect(
       fulfillments.find((row) => row.shipmentId === sibling.id),
-    ).toMatchObject({ lastErrorCode: null, status: "SUBMITTED" });
-    expect(
-      (
-        await db
-          .select()
-          .from(fulfillmentOrders)
-          .where(eq(fulfillmentOrders.id, fixture.order.id))
-      )[0].status,
-    ).toBe("FULFILLMENT_EXCEPTION");
-    const siblingAudit = (
-      await db
-        .select()
-        .from(auditLogs)
-        .where(eq(auditLogs.action, "JIFENG_ORDER_SUBMITTED"))
-    ).find((entry) => entry.afterJson?.fulfillmentStatus === "SUBMITTED");
-    expect(siblingAudit?.beforeJson).toMatchObject({
-      orderStatus: "FULFILLMENT_EXCEPTION",
+    ).toMatchObject({
+      erpNo: "REMOTE-ERP-SIBLING",
+      externalOrderNo: "JF-SIBLING",
+      status: "FULFILLING",
     });
+    const [savedOrder] = await db
+      .select()
+      .from(fulfillmentOrders)
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+    expect(savedOrder.status).toBe("FULFILLING");
   });
 
-  test("cancels one never-submitted package locally while keeping its sibling dispatchable", async () => {
+  test("cancels one unmatched package locally while keeping its sibling matchable", async () => {
     const fixture = await createShipmentFixture();
     const sibling = await addSiblingShipment(fixture);
     await enqueuePaidOrdersForFulfillment();
@@ -1217,7 +1084,7 @@ describe("paid order Jifeng dispatch", () => {
       client: {
         async cancelOrder() {
           remoteCancellationCalls += 1;
-          throw new Error("never-submitted package must not call Jifeng");
+          throw new Error("unmatched package must not call Jifeng cancellation");
         },
       },
       reason: "客户只取消其中一个平台订单",
@@ -1232,11 +1099,6 @@ describe("paid order Jifeng dispatch", () => {
     expect(
       fulfillments.find((row) => row.shipmentId === sibling.id),
     ).toMatchObject({ status: "PENDING" });
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, fixture.order.id));
-    expect(savedOrder.status).toBe("PAID_PENDING_FULFILLMENT");
     const [reservation] = await db
       .select()
       .from(inventoryReservations)
@@ -1254,40 +1116,62 @@ describe("paid order Jifeng dispatch", () => {
     ).toMatchObject({ status: "PENDING" });
   });
 
-  test("retrying one failed package keeps the parent exceptional while a sibling is still failed", async () => {
+  test("retrying one unmatched exception keeps the parent exceptional while a sibling remains failed", async () => {
     const fixture = await createShipmentFixture();
     const sibling = await addSiblingShipment(fixture);
     await enqueuePaidOrdersForFulfillment();
     const events = await db.select().from(integrationOutbox);
+
     for (const event of events) {
-      await processJifengCreateOrderEvent({
+      const platformOrderNo =
+        event.aggregateId === fixture.shipment.id
+          ? fixture.shipment.externalOrderNo
+          : sibling.externalOrderNo;
+      await processJifengExistingOrderMatchEvent({
         client: {
-          async createOrder() {
-            throw new JifengApiError({
-              code: "50026",
-              message: "warehouse stock is insufficient",
-              retryable: false,
-            });
+          async getOrder() {
+            return {
+              erpNo: `REMOTE-${event.aggregateId}`,
+              orderNo: `JF-${event.aggregateId}`,
+              platformOrderNo: `${platformOrderNo}-WRONG`,
+              status: 2,
+            };
           },
         },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
         eventId: event.id,
       });
     }
 
-    await retryJifengShipment({
-      actorUserId: "admin-user",
-      reason: "仅重试已补足库存的平台订单",
-      shipmentId: fixture.shipment.id,
-    });
+    await expect(
+      retryJifengShipment({
+        actorUserId: "admin-user",
+        reason: "修正平台订单号后重新匹配",
+        shipmentId: fixture.shipment.id,
+      }),
+    ).resolves.toEqual({ status: "PENDING" });
 
     const fulfillments = await db.select().from(shipmentFulfillments);
     expect(
       fulfillments.find((row) => row.shipmentId === fixture.shipment.id),
-    ).toMatchObject({ status: "PENDING" });
+    ).toMatchObject({ lastErrorCode: null, status: "PENDING" });
     expect(
       fulfillments.find((row) => row.shipmentId === sibling.id),
-    ).toMatchObject({ status: "EXCEPTION" });
+    ).toMatchObject({
+      lastErrorCode: "PLATFORM_ORDER_NO_MISMATCH",
+      status: "EXCEPTION",
+    });
+    const retriedEvent = events.find(
+      (event) => event.aggregateId === fixture.shipment.id,
+    )!;
+    const [savedEvent] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.id, retriedEvent.id));
+    expect(savedEvent).toMatchObject({
+      claimToken: null,
+      lastErrorCode: null,
+      status: "PENDING",
+    });
     const [savedOrder] = await db
       .select()
       .from(fulfillmentOrders)
@@ -1295,1042 +1179,33 @@ describe("paid order Jifeng dispatch", () => {
     expect(savedOrder.status).toBe("FULFILLMENT_EXCEPTION");
   });
 
-  test("never calls Jifeng for an event whose local order cancellation already committed", async () => {
-    const { order } = await createShipmentFixture();
+  test("manual recovery of a matched warehouse exception schedules only a status query", async () => {
+    const { shipment } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
     const [event] = await db.select().from(integrationOutbox);
-    await cancelFulfillmentOrder({
-      actorType: "ADMIN",
-      actorUserId: "admin-user",
-      orderId: order.id,
-      reason: "cancel before queued dispatch",
-    });
-    let apiCalls = 0;
-
-    const result = await processJifengCreateOrderEvent({
+    await processJifengExistingOrderMatchEvent({
       client: {
-        async createOrder() {
-          apiCalls += 1;
-          return { data: null };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-
-    expect(result).toEqual({ status: "SKIPPED_CANCELLED" });
-    expect(apiCalls).toBe(0);
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    const [savedEvent] = await db
-      .select()
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.id, event.id));
-    expect(savedOrder.status).toBe("CANCELLED");
-    expect(fulfillment.status).toBe("CANCELLED");
-    expect(savedEvent.status).toBe("COMPLETED");
-  });
-
-  test("blocks local cancellation after the dispatch claim crosses the safe boundary", async () => {
-    const { order } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const gate = deferred();
-    let apiCalls = 0;
-    const dispatch = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          apiCalls += 1;
-          await gate.promise;
-          return { data: null };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-    for (let attempt = 0; attempt < 100 && apiCalls === 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    expect(apiCalls).toBe(1);
-
-    await expect(
-      cancelFulfillmentOrder({
-        actorType: "ADMIN",
-        actorUserId: "admin-user",
-        orderId: order.id,
-        reason: "too late for local cancel",
-      }),
-    ).rejects.toMatchObject({ code: "FULFILLMENT_CANCEL_REQUIRED" });
-    gate.resolve();
-    await expect(dispatch).resolves.toEqual({ status: "COMPLETED" });
-  });
-
-  test("keeps only a safe failure summary and schedules retryable errors", async () => {
-    const { order } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        throw new JifengApiError({
-          code: "HTTP_503",
-          message: "极风接口网络响应异常（503）",
-          retryable: true,
-        });
-      },
-    };
-    const now = new Date("2026-08-12T02:00:00.000Z");
-
-    const result = await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now,
-    });
-
-    expect(result).toEqual({ status: "RETRY_SCHEDULED" });
-    const [updatedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    const [updatedEvent] = await db.select().from(integrationOutbox);
-    const [attempt] = await db.select().from(integrationAttempts);
-    expect(updatedOrder.status).toBe("FULFILLMENT_EXCEPTION");
-    expect(fulfillment).toMatchObject({
-      attemptCount: 1,
-      lastErrorCode: "HTTP_503",
-      status: "EXCEPTION",
-    });
-    expect(updatedEvent).toMatchObject({
-      attemptCount: 1,
-      lastErrorCode: "HTTP_503",
-      status: "FAILED",
-    });
-    expect(updatedEvent.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
-    expect(attempt).toMatchObject({
-      errorCode: "HTTP_503",
-      outcome: "RETRYABLE_FAILURE",
-    });
-    expect(JSON.stringify(updatedEvent)).not.toContain(recipient.phone);
-    expect(JSON.stringify(updatedEvent)).not.toContain(recipient.addressLine1);
-  });
-
-  test.each(["TIMEOUT", "NETWORK_ERROR", "INVALID_RESPONSE"])(
-    "blocks local cancellation after an ambiguous %s create attempt",
-    async (errorCode) => {
-      const { order } = await createShipmentFixture();
-      await enqueuePaidOrdersForFulfillment();
-      const [event] = await db.select().from(integrationOutbox);
-      await processJifengCreateOrderEvent({
-        client: {
-          async createOrder() {
-            throw new JifengApiError({
-              code: errorCode,
-              message: "ambiguous outbound failure",
-              retryable: true,
-            });
-          },
-        },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-      });
-
-      await expect(
-        cancelFulfillmentOrder({
-          actorType: "ADMIN",
-          actorUserId: "admin-user",
-          orderId: order.id,
-          reason: "must reconcile before cancellation",
-        }),
-      ).rejects.toMatchObject({ code: "FULFILLMENT_CANCEL_REQUIRED" });
-
-      const [savedOrder] = await db
-        .select()
-        .from(fulfillmentOrders)
-        .where(eq(fulfillmentOrders.id, order.id));
-      const [reservation] = await db
-        .select()
-        .from(inventoryReservations)
-        .where(eq(inventoryReservations.referenceId, order.id));
-      expect(savedOrder.status).not.toBe("CANCELLED");
-      expect(reservation.status).toBe("ACTIVE");
-    },
-  );
-
-  test("retries a transient Jifeng failure while preserving dispatch eligibility", async () => {
-    const { order } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    let apiCalls = 0;
-    let queryCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        apiCalls += 1;
-        if (apiCalls === 1) {
-          throw new JifengApiError({
-            code: "NETWORK_ERROR",
-            message: "temporary carrier outage",
-            retryable: true,
-          });
-        }
-        return { data: null };
-      },
-      async getOrder() {
-        queryCalls += 1;
-        throw new JifengApiError({
-          code: "50017",
-          message: "confirmed absent",
-          retryable: false,
-        });
-      },
-    };
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-
-    await expect(
-      processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-        now: firstAt,
-      }),
-    ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
-    await expect(
-      processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-        now: new Date(firstAt.getTime() + 60_000),
-      }),
-    ).resolves.toEqual({ status: "COMPLETED" });
-
-    expect(apiCalls).toBe(2);
-    expect(queryCalls).toBe(1);
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    expect(savedOrder.status).toBe("FULFILLING");
-    expect(savedEvent).toMatchObject({ attemptCount: 2, status: "COMPLETED" });
-    expect(fulfillment).toMatchObject({ attemptCount: 2, status: "SUBMITTED" });
-  });
-
-  test("reconciles an ambiguous create response to a remote order without creating twice", async () => {
-    const { order, shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    let apiCalls = 0;
-    let queryCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        apiCalls += 1;
-        throw new JifengApiError({
-          code: "TIMEOUT",
-          message: "create outcome unknown",
-          retryable: true,
-        });
-      },
-      async getOrder({ erpNo }) {
-        queryCalls += 1;
-        return { erpNo, orderNo: "JF-REMOTE-1", status: 6 };
-      },
-    };
-
-    await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-    const result = await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-
-    expect(result).toEqual({ status: "RECONCILED" });
-    expect(apiCalls).toBe(1);
-    expect(queryCalls).toBe(1);
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    const [fulfillment] = await db
-      .select()
-      .from(shipmentFulfillments)
-      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
-    expect(savedOrder.status).toBe("FULFILLING");
-    expect(savedEvent.status).toBe("COMPLETED");
-    expect(fulfillment).toMatchObject({
-      externalOrderNo: "JF-REMOTE-1",
-      status: "FULFILLING",
-    });
-  });
-
-  test("rejects a reconciliation response for a different ERP number without mutating either package", async () => {
-    const first = await createShipmentFixture();
-    const second = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const events = await db.select().from(integrationOutbox);
-    const firstEvent = events.find(
-      (event) => event.aggregateId === first.shipment.id,
-    );
-    expect(firstEvent).toBeDefined();
-
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "create outcome unknown",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: firstEvent!.id,
-    });
-
-    const result = await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new Error("reconciliation must not create again");
-        },
         async getOrder() {
           return {
-            erpNo: `TZX-${second.shipment.id.replaceAll("-", "")}`,
-            orderNo: "JF-WRONG-ORDER",
-            status: 6,
+            erpNo: "REMOTE-ERP-STATUS-RECOVERY",
+            orderNo: "JF-STATUS-RECOVERY",
+            platformOrderNo: shipment.externalOrderNo,
+            status: 2,
           };
         },
       },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: firstEvent!.id,
-    });
-
-    expect(result).toEqual({ status: "RECONCILIATION_REQUIRED" });
-    const fulfillments = await db.select().from(shipmentFulfillments);
-    expect(
-      fulfillments.find((row) => row.shipmentId === first.shipment.id),
-    ).toMatchObject({ status: "EXCEPTION" });
-    expect(
-      fulfillments.find((row) => row.shipmentId === second.shipment.id),
-    ).toMatchObject({ externalOrderNo: null, status: "PENDING" });
-    const [savedEvent] = await db
-      .select()
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.id, firstEvent!.id));
-    expect(savedEvent).toMatchObject({ status: "FAILED" });
-    expect(savedEvent.lastErrorCode).toContain("RECONCILIATION_REQUIRED");
-  });
-
-  test.each(["50019", "50038"])(
-    "automatically reconciles official create code %s instead of blindly creating again",
-    async (code) => {
-      await createShipmentFixture();
-      await enqueuePaidOrdersForFulfillment();
-      const [event] = await db.select().from(integrationOutbox);
-      let apiCalls = 0;
-      let queryCalls = 0;
-      const firstAt = new Date("2026-08-12T02:00:00.000Z");
-      const client: JifengCreateOrderPort = {
-        async createOrder() {
-          apiCalls += 1;
-          throw new JifengApiError({
-            code,
-            message: "official reconciliation response",
-            retryable: false,
-          });
-        },
-        async getOrder({ erpNo }) {
-          queryCalls += 1;
-          return { erpNo, orderNo: `JF-${code}`, status: 6 };
-        },
-      };
-      await expect(
-        processJifengCreateOrderEvent({
-          client,
-          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-          eventId: event.id,
-          now: firstAt,
-        }),
-      ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
-
-      const summary = await processDueJifengCreateOrderEvents({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        now: new Date(firstAt.getTime() + 60_000),
-      });
-
-      expect(summary).toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
-      expect(apiCalls).toBe(1);
-      expect(queryCalls).toBe(1);
-    },
-  );
-
-  test.each([
-    ["50019", "50017"],
-    ["50019", "50071"],
-    ["50038", "50017"],
-    ["50038", "50071"],
-  ])(
-    "keeps prior official code %s query-only when reconciliation returns %s",
-    async (priorCode, queryCode) => {
-      const { shipment } = await createShipmentFixture();
-      await enqueuePaidOrdersForFulfillment();
-      const [event] = await db.select().from(integrationOutbox);
-      let createCalls = 0;
-      let queryCalls = 0;
-      const firstAt = new Date("2026-08-12T02:00:00.000Z");
-      const client: JifengCreateOrderPort = {
-        async createOrder() {
-          createCalls += 1;
-          throw new JifengApiError({
-            code: priorCode,
-            message: "official query-only create response",
-            retryable: false,
-          });
-        },
-        async getOrder() {
-          queryCalls += 1;
-          throw new JifengApiError({
-            code: queryCode,
-            message: "confirmed absent during query-only reconciliation",
-            retryable: false,
-          });
-        },
-      };
-      await processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-        now: firstAt,
-      });
-      await processDueJifengCreateOrderEvents({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        now: new Date(firstAt.getTime() + 60_000),
-      });
-      await retryJifengShipment({
-        actorUserId: "admin-user",
-        reason: "repeat query-only warehouse investigation",
-        shipmentId: shipment.id,
-      });
-      await processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-        now: new Date(firstAt.getTime() + 120_000),
-      });
-
-      expect(createCalls).toBe(1);
-      expect(queryCalls).toBe(2);
-      const [savedEvent] = await db.select().from(integrationOutbox);
-      expect(savedEvent.status).toBe("FAILED");
-      expect(savedEvent.lastErrorCode).toContain("RECONCILIATION_REQUIRED");
-    },
-  );
-
-  test("claims reconciliation atomically so concurrent workers make one remote query and one terminal audit", async () => {
-    await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
       eventId: event.id,
     });
-    const queryGate = deferred();
-    let successQueries = 0;
-    let losingQueries = 0;
-    const winner = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new Error("create must not run during reconciliation");
-        },
-        async getOrder({ erpNo }) {
-          successQueries += 1;
-          await queryGate.promise;
-          return { erpNo, orderNo: "JF-ATOMIC-1", status: 6 };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-    for (let index = 0; index < 100 && successQueries === 0; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    const loser = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new Error("losing create must not run");
-        },
-        async getOrder() {
-          losingQueries += 1;
-          throw new JifengApiError({
-            code: "NETWORK_ERROR",
-            message: "delayed losing reconciliation",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    queryGate.resolve();
-
-    await expect(winner).resolves.toEqual({ status: "RECONCILED" });
-    await expect(loser).resolves.toEqual({ status: "BUSY" });
-    expect(successQueries).toBe(1);
-    expect(losingQueries).toBe(0);
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    expect(fulfillment).toMatchObject({
-      externalOrderNo: "JF-ATOMIC-1",
-      jifengStatus: 6,
-      status: "FULFILLING",
-    });
-    const reconciliationAudits = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "JIFENG_ORDER_RECONCILED"));
-    expect(reconciliationAudits).toHaveLength(1);
-  });
-
-  test("rejects an administrator retry while a live reconciliation claim is querying Jifeng", async () => {
-    const { shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    let createCalls = 0;
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const queryGate = deferred();
-    let queryCalls = 0;
-    const reconciliation = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new Error("create must not run during reconciliation");
-        },
-        async getOrder({ erpNo }) {
-          queryCalls += 1;
-          await queryGate.promise;
-          return { erpNo, orderNo: "JF-LIVE-CLAIM", status: 6 };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: new Date(firstAt.getTime() + 60_000),
-    });
-    for (let index = 0; index < 100 && queryCalls === 0; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-
-    await expect(
-      retryJifengShipment({
-        actorUserId: "admin-user",
-        now: new Date(firstAt.getTime() + 61_000),
-        reason: "must not steal a live reconciliation claim",
-        shipmentId: shipment.id,
-      }),
-    ).rejects.toMatchObject({ code: "RECONCILIATION_IN_PROGRESS" });
-    queryGate.resolve();
-
-    await expect(reconciliation).resolves.toEqual({ status: "RECONCILED" });
-    expect(createCalls).toBe(1);
-    expect(queryCalls).toBe(1);
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    expect(savedEvent.status).toBe("COMPLETED");
-  });
-
-  test("reclaims a crashed reconciliation exactly at lease expiry and queries Jifeng once", async () => {
-    await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    let createCalls = 0;
-    let queryCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        createCalls += 1;
-        throw new JifengApiError({
-          code: "TIMEOUT",
-          message: "ambiguous create",
-          retryable: true,
-        });
-      },
-      async getOrder({ erpNo }) {
-        queryCalls += 1;
-        return { erpNo, orderNo: "JF-LEASE-RECOVERED", status: 6 };
-      },
-    };
-    await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const claimAt = new Date(firstAt.getTime() + 60_000);
-    const crashedToken = crypto.randomUUID();
-    await db.execute(sql`
-      update integration_outbox
-      set
-        claim_token = ${crashedToken}::uuid,
-        locked_at = ${claimAt.toISOString()}::timestamptz,
-        status = 'PROCESSING'
-      where id = ${event.id}
-    `);
-
-    const beforeExpiry = await processDueJifengCreateOrderEvents({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS - 1),
-    });
-    expect(beforeExpiry).toEqual({ completed: 0, failed: 0, retryScheduled: 0 });
-    expect(queryCalls).toBe(0);
-
-    const atExpiry = await processDueJifengCreateOrderEvents({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
-    });
-    expect(atExpiry).toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
-    expect(createCalls).toBe(1);
-    expect(queryCalls).toBe(1);
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
-  });
-
-  test("queries before recreating after a stale claim is confirmed absent", async () => {
-    await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    const trace: string[] = [];
-    let createCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        createCalls += 1;
-        trace.push(`create-${createCalls}`);
-        if (createCalls === 1) {
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        }
-        return { data: null };
-      },
-      async getOrder() {
-        trace.push("query");
-        throw new JifengApiError({
-          code: "50017",
-          message: "confirmed absent",
-          retryable: false,
-        });
-      },
-    };
-    await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const claimAt = new Date(firstAt.getTime() + 60_000);
-    await db.execute(sql`
-      update integration_outbox
-      set
-        claim_token = ${crypto.randomUUID()}::uuid,
-        last_error_code = null,
-        locked_at = ${claimAt.toISOString()}::timestamptz,
-        status = 'PROCESSING'
-      where id = ${event.id}
-    `);
-
-    await expect(
-      processDueJifengCreateOrderEvents({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
-      }),
-    ).resolves.toEqual({ completed: 1, failed: 0, retryScheduled: 0 });
-    expect(trace).toEqual(["create-1", "query", "create-2"]);
-  });
-
-  test("keeps an administrator-recovered stale claim query-only before create", async () => {
-    const { shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    let createCalls = 0;
-    const claimAt = new Date(firstAt.getTime() + 60_000);
-    await db.execute(sql`
-      update integration_outbox
-      set
-        attempt_count = 1,
-        claim_token = ${crypto.randomUUID()}::uuid,
-        last_error_code = null,
-        locked_at = ${claimAt.toISOString()}::timestamptz,
-        status = 'PROCESSING'
-      where id = ${event.id}
-    `);
-    await db.execute(sql`
-      update shipment_fulfillments
-      set attempt_count = 1, last_error_code = null, status = 'EXCEPTION'
-      where shipment_id = ${shipment.id}
-    `);
-    const recoveredAt = new Date(
-      claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS,
-    );
-    await retryJifengShipment({
-      actorUserId: "admin-user",
-      now: recoveredAt,
-      reason: "recover the expired worker lease safely",
-      shipmentId: shipment.id,
-    });
-    let queryCalls = 0;
-    await expect(
-      processJifengCreateOrderEvent({
-        client: {
-          async createOrder() {
-            createCalls += 1;
-            throw new Error("remote exists, create must not repeat");
-          },
-          async getOrder({ erpNo }) {
-            queryCalls += 1;
-            return { erpNo, orderNo: "JF-ADMIN-RECOVERED", status: 6 };
-          },
-        },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-        now: recoveredAt,
-      }),
-    ).resolves.toEqual({ status: "RECONCILED" });
-    expect(createCalls).toBe(0);
-    expect(queryCalls).toBe(1);
-  });
-
-  test("lets only one concurrent worker reclaim a stale reconciliation lease", async () => {
-    await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    let createCalls = 0;
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new JifengApiError({
-            code: "NETWORK_ERROR",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const claimAt = new Date(firstAt.getTime() + 60_000);
-    await db.execute(sql`
-      update integration_outbox
-      set
-        claim_token = ${crypto.randomUUID()}::uuid,
-        locked_at = ${claimAt.toISOString()}::timestamptz,
-        status = 'PROCESSING'
-      where id = ${event.id}
-    `);
-    const queryGate = deferred();
-    let queryCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        createCalls += 1;
-        throw new Error("a stale reconciliation claim must query before create");
-      },
-      async getOrder({ erpNo }) {
-        queryCalls += 1;
-        await queryGate.promise;
-        return { erpNo, orderNo: "JF-SINGLE-RECLAIMER", status: 6 };
-      },
-    };
-    const now = new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS);
-    const workers = [
-      processDueJifengCreateOrderEvents({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        now,
-      }),
-      processDueJifengCreateOrderEvents({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        now,
-      }),
-    ];
-    for (let index = 0; index < 100 && queryCalls === 0; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    queryGate.resolve();
-    const summaries = await Promise.all(workers);
-
-    expect(queryCalls).toBe(1);
-    expect(createCalls).toBe(1);
-    expect(summaries.reduce((sum, item) => sum + item.completed, 0)).toBe(1);
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
-  });
-
-  test("prevents an expired reconciliation owner from overwriting the reclaimer result", async () => {
-    await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    let createCalls = 0;
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const oldOwnerGate = deferred();
-    let oldOwnerQueries = 0;
-    const claimAt = new Date(firstAt.getTime() + 60_000);
-    const expiredOwner = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new Error("reconciliation must not call create");
-        },
-        async getOrder() {
-          oldOwnerQueries += 1;
-          await oldOwnerGate.promise;
-          throw new JifengApiError({
-            code: "NETWORK_ERROR",
-            message: "expired owner failure",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: claimAt,
-    });
-    for (let index = 0; index < 100 && oldOwnerQueries === 0; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-
-    let newOwnerQueries = 0;
-    const reclaimer = await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          createCalls += 1;
-          throw new Error("reclaimer must query before create");
-        },
-        async getOrder({ erpNo }) {
-          newOwnerQueries += 1;
-          return { erpNo, orderNo: "JF-NEW-LEASE-OWNER", status: 6 };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: new Date(claimAt.getTime() + JIFENG_RECONCILIATION_LEASE_MS),
-    });
-    expect(reclaimer).toEqual({ status: "RECONCILED" });
-    oldOwnerGate.resolve();
-    await expect(expiredOwner).resolves.toEqual({ status: "STALE" });
-
-    expect(createCalls).toBe(1);
-    expect(oldOwnerQueries).toBe(1);
-    expect(newOwnerQueries).toBe(1);
-    const [savedEvent] = await db.select().from(integrationOutbox);
-    expect(savedEvent).toMatchObject({ claimToken: null, status: "COMPLETED" });
-    const reconciliationAudits = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "JIFENG_ORDER_RECONCILED"));
-    expect(reconciliationAudits).toHaveLength(1);
-  });
-
-  test("does not downgrade a shipment completed by status sync while a reconciliation failure is delayed", async () => {
-    const { order } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const [fulfillment] = await db.select().from(shipmentFulfillments);
-    const firstAt = new Date("2026-08-12T02:00:00.000Z");
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new JifengApiError({
-            code: "TIMEOUT",
-            message: "ambiguous create",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: firstAt,
-    });
-    const failureGate = deferred();
-    let queryStarted = false;
-    const delayedFailure = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          throw new Error("create must not repeat");
-        },
-        async getOrder() {
-          queryStarted = true;
-          await failureGate.promise;
-          throw new JifengApiError({
-            code: "NETWORK_ERROR",
-            message: "delayed status query failure",
-            retryable: true,
-          });
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: new Date(firstAt.getTime() + 60_000),
-    });
-    for (let index = 0; index < 100 && !queryStarted; index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    await applyJifengOrderStatus({
-      detail: {
-        erpNo: fulfillment.erpNo,
-        orderNo: "JF-SHIPPED-WHILE-QUERYING",
-        status: 7,
-        trackingNo: "CP-MONOTONIC",
-      },
-      now: new Date(firstAt.getTime() + 61_000),
-      source: "WEBHOOK",
-    });
-    failureGate.resolve();
-
-    await expect(delayedFailure).resolves.toEqual({
-      status: "ALREADY_COMPLETED",
-    });
-    const [savedFulfillment] = await db.select().from(shipmentFulfillments);
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    const [savedEvent] = await db
-      .select()
-      .from(integrationOutbox)
-      .where(eq(integrationOutbox.id, event.id));
-    expect(savedFulfillment.status).toBe("SHIPPED");
-    expect(savedOrder.status).toBe("SHIPPED");
-    expect(savedEvent.status).toBe("COMPLETED");
-    expect(
-      (await db.select().from(auditLogs)).filter(
-        (audit) => audit.action === "JIFENG_ORDER_RECONCILIATION_REQUIRED",
-      ),
-    ).toHaveLength(0);
-  });
-
-  test("manual retry restores dispatch eligibility after a confirmed permanent failure", async () => {
-    const { order, shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    let apiCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        apiCalls += 1;
-        if (apiCalls === 1) {
-          throw new JifengApiError({
-            code: "50024",
-            message: "confirmed validation failure",
-            retryable: false,
-          });
-        }
-        return { data: null };
-      },
-    };
-    await processJifengCreateOrderEvent({
-      client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-
-    await retryJifengShipment({
-      actorUserId: "admin-user",
-      reason: "corrected warehouse mapping",
-      shipmentId: shipment.id,
-    });
-    await expect(
-      processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-      }),
-    ).resolves.toEqual({ status: "COMPLETED" });
-    expect(apiCalls).toBe(2);
-    const [savedOrder] = await db
-      .select()
-      .from(fulfillmentOrders)
-      .where(eq(fulfillmentOrders.id, order.id));
-    expect(savedOrder.status).toBe("FULFILLING");
-  });
-
-  test("manual recovery of a remotely submitted warehouse exception schedules a status query without reopening create", async () => {
-    const { shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    await processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          return { data: null };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-      now: new Date("2026-08-20T04:00:00.000Z"),
-    });
-    const [submitted] = await db
-      .select()
-      .from(shipmentFulfillments)
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        jifengStatus: 8,
+        lastErrorCode: "50038",
+        lastErrorMessage: "warehouse exception",
+        status: "EXCEPTION",
+      })
       .where(eq(shipmentFulfillments.shipmentId, shipment.id));
-    await applyJifengOrderStatus({
-      detail: { erpNo: submitted.erpNo, errorCode: 50038, status: 8 },
-      now: new Date("2026-08-20T04:05:00.000Z"),
-      source: "POLL",
-    });
-    const retryAt = new Date("2026-08-20T04:06:00.000Z");
+    const retryAt = new Date();
 
     await expect(
       retryJifengShipment({
@@ -2340,6 +1215,7 @@ describe("paid order Jifeng dispatch", () => {
         shipmentId: shipment.id,
       }),
     ).resolves.toEqual({ status: "STATUS_REFRESH_SCHEDULED" });
+
     const [savedEvent] = await db
       .select()
       .from(integrationOutbox)
@@ -2350,117 +1226,17 @@ describe("paid order Jifeng dispatch", () => {
       .from(shipmentFulfillments)
       .where(eq(shipmentFulfillments.shipmentId, shipment.id));
     expect(savedFulfillment).toMatchObject({
+      erpNo: "REMOTE-ERP-STATUS-RECOVERY",
+      externalOrderNo: "JF-STATUS-RECOVERY",
       jifengStatus: 8,
+      lastErrorCode: null,
       nextRetryAt: retryAt,
       status: "EXCEPTION",
     });
-  });
-
-  test("never retries create after Jifeng success followed by a persistence error", async () => {
-    const { shipment } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    let apiCalls = 0;
-    let queryCalls = 0;
-    const client: JifengCreateOrderPort = {
-      async createOrder() {
-        apiCalls += 1;
-        return { data: null, requestId: "success-before-db-error" };
-      },
-      async getOrder({ erpNo }) {
-        queryCalls += 1;
-        return { erpNo, orderNo: "JF-PERSISTED-REMOTE", status: 6 };
-      },
-    };
-    await db.execute(sql.raw(`
-      create function test_fail_success_attempt() returns trigger language plpgsql as $$
-      begin
-        if new.outcome = 'SUCCESS' then
-          raise exception 'injected post-success persistence error';
-        end if;
-        return new;
-      end;
-      $$;
-      create trigger test_fail_success_attempt_trigger
-      before insert on integration_attempts
-      for each row execute function test_fail_success_attempt();
-    `));
-    try {
-      await expect(
-        processJifengCreateOrderEvent({
-          client,
-          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-          eventId: event.id,
-        }),
-      ).resolves.toEqual({ status: "RECONCILIATION_REQUIRED" });
-    } finally {
-      await db.execute(sql.raw(`
-        drop trigger if exists test_fail_success_attempt_trigger on integration_attempts;
-        drop function if exists test_fail_success_attempt();
-      `));
-    }
-
-    await expect(
-      processJifengCreateOrderEvent({
-        client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-      }),
-    ).resolves.toEqual({ status: "RECONCILED" });
-    expect(apiCalls).toBe(1);
-    expect(queryCalls).toBe(1);
-    const [fulfillment] = await db
+    const [audit] = await db
       .select()
-      .from(shipmentFulfillments)
-      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
-    expect(fulfillment.externalOrderNo).toBe("JF-PERSISTED-REMOTE");
-  });
-
-  test("serializes API success finalization with cancellation without duplicate create", async () => {
-    const { order } = await createShipmentFixture();
-    await enqueuePaidOrdersForFulfillment();
-    const [event] = await db.select().from(integrationOutbox);
-    const apiGate = deferred();
-    const lockReady = deferred();
-    const releaseLock = deferred();
-    let apiCalls = 0;
-    const dispatch = processJifengCreateOrderEvent({
-      client: {
-        async createOrder() {
-          apiCalls += 1;
-          await apiGate.promise;
-          return { data: null };
-        },
-      },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-      eventId: event.id,
-    });
-    for (let attempt = 0; attempt < 100 && apiCalls === 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    const blocker = db.transaction(async (tx) => {
-      await tx.execute(sql`
-        select id from fulfillment_orders where id = ${order.id} for update
-      `);
-      lockReady.resolve();
-      await releaseLock.promise;
-    });
-    await lockReady.promise;
-    const cancellation = cancelFulfillmentOrder({
-      actorType: "ADMIN",
-      actorUserId: "admin-user",
-      orderId: order.id,
-      reason: "race with successful create",
-    });
-    apiGate.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    releaseLock.resolve();
-
-    await blocker;
-    await expect(cancellation).rejects.toMatchObject({
-      code: "FULFILLMENT_CANCEL_REQUIRED",
-    });
-    await expect(dispatch).resolves.toEqual({ status: "COMPLETED" });
-    expect(apiCalls).toBe(1);
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "JIFENG_SHIPMENT_RETRY_REQUESTED"));
+    expect(audit.afterJson).toMatchObject({ recoveryMode: "STATUS_QUERY" });
   });
 });

@@ -8,7 +8,6 @@ import { encryptJifengSecret } from "@/modules/jifeng-connection/crypto";
 import {
   getEnabledJifengCancellationClient,
   getEnabledJifengLookupClient,
-  getEnabledJifengWriteClient,
   getJifengReadClient,
 } from "@/modules/jifeng-connection/provider";
 import type { JifengConnectionStatus } from "@/modules/jifeng-connection/types";
@@ -96,15 +95,15 @@ describe("Jifeng runtime credential provider", () => {
     "READY_DISABLED",
     "REFRESH_REQUIRED",
     "ERROR",
-  ] as const)("denies a write client while the database status is %s", async (status) => {
+  ] as const)("denies fulfillment lookup while the database status is %s", async (status) => {
     await insertConnection(status);
 
-    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+    await expect(getEnabledJifengLookupClient()).rejects.toMatchObject({
       code: "FULFILLMENT_DISABLED",
     });
   });
 
-  test("uses valid enabled database credentials and resources before legacy environment values", async () => {
+  test("uses enabled database credentials before legacy environment values", async () => {
     await insertConnection("ENABLED");
     const fetchMock = vi.fn<
       (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -117,32 +116,18 @@ describe("Jifeng runtime credential provider", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const runtime = await getEnabledJifengWriteClient();
+    const runtime = await getEnabledJifengLookupClient();
     await runtime.client.getOrder({ erpNo: "PROVIDER-PRECEDENCE" });
 
     expect(runtime.client).toBeInstanceOf(JifengClient);
-    expect(runtime.config).toEqual({
-      logisticsId: 73,
-      warehouseCode: "DB-WAREHOUSE",
-    });
+    expect(runtime).not.toHaveProperty("config");
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
     expect(headers.get("accessToken")).toBe("database-access-token");
     expect(headers.get("userId")).toBe("database-user");
     expect(headers.get("accessToken")).not.toBe("legacy-access-token");
   });
 
-  test.each([
-    { logisticsId: null, warehouseCode: "DB-WAREHOUSE" },
-    { logisticsId: 73, warehouseCode: null },
-  ])("denies enabled database credentials with invalid resources %#", async (resources) => {
-    await insertConnection("ENABLED", resources);
-
-    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
-      code: "RUNTIME_CONFIG_INVALID",
-    });
-  });
-
-  test("refreshes an expired stored access token before returning the write client", async () => {
+  test("refreshes an expired stored access token before returning the lookup client", async () => {
     await insertConnection("ENABLED", { accessTokenExpiresAt: new Date(0) });
     const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
       if (new URL(String(url)).pathname === "/api/oauth/refreshToken") {
@@ -167,7 +152,7 @@ describe("Jifeng runtime credential provider", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const runtime = await getEnabledJifengWriteClient();
+    const runtime = await getEnabledJifengLookupClient();
     await runtime.client.getOrder({ erpNo: "PROVIDER-REFRESH" });
 
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
@@ -234,7 +219,7 @@ describe("Jifeng runtime credential provider", () => {
     expect(JSON.stringify(audit)).not.toMatch(
       /database-access-token|database-refresh-token|client-secret/i,
     );
-    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+    await expect(getEnabledJifengLookupClient()).rejects.toMatchObject({
       code: "FULFILLMENT_DISABLED",
     });
   });
@@ -332,7 +317,7 @@ describe("Jifeng runtime credential provider", () => {
       expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
         "/api/order/get",
       );
-      await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+      await expect(getEnabledJifengLookupClient()).rejects.toMatchObject({
         code: "FULFILLMENT_DISABLED",
       });
     },
@@ -360,8 +345,8 @@ describe("Jifeng runtime credential provider", () => {
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
       "/api/order/get",
     );
-    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
-      name: "JifengConfigError",
+    await expect(getEnabledJifengLookupClient()).resolves.toMatchObject({
+      client: expect.any(JifengClient),
     });
   });
 
@@ -406,17 +391,16 @@ describe("Jifeng runtime credential provider", () => {
     expect(await db.select().from(jifengConnections)).toEqual([]);
   });
 
-  test("denies absent-row legacy writes unless compatibility is exactly true", async () => {
+  test("denies absent-row legacy fulfillment lookup unless compatibility is exactly true", async () => {
     vi.stubEnv("JIFENG_LEGACY_FULFILLMENT_ENABLED", "TRUE");
-    await expect(getEnabledJifengWriteClient()).rejects.toMatchObject({
+    await expect(getEnabledJifengLookupClient()).rejects.toMatchObject({
       code: "LEGACY_FULFILLMENT_DISABLED",
     });
 
     vi.stubEnv("JIFENG_LEGACY_FULFILLMENT_ENABLED", "true");
-    const runtime = await getEnabledJifengWriteClient();
-    expect(runtime.config).toEqual({
-      logisticsId: 91,
-      warehouseCode: "LEGACY-WAREHOUSE",
+    const runtime = await getEnabledJifengLookupClient();
+    expect(runtime).toMatchObject({
+      client: expect.any(JifengClient),
     });
   });
 });

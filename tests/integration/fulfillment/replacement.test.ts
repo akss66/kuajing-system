@@ -32,7 +32,7 @@ import {
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
 import { cancelJifengShipmentAction } from "@/modules/fulfillment/actions";
-import { processJifengCreateOrderEvent } from "@/modules/fulfillment/dispatch";
+import { processJifengExistingOrderMatchEvent } from "@/modules/fulfillment/order-matching";
 import {
   cancelJifengShipment,
   createReplacementRequest,
@@ -222,9 +222,19 @@ describe("replacement fulfillment", () => {
     expect(event).toMatchObject({ eventType: "JIFENG_CREATE_ORDER", status: "PENDING" });
     expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(10);
 
-    await processJifengCreateOrderEvent({
-      client: { async createOrder() { return { data: null, requestId: "repl-create" }; } },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
+    const replacementErpNo = `JF-ERP-${created.replacementRequestId}`;
+    await processJifengExistingOrderMatchEvent({
+      client: {
+        async getOrder({ platformOrderNo }) {
+          expect(platformOrderNo).toBe(replacementShipment.externalOrderNo);
+          return {
+            erpNo: replacementErpNo,
+            orderNo: "JF-REPLACEMENT-1",
+            platformOrderNo,
+            status: 2,
+          };
+        },
+      },
       eventId: event.id,
     });
     expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(10);
@@ -232,7 +242,7 @@ describe("replacement fulfillment", () => {
     await applyJifengOrderStatus({
       detail: {
         currency: "CAD",
-        erpNo: fulfillment.erpNo,
+        erpNo: replacementErpNo,
         logisticsFee: 7.5,
         status: 7,
         trackingNo: "CP-REPLACEMENT-1",
@@ -270,21 +280,27 @@ describe("replacement fulfillment", () => {
       originalShipmentId: fixture.shipment.id,
       reason: "测试取消补发",
     });
-    const [fulfillment] = await db
+    const [replacementShipment] = await db
       .select()
-      .from(shipmentFulfillments)
-      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+      .from(orderShipments)
+      .where(eq(orderShipments.id, created.replacementShipmentId));
     const [event] = await db
       .select()
       .from(integrationOutbox)
       .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
-    await processJifengCreateOrderEvent({
+    const replacementErpNo = `JF-ERP-${created.replacementRequestId}`;
+    await processJifengExistingOrderMatchEvent({
       client: {
-        async createOrder() {
-          return { data: null, requestId: "replacement-created-before-cancel" };
+        async getOrder({ platformOrderNo }) {
+          expect(platformOrderNo).toBe(replacementShipment.externalOrderNo);
+          return {
+            erpNo: replacementErpNo,
+            orderNo: "JF-REPLACEMENT-BEFORE-CANCEL",
+            platformOrderNo,
+            status: 2,
+          };
         },
       },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
       eventId: event.id,
     });
 
@@ -314,7 +330,7 @@ describe("replacement fulfillment", () => {
       actorUserId: "auth-admin-replacement",
       client: {
         async cancelOrder(input) {
-          expect(input).toEqual({ deleteRecord: false, erpNo: fulfillment.erpNo });
+          expect(input).toEqual({ deleteRecord: false, erpNo: replacementErpNo });
           return { data: null, requestId: "cancel-success" };
         },
       },
@@ -333,7 +349,7 @@ describe("replacement fulfillment", () => {
     );
 
     await applyJifengOrderStatus({
-      detail: { erpNo: fulfillment.erpNo, status: 9 },
+      detail: { erpNo: replacementErpNo, status: 9 },
       source: "POLL",
     });
     expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
@@ -476,19 +492,25 @@ describe("replacement fulfillment", () => {
       .select()
       .from(integrationOutbox)
       .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
-    await processJifengCreateOrderEvent({
+    const [replacementShipment] = await db
+      .select()
+      .from(orderShipments)
+      .where(eq(orderShipments.id, created.replacementShipmentId));
+    const replacementErpNo = `JF-ERP-${created.replacementRequestId}`;
+    await processJifengExistingOrderMatchEvent({
       client: {
-        async createOrder() {
-          return { data: null, requestId: "replacement-created-before-race" };
+        async getOrder({ platformOrderNo }) {
+          expect(platformOrderNo).toBe(replacementShipment.externalOrderNo);
+          return {
+            erpNo: replacementErpNo,
+            orderNo: "JF-REPLACEMENT-BEFORE-RACE",
+            platformOrderNo,
+            status: 2,
+          };
         },
       },
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
       eventId: event.id,
     });
-    const [fulfillment] = await db
-      .select()
-      .from(shipmentFulfillments)
-      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
 
     await expect(
       cancelJifengShipment({
@@ -496,7 +518,7 @@ describe("replacement fulfillment", () => {
         client: {
           async cancelOrder() {
             await applyJifengOrderStatus({
-              detail: { erpNo: fulfillment.erpNo, status: 9 },
+              detail: { erpNo: replacementErpNo, status: 9 },
               source: "POLL",
             });
             return { data: null, requestId: "cancel-confirmed-by-sync" };
@@ -608,30 +630,20 @@ describe("replacement fulfillment", () => {
         .select()
         .from(shipmentFulfillments)
         .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
-      await processJifengCreateOrderEvent({
-        client: {
-          async createOrder() {
-            throw new JifengApiError({
-              code: "TIMEOUT",
-              message: "ambiguous replacement create",
-              retryable: true,
-            });
-          },
-        },
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
-        eventId: event.id,
-      });
-
+      const [replacementShipment] = await db
+        .select()
+        .from(orderShipments)
+        .where(eq(orderShipments.id, created.replacementShipmentId));
+      const replacementErpNo = `JF-ERP-${created.replacementRequestId}`;
       await expect(
-        processJifengCreateOrderEvent({
+        processJifengExistingOrderMatchEvent({
           client: {
-            async createOrder() {
-              throw new Error("replacement create must not repeat");
-            },
-            async getOrder({ erpNo }) {
+            async getOrder({ platformOrderNo }) {
+              expect(platformOrderNo).toBe(replacementShipment.externalOrderNo);
               return {
-                erpNo,
+                erpNo: replacementErpNo,
                 orderNo: `JF-REPL-${jifengStatus}`,
+                platformOrderNo,
                 shippedTime:
                   jifengStatus === 7 ? "2026-08-12T09:00:00.000Z" : undefined,
                 status: jifengStatus,
@@ -639,10 +651,9 @@ describe("replacement fulfillment", () => {
               };
             },
           },
-          config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
           eventId: event.id,
         }),
-      ).resolves.toEqual({ status: "RECONCILED" });
+      ).resolves.toEqual({ status: "MATCHED" });
 
       const [savedFulfillment] = await db
         .select()
@@ -686,7 +697,7 @@ describe("replacement fulfillment", () => {
     },
   );
 
-  test("reconciles a replacement after post-success persistence failure without repeating create", async () => {
+  test("retries exact replacement lookup after post-success persistence failure without duplicate binding", async () => {
     const fixture = await createShippedFixture();
     const created = await createReplacementRequest({
       actorUserId: "auth-admin-replacement",
@@ -699,14 +710,22 @@ describe("replacement fulfillment", () => {
       .select()
       .from(integrationOutbox)
       .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
-    let createCalls = 0;
+    const [replacementShipment] = await db
+      .select()
+      .from(orderShipments)
+      .where(eq(orderShipments.id, created.replacementShipmentId));
+    let lookupCalls = 0;
+    const replacementErpNo = `JF-ERP-${created.replacementRequestId}`;
     const client = {
-      async createOrder() {
-        createCalls += 1;
-        return { data: null };
-      },
-      async getOrder({ erpNo }: { erpNo: string }) {
-        return { erpNo, orderNo: "JF-REPL-POST-SUCCESS", status: 6 };
+      async getOrder({ platformOrderNo }: { platformOrderNo: string }) {
+        lookupCalls += 1;
+        expect(platformOrderNo).toBe(replacementShipment.externalOrderNo);
+        return {
+          erpNo: replacementErpNo,
+          orderNo: "JF-REPL-POST-SUCCESS",
+          platformOrderNo,
+          status: 6,
+        };
       },
     };
     await db.execute(sql.raw(`
@@ -721,9 +740,8 @@ describe("replacement fulfillment", () => {
       for each row execute function test_fail_replacement_success_attempt();
     `));
     try {
-      await processJifengCreateOrderEvent({
+      await processJifengExistingOrderMatchEvent({
         client,
-        config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
         eventId: event.id,
       });
     } finally {
@@ -732,13 +750,12 @@ describe("replacement fulfillment", () => {
         drop function if exists test_fail_replacement_success_attempt();
       `));
     }
-    await processJifengCreateOrderEvent({
+    await processJifengExistingOrderMatchEvent({
       client,
-      config: { logisticsId: 310, warehouseCode: "CA-YYZ" },
       eventId: event.id,
     });
 
-    expect(createCalls).toBe(1);
+    expect(lookupCalls).toBe(2);
     expect((await db.select().from(replacementRequests))[0].status).toBe(
       "FULFILLING",
     );

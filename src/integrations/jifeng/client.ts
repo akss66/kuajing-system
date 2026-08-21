@@ -14,7 +14,6 @@ import {
   parseJifengWarehouses,
 } from "./resources";
 import type {
-  JifengCreateOrderInput,
   JifengCredentials,
   JifengOfflineLogistics,
   JifengOrderDetail,
@@ -125,15 +124,6 @@ export class JifengClient {
     this.onAuthenticationRejected = input.onAuthenticationRejected;
     this.onTokensRefreshed = input.onTokensRefreshed;
     this.timeoutMs = input.timeoutMs ?? 10_000;
-  }
-
-  async createOrder(_input: JifengCreateOrderInput): Promise<never> {
-    void _input;
-    throw new JifengApiError({
-      code: "CREATE_DISABLED",
-      message: "系统已禁用创建极风订单，只允许匹配极风已有订单",
-      retryable: false,
-    });
   }
 
   async getOrder(input: {

@@ -6,12 +6,10 @@ import { JifengClient } from "@/integrations/jifeng/client";
 import {
   JifengConfigError,
   readJifengAuthorizedConfig,
-  readJifengConfig,
 } from "@/integrations/jifeng/config";
 import type { JifengCredentials } from "@/integrations/jifeng/types";
 import {
   enqueuePaidOrdersForFulfillment,
-  type DispatchConfig,
 } from "@/modules/fulfillment/dispatch";
 import { processDueJifengExistingOrderMatches } from "@/modules/fulfillment/order-matching";
 import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
@@ -35,10 +33,6 @@ export class JifengProviderError extends Error {
 
 export type JifengReadRuntime = {
   client: JifengClient;
-};
-
-export type JifengWriteRuntime = JifengReadRuntime & {
-  config: DispatchConfig;
 };
 
 export type JifengCycleSummary = {
@@ -84,38 +78,6 @@ function buildReadRuntime(
   };
 }
 
-function buildWriteRuntime(
-  credentials: JifengCredentials & {
-    logisticsId: number | null;
-    warehouseCode: string | null;
-  },
-  onAuthenticationRejected?: AuthenticationRejectedCallback,
-): JifengWriteRuntime {
-  if (
-    !Number.isSafeInteger(credentials.logisticsId) ||
-    credentials.logisticsId === null ||
-    credentials.logisticsId <= 0 ||
-    !credentials.warehouseCode?.trim()
-  ) {
-    providerError(
-      "RUNTIME_CONFIG_INVALID",
-      "Jifeng runtime resources are not ready",
-    );
-  }
-
-  return {
-    client: new JifengClient({
-      automaticRefresh: onAuthenticationRejected ? false : undefined,
-      credentials,
-      onAuthenticationRejected,
-    }),
-    config: {
-      logisticsId: credentials.logisticsId,
-      warehouseCode: credentials.warehouseCode,
-    },
-  };
-}
-
 async function readConnectionState() {
   const [row] = await db
     .select({
@@ -131,10 +93,6 @@ async function readConnectionState() {
 
 function readLegacyReadRuntime(): JifengReadRuntime {
   return buildReadRuntime(readJifengAuthorizedConfig());
-}
-
-function readLegacyWriteRuntime(): JifengWriteRuntime {
-  return buildWriteRuntime(readJifengConfig());
 }
 
 async function readStoredRuntimeSource(input: {
@@ -193,26 +151,6 @@ export async function getEnabledJifengLookupClient(): Promise<JifengReadRuntime>
 
 export async function getEnabledJifengCancellationClient(): Promise<JifengReadRuntime> {
   return getEnabledJifengLookupClient();
-}
-
-export async function getEnabledJifengWriteClient(): Promise<JifengWriteRuntime> {
-  const stored = await readStoredRuntimeSource({
-    requireFulfillmentEnabled: true,
-  });
-  if (stored) {
-    return buildWriteRuntime(
-      stored.credentials,
-      stored.onAuthenticationRejected,
-    );
-  }
-
-  if (process.env.JIFENG_LEGACY_FULFILLMENT_ENABLED !== "true") {
-    providerError(
-      "LEGACY_FULFILLMENT_DISABLED",
-      "Legacy Jifeng fulfillment is disabled",
-    );
-  }
-  return readLegacyWriteRuntime();
 }
 
 function isUnavailableConnection(error: unknown) {

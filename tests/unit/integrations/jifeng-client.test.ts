@@ -7,7 +7,6 @@ import {
   signJifengRequest,
   type JifengSigningInput,
 } from "@/integrations/jifeng";
-import type { JifengCreateOrderInput } from "@/integrations/jifeng/types";
 
 const credentials = {
   accessToken: "1b56814f081c432cb82751be145261d3",
@@ -415,25 +414,6 @@ describe("Jifeng API client", () => {
 
     expect(error).toBeInstanceOf(JifengApiError);
     expect(error).toMatchObject({ code: String(code), retryable });
-  });
-
-  test("refuses to call the Jifeng create endpoint after existing-order matching is enabled", async () => {
-    const fetchMock = vi.fn(async () =>
-      Response.json({ code: 0, data: null }),
-    );
-    const client = new JifengClient({
-      credentials,
-      fetch: fetchMock,
-    });
-
-    await expect(
-      client.createOrder({} as JifengCreateOrderInput),
-    ).rejects.toMatchObject({
-      code: "CREATE_DISABLED",
-      message: "系统已禁用创建极风订单，只允许匹配极风已有订单",
-      retryable: false,
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test.each([50018, 50060])(

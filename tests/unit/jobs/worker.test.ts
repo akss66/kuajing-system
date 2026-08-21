@@ -51,11 +51,6 @@ vi.mock("@/integrations/jifeng/config", () => ({
 
 vi.mock("@/modules/fulfillment/dispatch", () => ({
   enqueuePaidOrdersForFulfillment: vi.fn(async () => 0),
-  processDueJifengCreateOrderEvents: vi.fn(async () => ({
-    completed: 0,
-    failed: 0,
-    retryScheduled: 0,
-  })),
 }));
 
 vi.mock("@/modules/fulfillment/status-sync", () => ({

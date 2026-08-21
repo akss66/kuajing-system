@@ -16,7 +16,7 @@ import { refreshParentFulfillmentStatus } from "./order-rollup";
 import { applyJifengOrderStatus } from "./status-sync";
 
 const LEGACY_MATCH_EVENT_TYPE = "JIFENG_CREATE_ORDER";
-const MATCH_LEASE_MS = 5 * 60 * 1000;
+export const JIFENG_MATCH_LEASE_MS = 5 * 60 * 1000;
 const NOT_FOUND_CODES = new Set(["50017", "50071"]);
 const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 
@@ -212,7 +212,7 @@ async function claimExistingOrderMatch(eventId: string, now: Date) {
         : row.lockedAt
           ? new Date(row.lockedAt)
           : null;
-      if (!lockedAt || lockedAt.getTime() + MATCH_LEASE_MS > now.getTime()) {
+      if (lockedAt && lockedAt.getTime() + JIFENG_MATCH_LEASE_MS > now.getTime()) {
         return "BUSY" as const;
       }
     }
@@ -790,7 +790,7 @@ export async function processDueJifengExistingOrderMatches(input: {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
     throw new Error("极风订单匹配批量大小必须在 1 到 200 之间");
   }
-  const staleLeaseCutoff = new Date(queryNow.getTime() - MATCH_LEASE_MS);
+  const staleLeaseCutoff = new Date(queryNow.getTime() - JIFENG_MATCH_LEASE_MS);
   const events = await db.execute<{ id: string }>(sql`
     select id
       from integration_outbox
@@ -800,7 +800,10 @@ export async function processDueJifengExistingOrderMatches(input: {
           (status in ('PENDING', 'FAILED')
           and next_attempt_at <= ${queryNow.toISOString()}::timestamptz)
         or (status = 'PROCESSING'
-          and locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz)
+          and (
+            locked_at is null
+            or locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz
+          ))
       )
     order by coalesce(locked_at, next_attempt_at), id
     limit ${limit}
