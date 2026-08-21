@@ -1265,4 +1265,62 @@ describe("Jifeng order status convergence", () => {
 
     expect(queryCount).toBe(1);
   });
+
+  test("claims each package immediately before its remote call so queued leases cannot expire", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-21T12:00:00.000Z");
+    const queriedErpNumbers: string[] = [];
+    let releaseFirstQuery!: () => void;
+    let signalFirstQueryStarted!: () => void;
+    const firstQueryGate = new Promise<void>((resolve) => {
+      releaseFirstQuery = resolve;
+    });
+    const firstQueryStarted = new Promise<void>((resolve) => {
+      signalFirstQueryStarted = resolve;
+    });
+
+    const firstWorker = pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => {
+          queriedErpNumbers.push(erpNo);
+          signalFirstQueryStarted();
+          await firstQueryGate;
+          return { erpNo, status: 2 };
+        },
+      },
+      limit: 2,
+      now,
+    });
+    await firstQueryStarted;
+
+    try {
+      const claimedRows = await db.execute<{ count: number }>(sql`
+        select count(*)::int as count
+        from shipment_fulfillments
+        where status_poll_claim_token is not null
+      `);
+      expect(claimedRows[0].count).toBe(1);
+
+      await expect(
+        pollActiveJifengFulfillments({
+          client: {
+            getOrder: async ({ erpNo }) => {
+              queriedErpNumbers.push(erpNo);
+              return { erpNo, status: 2 };
+            },
+          },
+          limit: 2,
+          now,
+        }),
+      ).resolves.toMatchObject({ synced: 1 });
+    } finally {
+      releaseFirstQuery();
+      await firstWorker;
+    }
+
+    expect(new Set(queriedErpNumbers)).toEqual(
+      new Set(fixture.fulfillments.map((fulfillment) => fulfillment.erpNo)),
+    );
+    expect(queriedErpNumbers).toHaveLength(2);
+  });
 });

@@ -993,85 +993,87 @@ export async function pollActiveJifengFulfillments(input: {
   now?: Date;
 }) {
   const limit = input.limit ?? 100;
-  const now = input.now ?? new Date();
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     throw new Error("极风状态轮询批量大小必须在 1 到 500 之间");
   }
-  const claimToken = crypto.randomUUID();
-  const staleLeaseCutoff = new Date(now.getTime() - STATUS_POLL_LEASE_MS);
-  const active = await db.execute<{ erpNo: string }>(sql`
-    with due as (
-      select id
-      from shipment_fulfillments
-      where (
-          (
-            status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING')
-            and (
-              submitted_at is not null
-              or jifeng_status is not null
-              or exists (
-                select 1
-                from integration_outbox as create_event
-                where create_event.aggregate_id = shipment_fulfillments.shipment_id::text
-                  and create_event.target = 'JIFENG'
-                  and create_event.event_type = 'JIFENG_CREATE_ORDER'
-                  and (
-                    create_event.last_error_code in (
-                      'TIMEOUT',
-                      'NETWORK_ERROR',
-                      'INVALID_RESPONSE',
-                      'INTERNAL_ERROR',
-                      'POST_SUCCESS_PERSISTENCE_ERROR',
-                      'STALE_PROCESSING',
-                      '50019',
-                      '50038'
-                    )
-                    or left(create_event.last_error_code, 5) = 'HTTP_'
-                    or left(create_event.last_error_code, 24) = 'RECONCILIATION_REQUIRED:'
-                  )
-              )
-            )
-          )
-          or (
-            status = 'SHIPPED'
-            and exists (
-              select 1
-              from order_shipments shipped_metadata
-              where shipped_metadata.id = shipment_fulfillments.shipment_id
-                and (
-                  shipped_metadata.logistics_fee_minor is null
-                  or nullif(trim(shipped_metadata.tracking_number), '') is null
-                  or shipped_metadata.shipped_at is null
-                  or shipment_fulfillments.shipped_at is null
-                )
-            )
-          )
-        )
-        and coalesce(last_error_code, '') <> 'REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH'
-        and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
-        and (
-          status_poll_locked_at is null
-          or status_poll_locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz
-        )
-      order by coalesce(next_retry_at, submitted_at, created_at), id
-      for update skip locked
-      limit ${limit}
-    )
-    update shipment_fulfillments as fulfillment
-    set
-      status_poll_claim_token = ${claimToken},
-      status_poll_locked_at = ${now.toISOString()}::timestamptz
-    from due
-    where fulfillment.id = due.id
-    returning fulfillment.erp_no as "erpNo"
-  `);
   const summary = {
     exceptions: 0,
     pollFailures: 0,
     shipped: 0,
     synced: 0,
   };
-  for (const fulfillment of active) {
+  for (let processed = 0; processed < limit; processed += 1) {
+    const now = input.now ?? new Date();
+    const claimToken = crypto.randomUUID();
+    const staleLeaseCutoff = new Date(now.getTime() - STATUS_POLL_LEASE_MS);
+    const claimedRows = await db.execute<{ erpNo: string }>(sql`
+      with due as (
+        select id
+        from shipment_fulfillments
+        where (
+            (
+              status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING')
+              and (
+                submitted_at is not null
+                or jifeng_status is not null
+                or exists (
+                  select 1
+                  from integration_outbox as create_event
+                  where create_event.aggregate_id = shipment_fulfillments.shipment_id::text
+                    and create_event.target = 'JIFENG'
+                    and create_event.event_type = 'JIFENG_CREATE_ORDER'
+                    and (
+                      create_event.last_error_code in (
+                        'TIMEOUT',
+                        'NETWORK_ERROR',
+                        'INVALID_RESPONSE',
+                        'INTERNAL_ERROR',
+                        'POST_SUCCESS_PERSISTENCE_ERROR',
+                        'STALE_PROCESSING',
+                        '50019',
+                        '50038'
+                      )
+                      or left(create_event.last_error_code, 5) = 'HTTP_'
+                      or left(create_event.last_error_code, 24) = 'RECONCILIATION_REQUIRED:'
+                    )
+                )
+              )
+            )
+            or (
+              status = 'SHIPPED'
+              and exists (
+                select 1
+                from order_shipments shipped_metadata
+                where shipped_metadata.id = shipment_fulfillments.shipment_id
+                  and (
+                    shipped_metadata.logistics_fee_minor is null
+                    or nullif(trim(shipped_metadata.tracking_number), '') is null
+                    or shipped_metadata.shipped_at is null
+                    or shipment_fulfillments.shipped_at is null
+                  )
+              )
+            )
+          )
+          and coalesce(last_error_code, '') <> 'REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH'
+          and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
+          and (
+            status_poll_locked_at is null
+            or status_poll_locked_at <= ${staleLeaseCutoff.toISOString()}::timestamptz
+          )
+        order by coalesce(next_retry_at, submitted_at, created_at), id
+        for update skip locked
+        limit 1
+      )
+      update shipment_fulfillments as fulfillment
+      set
+        status_poll_claim_token = ${claimToken},
+        status_poll_locked_at = ${now.toISOString()}::timestamptz
+      from due
+      where fulfillment.id = due.id
+      returning fulfillment.erp_no as "erpNo"
+    `);
+    const fulfillment = claimedRows[0];
+    if (!fulfillment) break;
     try {
       const detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
       if (detail.erpNo !== fulfillment.erpNo) {
