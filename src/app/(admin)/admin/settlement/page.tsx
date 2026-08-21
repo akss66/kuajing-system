@@ -14,7 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listPendingPaymentClaims } from "@/modules/orders/queries";
-import { listAdminSettlementBatches } from "@/modules/settlement/admin-queries";
+import {
+  listAdminSettlementBatches,
+  listPendingOfflineRefunds,
+} from "@/modules/settlement/admin-queries";
 import { adjustWalletAction } from "@/modules/wallet/actions";
 import { listAdminWalletAccounts, listAdminWalletTransactions } from "@/modules/wallet/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
@@ -31,12 +34,21 @@ function dateTime(value: Date) {
   }).format(value);
 }
 
+function refundAge(value: Date, now = new Date()) {
+  const elapsedDays = Math.max(
+    0,
+    Math.floor((now.getTime() - value.getTime()) / (24 * 60 * 60 * 1_000)),
+  );
+  return elapsedDays === 0 ? "等待不足 1 天" : `已等待 ${elapsedDays} 天`;
+}
+
 export default async function SettlementPage() {
-  const [accounts, transactions, pendingClaims, pendingBatches] = await Promise.all([
+  const [accounts, transactions, pendingClaims, pendingBatches, pendingRefunds] = await Promise.all([
     listAdminWalletAccounts(),
     listAdminWalletTransactions(),
     listPendingPaymentClaims(),
     listAdminSettlementBatches({ status: "PAYMENT_REPORTED" }),
+    listPendingOfflineRefunds(),
   ]);
   const totalBalanceFen = accounts.reduce((sum, account) => sum + account.balanceFen, 0);
 
@@ -49,10 +61,15 @@ export default async function SettlementPage() {
 
       <MetricStrip
         items={[
-          { hint: "等待管理员核款", label: "待核款", tone: pendingClaims.length ? "warning" : "default", value: String(pendingClaims.length) },
+          {
+            hint: `直接付款 ${pendingClaims.length} · 统一结算 ${pendingBatches.length}`,
+            label: "待核款",
+            tone: pendingClaims.length + pendingBatches.length ? "warning" : "default",
+            value: String(pendingClaims.length + pendingBatches.length),
+          },
+          { hint: "已取消包裹的微信退款", label: "待线下退款", tone: pendingRefunds.length ? "warning" : "default", value: String(pendingRefunds.length) },
           { hint: "所有客户钱包余额", label: "客户余额合计", value: money(totalBalanceFen) },
           { hint: "已启用客户钱包账户", label: "钱包账户", value: String(accounts.length) },
-          { hint: "等待整批确认或拒绝", label: "统一结算待审", tone: pendingBatches.length ? "warning" : "default", value: String(pendingBatches.length) },
         ]}
       />
 
@@ -81,6 +98,58 @@ export default async function SettlementPage() {
             </div>
           ) : (
             <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无需要核对的微信付款。</div>
+          )}
+        </SettlementRegion>
+
+        <SettlementRegion
+          description="已取消且使用微信线下付款的包裹，需要人工退款；完成后会自动移出本列表。"
+          id="pending-offline-refunds"
+          kind="refunds"
+        >
+          {pendingRefunds.length ? (
+            <ResponsiveDataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>客户</TableHead>
+                    <TableHead>拿货单 / 平台单号</TableHead>
+                    <TableHead>创建时间 / 账龄</TableHead>
+                    <TableHead className="text-right">待退款</TableHead>
+                    <TableHead className="text-right">处理</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingRefunds.map((refund) => (
+                    <TableRow key={refund.shipmentId}>
+                      <TableCell>
+                        <p className="font-medium">{refund.customerCode}</p>
+                        <p className="text-xs text-muted">{refund.customerName}</p>
+                      </TableCell>
+                      <TableCell>
+                        <p className="font-medium">{refund.orderNumber}</p>
+                        <p className="text-xs text-muted">{refund.externalOrderNo}</p>
+                      </TableCell>
+                      <TableCell>
+                        <p>{dateTime(refund.createdAt)}</p>
+                        <p className="text-xs text-warning">{refundAge(refund.createdAt)}</p>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums text-danger">
+                        {money(refund.offlineAmountFen)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link className="font-medium text-primary hover:underline" href={`/admin/orders/${refund.orderId}`}>
+                          进入订单详情处理
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ResponsiveDataTable>
+          ) : (
+            <div className="px-5 py-10 text-center text-sm text-muted" role="status">
+              暂无线下退款待办。
+            </div>
           )}
         </SettlementRegion>
 

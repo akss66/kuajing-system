@@ -6,9 +6,11 @@ import {
   auditLogs,
   customers,
   fulfillmentOrders,
+  orderShipments,
   settlementBatchOrders,
   settlementBatches,
   settlementPaymentClaims,
+  shipmentCancellationAdjustments,
   stores,
   walletHolds,
 } from "@/db/schema";
@@ -30,6 +32,37 @@ export type AdminSettlementBatchFilters = {
   status?: string;
   storeId?: string;
 };
+
+export async function listPendingOfflineRefunds() {
+  await requireAdmin();
+
+  return db
+    .select({
+      createdAt: shipmentCancellationAdjustments.createdAt,
+      customerCode: customers.code,
+      customerName: customers.name,
+      externalOrderNo: orderShipments.externalOrderNo,
+      offlineAmountFen: shipmentCancellationAdjustments.offlineAmountFen,
+      orderId: fulfillmentOrders.id,
+      orderNumber: fulfillmentOrders.orderNumber,
+      shipmentId: orderShipments.id,
+    })
+    .from(shipmentCancellationAdjustments)
+    .innerJoin(
+      orderShipments,
+      eq(orderShipments.id, shipmentCancellationAdjustments.shipmentId),
+    )
+    .innerJoin(
+      fulfillmentOrders,
+      eq(fulfillmentOrders.id, shipmentCancellationAdjustments.orderId),
+    )
+    .innerJoin(customers, eq(customers.id, shipmentCancellationAdjustments.customerId))
+    .where(eq(shipmentCancellationAdjustments.status, "PENDING_OFFLINE"))
+    .orderBy(
+      asc(shipmentCancellationAdjustments.createdAt),
+      asc(shipmentCancellationAdjustments.id),
+    );
+}
 
 function isIsoDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

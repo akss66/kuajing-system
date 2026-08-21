@@ -33,12 +33,14 @@ function SectionHeading({ description, id, title }: { description: string; id: s
 
 function QueueRow({
   count,
+  detail,
   href,
   icon: Icon,
   label,
   tone = "warning",
 }: {
   count: number;
+  detail?: string;
   href: string;
   icon: typeof AlertTriangle;
   label: string;
@@ -53,7 +55,10 @@ function QueueRow({
         aria-hidden="true"
         className={tone === "danger" ? "size-4 text-danger" : "size-4 text-warning"}
       />
-      <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        {detail ? <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span> : null}
+      </span>
       <strong className="tabular-nums text-base text-foreground">{count}</strong>
       <ArrowRight aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
     </Link>
@@ -111,6 +116,13 @@ export function AdminOperationsDashboard({
                 href="/admin/settlement-batches?status=PAYMENT_REPORTED"
                 icon={BanknoteArrowDown}
                 label="待审核付款"
+              />
+              <QueueRow
+                count={dashboard.pendingOfflineRefundCount}
+                detail={money.format(dashboard.pendingOfflineRefundAmountFen / 100)}
+                href="/admin/settlement#pending-offline-refunds"
+                icon={ReceiptText}
+                label="待线下退款"
               />
               <QueueRow
                 count={dashboard.fulfillmentExceptionCount}

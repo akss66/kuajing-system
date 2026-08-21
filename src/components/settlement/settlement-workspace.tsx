@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-type SettlementRegionKind = "balances" | "batches" | "review" | "transactions";
+type SettlementRegionKind = "balances" | "batches" | "refunds" | "review" | "transactions";
 
 const defaultRegionTitles: Record<SettlementRegionKind, string> = {
   balances: "客户余额",
   batches: "结算批次",
+  refunds: "待线下退款",
   review: "待核款队列",
   transactions: "资金流水",
 };
@@ -22,6 +23,7 @@ type SettlementRegionProps = {
   className?: string;
   contentClassName?: string;
   description?: ReactNode;
+  id?: string;
   kind: SettlementRegionKind;
   title?: string;
 };
@@ -40,6 +42,7 @@ export function SettlementRegion({
   className,
   contentClassName,
   description,
+  id,
   kind,
   title = defaultRegionTitles[kind],
 }: SettlementRegionProps) {
@@ -53,6 +56,7 @@ export function SettlementRegion({
         className,
       )}
       data-settlement-region={kind}
+      id={id}
     >
       <header className="flex flex-col gap-3 border-b border-border px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:px-5">
         <div className="min-w-0">

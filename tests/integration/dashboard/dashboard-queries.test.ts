@@ -14,6 +14,7 @@ import {
   products,
   settlementBatches,
   settlementPaymentClaims,
+  shipmentCancellationAdjustments,
   skus,
   stores,
   walletAccounts,
@@ -200,6 +201,87 @@ describe("dashboard queries", () => {
         unitPriceFen: 1_100,
       },
     ]);
+    const refundCreatedAt = new Date("2026-08-01T04:00:00.000Z");
+    const [partialRefundOrder, fullRefundOrder] = await db
+      .insert(fulfillmentOrders)
+      .values([
+        {
+          cancellationState: "PARTIAL",
+          customerId: customer.id,
+          orderNumber: `PARTIAL-REFUND-${suffix}`,
+          paidAt: refundCreatedAt,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "FULFILLING",
+          storeId: store.id,
+          submittedAt: refundCreatedAt,
+          totalAmountFen: 1_300,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        },
+        {
+          cancelReason: "整单取消",
+          cancellationState: "ALL",
+          cancelledAt: refundCreatedAt,
+          customerId: customer.id,
+          orderNumber: `FULL-REFUND-${suffix}`,
+          paidAt: refundCreatedAt,
+          paymentMode: "DIRECT_OFFLINE",
+          status: "CANCELLED",
+          storeId: store.id,
+          submittedAt: refundCreatedAt,
+          totalAmountFen: 1_300,
+          totalPackageCount: 1,
+          totalQuantity: 1,
+        },
+      ])
+      .returning();
+    const [partialRefundShipment, fullRefundShipment] = await db
+      .insert(orderShipments)
+      .values([
+        {
+          externalOrderNo: `PARTIAL-REFUND-${suffix}`,
+          orderId: partialRefundOrder.id,
+          recipientPayloadEncrypted: "encrypted",
+          storeId: store.id,
+        },
+        {
+          externalOrderNo: `FULL-REFUND-${suffix}`,
+          orderId: fullRefundOrder.id,
+          recipientPayloadEncrypted: "encrypted",
+          storeId: store.id,
+        },
+      ])
+      .returning();
+    await db.insert(shipmentCancellationAdjustments).values([
+      {
+        actorType: "SYSTEM",
+        createdAt: refundCreatedAt,
+        customerId: customer.id,
+        merchandiseAmountFen: 0,
+        offlineAmountFen: 1_300,
+        orderId: partialRefundOrder.id,
+        reason: "部分取消",
+        shipmentId: partialRefundShipment.id,
+        shippingFeeFen: 1_300,
+        status: "PENDING_OFFLINE",
+        totalAmountFen: 1_300,
+        walletAmountFen: 0,
+      },
+      {
+        actorType: "SYSTEM",
+        createdAt: refundCreatedAt,
+        customerId: customer.id,
+        merchandiseAmountFen: 0,
+        offlineAmountFen: 1_300,
+        orderId: fullRefundOrder.id,
+        reason: "整单取消",
+        shipmentId: fullRefundShipment.id,
+        shippingFeeFen: 1_300,
+        status: "PENDING_OFFLINE",
+        totalAmountFen: 1_300,
+        walletAmountFen: 0,
+      },
+    ]);
     await db.insert(paymentClaims).values({
       amountFen: 600,
       customerId: customer.id,
@@ -273,6 +355,8 @@ describe("dashboard queries", () => {
       fulfillmentExceptionCount: 1,
       importExceptionCount: 1,
       pendingFulfillmentCount: 1,
+      pendingOfflineRefundAmountFen: 2_600,
+      pendingOfflineRefundCount: 2,
       pendingPaymentReviewCount: 2,
       todayNetOrderAmountFen: 6_000,
       todayOrderCount: 3,

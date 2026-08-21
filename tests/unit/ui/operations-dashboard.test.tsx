@@ -31,6 +31,8 @@ describe("operations dashboards", () => {
           fulfillmentExceptionCount: 1,
           importExceptionCount: 3,
           pendingFulfillmentCount: 4,
+          pendingOfflineRefundAmountFen: 2_600,
+          pendingOfflineRefundCount: 2,
           pendingPaymentReviewCount: 5,
           sevenDaySeries: [
             { date: "2026-08-07", netOrderAmountFen: 0, orderCount: 0 },
@@ -58,6 +60,10 @@ describe("operations dashboards", () => {
     expect(screen.getByText("¥123.45")).toBeVisible();
     expect(screen.getByText("下单净额")).toBeVisible();
     expect(screen.getByText("拿货单与下单净额")).toBeVisible();
+    expect(screen.getByRole("link", { name: /待线下退款.*¥26\.00.*2/ })).toHaveAttribute(
+      "href",
+      "/admin/settlement#pending-offline-refunds",
+    );
     expect(document.body).not.toHaveTextContent("成交金额");
     expect(screen.getByRole("link", { name: /审核收款/ })).toHaveAttribute(
       "href",

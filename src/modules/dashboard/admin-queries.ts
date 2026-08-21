@@ -11,6 +11,8 @@ export type AdminOperationsDashboard = {
   fulfillmentExceptionCount: number;
   importExceptionCount: number;
   pendingFulfillmentCount: number;
+  pendingOfflineRefundAmountFen: number;
+  pendingOfflineRefundCount: number;
   pendingPaymentReviewCount: number;
   sevenDaySeries: Array<{ date: string; netOrderAmountFen: number; orderCount: number }>;
   todayNetOrderAmountFen: number;
@@ -44,6 +46,8 @@ export async function getAdminOperationsDashboard(
       fulfillmentExceptionCount: number | string;
       importExceptionCount: number | string;
       pendingFulfillmentCount: number | string;
+      pendingOfflineRefundAmountFen: number | string;
+      pendingOfflineRefundCount: number | string;
       pendingPaymentReviewCount: number | string;
       todayNetOrderAmountFen: number | string;
       todayOrderCount: number | string;
@@ -77,6 +81,16 @@ export async function getAdminOperationsDashboard(
           (select count(*) from payment_claims where status = 'PENDING') +
           (select count(*) from settlement_payment_claims where status = 'PENDING')
         ) as "pendingPaymentReviewCount",
+        (
+          select count(*)
+          from shipment_cancellation_adjustments
+          where status = 'PENDING_OFFLINE'
+        ) as "pendingOfflineRefundCount",
+        (
+          select coalesce(sum(offline_amount_fen), 0)
+          from shipment_cancellation_adjustments
+          where status = 'PENDING_OFFLINE'
+        ) as "pendingOfflineRefundAmountFen",
         (
           select count(*)
           from order_import_batches
@@ -138,6 +152,10 @@ export async function getAdminOperationsDashboard(
     fulfillmentExceptionCount: Number(summary?.fulfillmentExceptionCount ?? 0),
     importExceptionCount: Number(summary?.importExceptionCount ?? 0),
     pendingFulfillmentCount: Number(summary?.pendingFulfillmentCount ?? 0),
+    pendingOfflineRefundAmountFen: Number(
+      summary?.pendingOfflineRefundAmountFen ?? 0,
+    ),
+    pendingOfflineRefundCount: Number(summary?.pendingOfflineRefundCount ?? 0),
     pendingPaymentReviewCount: Number(summary?.pendingPaymentReviewCount ?? 0),
     sevenDaySeries: dates.map((date) => ({
       date,

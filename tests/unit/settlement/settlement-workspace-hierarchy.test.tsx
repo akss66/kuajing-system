@@ -11,6 +11,7 @@ const orderQueryMocks = vi.hoisted(() => ({
 
 const settlementQueryMocks = vi.hoisted(() => ({
   listAdminSettlementBatches: vi.fn(),
+  listPendingOfflineRefunds: vi.fn(),
 }));
 
 const walletQueryMocks = vi.hoisted(() => ({
@@ -36,6 +37,18 @@ describe("settlement workspace hierarchy", () => {
   it("separates review queue, balances, batches and transactions into named financial regions", async () => {
     orderQueryMocks.listPendingPaymentClaims.mockResolvedValue([]);
     settlementQueryMocks.listAdminSettlementBatches.mockResolvedValue([]);
+    settlementQueryMocks.listPendingOfflineRefunds.mockResolvedValue([
+      {
+        createdAt: new Date("2026-08-10T04:00:00.000Z"),
+        customerCode: "C-001",
+        customerName: "客户一",
+        externalOrderNo: "PO-10001",
+        offlineAmountFen: 1_300,
+        orderId: "order-1",
+        orderNumber: "TH-20260810-001",
+        shipmentId: "shipment-1",
+      },
+    ]);
     walletQueryMocks.listAdminWalletAccounts.mockResolvedValue([
       {
         balanceFen: 168800,
@@ -50,8 +63,15 @@ describe("settlement workspace hierarchy", () => {
     render(await SettlementPage());
 
     expect(screen.getByRole("region", { name: "待核款队列" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "待线下退款" })).toBeVisible();
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
     expect(screen.getByRole("region", { name: "结算批次" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
+    expect(screen.getByText("PO-10001")).toBeVisible();
+    expect(screen.getByText("¥13.00")).toBeVisible();
+    expect(screen.getByRole("link", { name: /进入订单详情处理/ })).toHaveAttribute(
+      "href",
+      "/admin/orders/order-1",
+    );
   });
 });
