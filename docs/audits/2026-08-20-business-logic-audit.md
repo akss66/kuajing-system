@@ -1,5 +1,7 @@
 # 跨境系统业务逻辑与安全审计（2026-08-20）
 
+> 2026-08-21 接续更新：极风履约已经改为只按 `platformOrderNo` 匹配已有订单，创建接口和旧创建执行器均已删除。本文中关于“创建/重建极风订单”的历史描述不再代表当前实现；现行决策见 `docs/decisions/001-jifeng-existing-order-match-only.md`。
+
 ## 范围与最终结论
 
 - 接续基线：`codex/sku-management` / `faad1aa21dc94f6c6ad04234695ae19ce15468e6`；本轮独立 worktree 分支为 `codex/sku-management-audit-20260820`。
@@ -18,7 +20,7 @@
 6. 飞书源货盘只读；发布配置强制 `FEISHU_CARGO_WRITES_ENABLED=false`，见 `C:\Users\AKSSINA\.codex\worktrees\sku-audit-20260820\kuajinng\compose.production.yaml:14`。数据库是商品、库存、订单与金额的唯一事实来源。
 7. SKU 匹配优先级为“店铺专属映射 > 全局映射 > 在售标准 SKU 精确码”；同一平台主订单收件信息冲突必须整包无效，不能选择最后一行地址。
 8. 活动去重键同时覆盖 `storeId + externalOrderNo` 和 `storeId + externalSubOrderNo`；单店和批量路径共享同一 advisory-lock 命名空间，定义见 `C:\Users\AKSSINA\.codex\worktrees\sku-audit-20260820\kuajinng\src\modules\orders\import-conflict-lock.ts:13`。
-9. 极风状态 2 为“待仓库发货/履约中”，7 为已发货，8/11 为仓库异常，9 为已取消；创建、查询、取消都必须按 ERP 单号精确关联，不能用一个包裹的响应更新另一个包裹。
+9. 极风状态 2 为“待仓库发货/履约中”，7 为已发货，8/11 为仓库异常，9 为已取消；首次绑定必须按平台订单号精确匹配已有订单，绑定后的查询和取消必须按极风真实 ERP 单号关联，不能用一个包裹的响应更新另一个包裹。
 10. 远程调用不得占用长数据库事务；轮询、Outbox 使用 claim token、租约、`SKIP LOCKED` 和 CAS。成功查询必须清理失败计数与 claim，并按状态重新安排或清空 `nextRetryAt`。
 11. 客户数据访问以认证主体 `customerId` 为边界；账号创建/停用属于超级管理员能力；联系人姓名和微信号不得明文复制到审计日志。
 

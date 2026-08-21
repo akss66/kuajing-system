@@ -20,7 +20,7 @@ const auditActionLabels: Record<string, string> = {
   JIFENG_ORDER_RECONCILED: "极风订单对账完成",
   JIFENG_ORDER_RECONCILIATION_REQUIRED: "极风订单需要对账",
   JIFENG_ORDER_SUBMISSION_FAILED: "极风订单推送失败",
-  JIFENG_ORDER_SUBMITTED: "极风订单已推送",
+  JIFENG_ORDER_SUBMITTED: "极风已有订单已绑定（历史事件）",
   JIFENG_SHIPMENT_CANCEL_FAILED: "极风取消发货失败",
   JIFENG_SHIPMENT_CANCEL_REQUESTED: "极风取消发货已请求",
   JIFENG_SHIPMENT_CANCELLED: "极风发货已取消",
