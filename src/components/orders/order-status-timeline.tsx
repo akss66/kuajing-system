@@ -22,10 +22,10 @@ const shipmentLabels: Record<string, string> = {
   CANCEL_PENDING: "包裹取消中",
   EXCEPTION: "仓库处理异常",
   FULFILLING: "待仓库发货",
-  PENDING: "待推送履约",
+  PENDING: "等待匹配极风订单",
   SHIPPED: "仓库已发货",
-  SUBMITTED: "已提交履约",
-  SUBMITTING: "正在提交履约",
+  SUBMITTED: "已匹配极风订单",
+  SUBMITTING: "正在匹配极风订单",
 };
 
 function mostRelevantStatus(statuses: Array<string | null>) {

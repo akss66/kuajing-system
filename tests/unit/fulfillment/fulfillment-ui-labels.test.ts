@@ -5,7 +5,7 @@ import { safeFulfillmentError } from "@/modules/fulfillment/fulfillment-ui-label
 describe("safeFulfillmentError", () => {
   it("keeps documented Jifeng business codes actionable", () => {
     expect(safeFulfillmentError("50026")).toEqual({
-      message: "请先同步或补充极风仓库库存，再重试当前包裹。",
+      message: "请在极风后台处理仓库库存问题；系统只匹配已有订单，不会另建订单。",
       title: "极风仓库库存不足（50026）",
     });
   });

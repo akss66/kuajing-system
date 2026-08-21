@@ -25,6 +25,7 @@ import {
   recordPackageCancellationAdjustment,
 } from "@/modules/fulfillment/package-cancellation-adjustment";
 import { cancelJifengShipment } from "@/modules/fulfillment/replacement";
+import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder, declareOfflinePayment } from "@/modules/orders/lifecycle";
 import { getAdminOrderDetail, getCustomerOrderDetail, listCustomerOrders } from "@/modules/orders/queries";
 import { reportSettlementPayment } from "@/modules/settlement/batch-service";
@@ -250,7 +251,40 @@ describe("paid package cancellation refunds", () => {
         reason: "客户取消已接单包裹",
         shipmentId: fixture.shipments[0].id,
       }),
-    ).resolves.toEqual({ status: "CANCELLED" });
+    ).resolves.toEqual({ status: "CANCEL_PENDING" });
+
+    await expect(refundRows(fixture.order.id)).resolves.toEqual([]);
+    await expect(
+      db
+        .select({ status: shipmentFulfillments.status })
+        .from(shipmentFulfillments)
+        .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id)),
+    ).resolves.toEqual([{ status: "CANCEL_PENDING" }]);
+
+    await expect(
+      applyJifengOrderStatus({
+        detail: {
+          erpNo: fixture.fulfillments[0].erpNo,
+          orderNo: "JF-ACCEPTED-1",
+          status: 2,
+        },
+        now: new Date("2026-08-20T01:05:30.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toMatchObject({ status: "CANCEL_PENDING" });
+    await expect(refundRows(fixture.order.id)).resolves.toEqual([]);
+
+    await expect(
+      applyJifengOrderStatus({
+        detail: {
+          erpNo: fixture.fulfillments[0].erpNo,
+          orderNo: "JF-ACCEPTED-1",
+          status: 9,
+        },
+        now: new Date("2026-08-20T01:06:00.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toMatchObject({ status: "CANCELLED" });
 
     const pendingRefunds = await refundRows(fixture.order.id);
     expect(pendingRefunds).toEqual([
@@ -791,7 +825,7 @@ describe("paid package cancellation refunds", () => {
     ).rejects.toMatchObject({ code: "SETTLEMENT_ORDERS_NOT_PENDING" });
 
     releaseRemote();
-    await expect(cancellation).resolves.toEqual({ status: "CANCELLED" });
+    await expect(cancellation).resolves.toEqual({ status: "CANCEL_PENDING" });
     await expect(
       db
         .select({ status: settlementBatches.status })

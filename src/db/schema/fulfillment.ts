@@ -36,6 +36,7 @@ export const replacementRequestStatus = pgEnum("replacement_request_status", [
   "FULFILLING",
   "SHIPPED",
   "EXCEPTION",
+  "CANCEL_PENDING",
   "CANCELLED",
 ]);
 

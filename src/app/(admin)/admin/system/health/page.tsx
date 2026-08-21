@@ -14,7 +14,7 @@ export default async function SystemHealthPage() {
     {
       href: "/admin/system/integrations",
       icon: CircleAlert,
-      impact: "订单推送或异常通知可能延迟",
+      impact: "极风订单匹配、状态同步或异常通知可能延迟",
       label: "失败集成任务",
       next: "查看失败任务",
       value: health.checks.failedIntegrations,

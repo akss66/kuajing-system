@@ -144,7 +144,9 @@ test("administrator can inspect a shipped package and create a replacement @desk
   await page.getByPlaceholder("填写补发原因，例如：运输破损").fill("E2E 运输破损补发");
   await page.getByText("我确认补发将立即锁定所选库存").click();
   await page.getByRole("button", { name: "创建补发并锁定库存" }).click();
-  await expect(page.getByText("补发已创建并锁定库存，等待极风履约。")).toBeVisible();
+  await expect(
+    page.getByText("补发已创建并锁定库存，系统将等待匹配极风已有订单。"),
+  ).toBeVisible();
 
   await expect.poll(async () => {
     const rows = await db

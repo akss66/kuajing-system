@@ -354,7 +354,7 @@ test("super admin authorizes, validates read-only access, and explicitly enables
   );
   await expect(page.getByText("已就绪，自动履约未启用")).toBeVisible();
   await expect(
-    page.getByText("订单仍留在本系统，不会自动推送。", { exact: false }),
+    page.getByText("订单仍留在本系统，不会自动匹配极风已有订单。", { exact: false }),
   ).toBeVisible();
 
   await expect.poll(async () => (await db.select().from(jifengConnections))[0]).toMatchObject({
@@ -371,7 +371,7 @@ test("super admin authorizes, validates read-only access, and explicitly enables
   );
   await expect(page.getByText("只读连接诊断已通过。")).toBeVisible();
   await expect(
-    page.getByText("订单仍留在本系统，不会自动推送。", { exact: false }),
+    page.getByText("订单仍留在本系统，不会自动匹配极风已有订单。", { exact: false }),
   ).toBeVisible();
   await expect.poll(async () => (await db.select().from(jifengConnections))[0]?.lastDiagnosticAt).not.toBeNull();
 
@@ -380,7 +380,7 @@ test("super admin authorizes, validates read-only access, and explicitly enables
   const dialog = page.getByRole("alertdialog", { name: "确认启用极风自动履约？" });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(
-    "符合条件的已付款订单会自动发送到极风并进入真实仓库履约",
+    "符合条件的已付款包裹会自动匹配极风已有订单并同步真实仓库履约状态",
   );
   await expect(dialog).toHaveCSS("opacity", "1");
   await screenshotForReview(page, testInfo, "jifeng-enable-confirmation");

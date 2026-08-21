@@ -430,6 +430,7 @@ export async function cancelFulfillmentOrder(input: {
     const fulfillmentRows = await tx.execute<{
       attemptCount: number;
       externalOrderNo: string | null;
+      jifengStatus: number | null;
       kind: string;
       shipmentId: string;
       status: string;
@@ -438,6 +439,7 @@ export async function cancelFulfillmentOrder(input: {
       select
         f.attempt_count as "attemptCount",
         f.external_order_no as "externalOrderNo",
+        f.jifeng_status as "jifengStatus",
         f.status,
         f.submitted_at as "submittedAt",
         s.id as "shipmentId",
@@ -481,15 +483,15 @@ export async function cancelFulfillmentOrder(input: {
       fulfillmentRows.some(
         (fulfillment) =>
           fulfillment.status !== "CANCELLED" &&
-          (fulfillment.attemptCount !== 0 ||
-            fulfillment.externalOrderNo !== null ||
+          (fulfillment.externalOrderNo !== null ||
+            fulfillment.jifengStatus !== null ||
             fulfillment.submittedAt !== null ||
-            fulfillment.status !== "PENDING"),
+            !["PENDING", "EXCEPTION"].includes(fulfillment.status)),
       ) ||
       outboxRows.some(
         (event) =>
           event.fulfillmentStatus !== "CANCELLED" &&
-          (event.attemptCount !== 0 || event.status !== "PENDING"),
+          event.status === "PROCESSING",
       )
     ) {
       throw new OrderLifecycleError(
@@ -516,11 +518,12 @@ export async function cancelFulfillmentOrder(input: {
       .update(integrationOutbox)
       .set({
         claimToken: null,
-        completedAt: now,
-        lastErrorCode: "ORDER_CANCELLED",
-        lastErrorMessage: "Local order cancellation",
+        completedAt: null,
+        lastErrorCode: "LOCAL_CANCEL_MONITORING",
+        lastErrorMessage: "Monitoring Jifeng for a late-arriving matching order",
         lockedAt: null,
-        status: "COMPLETED",
+        nextAttemptAt: now,
+        status: "PENDING",
         updatedAt: now,
       })
       .where(sql`${integrationOutbox.id} in (

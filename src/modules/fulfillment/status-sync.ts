@@ -171,9 +171,58 @@ export async function applyJifengOrderStatus(input: {
       current.fulfillmentStatus === "CANCELLED" &&
       input.detail.status !== 9
     ) {
+      await tx.insert(auditLogs).values({
+        action: "JIFENG_CANCELLED_REMOTE_STATUS_CONFLICT",
+        actorId: null,
+        actorType: "SYSTEM",
+        afterJson: {
+          localStatus: "CANCELLED",
+          remoteStatus: input.detail.status,
+          source: input.source,
+        },
+        beforeJson: { localStatus: "CANCELLED" },
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        reason: "本地已取消但极风远端状态不是 9",
+      });
+      await createSystemNotification(tx, {
+        deduplicationKey: `jifeng-cancel-conflict:${current.fulfillmentId}:${input.detail.status}`,
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        message: `本地包裹已取消，但极风状态为 ${input.detail.status}，请立即核查是否仍会发货。`,
+        now,
+        severity: "ERROR",
+        title: "本地取消与极风状态冲突",
+        type: "JIFENG_EXCEPTION",
+      });
       return {
         orderStatus: current.orderStatus,
         status: "ALREADY_CANCELLED" as const,
+      };
+    }
+
+    if (
+      current.fulfillmentStatus === "CANCEL_PENDING" &&
+      input.detail.status !== 7 &&
+      input.detail.status !== 9
+    ) {
+      const nextRetryAt = new Date(now.getTime() + 60_000);
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt, now, source: input.source }),
+          externalOrderNo: input.detail.orderNo ?? null,
+          jifengStatus: input.detail.status,
+          lastErrorCode: "CANCEL_CONFIRMATION_PENDING",
+          lastErrorMessage: "极风已接收取消请求，等待远端状态确认",
+          nextRetryAt,
+          status: "CANCEL_PENDING",
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      return {
+        orderStatus: current.orderStatus,
+        status: "CANCEL_PENDING" as const,
       };
     }
     if (
@@ -635,7 +684,7 @@ export async function refreshJifengShipmentStatus(input: {
     })
     .where(
       sql`${shipmentFulfillments.shipmentId} = ${input.shipmentId}
-        and ${shipmentFulfillments.status} in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCELLED', 'SHIPPED')
+        and ${shipmentFulfillments.status} in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING', 'CANCELLED', 'SHIPPED')
         and (
           ${shipmentFulfillments.statusPollLockedAt} is null
           or ${shipmentFulfillments.statusPollLockedAt} <= ${staleLeaseCutoff.toISOString()}::timestamptz
@@ -755,7 +804,7 @@ export async function pollActiveJifengFulfillments(input: {
     with due as (
       select id
       from shipment_fulfillments
-      where status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION')
+      where status in ('SUBMITTED', 'FULFILLING', 'EXCEPTION', 'CANCEL_PENDING')
         and (
           submitted_at is not null
           or jifeng_status is not null

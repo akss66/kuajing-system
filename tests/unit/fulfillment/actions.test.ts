@@ -16,7 +16,7 @@ vi.mock("@/modules/identity/admin-profile", () => ({
   resolveAdminUserId: vi.fn().mockResolvedValue("admin-profile"),
 }));
 vi.mock("@/modules/jifeng-connection/provider", () => ({
-  getEnabledJifengWriteClient: vi.fn(),
+  getEnabledJifengCancellationClient: vi.fn(),
   getJifengReadClient: mocks.getJifengReadClient,
 }));
 vi.mock("@/modules/fulfillment/dispatch", () => ({

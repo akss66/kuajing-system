@@ -28,10 +28,10 @@ const statusLabels: Record<string, string> = {
   CANCEL_PENDING: "取消中",
   EXCEPTION: "异常",
   FULFILLING: "待仓库发货",
-  PENDING: "待推送",
+  PENDING: "等待匹配极风订单",
   SHIPPED: "仓库已发货",
-  SUBMITTED: "已提交极风",
-  SUBMITTING: "提交中",
+  SUBMITTED: "已匹配极风订单",
+  SUBMITTING: "正在匹配极风订单",
 };
 
 const MANUAL_RETRY_QUEUED = "MANUAL_CONFIRMED_FAILURE_RETRY";
@@ -120,7 +120,7 @@ export default async function AdminOrderDetailPage({
             shipment.fulfillmentStatus === "EXCEPTION" &&
             shipment.jifengStatus === null;
           const canRefresh =
-            ["SUBMITTED", "FULFILLING"].includes(shipment.fulfillmentStatus ?? "") ||
+            ["SUBMITTED", "FULFILLING", "CANCEL_PENDING"].includes(shipment.fulfillmentStatus ?? "") ||
             (shipment.fulfillmentStatus === "EXCEPTION" &&
               shipment.jifengStatus !== null) ||
             (shipment.fulfillmentStatus === "CANCELLED" &&
@@ -129,6 +129,9 @@ export default async function AdminOrderDetailPage({
           const canCancel = shipment.fulfillmentStatus !== null && !["SHIPPED", "CANCELLED", "CANCEL_PENDING"].includes(shipment.fulfillmentStatus);
           const canReplace = shipment.kind === "NORMAL" && shipment.fulfillmentStatus === "SHIPPED";
           const retryQueued = shipment.lastErrorCode === MANUAL_RETRY_QUEUED;
+          const waitingForMatch =
+            shipment.fulfillmentStatus === "PENDING" &&
+            ["50017", "50071"].includes(shipment.lastErrorCode ?? "");
           const errorPresentation = shipment.lastErrorCode
             ? safeFulfillmentError(shipment.lastErrorCode, shipment.lastErrorMessage)
             : null;
@@ -151,8 +154,8 @@ export default async function AdminOrderDetailPage({
               </div>
 
               {shipment.lastErrorCode ? (
-                <div className={`flex gap-3 border-b px-4 py-3 text-sm sm:px-5 ${retryQueued ? "border-primary/20 bg-primary-soft text-primary-hover" : "border-danger/20 bg-danger/5 text-danger"}`}>
-                  {retryQueued ? <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
+                <div className={`flex gap-3 border-b px-4 py-3 text-sm sm:px-5 ${retryQueued || waitingForMatch ? "border-primary/20 bg-primary-soft text-primary-hover" : "border-danger/20 bg-danger/5 text-danger"}`}>
+                  {retryQueued || waitingForMatch ? <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
                   <div>
                     <p className="font-semibold">{errorPresentation?.title}</p>
                     <p className="mt-1">{errorPresentation?.message}</p>
@@ -204,7 +207,7 @@ export default async function AdminOrderDetailPage({
               {(canRetry || canRefresh || canCancel || canReplace) ? <div className="grid gap-4 border-t border-border bg-surface/60 p-4 lg:grid-cols-3 sm:p-5">
                 {canRetry ? <ActionForm action={retryJifengShipmentAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel="重试这个包裹"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCcw className="size-4" />重试这个包裹</p><p className="mt-1 text-xs text-muted">只重新处理当前平台订单，不影响同一拿货单的其他包裹。</p></div><Input maxLength={1000} name="reason" placeholder="填写重试原因" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我已核对错误信息并确认重试</label></ActionForm> : null}
                 {canRefresh ? <ActionForm action={refreshJifengShipmentStatusAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel={shipment.fulfillmentStatus === "CANCELLED" ? "重新核对取消状态" : "重新查询极风状态"}><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCcw className="size-4" />{shipment.fulfillmentStatus === "CANCELLED" ? "修复父单进度" : "重新查询极风状态"}</p><p className="mt-1 text-xs text-muted">直接读取极风当前结果并更新本包裹；不会重复创建订单。</p></div><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认立即向极风查询当前状态</label></ActionForm> : null}
-                {canCancel ? <ActionForm action={cancelJifengShipmentAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel="取消此包裹"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="text-sm font-semibold text-ink">取消此包裹</p><p className="mt-1 text-xs text-muted">未推送时直接本地取消；已提交极风时，确认远端取消后再释放库存。其他包裹不受影响。</p></div><Input maxLength={1000} name="reason" placeholder="填写取消原因" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认只取消当前平台订单对应的包裹</label></ActionForm> : null}
+                {canCancel ? <ActionForm action={cancelJifengShipmentAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel="取消此包裹"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="text-sm font-semibold text-ink">取消此包裹</p><p className="mt-1 text-xs text-muted">尚未绑定极风订单时直接本地取消；已绑定时，确认极风取消后再释放库存。其他包裹不受影响。</p></div><Input maxLength={1000} name="reason" placeholder="填写取消原因" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认只取消当前平台订单对应的包裹</label></ActionForm> : null}
                 {canReplace ? <ActionForm action={createReplacementAction} className="space-y-3 rounded-xl border border-border bg-background p-4 lg:col-span-3" submitLabel="创建补发并锁定库存"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><PackageCheck className="size-4" />创建补发</p><p className="mt-1 text-xs text-muted">只可选择原包裹 SKU，填 0 表示不补发。</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{shipment.lines.map((line) => <label className="space-y-1 text-xs text-muted" key={line.id}>{line.skuCode}（原 {line.quantity} 件）<Input defaultValue="0" inputMode="numeric" max={line.quantity} min="0" name={`quantity:${line.skuId}`} type="number" /></label>)}</div><Input maxLength={1000} name="reason" placeholder="填写补发原因，例如：运输破损" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认补发将立即锁定所选库存</label></ActionForm> : null}
               </div> : null}
             </section>

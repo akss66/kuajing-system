@@ -61,7 +61,7 @@ const statusContent: Record<
   }
 > = {
   DISCONNECTED: {
-    consequence: "不会向极风发送订单。",
+    consequence: "不会自动匹配或变更极风订单。",
     label: "未连接",
     nextStep: "使用一次性令牌完成授权。",
     readOnlyNextStep: "如需连接极风，请联系超级管理员完成授权。",
@@ -82,21 +82,21 @@ const statusContent: Record<
     tone: "warning",
   },
   READY_DISABLED: {
-    consequence: "订单仍留在本系统，不会自动推送。",
+    consequence: "订单仍留在本系统，不会自动匹配极风已有订单。",
     label: "已就绪，自动履约未启用",
     nextStep: "运行最新诊断并确认启用。",
     readOnlyNextStep: "如需启用自动履约，请联系超级管理员完成诊断和确认。",
     tone: "warning",
   },
   ENABLED: {
-    consequence: "符合条件的已付款订单会自动推送到极风。",
+    consequence: "符合条件的已付款包裹会自动匹配极风已有订单。",
     label: "自动履约已启用",
     nextStep: "异常时先停用自动履约，再检查连接。",
     readOnlyNextStep: "如需停用或检查连接，请联系超级管理员处理。",
     tone: "success",
   },
   REFRESH_REQUIRED: {
-    consequence: "自动推单已被阻止。",
+    consequence: "自动订单匹配已被阻止。",
     label: "授权需要更新",
     nextStep: "获取新的一次性令牌并重新授权。",
     readOnlyNextStep: "请联系超级管理员更新极风授权。",
@@ -328,7 +328,7 @@ function ConnectionActions({ status }: { status: JifengConnectionStatus }) {
         <ConfirmedActionForm
           action={setJifengFulfillmentAction}
           className="space-y-3 border-t border-border pt-5"
-          confirmDescription="启用后，符合条件的已付款订单会自动发送到极风并进入真实仓库履约。"
+          confirmDescription="启用后，符合条件的已付款包裹会自动匹配极风已有订单并同步真实仓库履约状态。"
           confirmLabel="确认启用自动履约"
           confirmTitle="确认启用极风自动履约？"
           submitLabel="启用自动履约"

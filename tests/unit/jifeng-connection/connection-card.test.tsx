@@ -144,12 +144,12 @@ describe("JifengConnectionCard", () => {
   afterEach(() => cleanup());
 
   it.each([
-    ["DISCONNECTED", "未连接", "不会向极风发送订单", "使用一次性令牌完成授权"],
+    ["DISCONNECTED", "未连接", "不会自动匹配或变更极风订单", "使用一次性令牌完成授权"],
     ["AUTHORIZED", "已授权，待发现资源", "自动履约保持关闭", "重新发现可用仓库和物流渠道"],
     ["RESOURCE_SELECTION_REQUIRED", "待选择履约资源", "不会默认选择任何仓库或渠道", "明确选择仓库和物流渠道"],
     ["READY_DISABLED", "已就绪，自动履约未启用", "订单仍留在本系统", "运行最新诊断并确认启用"],
-    ["ENABLED", "自动履约已启用", "符合条件的已付款订单会自动推送", "异常时先停用自动履约"],
-    ["REFRESH_REQUIRED", "授权需要更新", "自动推单已被阻止", "获取新的一次性令牌并重新授权"],
+    ["ENABLED", "自动履约已启用", "符合条件的已付款包裹会自动匹配极风已有订单", "异常时先停用自动履约"],
+    ["REFRESH_REQUIRED", "授权需要更新", "自动订单匹配已被阻止", "获取新的一次性令牌并重新授权"],
     ["ERROR", "连接异常", "当前连接不可用于履约", "重新授权；若仍失败请联系系统维护人员"],
   ] as const)(
     "explains the %s lifecycle state, consequence, and recovery",
@@ -184,7 +184,7 @@ describe("JifengConnectionCard", () => {
   it.each([
     [
       "DISCONNECTED",
-      "不会向极风发送订单。",
+      "不会自动匹配或变更极风订单。",
       "使用一次性令牌完成授权。",
       "如需连接极风，请联系超级管理员完成授权。",
     ],
@@ -202,19 +202,19 @@ describe("JifengConnectionCard", () => {
     ],
     [
       "READY_DISABLED",
-      "订单仍留在本系统，不会自动推送。",
+      "订单仍留在本系统，不会自动匹配极风已有订单。",
       "运行最新诊断并确认启用。",
       "如需启用自动履约，请联系超级管理员完成诊断和确认。",
     ],
     [
       "ENABLED",
-      "符合条件的已付款订单会自动推送到极风。",
+      "符合条件的已付款包裹会自动匹配极风已有订单。",
       "异常时先停用自动履约，再检查连接。",
       "如需停用或检查连接，请联系超级管理员处理。",
     ],
     [
       "REFRESH_REQUIRED",
-      "自动推单已被阻止。",
+      "自动订单匹配已被阻止。",
       "获取新的一次性令牌并重新授权。",
       "请联系超级管理员更新极风授权。",
     ],
@@ -345,7 +345,9 @@ describe("JifengConnectionCard", () => {
     expect(screen.getByRole("alertdialog")).toBeVisible();
     expect(screen.getByText("确认启用极风自动履约？")).toBeVisible();
     expect(
-      screen.getByText("启用后，符合条件的已付款订单会自动发送到极风并进入真实仓库履约。"),
+      screen.getByText(
+        "启用后，符合条件的已付款包裹会自动匹配极风已有订单并同步真实仓库履约状态。",
+      ),
     ).toBeVisible();
   });
 

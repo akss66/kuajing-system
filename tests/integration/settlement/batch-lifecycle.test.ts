@@ -1693,7 +1693,7 @@ describe("unified offline settlement lifecycle", () => {
       where s.order_id = ${allocation.orderId}
     `);
     expect(cancelledWork).toEqual([
-      { fulfillmentStatus: "CANCELLED", outboxStatus: "COMPLETED" },
+      { fulfillmentStatus: "CANCELLED", outboxStatus: "PENDING" },
     ]);
   });
 

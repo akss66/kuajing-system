@@ -66,7 +66,7 @@ function integrationTargetLabel(target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT"
 }
 
 function integrationEventLabel(eventType: string) {
-  if (eventType === "JIFENG_CREATE_ORDER") return "订单推送";
+  if (eventType === "JIFENG_CREATE_ORDER") return "已有订单匹配";
   if (eventType === "FEISHU_CARGO_SYNC") return "货盘同步";
   if (eventType === "FEISHU_NOTIFICATION") return "异常通知";
   return "后台同步任务";
@@ -224,7 +224,7 @@ export default async function IntegrationsPage() {
                 <div>
                   <h3 className="font-semibold text-ink">极风 WMS</h3>
                   <p className="mt-1 text-sm text-muted">
-                    用于自动推单、加拿大邮政运单和发货状态同步。
+                    用于匹配极风已有订单、同步加拿大邮政运单和发货状态。
                   </p>
                 </div>
               </div>

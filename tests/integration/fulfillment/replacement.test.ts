@@ -322,7 +322,22 @@ describe("replacement fulfillment", () => {
       shipmentId: created.replacementShipmentId,
     });
     expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
-      releaseReason: "极风取消确认：地址需要更正",
+      releaseReason: null,
+      status: "ACTIVE",
+    });
+    expect((await db.select().from(replacementRequests))[0].status).toBe(
+      "CANCEL_PENDING",
+    );
+    expect((await db.select().from(shipmentFulfillments))[1].status).toBe(
+      "CANCEL_PENDING",
+    );
+
+    await applyJifengOrderStatus({
+      detail: { erpNo: fulfillment.erpNo, status: 9 },
+      source: "POLL",
+    });
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      releaseReason: "极风状态同步确认包裹已取消",
       status: "RELEASED",
     });
     expect((await db.select().from(replacementRequests))[0].status).toBe("CANCELLED");

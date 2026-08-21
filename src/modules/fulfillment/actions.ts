@@ -7,7 +7,7 @@ import { JifengApiError } from "@/integrations/jifeng/client";
 import { requireAdmin } from "@/modules/identity/guards";
 import { resolveAdminUserId } from "@/modules/identity/admin-profile";
 import {
-  getEnabledJifengWriteClient,
+  getEnabledJifengCancellationClient,
   getJifengReadClient,
 } from "@/modules/jifeng-connection/provider";
 import { SettlementBatchError } from "@/modules/settlement/batch-service";
@@ -105,7 +105,10 @@ export async function createReplacementAction(
     return failure(error, "补发创建失败，请稍后重试。");
   }
   refreshOrder(orderId);
-  return { message: "补发已创建并锁定库存，等待极风履约。", status: "success" };
+  return {
+    message: "补发已创建并锁定库存，系统将等待匹配极风已有订单。",
+    status: "success",
+  };
 }
 
 export async function retryJifengShipmentAction(
@@ -182,9 +185,10 @@ export async function cancelJifengShipmentAction(
   });
   const orderId = String(formData.get("orderId") ?? "");
   if (!parsed.success) return { status: "error", message: "包裹或取消原因无效。" };
+  let cancellationResult: Awaited<ReturnType<typeof cancelJifengShipment>>;
   try {
     try {
-      await cancelJifengShipment({
+      cancellationResult = await cancelJifengShipment({
         actorUserId: principal.userId,
         reason: parsed.data.reason,
         shipmentId: parsed.data.shipmentId,
@@ -193,8 +197,8 @@ export async function cancelJifengShipmentAction(
       if (!(error instanceof ReplacementError) || error.code !== "JIFENG_CLIENT_REQUIRED") {
         throw error;
       }
-      const { client } = await getEnabledJifengWriteClient();
-      await cancelJifengShipment({
+      const { client } = await getEnabledJifengCancellationClient();
+      cancellationResult = await cancelJifengShipment({
         actorUserId: principal.userId,
         client,
         reason: parsed.data.reason,
@@ -205,6 +209,12 @@ export async function cancelJifengShipmentAction(
     return failure(error, "极风取消失败，库存未释放。" );
   }
   refreshOrder(orderId);
+  if (cancellationResult.status === "CANCEL_PENDING") {
+    return {
+      message: "极风已接收取消请求，系统将在确认远端状态 9 后释放库存和生成退款记录。",
+      status: "success",
+    };
+  }
   return {
     message: "包裹已取消，库存已释放；系统已同步生成应付冲减或退款记录。",
     status: "success",

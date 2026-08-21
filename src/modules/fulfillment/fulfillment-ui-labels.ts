@@ -24,14 +24,32 @@ export function safeFulfillmentError(
   }
   if (code === "50026") {
     return {
-      message: "请先同步或补充极风仓库库存，再重试当前包裹。",
+      message: "请在极风后台处理仓库库存问题；系统只匹配已有订单，不会另建订单。",
       title: "极风仓库库存不足（50026）",
     };
   }
   if (code === "50019" || code === "50038") {
     return {
-      message: "系统会先查询现有极风订单，确认结果前不会盲目重复创建。",
+      message: "请在极风后台核对该订单；系统会继续查询已有订单，不会另建订单。",
       title: `极风订单正在核对（${code}）`,
+    };
+  }
+  if (code === "50017" || code === "50071") {
+    return {
+      message: "极风暂未找到这个平台订单，系统会按退避计划继续匹配。",
+      title: "等待极风已有订单",
+    };
+  }
+  if (code === "PLATFORM_ORDER_NO_MISMATCH") {
+    return {
+      message: "极风返回的订单号与本地包裹不一致，系统已阻止绑定，请人工核查。",
+      title: "极风订单号不一致",
+    };
+  }
+  if (code === "REMOTE_ORDER_ALREADY_BOUND") {
+    return {
+      message: "这个极风订单已经绑定其他系统包裹，系统已阻止重复绑定。",
+      title: "极风订单重复绑定",
     };
   }
   if (
@@ -45,8 +63,8 @@ export function safeFulfillmentError(
   }
   if (code.startsWith("CONFIRMED_NOT_FOUND:")) {
     return {
-      message: "系统已确认极风不存在该订单，可按页面指引重新提交。",
-      title: "极风订单未创建",
+      message: "极风暂未找到该订单，请先确认订单已导入极风，再重新匹配。",
+      title: "极风订单尚未导入",
     };
   }
   if (code === "CANCEL_FAILED") {
@@ -57,7 +75,7 @@ export function safeFulfillmentError(
   }
   if (code === "SHIPMENT_CANCELLED" || code === "ORDER_CANCELLED") {
     return {
-      message: "该包裹已终止处理，不会继续推送或扣减库存。",
+      message: "该包裹已终止处理，不会继续匹配或扣减库存。",
       title: "包裹已取消",
     };
   }

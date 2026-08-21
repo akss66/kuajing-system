@@ -5,7 +5,9 @@ import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-la
 describe("formatReplacementStatus", () => {
   it("maps known replacement statuses to Chinese labels", () => {
     expect(formatReplacementStatus("PENDING_FULFILLMENT")).toBe("待履约");
+    expect(formatReplacementStatus("FULFILLING")).toBe("待仓库发货");
     expect(formatReplacementStatus("EXCEPTION")).toBe("异常待处理");
+    expect(formatReplacementStatus("CANCEL_PENDING")).toBe("等待极风确认取消");
     expect(formatReplacementStatus("SHIPPED")).toBe("仓库已发货");
     expect(formatReplacementStatus("CANCELLED")).toBe("已取消");
   });
