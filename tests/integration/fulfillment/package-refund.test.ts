@@ -369,6 +369,51 @@ describe("paid package cancellation refunds", () => {
     ).resolves.toEqual([{ status: "CANCELLED" }]);
   });
 
+  test("refunds each package from its immutable shipping fee snapshot across rate changes", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: "DIRECT_OFFLINE",
+      walletAmountFen: 0,
+    });
+    await db
+      .update(orderShipments)
+      .set({ shippingFeeFen: 1_300 })
+      .where(eq(orderShipments.id, fixture.shipments[0].id));
+    await db
+      .update(orderShipments)
+      .set({ shippingFeeFen: 1_700 })
+      .where(eq(orderShipments.id, fixture.shipments[1].id));
+    await db
+      .update(fulfillmentOrders)
+      .set({ totalAmountFen: 4_200 })
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+
+    await cancelJifengShipment({
+      actorUserId: fixture.admin.id,
+      reason: "取消旧费率包裹",
+      shipmentId: fixture.shipments[0].id,
+    });
+    await cancelJifengShipment({
+      actorUserId: fixture.admin.id,
+      reason: "取消新费率包裹",
+      shipmentId: fixture.shipments[1].id,
+    });
+
+    await expect(refundRows(fixture.order.id)).resolves.toEqual([
+      expect.objectContaining({
+        merchandiseAmountFen: 500,
+        shippingFeeFen: 1_300,
+        shipmentId: fixture.shipments[0].id,
+        totalAmountFen: 1_800,
+      }),
+      expect.objectContaining({
+        merchandiseAmountFen: 700,
+        shippingFeeFen: 1_700,
+        shipmentId: fixture.shipments[1].id,
+        totalAmountFen: 2_400,
+      }),
+    ]);
+  });
+
   test("releases only the cancelled package duplicate keys for later re-import", async () => {
     const fixture = await createPaidTwoPackageOrder({
       paymentMode: "DIRECT_OFFLINE",

@@ -206,6 +206,7 @@ describe("replacement fulfillment", () => {
       kind: "REPLACEMENT",
       orderId: fixture.order.id,
       recipientPayloadEncrypted: fixture.shipment.recipientPayloadEncrypted,
+      shippingFeeFen: 0,
     });
     expect(replacementLine).toMatchObject({
       lineAmountFen: 0,

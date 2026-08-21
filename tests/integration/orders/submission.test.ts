@@ -229,7 +229,9 @@ describe("atomic TEMU take-order submission", () => {
       totalQuantity: 3,
     });
     expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
-    expect(await db.select().from(orderShipments)).toHaveLength(1);
+    const shipments = await db.select().from(orderShipments);
+    expect(shipments).toHaveLength(1);
+    expect(shipments[0].shippingFeeFen).toBe(1_300);
     const lines = await db
       .select()
       .from(orderLines)

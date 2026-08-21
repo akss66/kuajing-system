@@ -12,7 +12,6 @@ import {
   shipmentCancellationAdjustments,
   walletTransactions,
 } from "@/db/schema";
-import { PACKAGE_SHIPPING_FEE_FEN } from "@/modules/orders/pricing";
 import { refundWalletForShipment } from "@/modules/wallet/service";
 
 type CancellationActor = {
@@ -155,12 +154,14 @@ export async function recordPackageCancellationAdjustment(
     customerId: string;
     kind: string;
     paymentMode: string | null;
+    shippingFeeFen: number;
     totalAmountFen: number;
   }>(sql`
     select
       o.customer_id as "customerId",
       s.kind,
       o.payment_mode as "paymentMode",
+      s.shipping_fee_fen as "shippingFeeFen",
       o.total_amount_fen as "totalAmountFen"
     from order_shipments s
     inner join fulfillment_orders o on o.id = s.order_id
@@ -198,7 +199,7 @@ export async function recordPackageCancellationAdjustment(
       and order_id = ${input.orderId}
   `);
   const merchandiseAmountFen = merchandiseRows[0]?.amountFen ?? 0;
-  const shippingFeeFen = PACKAGE_SHIPPING_FEE_FEN;
+  const shippingFeeFen = row.shippingFeeFen;
   const totalAmountFen = merchandiseAmountFen + shippingFeeFen;
   if (!Number.isSafeInteger(totalAmountFen) || totalAmountFen <= 0) {
     throw new Error("取消包裹金额无效");

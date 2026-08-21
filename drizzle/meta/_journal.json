@@ -218,6 +218,13 @@
       "when": 1787302526474,
       "tag": "0030_replacement_cancel_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787308610711,
+      "tag": "0031_clear_dracula",
+      "breakpoints": true
     }
   ]
 }

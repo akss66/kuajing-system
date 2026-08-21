@@ -45,6 +45,7 @@ async function createOrderWithShipments() {
         kind: "NORMAL",
         orderId: order.id,
         recipientPayloadEncrypted: "encrypted-normal",
+        shippingFeeFen: 1_300,
         storeId: store.id,
       },
       {
@@ -52,6 +53,7 @@ async function createOrderWithShipments() {
         kind: "REPLACEMENT",
         orderId: order.id,
         recipientPayloadEncrypted: "encrypted-replacement",
+        shippingFeeFen: 0,
         storeId: store.id,
       },
     ])
@@ -104,6 +106,17 @@ describe("fulfillment integration schema", () => {
         erpNo: `JF-${normalShipment.id}`,
         shipmentId: replacementShipment.id,
       }),
+    ).rejects.toThrow();
+  });
+
+  test("rejects a negative package shipping fee snapshot", async () => {
+    const { normalShipment } = await createOrderWithShipments();
+
+    await expect(
+      db
+        .update(orderShipments)
+        .set({ shippingFeeFen: -1 })
+        .where(sql`${orderShipments.id} = ${normalShipment.id}`),
     ).rejects.toThrow();
   });
 

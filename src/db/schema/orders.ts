@@ -715,6 +715,7 @@ export const orderShipments = pgTable(
       .references(() => stores.id, { onDelete: "restrict" }),
     kind: shipmentKind("kind").default("NORMAL").notNull(),
     deduplicationActive: boolean("deduplication_active").default(true).notNull(),
+    shippingFeeFen: integer("shipping_fee_fen").default(1_300).notNull(),
     externalOrderNo: varchar("external_order_no", { length: 160 }).notNull(),
     recipientPayloadEncrypted: text("recipient_payload_encrypted").notNull(),
     countryCode: varchar("country_code", { length: 2 }).default("CA").notNull(),
@@ -739,6 +740,10 @@ export const orderShipments = pgTable(
     uniqueIndex("order_shipments_id_order_unique").on(
       table.id,
       table.orderId,
+    ),
+    check(
+      "order_shipments_shipping_fee_non_negative",
+      sql`${table.shippingFeeFen} >= 0`,
     ),
     check(
       "order_shipments_logistics_fee_non_negative",

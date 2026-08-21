@@ -146,6 +146,7 @@ export async function createReplacementRequest(input: {
       kind: "REPLACEMENT",
       orderId: original.orderId,
       recipientPayloadEncrypted: original.recipientPayloadEncrypted,
+      shippingFeeFen: 0,
       storeId: original.storeId,
     });
     await tx.insert(orderLines).values(

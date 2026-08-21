@@ -19,7 +19,7 @@ import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 import { lockActiveOrderUniqueKeys } from "./import-conflict-lock";
-import { calculateOrderPricing } from "./pricing";
+import { calculateOrderPricing, PACKAGE_SHIPPING_FEE_FEN } from "./pricing";
 
 export const UNPAID_ORDER_LOCK_MS = 2 * 60 * 60 * 1_000;
 
@@ -443,6 +443,7 @@ export async function submitTemuImportBatch(input: {
         [...shipmentRows.values()].map((shipment) => ({
           ...shipment,
           orderId,
+          shippingFeeFen: PACKAGE_SHIPPING_FEE_FEN,
           storeId: batch.storeId,
         })),
       )
