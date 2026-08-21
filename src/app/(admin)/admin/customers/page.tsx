@@ -4,11 +4,14 @@ import { requireAdmin } from "@/modules/identity/guards";
 
 export default async function CustomersPage() {
   const principal = await requireAdmin();
-  const rows = await listCustomerManagementRows();
+  const canGovernAccounts = principal.kind === "SUPER_ADMIN";
+  const rows = await listCustomerManagementRows({
+    includeAccountIdentity: canGovernAccounts,
+  });
 
   return (
     <CustomerListWorkspace
-      canGovernAccounts={principal.kind === "SUPER_ADMIN"}
+      canGovernAccounts={canGovernAccounts}
       rows={rows}
     />
   );

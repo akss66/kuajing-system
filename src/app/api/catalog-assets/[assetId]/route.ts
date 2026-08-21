@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { catalogAssets, products, skus } from "@/db/schema";
@@ -35,6 +35,8 @@ async function findCustomerAsset(assetId: string) {
       and(
         eq(catalogAssets.id, assetId),
         eq(products.status, "ACTIVE"),
+        eq(skus.lifecycleStatus, "ACTIVE"),
+        isNull(skus.archivedAt),
       ),
     )
     .limit(1);
@@ -56,6 +58,9 @@ export async function GET(
   }
 
   const { assetId } = await params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) {
+    return jsonError(404, "NOT_FOUND");
+  }
   const asset =
     principal.kind === "CUSTOMER"
       ? await findCustomerAsset(assetId)

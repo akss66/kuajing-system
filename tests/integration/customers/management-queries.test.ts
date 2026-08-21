@@ -134,7 +134,7 @@ test("uses the newest customer mirror when duplicate rows exist and still return
     },
   ]);
 
-  const rows = await listCustomerManagementRows();
+  const rows = await listCustomerManagementRows({ includeAccountIdentity: true });
 
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({
@@ -143,6 +143,30 @@ test("uses the newest customer mirror when duplicate rows exist and still return
     accountStatus: "ACTIVE",
     customerId: customer.id,
   });
+});
+
+test("omits customer login identity unless the caller explicitly has account-governance access", async () => {
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: "SAFE-PROJECTION", name: "最小权限客户" })
+    .returning({ id: customers.id });
+  await db.insert(customerUsers).values({
+    customerId: customer.id,
+    displayName: "敏感账号姓名",
+    loginIdentifier: "sensitive-login@example.test",
+    status: "ACTIVE",
+  });
+
+  const [row] = await listCustomerManagementRows();
+  const detail = await getCustomerManagementDetail(customer.id);
+
+  expect(row).toMatchObject({
+    accountDisplayName: null,
+    accountEmail: null,
+    accountStatus: null,
+    customerId: customer.id,
+  });
+  expect(detail.account).toBeNull();
 });
 
 test("returns one exact management row per customer without multiplying wallet, store, or order aggregates", async () => {
@@ -263,7 +287,7 @@ test("returns one exact management row per customer without multiplying wallet, 
     },
   ]);
 
-  const rows = await listCustomerManagementRows();
+  const rows = await listCustomerManagementRows({ includeAccountIdentity: true });
 
   expect(rows).toEqual([
     {
@@ -310,7 +334,9 @@ test("returns a complete empty-account detail without failing when no customer m
     .values({ customerId: customer.id, name: "无账号客户一店" })
     .returning();
 
-  const detail = await getCustomerManagementDetail(customer.id);
+  const detail = await getCustomerManagementDetail(customer.id, {
+    includeAccountIdentity: true,
+  });
 
   expect(detail.account).toBeNull();
   expect(detail.stores).toEqual([store]);
@@ -359,7 +385,9 @@ test("returns the newest customer mirror identity without changing the remaining
     .values({ customerId: customer.id, name: "重复账号客户一店" })
     .returning();
 
-  const detail = await getCustomerManagementDetail(customer.id);
+  const detail = await getCustomerManagementDetail(customer.id, {
+    includeAccountIdentity: true,
+  });
 
   expect(detail.account).toEqual({
     displayName: "最新详情负责人",

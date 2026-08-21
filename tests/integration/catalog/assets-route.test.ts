@@ -159,7 +159,13 @@ async function seedCatalogAsset(storage: StorageModule) {
     unitPriceFen: 799,
   });
 
-  return { assetId: asset.id, bytes, customerId: customer.id, otherCustomerId: otherCustomer.id };
+  return {
+    assetId: asset.id,
+    bytes,
+    customerId: customer.id,
+    otherCustomerId: otherCustomer.id,
+    skuId: sku.id,
+  };
 }
 
 async function seedCustomerVisibleAsset(
@@ -235,7 +241,13 @@ async function seedCustomerVisibleAsset(
     });
   }
 
-  return { assetId: asset.id, bytes, customerId: customer.id, otherCustomerId: otherCustomer.id };
+  return {
+    assetId: asset.id,
+    bytes,
+    customerId: customer.id,
+    otherCustomerId: otherCustomer.id,
+    skuId: sku.id,
+  };
 }
 
 afterEach(async () => {
@@ -410,6 +422,70 @@ describe("catalog asset route", () => {
             notSellable.bytes,
           ),
         ).toBe(0);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("hides an archived SKU asset from customers while retaining administrator access", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route, storage }) => {
+        const seeded = await seedCustomerVisibleAsset(storage);
+        await db
+          .update(skus)
+          .set({ archivedAt: new Date(), lifecycleStatus: "ARCHIVED" })
+          .where(sql`${skus.id} = ${seeded.skuId}`);
+        const customerCookie = await createSessionCookie(auth, {
+          customerId: seeded.customerId,
+          role: "user",
+          scope: "customer",
+        });
+        const adminCookie = await createSessionCookie(auth, {
+          role: "admin",
+          scope: "admin",
+        });
+
+        const customerResponse = await route.GET(
+          new Request(`http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}`, {
+            headers: { cookie: customerCookie },
+          }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+        const adminResponse = await route.GET(
+          new Request(`http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}`, {
+            headers: { cookie: adminCookie },
+          }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+
+        expect(customerResponse.status).toBe(404);
+        expect(adminResponse.status).toBe(200);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("returns 404 for malformed asset ids", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route }) => {
+        const cookie = await createSessionCookie(auth, {
+          role: "admin",
+          scope: "admin",
+        });
+        const response = await route.GET(
+          new Request("http://127.0.0.1:3000/api/catalog-assets/not-a-uuid", {
+            headers: { cookie },
+          }),
+          { params: Promise.resolve({ assetId: "not-a-uuid" }) },
+        );
+
+        expect(response.status).toBe(404);
       });
     } finally {
       await rm(assetDir, { force: true, recursive: true });

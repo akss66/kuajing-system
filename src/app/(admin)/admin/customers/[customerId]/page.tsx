@@ -8,11 +8,14 @@ export default async function CustomerDetailPage(props: {
   params: Promise<{ customerId: string }>;
 }) {
   const principal = await requireAdmin();
+  const canGovernAccounts = principal.kind === "SUPER_ADMIN";
   const { customerId } = await props.params;
   let detail: Awaited<ReturnType<typeof getCustomerManagementDetail>>;
 
   try {
-    detail = await getCustomerManagementDetail(customerId);
+    detail = await getCustomerManagementDetail(customerId, {
+      includeAccountIdentity: canGovernAccounts,
+    });
   } catch (error) {
     if (error instanceof Error && error.message === "CUSTOMER_NOT_FOUND") {
       notFound();
@@ -22,7 +25,7 @@ export default async function CustomerDetailPage(props: {
 
   return (
     <CustomerDetailWorkspace
-      canGovernAccounts={principal.kind === "SUPER_ADMIN"}
+      canGovernAccounts={canGovernAccounts}
       detail={detail}
     />
   );

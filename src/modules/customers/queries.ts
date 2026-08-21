@@ -27,18 +27,33 @@ export type CustomerManagementListRow = {
   storeCount: number;
 };
 
-export async function listCustomerManagementRows(): Promise<CustomerManagementListRow[]> {
+export async function listCustomerManagementRows(options: {
+  includeAccountIdentity?: boolean;
+} = {}): Promise<CustomerManagementListRow[]> {
+  const accountProjection = options.includeAccountIdentity
+    ? sql`
+      account.display_name as "accountDisplayName",
+      account.login_identifier as "accountEmail",
+      account.status as "accountStatus",
+    `
+    : sql`
+      null::text as "accountDisplayName",
+      null::text as "accountEmail",
+      null::text as "accountStatus",
+    `;
+  const accountJoin = options.includeAccountIdentity
+    ? sql`
+      left join lateral (
+        select display_name, login_identifier, status
+        from customer_users
+        where customer_id = c.id
+        order by created_at desc, id desc
+        limit 1
+      ) account on true
+    `
+    : sql``;
   const rows = await db.execute<CustomerManagementListRow>(sql`
-    with account_summary as (
-      select distinct on (customer_id)
-        customer_id,
-        display_name,
-        login_identifier,
-        status
-      from customer_users
-      order by customer_id, created_at desc, id desc
-    ),
-    store_summary as (
+    with store_summary as (
       select
         customer_id,
         count(*)::int as store_count
@@ -72,17 +87,14 @@ export async function listCustomerManagementRows(): Promise<CustomerManagementLi
       c.name as "name",
       c.contact_name as "contactName",
       c.status as "status",
-      a.display_name as "accountDisplayName",
-      a.login_identifier as "accountEmail",
-      a.status as "accountStatus",
+      ${accountProjection}
       coalesce(s.store_count, 0)::int as "storeCount",
       coalesce(w.balance_fen, 0)::int as "balanceFen",
       coalesce(o.pending_payment_fen, 0)::int as "pendingPaymentFen",
       coalesce(o.recent_order_count, 0)::int as "recentOrderCount",
       coalesce(o.exception_order_count, 0)::int as "exceptionOrderCount"
     from customers c
-    left join account_summary a
-      on a.customer_id = c.id
+    ${accountJoin}
     left join store_summary s
       on s.customer_id = c.id
     left join wallet_accounts w
@@ -102,7 +114,10 @@ export async function listCustomerManagementRows(): Promise<CustomerManagementLi
   }));
 }
 
-export async function getCustomerManagementDetail(customerId: string) {
+export async function getCustomerManagementDetail(
+  customerId: string,
+  options: { includeAccountIdentity?: boolean } = {},
+) {
   const [customer] = await db
     .select()
     .from(customers)
@@ -121,12 +136,14 @@ export async function getCustomerManagementDetail(customerId: string) {
     recentOrders,
     recentTransactions,
   ] = await Promise.all([
-    db
-      .select()
-      .from(customerUsers)
-      .where(eq(customerUsers.customerId, customerId))
-      .orderBy(desc(customerUsers.createdAt), desc(customerUsers.id))
-      .limit(1),
+    options.includeAccountIdentity
+      ? db
+          .select()
+          .from(customerUsers)
+          .where(eq(customerUsers.customerId, customerId))
+          .orderBy(desc(customerUsers.createdAt), desc(customerUsers.id))
+          .limit(1)
+      : Promise.resolve([]),
     db
       .select()
       .from(stores)
