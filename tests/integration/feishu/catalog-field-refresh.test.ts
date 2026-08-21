@@ -19,7 +19,10 @@ import {
   createCatalogFieldRefreshService,
   type CatalogFieldRefreshReadPort,
 } from "@/modules/feishu/catalog-field-refresh";
-import { parseLegacyCargoSheet } from "@/modules/feishu/cargo-parser";
+import {
+  parseCargoSheetForSync,
+  parseLegacyCargoSheet,
+} from "@/modules/feishu/cargo-parser";
 import type { CargoPricePlaceholder } from "@/modules/feishu/cargo-types";
 import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field-aligned-cargo-source";
 
@@ -324,6 +327,90 @@ afterEach(async () => {
 });
 
 describe("catalog field refresh", () => {
+  test("downloads unique source images concurrently without holding the catalog advisory lock", async () => {
+    await seedCatalog();
+    const values = buildFieldAlignedCargoSourceFixture().value;
+    const parsed = parseCargoSheetForSync(values);
+    const expectedTokens = new Set(
+      parsed.rows.flatMap((row) =>
+        row.imageFileToken === null ? [] : [row.imageFileToken],
+      ),
+    );
+    const client = createReadOnlyClient(values);
+    const downloadedTokens: string[] = [];
+    const advisoryLockCounts: number[] = [];
+    let activeDownloads = 0;
+    let maxActiveDownloads = 0;
+    client.downloadMedia = async (fileToken) => {
+      downloadedTokens.push(fileToken);
+      activeDownloads += 1;
+      maxActiveDownloads = Math.max(maxActiveDownloads, activeDownloads);
+      const [lockCount] = await db.execute<{ count: number }>(sql`
+        select count(*)::int as count
+        from pg_locks
+        where locktype = 'advisory' and granted
+      `);
+      advisoryLockCounts.push(lockCount?.count ?? -1);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeDownloads -= 1;
+      return {
+        bytes: imageBytes,
+        contentType: "image/png",
+        fileName: `${fileToken}.png`,
+      };
+    };
+
+    await createCatalogFieldRefreshService({ assetDir: assetRoot }).apply({
+      actorUserId: "refresh-actor",
+      client,
+      ...validInput,
+    });
+
+    expect(new Set(downloadedTokens)).toEqual(expectedTokens);
+    expect(downloadedTokens).toHaveLength(expectedTokens.size);
+    expect(maxActiveDownloads).toBeGreaterThan(1);
+    expect(advisoryLockCounts.every((count) => count === 0)).toBe(true);
+  });
+
+  test("rejects a source snapshot that changes while its images are staged", async () => {
+    await seedCatalog();
+    const originalValues = buildFieldAlignedCargoSourceFixture().value;
+    const changedValues = structuredClone(originalValues);
+    const skuIndex = changedValues[0].indexOf("SKU");
+    const nameIndex = changedValues[0].indexOf("名称");
+    const changedRow = changedValues.find(
+      (row, index) => index > 0 && row[skuIndex] === "TZX-001-1",
+    );
+    if (skuIndex === -1 || nameIndex === -1 || !changedRow) {
+      throw new Error("SOURCE_CHANGE_FIXTURE_SETUP_FAILED");
+    }
+    changedRow[nameIndex] = "同步期间被修改的名称";
+    const client = createReadOnlyClient(originalValues);
+    let readCount = 0;
+    client.readRangeDetails = async (input) => ({
+      range: input.range,
+      revision: ++readCount,
+      values: readCount === 1 ? originalValues : changedValues,
+    });
+    const before = {
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    };
+
+    await expect(
+      createCatalogFieldRefreshService({ assetDir: assetRoot }).apply({
+        actorUserId: "refresh-actor",
+        client,
+        ...validInput,
+      }),
+    ).rejects.toThrow("SOURCE_CHANGED_DURING_SYNC");
+    expect(readCount).toBe(2);
+    expect({
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    }).toEqual(before);
+  });
+
   test("creates exact Feishu SKUs, preserves nulls as non-sellable drafts, and initializes inventory once", async () => {
     await seedCatalog();
     const beforeExistingInventory = await readInventoryFacts();
@@ -487,7 +574,7 @@ describe("catalog field refresh", () => {
     ).resolves.toEqual([]);
   });
 
-  test("serializes the Feishu read with apply so an older slow response cannot overwrite a newer click", async () => {
+  test("prevents an older slow response from overwriting a newer click", async () => {
     await seedCatalog();
     const olderClient = createReadOnlyClient(createSpecificationValues("旧快照"));
     const newerClient = createReadOnlyClient(createSpecificationValues("新快照"));
@@ -520,7 +607,16 @@ describe("catalog field refresh", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
     releaseOlderRead();
-    await Promise.all([olderApply, newerApply]);
+    const [olderResult, newerResult] = await Promise.allSettled([
+      olderApply,
+      newerApply,
+    ]);
+
+    expect(olderResult).toMatchObject({
+      reason: expect.objectContaining({ message: "SOURCE_SYNC_SUPERSEDED" }),
+      status: "rejected",
+    });
+    expect(newerResult).toMatchObject({ status: "fulfilled" });
 
     const [row] = await db
       .select({ specification: skus.specification })

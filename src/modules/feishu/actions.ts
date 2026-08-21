@@ -107,6 +107,10 @@ function mapCatalogRefreshErrorMessage(error: unknown) {
       return "飞书货盘中没有可同步的有效 SKU，本次未更新。";
     case "SOURCE_IMAGE_DOWNLOAD_FAILED":
       return "读取飞书货盘图片失败，请稍后重试；本次未修改商品或库存。";
+    case "SOURCE_CHANGED_DURING_SYNC":
+      return "飞书货盘在同步期间发生了变化，本次未更新。请重新点击同步。";
+    case "SOURCE_SYNC_SUPERSEDED":
+      return "已有更新的一次飞书同步请求，本次较早请求已停止。请以最新同步结果为准。";
     case "SOURCE_SHEET_SELECTION_REQUIRED":
       return "已导入基线缺少明确的源工作表，本次未更新。请联系系统维护人员核对配置。";
     default:

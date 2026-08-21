@@ -569,6 +569,8 @@ describe("feishu admin actions", () => {
     ["PARSER_BLOCKING_ISSUES", "阻断问题"],
     ["NO_SYNCABLE_SKUS", "有效 SKU"],
     ["SOURCE_IMAGE_DOWNLOAD_FAILED", "图片"],
+    ["SOURCE_CHANGED_DURING_SYNC", "发生了变化"],
+    ["SOURCE_SYNC_SUPERSEDED", "较早请求"],
   ])("maps catalog refresh failure %s to safe Chinese", async (code, label) => {
     serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(new Error(code));
 

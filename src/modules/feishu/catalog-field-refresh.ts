@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -86,6 +86,11 @@ type StagedAssets = {
   manifestBySkuCode: Map<string, TemporaryAssetManifest>;
   runId: string;
 };
+
+const SOURCE_IMAGE_DOWNLOAD_CONCURRENCY = 4;
+const CATALOG_REFRESH_STARTED_ACTION =
+  "CATALOG_FIELDS_REFRESH_STARTED_FROM_FEISHU";
+const CATALOG_REFRESH_LOCK_NAME = "feishu-catalog-field-refresh";
 
 function fail(code: string): never {
   throw new Error(code);
@@ -233,36 +238,113 @@ async function stageSourceAssets(input: {
   const runId = randomUUID();
   const storage = createCatalogAssetStorage({ assetDir: input.assetDir });
   const manifestBySkuCode = new Map<string, TemporaryAssetManifest>();
-  const manifestByDownloadedDigest = new Map<string, TemporaryAssetManifest>();
+  const manifestByDownloadedDigest = new Map<
+    string,
+    Promise<TemporaryAssetManifest>
+  >();
+  const rowsByFileToken = new Map<string, ParsedCargoSyncRow[]>();
+  for (const row of input.rows) {
+    if (row.imageFileToken === null) continue;
+    const rows = rowsByFileToken.get(row.imageFileToken) ?? [];
+    rows.push(row);
+    rowsByFileToken.set(row.imageFileToken, rows);
+  }
+  const entries = [...rowsByFileToken.entries()];
+  let cursor = 0;
+  let firstError: unknown;
 
   try {
-    for (const row of input.rows) {
-      if (row.imageFileToken === null) continue;
-      const media = await input.client.downloadMedia(row.imageFileToken);
-      const downloadedDigest = createHash("sha256").update(media.bytes).digest("hex");
-      const sharedManifest = manifestByDownloadedDigest.get(downloadedDigest);
-      if (sharedManifest) {
-        manifestBySkuCode.set(row.skuCode, {
-          ...sharedManifest,
-          skuCode: row.skuCode,
-        });
-        continue;
+    const downloadWorker = async () => {
+      while (firstError === undefined) {
+        const entry = entries[cursor];
+        cursor += 1;
+        if (!entry) return;
+        const [fileToken, rows] = entry;
+        try {
+          const media = await input.client.downloadMedia(fileToken);
+          const downloadedDigest = createHash("sha256")
+            .update(media.bytes)
+            .digest("hex");
+          let manifestPromise = manifestByDownloadedDigest.get(downloadedDigest);
+          if (!manifestPromise) {
+            const representative = rows[0]!;
+            manifestPromise = storage.stageCatalogAsset({
+              bytes: media.bytes,
+              contentType: media.contentType,
+              originalFileName: media.fileName ?? `${representative.skuCode}.bin`,
+              runId,
+              skuCode: representative.skuCode,
+            });
+            manifestByDownloadedDigest.set(downloadedDigest, manifestPromise);
+          }
+          const manifest = await manifestPromise;
+          for (const row of rows) {
+            manifestBySkuCode.set(row.skuCode, {
+              ...manifest,
+              skuCode: row.skuCode,
+            });
+          }
+        } catch (error) {
+          firstError ??= error;
+        }
       }
-      const manifest = await storage.stageCatalogAsset({
-        bytes: media.bytes,
-        contentType: media.contentType,
-        originalFileName: media.fileName ?? `${row.skuCode}.bin`,
-        runId,
-        skuCode: row.skuCode,
-      });
-      manifestByDownloadedDigest.set(downloadedDigest, manifest);
-      manifestBySkuCode.set(row.skuCode, manifest);
-    }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(SOURCE_IMAGE_DOWNLOAD_CONCURRENCY, entries.length) },
+        downloadWorker,
+      ),
+    );
+    if (firstError !== undefined) throw firstError;
     return { manifestBySkuCode, runId };
   } catch {
     await storage.discardStagedAssets(runId).catch(() => undefined);
     fail("SOURCE_IMAGE_DOWNLOAD_FAILED");
   }
+}
+
+function preparedSourceDigest(source: PreparedSource) {
+  return createHash("sha256").update(JSON.stringify(source)).digest("hex");
+}
+
+async function lockCatalogRefresh(database: DbTransaction) {
+  await database.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${CATALOG_REFRESH_LOCK_NAME}))`,
+  );
+}
+
+async function registerRefreshAttempt(input: {
+  actorUserId: string;
+  database: typeof db;
+  reason: string;
+  runId: string;
+}) {
+  await input.database.transaction(async (transaction) => {
+    await lockCatalogRefresh(transaction);
+    await transaction.insert(auditLogs).values({
+      action: CATALOG_REFRESH_STARTED_ACTION,
+      actorId: input.actorUserId,
+      actorType: "ADMIN",
+      afterJson: {},
+      beforeJson: {},
+      entityId: input.runId,
+      entityType: "CATALOG",
+      reason: input.reason,
+    });
+  });
+}
+
+async function assertLatestRefreshAttempt(
+  database: DbTransaction,
+  runId: string,
+) {
+  const [latest] = await database
+    .select({ entityId: auditLogs.entityId })
+    .from(auditLogs)
+    .where(eq(auditLogs.action, CATALOG_REFRESH_STARTED_ACTION))
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+    .limit(1);
+  if (latest?.entityId !== runId) fail("SOURCE_SYNC_SUPERSEDED");
 }
 
 async function publishSourceAssets(input: {
@@ -519,19 +601,28 @@ export function createCatalogFieldRefreshService(
       if (!reason) fail("OPERATOR_REASON_REQUIRED");
 
       const runId = randomUUID();
-      return await database.transaction(async (transaction) => {
-        await transaction.execute(
-          sql`select pg_advisory_xact_lock(hashtext('feishu-catalog-field-refresh'))`,
-        );
-        const source = await prepareSource(input);
-        const plan = await buildRefreshPlan(transaction, source);
-        const staged = await stageSourceAssets({
-          assetDir,
-          client: input.client,
-          rows: source.rows,
-        });
-        const storage = createCatalogAssetStorage({ assetDir });
-        try {
+      await registerRefreshAttempt({
+        actorUserId: input.actorUserId,
+        database,
+        reason,
+        runId,
+      });
+      const source = await prepareSource(input);
+      const staged = await stageSourceAssets({
+        assetDir,
+        client: input.client,
+        rows: source.rows,
+      });
+      const storage = createCatalogAssetStorage({ assetDir });
+      try {
+        const verifiedSource = await prepareSource(input);
+        if (preparedSourceDigest(verifiedSource) !== preparedSourceDigest(source)) {
+          fail("SOURCE_CHANGED_DURING_SYNC");
+        }
+        return await database.transaction(async (transaction) => {
+          await lockCatalogRefresh(transaction);
+          await assertLatestRefreshAttempt(transaction, runId);
+          const plan = await buildRefreshPlan(transaction, verifiedSource);
           const assetBySkuCode = await publishSourceAssets({
             assetDir,
             database: transaction,
@@ -546,10 +637,10 @@ export function createCatalogFieldRefreshService(
             runId,
           });
           return previewForPlan(plan);
-        } finally {
-          await storage.discardStagedAssets(staged.runId).catch(() => undefined);
-        }
-      });
+        });
+      } finally {
+        await storage.discardStagedAssets(staged.runId).catch(() => undefined);
+      }
     },
   };
 }
