@@ -12,6 +12,8 @@ import {
   orderLines,
   paymentClaims,
   products,
+  settlementBatchOrders,
+  settlementBatches,
   skus,
   stores,
 } from "@/db/schema";
@@ -91,6 +93,59 @@ async function seedPendingPaymentOrder() {
 
   return { admin, customerUser, order };
 }
+
+async function seedMixedPaidOrder() {
+  const fixture = await seedPendingPaymentOrder();
+  const paidAt = new Date();
+  await db
+    .update(fulfillmentOrders)
+    .set({
+      lockExpiresAt: null,
+      paidAt,
+      paymentMode: "MIXED",
+      status: "PAID_PENDING_FULFILLMENT",
+    })
+    .where(eq(fulfillmentOrders.id, fixture.order.id));
+  const [batch] = await db
+    .insert(settlementBatches)
+    .values({
+      batchNumber: `SET-E2E-${crypto.randomUUID()}`,
+      customerId: fixture.order.customerId,
+      idempotencyKey: `mixed-e2e-${crypto.randomUUID()}`,
+      offlineAmountFen: 300,
+      paidAt,
+      paymentDueAt: paidAt,
+      status: "PAID",
+      totalAmountFen: 500,
+      walletAmountFen: 200,
+    })
+    .returning();
+  await db.insert(settlementBatchOrders).values({
+    customerId: fixture.order.customerId,
+    offlineAmountFen: 300,
+    orderId: fixture.order.id,
+    settlementBatchId: batch.id,
+    totalAmountFen: 500,
+    walletAmountFen: 200,
+  });
+  return fixture;
+}
+
+test("mixed settlement order shows its exact wallet and WeChat allocation @desktop-only", async ({
+  page,
+}) => {
+  const fixture = await seedMixedPaidOrder();
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal/);
+  await page.goto(`/portal/orders/${fixture.order.id}`);
+
+  await expect(
+    page.getByRole("heading", { name: "付款已完成，等待同舟行发货" }),
+  ).toBeVisible();
+  await expect(page.getByText("余额扣除 ¥2.00，微信确认 ¥3.00。")).toBeVisible();
+  await expect(page.getByText(/本单未经过钱包充值和扣款/)).toHaveCount(0);
+});
 
 test("customer declares an exact WeChat payment and admin confirms it without using wallet @desktop-only", async ({
   page,

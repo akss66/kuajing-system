@@ -15,6 +15,18 @@ function dateTime(value: Date) {
   }).format(value);
 }
 
+function paidPaymentDescription(order: CustomerOrderDetail) {
+  if (order.paymentMode === "MIXED") {
+    if (order.walletAmountFen !== null && order.offlineAmountFen !== null) {
+      return `余额扣除 ${money(order.walletAmountFen)}，微信确认 ${money(order.offlineAmountFen)}。`;
+    }
+    return "本单通过余额与微信组合结算，具体分摊请查看统一结算记录。";
+  }
+  return order.paymentMode === "WALLET"
+    ? "客户余额已自动扣除，无需管理员再次确认。"
+    : "管理员已确认微信付款到账，本单未经过钱包充值和扣款。";
+}
+
 export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
   const paid = ["PAID_PENDING_FULFILLMENT", "FULFILLING", "SHIPPED"].includes(
     order.status,
@@ -59,11 +71,7 @@ export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
         <CheckCircle2 className="mt-0.5 size-5 shrink-0" />
         <div>
           <h2 className="font-semibold">付款已完成，等待同舟行发货</h2>
-          <p className="mt-1 text-sm">
-            {order.paymentMode === "WALLET"
-              ? "客户余额已自动扣除，无需管理员再次确认。"
-              : "管理员已确认微信付款到账，本单未经过钱包充值和扣款。"}
-          </p>
+          <p className="mt-1 text-sm">{paidPaymentDescription(order)}</p>
         </div>
       </section>
     );

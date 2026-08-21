@@ -14,6 +14,8 @@ import {
   paymentClaims,
   products,
   replacementRequests,
+  settlementBatchOrders,
+  settlementBatches,
   shipmentFulfillments,
   skus,
   stores,
@@ -37,7 +39,7 @@ const initialNow = new Date("2026-08-12T10:00:00.000Z");
 async function createOrder(input?: {
   customerId?: string;
   lockExpiresAt?: Date | null;
-  paymentMode?: "WALLET" | "DIRECT_OFFLINE" | null;
+  paymentMode?: "WALLET" | "DIRECT_OFFLINE" | "MIXED" | null;
   status?: "PENDING_PAYMENT" | "PAID_PENDING_FULFILLMENT";
 }) {
   const customer = input?.customerId
@@ -418,6 +420,62 @@ describe("offline payment and order lifecycle", () => {
     await expect(getCustomerOrderDetail(customer.id, order.id)).resolves.toMatchObject({
       id: order.id,
       orderNumber: order.orderNumber,
+    });
+  });
+
+  test("customer order detail returns each order allocation from a mixed settlement batch", async () => {
+    const first = await createOrder({
+      paymentMode: "MIXED",
+      status: "PAID_PENDING_FULFILLMENT",
+    });
+    const second = await createOrder({
+      customerId: first.customer.id,
+      paymentMode: "MIXED",
+      status: "PAID_PENDING_FULFILLMENT",
+    });
+    const [batch] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `SET-MIXED-${crypto.randomUUID()}`,
+        customerId: first.customer.id,
+        idempotencyKey: `mixed-detail-${crypto.randomUUID()}`,
+        offlineAmountFen: 800,
+        paymentDueAt: new Date("2026-08-22T00:00:00.000Z"),
+        status: "PAID",
+        totalAmountFen: 1_000,
+        walletAmountFen: 200,
+      })
+      .returning();
+    await db.insert(settlementBatchOrders).values([
+      {
+        customerId: first.customer.id,
+        offlineAmountFen: 500,
+        orderId: first.order.id,
+        settlementBatchId: batch.id,
+        totalAmountFen: 500,
+        walletAmountFen: 0,
+      },
+      {
+        customerId: first.customer.id,
+        offlineAmountFen: 300,
+        orderId: second.order.id,
+        settlementBatchId: batch.id,
+        totalAmountFen: 500,
+        walletAmountFen: 200,
+      },
+    ]);
+
+    await expect(
+      getCustomerOrderDetail(first.customer.id, first.order.id),
+    ).resolves.toMatchObject({
+      offlineAmountFen: 500,
+      walletAmountFen: 0,
+    });
+    await expect(
+      getCustomerOrderDetail(first.customer.id, second.order.id),
+    ).resolves.toMatchObject({
+      offlineAmountFen: 300,
+      walletAmountFen: 200,
     });
   });
 

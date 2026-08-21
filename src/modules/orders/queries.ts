@@ -8,6 +8,7 @@ import {
   orderShipments,
   paymentClaims,
   replacementRequests,
+  settlementBatchOrders,
   shipmentCancellationAdjustments,
   shipmentFulfillments,
   stores,
@@ -96,6 +97,7 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
       id: fulfillmentOrders.id,
       lockExpiresAt: fulfillmentOrders.lockExpiresAt,
       orderNumber: fulfillmentOrders.orderNumber,
+      offlineAmountFen: settlementBatchOrders.offlineAmountFen,
       paidAt: fulfillmentOrders.paidAt,
       paymentMode: fulfillmentOrders.paymentMode,
       status: fulfillmentOrders.status,
@@ -103,9 +105,17 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
       totalAmountFen: fulfillmentOrders.totalAmountFen,
       totalPackageCount: fulfillmentOrders.totalPackageCount,
       totalQuantity: fulfillmentOrders.totalQuantity,
+      walletAmountFen: settlementBatchOrders.walletAmountFen,
     })
     .from(fulfillmentOrders)
     .innerJoin(stores, eq(stores.id, fulfillmentOrders.storeId))
+    .leftJoin(
+      settlementBatchOrders,
+      and(
+        eq(settlementBatchOrders.orderId, fulfillmentOrders.id),
+        eq(settlementBatchOrders.customerId, fulfillmentOrders.customerId),
+      ),
+    )
     .where(
       and(
         eq(fulfillmentOrders.id, orderId),
