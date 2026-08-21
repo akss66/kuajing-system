@@ -10,7 +10,10 @@ import {
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
 import type { JifengOrderDetail } from "@/integrations/jifeng/types";
-import { createSystemNotification } from "@/modules/notifications/service";
+import {
+  createSystemNotification,
+  resolveSystemNotificationsByDeduplicationPrefix,
+} from "@/modules/notifications/service";
 
 import { refreshParentFulfillmentStatus } from "./order-rollup";
 import { applyJifengOrderStatus } from "./status-sync";
@@ -214,6 +217,17 @@ async function claimExistingOrderMatch(eventId: string, now: Date) {
           : null;
       if (lockedAt && lockedAt.getTime() + JIFENG_MATCH_LEASE_MS > now.getTime()) {
         return "BUSY" as const;
+      }
+      if (row.attemptCount > 0) {
+        await tx.insert(integrationAttempts).values({
+          attemptNumber: row.attemptCount,
+          errorCode: "STALE_PROCESSING",
+          errorMessage: "Jifeng order matching lease expired before completion",
+          finishedAt: now,
+          outcome: "RETRYABLE_FAILURE",
+          outboxEventId: eventId,
+          startedAt: lockedAt ?? now,
+        });
       }
     }
 
@@ -518,7 +532,7 @@ async function recordMatchFailure(input: {
         : "极风已有订单无法安全匹配",
     });
 
-    if (!input.failure.retryable || input.claim.attemptNumber >= 6) {
+    if (!input.failure.retryable || input.claim.attemptNumber === 6) {
       await createSystemNotification(tx, {
         deduplicationKey: `jifeng-match:${input.claim.fulfillmentId}:${
           input.failure.retryable ? "waiting" : input.failure.code
@@ -684,6 +698,10 @@ async function finalizeExistingOrderMatch(input: {
       entityId: input.claim.shipmentId,
       entityType: "ORDER_SHIPMENT",
       reason: "已按平台订单号精确绑定极风已有订单",
+    });
+    await resolveSystemNotificationsByDeduplicationPrefix(tx, {
+      deduplicationKeyPrefix: `jifeng-match:${input.claim.fulfillmentId}:`,
+      now: input.now,
     });
 
     if (input.claim.isLocalCancelMonitoring && input.detail.status !== 9) {

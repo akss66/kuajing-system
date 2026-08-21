@@ -90,3 +90,27 @@ export async function resolveSystemNotifications(
         and ${systemNotifications.status} <> 'RESOLVED'`,
     );
 }
+
+export async function resolveSystemNotificationsByDeduplicationPrefix(
+  tx: DbTransaction,
+  input: {
+    deduplicationKeyPrefix: string;
+    now?: Date;
+  },
+) {
+  if (input.deduplicationKeyPrefix.length === 0) return;
+  const now = input.now ?? new Date();
+  await tx
+    .update(systemNotifications)
+    .set({
+      resolvedAt: now,
+      status: "RESOLVED",
+      updatedAt: now,
+    })
+    .where(
+      sql`starts_with(
+          ${systemNotifications.deduplicationKey},
+          ${input.deduplicationKeyPrefix}
+        ) and ${systemNotifications.status} <> 'RESOLVED'`,
+    );
+}

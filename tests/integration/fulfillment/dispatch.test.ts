@@ -438,6 +438,131 @@ describe("paid order Jifeng dispatch", () => {
     ).resolves.toEqual({ status: "CANCELLED" });
   });
 
+  test("notifies only when missing-order matching first reaches the warning threshold and resolves it after a match", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const warningKey = `jifeng-match:${(
+      await db.select().from(shipmentFulfillments)
+    )[0]!.id}:waiting`;
+
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      await expect(
+        processJifengExistingOrderMatchEvent({
+          client: {
+            async getOrder() {
+              throw new JifengApiError({
+                code: attempt % 2 === 0 ? "50071" : "50017",
+                message: "existing order not found",
+                retryable: false,
+              });
+            },
+          },
+          eventId: event.id,
+          now: new Date(`2026-08-12T${String(attempt).padStart(2, "0")}:05:00.000Z`),
+        }),
+      ).resolves.toEqual({ status: "RETRY_SCHEDULED" });
+    }
+
+    const [warning] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.deduplicationKey, warningKey));
+    const warningDeliveries = (await db.select().from(integrationOutbox)).filter(
+      (outbox) =>
+        outbox.target === "FEISHU_BOT" &&
+        outbox.aggregateId === warning?.id,
+    );
+    expect(warning).toMatchObject({ occurrenceCount: 1, status: "UNREAD" });
+    expect(warningDeliveries).toHaveLength(1);
+
+    await expect(
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-AFTER-WAITING",
+              orderNo: "JF-AFTER-WAITING",
+              platformOrderNo: shipment.externalOrderNo,
+              status: 2,
+            };
+          },
+        },
+        eventId: event.id,
+        now: new Date("2026-08-12T09:05:00.000Z"),
+      }),
+    ).resolves.toEqual({ status: "MATCHED" });
+
+    const [resolvedWarning] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.deduplicationKey, warningKey));
+    expect(resolvedWarning).toMatchObject({
+      occurrenceCount: 1,
+      resolvedAt: expect.any(Date),
+      status: "RESOLVED",
+    });
+  });
+
+  test("resolves the permanent match notification after an operator retry succeeds", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const [fulfillment] = await db.select().from(shipmentFulfillments);
+    const notificationKey = `jifeng-match:${fulfillment!.id}:PLATFORM_ORDER_NO_MISMATCH`;
+
+    await expect(
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-WRONG-ORDER-RETRY",
+              orderNo: "JF-WRONG-ORDER-RETRY",
+              platformOrderNo: `${shipment.externalOrderNo}-OTHER`,
+              status: 2,
+            };
+          },
+        },
+        eventId: event.id,
+      }),
+    ).resolves.toEqual({ status: "FAILED" });
+    const [openNotification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.deduplicationKey, notificationKey));
+    expect(openNotification).toMatchObject({ status: "UNREAD" });
+
+    await retryJifengShipment({
+      actorUserId: crypto.randomUUID(),
+      reason: "人工核对后重新匹配",
+      shipmentId: shipment.id,
+    });
+    await expect(
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-AFTER-MANUAL-RETRY",
+              orderNo: "JF-AFTER-MANUAL-RETRY",
+              platformOrderNo: shipment.externalOrderNo,
+              status: 2,
+            };
+          },
+        },
+        eventId: event.id,
+      }),
+    ).resolves.toEqual({ status: "MATCHED" });
+
+    const [resolvedNotification] = await db
+      .select()
+      .from(systemNotifications)
+      .where(eq(systemNotifications.deduplicationKey, notificationKey));
+    expect(resolvedNotification).toMatchObject({
+      resolvedAt: expect.any(Date),
+      status: "RESOLVED",
+    });
+  });
+
   test("rejects a Jifeng response whose platform order number does not exactly match the package", async () => {
     const { order, shipment } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
@@ -931,6 +1056,65 @@ describe("paid order Jifeng dispatch", () => {
         eventId: event.id,
       }),
     ).resolves.toEqual({ status: "MATCHED" });
+  });
+
+  test("records the abandoned attempt before reclaiming an expired processing match", async () => {
+    const { shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    const staleStartedAt = new Date("2026-08-12T01:00:00.000Z");
+    const recoveredAt = new Date("2026-08-12T01:06:00.000Z");
+    await db
+      .update(integrationOutbox)
+      .set({
+        attemptCount: 1,
+        claimToken: "00000000-0000-4000-8000-000000000002",
+        lockedAt: staleStartedAt,
+        status: "PROCESSING",
+      })
+      .where(eq(integrationOutbox.id, event.id));
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        attemptCount: 1,
+        lastAttemptAt: staleStartedAt,
+        status: "SUBMITTING",
+      })
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+
+    await expect(
+      processJifengExistingOrderMatchEvent({
+        client: {
+          async getOrder() {
+            return {
+              erpNo: "REMOTE-ERP-STALE-RECOVERY",
+              orderNo: "JF-STALE-RECOVERY",
+              platformOrderNo: shipment.externalOrderNo,
+              status: 2,
+            };
+          },
+        },
+        eventId: event.id,
+        now: recoveredAt,
+      }),
+    ).resolves.toEqual({ status: "MATCHED" });
+
+    const attempts = await db
+      .select()
+      .from(integrationAttempts)
+      .where(eq(integrationAttempts.outboxEventId, event.id))
+      .orderBy(integrationAttempts.attemptNumber);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({
+      attemptNumber: 1,
+      errorCode: "STALE_PROCESSING",
+      outcome: "RETRYABLE_FAILURE",
+      startedAt: staleStartedAt,
+    });
+    expect(attempts[1]).toMatchObject({
+      attemptNumber: 2,
+      outcome: "SUCCESS",
+    });
   });
 
   test("immediately applies shipped status, tracking, and inventory deduction when the matched order already shipped", async () => {
