@@ -589,13 +589,12 @@ test("customer import preview uses the compact review workspace and sticky submi
   await expect(page.getByText(/preview-orders\.xlsx/)).toBeVisible();
   const workspace = page.getByRole("region", { name: "逐行校验工作台" });
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByRole("table", { name: "逐行校验结果" })).toBeVisible();
   if (testInfo.project.name === "mobile-chromium") {
-    const workspaceWidth = await workspace.evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }));
-    expect(workspaceWidth.scrollWidth).toBeLessThanOrEqual(workspaceWidth.clientWidth + 1);
+    await expect(workspace.locator("[data-import-review-mobile-list]")).toBeVisible();
+    await expect(workspace.getByRole("table", { name: "逐行校验结果" })).not.toBeVisible();
+  }
+  if (testInfo.project.name !== "mobile-chromium") {
+    await expect(workspace.getByRole("table", { name: "逐行校验结果" })).toBeVisible();
   }
   await expect(workspace.getByText("可提交", { exact: true })).toBeVisible();
   await expect(workspace.getByText("需处理", { exact: true })).toBeVisible();
@@ -608,8 +607,11 @@ test("customer import preview uses the compact review workspace and sticky submi
     (page.viewportSize()?.height ?? 0) + 1,
   );
 
-  const row = page.getByRole("row", { name: "Excel 第 2 行" });
-  await expect(row.getByText("校验通过", { exact: true })).toBeVisible();
+  const row =
+    testInfo.project.name === "mobile-chromium"
+      ? page.getByRole("article", { name: "Excel 第 2 行" })
+      : page.getByRole("row", { name: "Excel 第 2 行" });
+  await expect(row.getByText("校验通过", { exact: true }).first()).toBeVisible();
   await expect(row.getByText("TZX-PREVIEW-1", { exact: true })).toBeVisible();
   await expect(page.getByLabel("同系列替代 SKU")).toHaveCount(0);
   await testInfo.attach("import-review-scheme-a-viewport", {

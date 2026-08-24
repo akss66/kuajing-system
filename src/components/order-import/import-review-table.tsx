@@ -106,8 +106,26 @@ export function ImportReviewTable({
         ))}
       </dl>
 
-      <Table className="block w-full md:table md:min-w-[980px]" aria-label="逐行校验结果">
-        <TableHeader className="hidden md:table-header-group">
+      <div className="space-y-3 p-3 md:hidden" data-import-review-mobile-list>
+        {visibleRows.length ? (
+          visibleRows.map((row) => (
+            <ImportRowEditor
+              action={action}
+              batchId={batchId}
+              key={`${row.id}:${row.revision}`}
+              layout="mobile"
+              row={row}
+            />
+          ))
+        ) : (
+          <div className="rounded-[var(--radius-control)] border border-dashed border-border px-4 py-10 text-center text-sm text-muted">
+            当前没有需要处理的行。
+          </div>
+        )}
+      </div>
+
+      <Table className="hidden w-full md:table md:min-w-[980px]" aria-label="逐行校验结果">
+        <TableHeader>
           <TableRow>
             <TableHead className="w-16">行</TableHead>
             <TableHead className="w-[17rem]">订单号 / 子订单号</TableHead>
@@ -118,7 +136,7 @@ export function ImportReviewTable({
             <TableHead className="w-24 text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody className="block divide-y divide-border md:table-row-group md:divide-y-0">
+        <TableBody>
           {visibleRows.map((row) => (
             <ImportRowEditor
               action={action}
@@ -128,8 +146,8 @@ export function ImportReviewTable({
             />
           ))}
           {visibleRows.length === 0 ? (
-            <TableRow className="block md:table-row">
-              <TableCell className="block h-24 pt-9 text-center text-muted md:table-cell md:pt-2" colSpan={7}>
+            <TableRow>
+              <TableCell className="h-24 pt-9 text-center text-muted md:pt-2" colSpan={7}>
                 当前没有需要处理的行。
               </TableCell>
             </TableRow>

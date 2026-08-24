@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -25,11 +25,11 @@ function row(overrides: Partial<EditableImportRow> = {}): EditableImportRow {
     quantity: 1,
     quantityMultiplier: 1,
     resolutionMethod: "NORMALIZED_SUFFIX",
-    resolvedSku: { id: "sku-14-3", name: "桔色", skuCode: "TZX-014-3" },
+    resolvedSku: { id: "sku-14-3", name: "橘色", skuCode: "TZX-014-3" },
     revision: 1,
     rowNumber: 2,
     siblingCandidates: [
-      { availableQuantity: 505, id: "sku-14-3", name: "桔色", skuCode: "TZX-014-3" },
+      { availableQuantity: 505, id: "sku-14-3", name: "橘色", skuCode: "TZX-014-3" },
       { availableQuantity: 86, id: "sku-14-2", name: "紫色", skuCode: "TZX-014-2" },
     ],
     status: "READY",
@@ -40,8 +40,8 @@ function row(overrides: Partial<EditableImportRow> = {}): EditableImportRow {
 describe("ImportReviewTable", () => {
   afterEach(cleanup);
 
-  it("keeps ready rows compact, opens failed rows, and filters to rows needing attention", () => {
-    render(
+  it("renders mobile cards, keeps ready rows collapsed, opens failed rows, and filters to rows needing attention", () => {
+    const { container } = render(
       <ImportReviewTable
         action={vi.fn()}
         batchId="batch-1"
@@ -60,27 +60,32 @@ describe("ImportReviewTable", () => {
       />,
     );
 
-    expect(screen.getByRole("table", { name: "逐行校验结果" })).toHaveClass(
-      "block",
-      "md:table",
-    );
-    expect(screen.getByRole("button", { name: "修改 Excel 第 2 行" })).toHaveAttribute(
+    const mobileList = container.querySelector("[data-import-review-mobile-list]");
+    expect(mobileList).not.toBeNull();
+    const mobile = within(mobileList as HTMLElement);
+    expect(mobile.getByText("PO-1")).toBeVisible();
+    expect(mobile.getByText("PO-2")).toBeVisible();
+    const readyCard = mobile.getByLabelText("Excel 第 2 行");
+    const failedCard = mobile.getByLabelText("Excel 第 3 行");
+    const ready = within(readyCard);
+    const failed = within(failedCard);
+
+    expect(ready.getByRole("button", { name: "修改 Excel 第 2 行" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    expect(screen.queryByRole("row", { name: "Excel 第 2 行编辑器" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收起 Excel 第 3 行" })).toHaveAttribute(
+    expect(ready.queryByText("同系列替代 SKU")).not.toBeInTheDocument();
+    expect(failed.getByRole("button", { name: "收起 Excel 第 3 行" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-    expect(screen.getByRole("row", { name: "Excel 第 3 行编辑器" })).toBeVisible();
-    expect(screen.getByText("对应 SKU 库存不足，请更换 SKU")).toBeVisible();
+    expect(failed.getAllByText("对应 SKU 库存不足，请更换 SKU").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
-    expect(screen.getByRole("row", { name: "Excel 第 2 行编辑器" })).toBeVisible();
+    fireEvent.click(ready.getByRole("button", { name: "修改 Excel 第 2 行" }));
+    expect(ready.getByLabelText("同系列替代 SKU")).toBeVisible();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "仅看需处理（1）" }));
-    expect(screen.queryByRole("row", { name: "Excel 第 2 行" })).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "Excel 第 3 行" })).toBeVisible();
+    expect(mobile.queryByText("PO-1")).not.toBeInTheDocument();
+    expect(mobile.getByText("PO-2")).toBeVisible();
   });
 });

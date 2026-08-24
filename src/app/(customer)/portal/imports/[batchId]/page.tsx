@@ -54,7 +54,7 @@ export default async function ImportPreviewPage({
   );
 
   return (
-    <div className="space-y-5 pb-2">
+    <div className="space-y-5 pb-28 sm:pb-2">
       <PageHeading
         action={
           <div className="text-sm text-muted sm:text-right">
@@ -95,7 +95,7 @@ export default async function ImportPreviewPage({
 
       <section
         aria-label="提交拿货单操作栏"
-        className="sticky bottom-2 z-20 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-surface)] border border-border bg-background/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex sm:justify-between sm:px-5 sm:py-3"
+        className="sticky bottom-0 z-20 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-t-[var(--radius-surface)] border border-border bg-background/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex sm:justify-between sm:rounded-[var(--radius-surface)] sm:px-5 sm:py-3"
       >
         <div className="hidden min-w-0 items-start gap-3 sm:flex">
           {blocking ? (
