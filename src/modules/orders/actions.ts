@@ -39,7 +39,10 @@ export async function submitImportBatchAction(
       return { status: "error", message: "部分 SKU 库存不足，请联系管理员补货后重试。" };
     }
     if (error instanceof OrderSubmissionError) {
-      if (error.code === "SKU_NOT_SELLABLE") {
+      if (
+        error.code === "SKU_NOT_SELLABLE" ||
+        error.code === "INSUFFICIENT_INVENTORY"
+      ) {
         refresh();
       }
       return { status: "error", message: error.message };
