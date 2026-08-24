@@ -37,6 +37,10 @@ const CANCEL_CONFIRMATION_TIMEOUT_MS = 6 * 60 * 60_000;
 const CANCEL_CONFIRMATION_TIMEOUT_CODE = "CANCEL_CONFIRMATION_TIMEOUT";
 export const REMOTE_SHIP_INVENTORY_INVARIANT_CODE =
   "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH";
+const REMOTE_ACTIVE_AFTER_LOCAL_CANCEL_CODE =
+  "REMOTE_ACTIVE_AFTER_LOCAL_CANCEL";
+const REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE =
+  "REMOTE_SHIPPED_AFTER_LOCAL_CANCEL";
 
 export type JifengOrderStatusPort = {
   getOrder(input: { erpNo: string }): Promise<JifengOrderDetail>;
@@ -313,6 +317,7 @@ export async function applyJifengOrderStatus(input: {
     }
     if (
       current.fulfillmentStatus === "CANCELLED" &&
+      current.jifengStatus === 9 &&
       input.detail.status !== 9
     ) {
       await tx
@@ -322,16 +327,187 @@ export async function applyJifengOrderStatus(input: {
           updatedAt: now,
         })
         .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      return {
+        orderStatus: current.orderStatus,
+        status: "ALREADY_CANCELLED" as const,
+      };
+    }
+    const isLateRemoteAfterLocalCancel =
+      (current.fulfillmentStatus === "CANCELLED" && current.jifengStatus !== 9) ||
+      current.lastErrorCode === REMOTE_ACTIVE_AFTER_LOCAL_CANCEL_CODE ||
+      current.lastErrorCode === REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE;
+    if (
+      isLateRemoteAfterLocalCancel &&
+      input.detail.status === 7 &&
+      current.lastErrorCode !== REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE
+    ) {
+      const lineQuantities = await tx.execute<{
+        quantity: number;
+        skuCode: string;
+        skuId: string;
+      }>(sql`
+        select
+          sku_id as "skuId",
+          max(sku_code_snapshot) as "skuCode",
+          sum(quantity)::int as quantity
+        from order_lines
+        where shipment_id = ${current.shipmentId}
+        group by sku_id
+        order by sku_id
+      `);
+      if (lineQuantities.length === 0) {
+        throw new RemoteShippedInventoryInvariantError(
+          "本地取消后极风仍发货，但包裹没有对应商品明细",
+        );
+      }
+      for (const line of lineQuantities) {
+        const balanceRows = await tx.execute<{ totalQuantity: number }>(sql`
+          select total_quantity as "totalQuantity"
+          from inventory_balances
+          where sku_id = ${line.skuId}
+          for update
+        `);
+        const balance = balanceRows[0];
+        if (!balance || balance.totalQuantity < line.quantity) {
+          throw new RemoteShippedInventoryInvariantError(
+            "本地取消后极风仍发货，但库存余额不足以完成对账",
+          );
+        }
+        const afterQuantity = balance.totalQuantity - line.quantity;
+        await tx
+          .update(inventoryBalances)
+          .set({ totalQuantity: afterQuantity, updatedAt: now })
+          .where(eq(inventoryBalances.skuId, line.skuId));
+        await tx.insert(inventoryMovements).values({
+          actorId: null,
+          actorType: "SYSTEM",
+          afterQuantity,
+          beforeQuantity: balance.totalQuantity,
+          delta: -line.quantity,
+          movementType: "SHIPMENT",
+          reason: "本地取消后极风仍实际发货，执行库存对账扣减",
+          reasonCode: "SYSTEM_SHIPMENT",
+          referenceId: current.shipmentId,
+          referenceType: "ORDER_SHIPMENT",
+          skuId: line.skuId,
+        });
+      }
+      const shippedAt = parsedRemoteShippedAt(input.detail.shippedTime);
+      const feeMinor =
+        input.detail.logisticsFee === undefined
+          ? null
+          : Math.round(input.detail.logisticsFee * 100);
+      await tx
+        .update(orderShipments)
+        .set({
+          logisticsCurrency:
+            feeMinor === null ? null : logisticsCurrency(input.detail.currency),
+          logisticsFeeMinor: feeMinor,
+          shippedAt,
+          trackingNumber: input.detail.trackingNo?.trim() || null,
+          updatedAt: now,
+        })
+        .where(eq(orderShipments.id, current.shipmentId));
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({
+            nextRetryAt: null,
+            now,
+            source: input.source,
+          }),
+          externalOrderNo: input.detail.orderNo ?? null,
+          jifengStatus: 7,
+          lastErrorCode: REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE,
+          lastErrorMessage:
+            "本地取消后极风仍实际发货，库存已扣减，请人工处理资金和客户对账。",
+          nextRetryAt: null,
+          shippedAt,
+          status: "EXCEPTION",
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      await tx.insert(auditLogs).values({
+        action: "JIFENG_SHIPPED_AFTER_LOCAL_CANCEL",
+        actorId: null,
+        actorType: "SYSTEM",
+        afterJson: {
+          errorCode: REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE,
+          jifengStatus: 7,
+          source: input.source,
+        },
+        beforeJson: {
+          fulfillmentStatus: current.fulfillmentStatus,
+          orderStatus: current.orderStatus,
+        },
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        reason: "本地取消后极风仍发货，已扣减实际出库库存并转人工对账",
+      });
+      await enqueueCargoSyncEvent(tx, {
+        idempotencyKey: `shipment-shipped-after-local-cancel:${current.shipmentId}`,
+        now,
+        reason: "remote-shipped-after-local-cancel",
+      });
+      await createSystemNotification(tx, {
+        deduplicationKey: `jifeng-shipped-after-local-cancel:${current.fulfillmentId}`,
+        entityId: current.shipmentId,
+        entityType: "ORDER_SHIPMENT",
+        message:
+          "本地取消后极风仍实际发货。系统已按实际出库扣减库存并保存运单，请立即核对资金和客户处理。",
+        now,
+        severity: "ERROR",
+        title: "本地取消后极风仍发货",
+        type: "JIFENG_EXCEPTION",
+      });
+      return {
+        orderStatus: current.orderStatus,
+        status: "EXCEPTION" as const,
+      };
+    }
+    if (
+      isLateRemoteAfterLocalCancel &&
+      input.detail.status === 7 &&
+      current.lastErrorCode === REMOTE_SHIPPED_AFTER_LOCAL_CANCEL_CODE
+    ) {
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt: null, now, source: input.source }),
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
+      return {
+        orderStatus: current.orderStatus,
+        status: "EXCEPTION" as const,
+      };
+    }
+    if (isLateRemoteAfterLocalCancel && input.detail.status !== 9) {
+      const nextRetryAt = new Date(now.getTime() + EXCEPTION_STATUS_POLL_INTERVAL_MS);
+      await tx
+        .update(shipmentFulfillments)
+        .set({
+          ...clearedStatusPollState({ nextRetryAt, now, source: input.source }),
+          externalOrderNo: input.detail.orderNo ?? null,
+          jifengStatus: input.detail.status,
+          lastErrorCode: REMOTE_ACTIVE_AFTER_LOCAL_CANCEL_CODE,
+          lastErrorMessage:
+            "本地已取消，但极风远端订单仍在处理中；系统将继续低频跟踪到取消或发货。",
+          status: "EXCEPTION",
+          updatedAt: now,
+        })
+        .where(eq(shipmentFulfillments.id, current.fulfillmentId));
       await tx.insert(auditLogs).values({
         action: "JIFENG_CANCELLED_REMOTE_STATUS_CONFLICT",
         actorId: null,
         actorType: "SYSTEM",
         afterJson: {
-          localStatus: "CANCELLED",
+          localStatus: current.fulfillmentStatus,
+          nextRetryAt: nextRetryAt.toISOString(),
           remoteStatus: input.detail.status,
           source: input.source,
         },
-        beforeJson: { localStatus: "CANCELLED" },
+        beforeJson: { localStatus: current.fulfillmentStatus },
         entityId: current.shipmentId,
         entityType: "ORDER_SHIPMENT",
         reason: "本地已取消但极风远端状态不是 9",
@@ -348,7 +524,7 @@ export async function applyJifengOrderStatus(input: {
       });
       return {
         orderStatus: current.orderStatus,
-        status: "ALREADY_CANCELLED" as const,
+        status: "EXCEPTION" as const,
       };
     }
 
@@ -692,7 +868,8 @@ export async function applyJifengOrderStatus(input: {
 
     if (input.detail.status === 9) {
       const priorCancellationRows =
-        current.fulfillmentStatus === "CANCELLED"
+        current.fulfillmentStatus === "CANCELLED" ||
+        current.lastErrorCode === REMOTE_ACTIVE_AFTER_LOCAL_CANCEL_CODE
           ? await tx.execute<{ inventoryAlreadyReleased: boolean }>(sql`
               select exists (
                 select 1
@@ -802,6 +979,15 @@ export async function applyJifengOrderStatus(input: {
         now,
         priorStatus: current.fulfillmentStatus,
       });
+      if (current.lastErrorCode === REMOTE_ACTIVE_AFTER_LOCAL_CANCEL_CODE) {
+        await resolveSystemNotifications(tx, {
+          deduplicationKeys: [
+            `jifeng-cancel-conflict:${current.fulfillmentId}:${current.jifengStatus}`,
+            `jifeng-match-after-cancel:${current.fulfillmentId}`,
+          ],
+          now,
+        });
+      }
       await tx.insert(auditLogs).values({
         action: "JIFENG_SHIPMENT_CANCELLED",
         actorId: null,
@@ -1063,8 +1249,9 @@ export async function refreshJifengShipmentStatus(input: {
 
   let detail: JifengOrderDetail | null = null;
   try {
-    detail = await input.client.getOrder({ erpNo: claim.erpNo });
-    if (detail.erpNo !== claim.erpNo) {
+    const response = await input.client.getOrder({ erpNo: claim.erpNo });
+    detail = response;
+    if (response.erpNo !== claim.erpNo) {
       throw new JifengApiError({
         code: "INVALID_RESPONSE",
         message: "极风状态查询返回了不匹配的包裹标识",
@@ -1086,7 +1273,7 @@ export async function refreshJifengShipmentStatus(input: {
         );
       }
       const result = await applyJifengOrderStatus({
-        detail,
+        detail: response,
         now,
         source: "MANUAL",
       }, tx);
@@ -1190,7 +1377,10 @@ export async function pollActiveJifengFulfillments(input: {
               )
             )
           )
-          and coalesce(last_error_code, '') <> 'REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH'
+          and coalesce(last_error_code, '') not in (
+            'REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH',
+            'REMOTE_SHIPPED_AFTER_LOCAL_CANCEL'
+          )
           and (next_retry_at is null or next_retry_at <= ${now.toISOString()}::timestamptz)
           and (
             status_poll_locked_at is null
@@ -1212,8 +1402,9 @@ export async function pollActiveJifengFulfillments(input: {
     if (!fulfillment) break;
     let detail: JifengOrderDetail | null = null;
     try {
-      detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
-      if (detail.erpNo !== fulfillment.erpNo) {
+      const response = await input.client.getOrder({ erpNo: fulfillment.erpNo });
+      detail = response;
+      if (response.erpNo !== fulfillment.erpNo) {
         throw new JifengApiError({
           code: "INVALID_RESPONSE",
           message: "极风状态查询返回了不匹配的包裹标识",
@@ -1229,7 +1420,10 @@ export async function pollActiveJifengFulfillments(input: {
           for update
         `);
         if (!claimed[0]) return null;
-        return applyJifengOrderStatus({ detail, now, source: "POLL" }, tx);
+        return applyJifengOrderStatus(
+          { detail: response, now, source: "POLL" },
+          tx,
+        );
       });
       if (!result) continue;
       if (result.status === "SHIPPED") summary.shipped += 1;

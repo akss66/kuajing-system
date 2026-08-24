@@ -5,6 +5,7 @@ import {
   auditLogs,
   integrationAttempts,
   integrationOutbox,
+  orderShipments,
   replacementRequests,
   shipmentFulfillments,
 } from "@/db/schema";
@@ -433,8 +434,14 @@ async function recordMatchFailure(input: {
       ? retryAt(input.now, input.claim.attemptNumber)
       : NEVER_RETRY_AT;
     const isLocalCancelMonitoring = input.claim.isLocalCancelMonitoring;
-    const fulfillmentStatus = isLocalCancelMonitoring
-      ? "CANCELLED"
+    const isTerminalShippedCancelConflict =
+      isLocalCancelMonitoring &&
+      input.failure.code === "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH" &&
+      input.failure.remoteStatus === 7;
+    const fulfillmentStatus = isTerminalShippedCancelConflict
+      ? "EXCEPTION"
+      : isLocalCancelMonitoring
+        ? "CANCELLED"
       : input.failure.retryable
         ? "PENDING"
         : "EXCEPTION";
@@ -453,7 +460,7 @@ async function recordMatchFailure(input: {
       .update(integrationOutbox)
       .set({
         claimToken: null,
-        lastErrorCode: isLocalCancelMonitoring
+        lastErrorCode: isLocalCancelMonitoring && !isTerminalShippedCancelConflict
           ? "LOCAL_CANCEL_MONITORING"
           : input.failure.code,
         lastErrorMessage: input.failure.message,
@@ -637,6 +644,35 @@ async function finalizeExistingOrderMatch(input: {
         input.detail.status === 7 &&
         isRemoteShippedInventoryInvariantFailure(error)
       ) {
+        const normalizedCurrency = input.detail.currency?.trim().toUpperCase();
+        const shippedAt = input.detail.shippedTime
+          ? new Date(input.detail.shippedTime)
+          : null;
+        const safeShippedAt =
+          shippedAt && !Number.isNaN(shippedAt.getTime()) ? shippedAt : null;
+        const feeMinor =
+          input.detail.logisticsFee === undefined
+            ? null
+            : Math.round(input.detail.logisticsFee * 100);
+        await tx
+          .update(orderShipments)
+          .set({
+            logisticsCurrency:
+              feeMinor === null
+                ? null
+                : normalizedCurrency && /^[A-Z]{3}$/.test(normalizedCurrency)
+                  ? normalizedCurrency
+                  : "CAD",
+            logisticsFeeMinor: feeMinor,
+            shippedAt: safeShippedAt,
+            trackingNumber: input.detail.trackingNo?.trim() || null,
+            updatedAt: input.now,
+          })
+          .where(eq(orderShipments.id, input.claim.shipmentId));
+        await tx
+          .update(shipmentFulfillments)
+          .set({ shippedAt: safeShippedAt, updatedAt: input.now })
+          .where(eq(shipmentFulfillments.id, input.claim.fulfillmentId));
         const failure: MatchFailure = {
           code: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
           message:

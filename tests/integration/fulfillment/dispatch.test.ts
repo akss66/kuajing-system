@@ -11,6 +11,7 @@ import {
   integrationOutbox,
   jifengConnections,
   inventoryBalances,
+  inventoryMovements,
   inventoryReservations,
   orderLines,
   orderShipments,
@@ -29,6 +30,7 @@ import {
 } from "@/modules/fulfillment/dispatch";
 import { processJifengExistingOrderMatchEvent } from "@/modules/fulfillment/order-matching";
 import { cancelJifengShipment } from "@/modules/fulfillment/replacement";
+import { pollActiveJifengFulfillments } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
 import type { TemuRecipient } from "@/modules/order-import/temu-parser";
 import { encryptPii } from "@/shared/pii-crypto";
@@ -758,8 +760,8 @@ describe("paid order Jifeng dispatch", () => {
     expect(savedOrder.status).toBe("FULFILLMENT_EXCEPTION");
   });
 
-  test("continues monitoring in CANCELLED mode and still completes monitoring when remote order appears", async () => {
-    const { order, shipment } = await createShipmentFixture();
+  test("keeps monitoring a late remote order after local cancellation and reconciles a later shipment", async () => {
+    const { order, shipment, sku } = await createShipmentFixture();
     await enqueuePaidOrdersForFulfillment();
     const [event] = await db.select().from(integrationOutbox);
     await processJifengExistingOrderMatchEvent({
@@ -836,8 +838,11 @@ describe("paid order Jifeng dispatch", () => {
     expect(savedFulfillment).toMatchObject({
       erpNo: remoteErpNo,
       externalOrderNo: "JF-REMOTE-ARRIVED",
-      status: "CANCELLED",
+      jifengStatus: 2,
+      lastErrorCode: "REMOTE_ACTIVE_AFTER_LOCAL_CANCEL",
+      status: "EXCEPTION",
     });
+    expect(savedFulfillment.nextRetryAt).not.toBeNull();
     expect(savedEvent).toMatchObject({ status: "COMPLETED" });
     expect(cancelConflictNotification).not.toBeUndefined();
     expect(savedEvent.lastErrorCode).toBeNull();
@@ -846,6 +851,208 @@ describe("paid order Jifeng dispatch", () => {
       .from(fulfillmentOrders)
       .where(eq(fulfillmentOrders.id, order.id));
     expect(savedOrder.status).toBe("CANCELLED");
+
+    const stillActiveAt = new Date("2026-08-21T08:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: stillActiveAt })
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => ({
+          erpNo,
+          orderNo: "JF-REMOTE-ARRIVED",
+          status: 2,
+        }),
+      },
+      limit: 1,
+      now: stillActiveAt,
+    });
+    const [stillActive] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    expect(stillActive).toMatchObject({
+      jifengStatus: 2,
+      lastErrorCode: "REMOTE_ACTIVE_AFTER_LOCAL_CANCEL",
+      status: "EXCEPTION",
+    });
+    expect(stillActive.nextRetryAt?.getTime()).toBeGreaterThan(
+      stillActiveAt.getTime(),
+    );
+
+    const shippedAt = new Date("2026-08-21T09:00:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: shippedAt })
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => ({
+          currency: "CAD",
+          erpNo,
+          logisticsFee: 13,
+          orderNo: "JF-REMOTE-ARRIVED",
+          shippedTime: shippedAt.toISOString(),
+          status: 7,
+          trackingNo: "CP-LATE-SHIPPED",
+        }),
+      },
+      limit: 1,
+      now: shippedAt,
+    });
+
+    const [shippedConflict] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+    expect(shippedConflict).toMatchObject({
+      jifengStatus: 7,
+      lastErrorCode: "REMOTE_SHIPPED_AFTER_LOCAL_CANCEL",
+      nextRetryAt: null,
+      status: "EXCEPTION",
+    });
+    expect((await db.select().from(inventoryBalances).where(
+      eq(inventoryBalances.skuId, sku.id),
+    ))[0]?.totalQuantity).toBe(18);
+    expect(await db.select().from(inventoryMovements).where(
+      eq(inventoryMovements.referenceId, shipment.id),
+    )).toHaveLength(1);
+    expect((await db.select().from(orderShipments).where(
+      eq(orderShipments.id, shipment.id),
+    ))[0]).toMatchObject({
+      logisticsCurrency: "CAD",
+      logisticsFeeMinor: 1300,
+      trackingNumber: "CP-LATE-SHIPPED",
+    });
+    expect((await db.select().from(fulfillmentOrders).where(
+      eq(fulfillmentOrders.id, order.id),
+    ))[0]?.status).toBe("CANCELLED");
+  });
+
+  test("parks a late remote shipment after local cancellation when physical inventory cannot be reconciled", async () => {
+    const { order, shipment, sku } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    await cancelFulfillmentOrder({
+      actorType: "ADMIN",
+      actorUserId: crypto.randomUUID(),
+      orderId: order.id,
+      reason: "本地取消后测试极风晚到发货",
+    });
+    await db
+      .update(inventoryBalances)
+      .set({ totalQuantity: 1 })
+      .where(eq(inventoryBalances.skuId, sku.id));
+
+    const result = await processJifengExistingOrderMatchEvent({
+      client: {
+        getOrder: async () => ({
+          currency: "CAD",
+          erpNo: `REMOTE-LATE-${crypto.randomUUID().slice(0, 8)}`,
+          logisticsFee: 13,
+          orderNo: "JF-LATE-INVENTORY-CONFLICT",
+          platformOrderNo: shipment.externalOrderNo,
+          shippedTime: "2026-08-21T10:00:00.000Z",
+          status: 7,
+          trackingNo: "CP-LATE-INVENTORY-CONFLICT",
+        }),
+      },
+      eventId: event.id,
+      now: new Date("2026-08-21T10:05:00.000Z"),
+    });
+
+    expect(result).toEqual({ status: "FAILED" });
+    expect((await db.select().from(shipmentFulfillments).where(
+      eq(shipmentFulfillments.shipmentId, shipment.id),
+    ))[0]).toMatchObject({
+      jifengStatus: 7,
+      lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+      nextRetryAt: null,
+      status: "EXCEPTION",
+    });
+    expect((await db.select().from(orderShipments).where(
+      eq(orderShipments.id, shipment.id),
+    ))[0]).toMatchObject({
+      logisticsCurrency: "CAD",
+      logisticsFeeMinor: 1300,
+      trackingNumber: "CP-LATE-INVENTORY-CONFLICT",
+    });
+    expect((await db.select().from(inventoryBalances).where(
+      eq(inventoryBalances.skuId, sku.id),
+    ))[0]?.totalQuantity).toBe(1);
+    expect(await db.select().from(inventoryMovements).where(
+      eq(inventoryMovements.referenceId, shipment.id),
+    )).toHaveLength(0);
+    expect((await db.select().from(integrationOutbox).where(
+      eq(integrationOutbox.id, event.id),
+    ))[0]).toMatchObject({
+      lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+      status: "FAILED",
+    });
+    expect((await db.select().from(fulfillmentOrders).where(
+      eq(fulfillmentOrders.id, order.id),
+    ))[0]?.status).toBe("CANCELLED");
+  });
+
+  test("stops late-order monitoring when Jifeng confirms cancellation", async () => {
+    const { order, shipment, sku } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const [event] = await db.select().from(integrationOutbox);
+    await cancelFulfillmentOrder({
+      actorType: "ADMIN",
+      actorUserId: crypto.randomUUID(),
+      orderId: order.id,
+      reason: "先本地取消，继续等待极风取消结果",
+    });
+    const erpNo = `REMOTE-CANCEL-${crypto.randomUUID().slice(0, 8)}`;
+    await processJifengExistingOrderMatchEvent({
+      client: {
+        getOrder: async () => ({
+          erpNo,
+          orderNo: "JF-LATE-CANCEL",
+          platformOrderNo: shipment.externalOrderNo,
+          status: 2,
+        }),
+      },
+      eventId: event.id,
+      now: new Date("2026-08-21T11:00:00.000Z"),
+    });
+    const cancelledAt = new Date("2026-08-21T11:30:00.000Z");
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: cancelledAt })
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+
+    await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async () => ({
+          erpNo,
+          orderNo: "JF-LATE-CANCEL",
+          status: 9,
+        }),
+      },
+      limit: 1,
+      now: cancelledAt,
+    });
+
+    expect((await db.select().from(shipmentFulfillments).where(
+      eq(shipmentFulfillments.shipmentId, shipment.id),
+    ))[0]).toMatchObject({
+      jifengStatus: 9,
+      lastErrorCode: null,
+      nextRetryAt: null,
+      status: "CANCELLED",
+    });
+    expect((await db.select().from(inventoryBalances).where(
+      eq(inventoryBalances.skuId, sku.id),
+    ))[0]?.totalQuantity).toBe(20);
+    expect(await db.select().from(inventoryMovements).where(
+      eq(inventoryMovements.referenceId, shipment.id),
+    )).toHaveLength(0);
+    expect((await db.select().from(fulfillmentOrders).where(
+      eq(fulfillmentOrders.id, order.id),
+    ))[0]?.status).toBe("CANCELLED");
   });
 
   test("lets a cancelled monitoring shipment yield to a re-imported active shipment with the same platform order number", async () => {
