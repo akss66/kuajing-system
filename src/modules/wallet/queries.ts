@@ -10,6 +10,11 @@ import {
   walletTransactions,
 } from "@/db/schema";
 
+import {
+  publicWalletHoldReleaseReason,
+  publicWalletTransactionReason,
+} from "./public-labels";
+
 export async function getWalletPosition(customerId: string): Promise<{
   activeHoldFen: number;
   availableFen: number;
@@ -78,14 +83,13 @@ export async function listAdminWalletTransactions(limit = 100) {
 
 export async function getCustomerWalletView(customerId: string) {
   const position = await getWalletPosition(customerId);
-  const transactions = await db
+  const transactionRows = await db
     .select({
       afterBalanceFen: walletTransactions.afterBalanceFen,
       createdAt: walletTransactions.createdAt,
       deltaFen: walletTransactions.deltaFen,
       id: walletTransactions.id,
       orderNumber: fulfillmentOrders.orderNumber,
-      reason: walletTransactions.reason,
       transactionType: walletTransactions.transactionType,
     })
     .from(walletTransactions)
@@ -93,13 +97,16 @@ export async function getCustomerWalletView(customerId: string) {
     .where(eq(walletTransactions.customerId, customerId))
     .orderBy(desc(walletTransactions.createdAt))
     .limit(100);
-  const holds = await db
+  const transactions = transactionRows.map((transaction) => ({
+    ...transaction,
+    reason: publicWalletTransactionReason(transaction.transactionType),
+  }));
+  const holdRows = await db
     .select({
       amountFen: walletHolds.amountFen,
       batchNumber: settlementBatches.batchNumber,
       createdAt: walletHolds.createdAt,
       id: walletHolds.id,
-      releaseReason: walletHolds.releaseReason,
       releasedAt: walletHolds.releasedAt,
       settlementBatchId: walletHolds.settlementBatchId,
       status: walletHolds.status,
@@ -112,6 +119,10 @@ export async function getCustomerWalletView(customerId: string) {
     .where(eq(walletHolds.customerId, customerId))
     .orderBy(desc(walletHolds.createdAt))
     .limit(50);
+  const holds = holdRows.map((hold) => ({
+    ...hold,
+    releaseReason: publicWalletHoldReleaseReason(hold.status),
+  }));
 
   return { ...position, holds, transactions };
 }
