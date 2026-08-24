@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, test } from "vitest";
 
@@ -14,9 +17,11 @@ import {
   stores,
   walletAccounts,
 } from "@/db/schema";
-import { getOperationalHealth } from "@/modules/system/health";
+import { checkDatabaseHealth, getOperationalHealth } from "@/modules/system/health";
 
 describe("operational health", () => {
+  const temporaryDirs = new Set<string>();
+
   afterEach(async () => {
     await db.execute(sql.raw(`
       truncate table
@@ -35,6 +40,10 @@ describe("operational health", () => {
         customers
       restart identity cascade
     `));
+    for (const directory of temporaryDirs) {
+      rmSync(directory, { force: true, recursive: true });
+    }
+    temporaryDirs.clear();
   });
 
   test("reports actionable counts without returning PII", async () => {
@@ -119,5 +128,72 @@ describe("operational health", () => {
     });
     expect(JSON.stringify(result)).not.toContain("encrypted-private-value");
     expect(JSON.stringify(result)).not.toContain(customer.name);
+  });
+
+  test("degrades when the worker heartbeat is stale", async () => {
+    const now = new Date("2026-08-24T08:30:00.000Z");
+    const directory = mkdtempSync(join(tmpdir(), "worker-health-"));
+    temporaryDirs.add(directory);
+    const filePath = join(directory, "worker-health.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        lastHeartbeatAt: "2026-08-24T08:05:00.000Z",
+        pid: 4321,
+        startedAt: "2026-08-24T07:00:00.000Z",
+        state: "READY",
+        version: 1,
+      }),
+      "utf8",
+    );
+
+    const result = await getOperationalHealth({
+      now,
+      workerHealth: { filePath, required: true },
+    });
+
+    expect(result).toMatchObject({
+      checks: {
+        workerHeartbeatFailures: 1,
+      },
+      status: "DEGRADED",
+      worker: {
+        code: "HEARTBEAT_STALE",
+        healthy: false,
+      },
+    });
+  });
+
+  test("fails runtime health checks when worker heartbeat is required but missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worker-health-missing-"));
+    temporaryDirs.add(directory);
+    const filePath = join(directory, "missing-worker-health.json");
+
+    await expect(
+      getOperationalHealth({
+        workerHealth: { filePath, required: true },
+      }),
+    ).resolves.toMatchObject({
+      checks: {
+        workerHeartbeatFailures: 1,
+      },
+      status: "DEGRADED",
+      worker: {
+        code: "INVALID_HEARTBEAT",
+        healthy: false,
+      },
+    });
+  });
+
+  test("rejects the runtime readiness probe when a required worker heartbeat is missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worker-health-probe-"));
+    temporaryDirs.add(directory);
+    const filePath = join(directory, "missing-worker-health.json");
+
+    await expect(
+      checkDatabaseHealth({
+        workerHealth: { filePath, required: true },
+      }),
+    ).rejects.toThrow("WORKER_HEALTH_INVALID_HEARTBEAT");
   });
 });

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
+import { checkWorkerHealth, type WorkerHealthAssessment } from "@/jobs/worker-health";
 
 type CountRow = { value: number | string };
 
@@ -8,9 +9,38 @@ function count(rows: CountRow[]) {
   return Number(rows[0]?.value ?? 0);
 }
 
-export async function getOperationalHealth(input?: { now?: Date }) {
+type WorkerHealthOptions = {
+  filePath?: string;
+  required?: boolean;
+};
+
+function shouldRequireWorkerHealth(options?: WorkerHealthOptions) {
+  if (typeof options?.required === "boolean") return options.required;
+  return Boolean(options?.filePath ?? process.env.WORKER_HEALTH_FILE);
+}
+
+function assessSharedWorkerHealth(
+  now: Date,
+  options?: WorkerHealthOptions,
+): WorkerHealthAssessment | null {
+  const filePath = options?.filePath ?? process.env.WORKER_HEALTH_FILE;
+  if (!shouldRequireWorkerHealth({ ...options, filePath })) return null;
+  return checkWorkerHealth({
+    filePath,
+    now,
+    // The web container reads a heartbeat written by the worker container,
+    // so PID probing would always fail across isolated container namespaces.
+    processProbe: () => true,
+  });
+}
+
+export async function getOperationalHealth(input?: {
+  now?: Date;
+  workerHealth?: WorkerHealthOptions;
+}) {
   const now = input?.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 10 * 60_000);
+  const worker = assessSharedWorkerHealth(now, input?.workerHealth);
   const [failed, stale, overReserved, walletMismatch, missingTracking] =
     await Promise.all([
       db.execute<CountRow>(sql`
@@ -61,6 +91,7 @@ export async function getOperationalHealth(input?: { now?: Date }) {
     shippedWithoutTracking: count(missingTracking),
     staleProcessingIntegrations: count(stale),
     walletMismatches: count(walletMismatch),
+    workerHeartbeatFailures: worker && !worker.healthy ? 1 : 0,
   };
   return {
     checkedAt: now.toISOString(),
@@ -68,9 +99,20 @@ export async function getOperationalHealth(input?: { now?: Date }) {
     status: Object.values(checks).some((value) => value > 0)
       ? ("DEGRADED" as const)
       : ("HEALTHY" as const),
+    worker:
+      worker === null
+        ? null
+        : {
+            code: worker.code,
+            healthy: worker.healthy,
+          },
   };
 }
 
-export async function checkDatabaseHealth() {
+export async function checkDatabaseHealth(input?: { now?: Date; workerHealth?: WorkerHealthOptions }) {
   await db.execute(sql`select 1`);
+  const worker = assessSharedWorkerHealth(input?.now ?? new Date(), input?.workerHealth);
+  if (worker && !worker.healthy) {
+    throw new Error(`WORKER_HEALTH_${worker.code}`);
+  }
 }

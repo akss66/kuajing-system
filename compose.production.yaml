@@ -20,7 +20,7 @@ x-app: &app
     JIFENG_CLIENT_ID: ${JIFENG_CLIENT_ID:-}
     JIFENG_CLIENT_SECRET: ${JIFENG_CLIENT_SECRET:-}
     JIFENG_TOKEN_ENCRYPTION_KEY: ${JIFENG_TOKEN_ENCRYPTION_KEY:-}
-    WORKER_HEALTH_FILE: /tmp/tongzhouxing-worker-health.json
+    WORKER_HEALTH_FILE: /app/runtime/worker-health/heartbeat.json
   init: true
   restart: unless-stopped
   security_opt:
@@ -85,6 +85,7 @@ services:
           - tongzhouxing-web
     volumes:
       - catalog_assets:/app/data/catalog-assets
+      - worker_health:/app/runtime/worker-health
 
   worker:
     <<: *app
@@ -106,6 +107,7 @@ services:
     mem_limit: 640m
     volumes:
       - catalog_assets:/app/data/catalog-assets
+      - worker_health:/app/runtime/worker-health
 
 networks:
   backend:
@@ -118,3 +120,5 @@ volumes:
     name: tongzhouxing_shop_catalog_assets
   postgres_data:
     name: tongzhouxing_shop_postgres_data
+  worker_health:
+    name: tongzhouxing_shop_worker_health

@@ -1,4 +1,4 @@
-import { Activity, Boxes, CircleAlert, PackageX, RefreshCcw, WalletCards } from "lucide-react";
+import { Activity, Boxes, CircleAlert, PackageX, RefreshCcw, ServerCrash, WalletCards } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -11,6 +11,14 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 export default async function SystemHealthPage() {
   const health = await getOperationalHealth();
   const cards = [
+    {
+      href: "/admin/system/health",
+      icon: ServerCrash,
+      impact: "后台队列、自动取消、极风状态同步和飞书后台任务可能已经停止",
+      label: "Worker 心跳异常",
+      next: "检查 Worker",
+      value: health.checks.workerHeartbeatFailures,
+    },
     {
       href: "/admin/system/integrations",
       icon: CircleAlert,
