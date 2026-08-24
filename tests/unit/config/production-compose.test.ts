@@ -23,6 +23,9 @@ describe("production compose integration rollout", () => {
     expect(normalizedCompose).toMatch(/worker-health-init:\n(?:.*\n)*?\s+cap_add:\n(?:.*\n)*?\s+- CHOWN/);
     expect(normalizedCompose).toMatch(/worker-health-init:\n(?:.*\n)*?\s+cap_add:\n(?:.*\n)*?\s+- FOWNER/);
     expect(normalizedCompose).toContain(
+      "chown 1001:1001 /app/runtime/worker-health",
+    );
+    expect(normalizedCompose).not.toContain(
       "chown -R 1001:1001 /app/runtime/worker-health",
     );
     expect(normalizedCompose).toContain(
