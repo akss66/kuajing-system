@@ -145,6 +145,7 @@ describe("ImportPreviewPage", () => {
     expect(workspace).toHaveTextContent("重复跳过0");
     expect(within(workspace).getByRole("table", { name: "逐行校验结果" })).toBeVisible();
     expect(submitBar).toHaveClass("sticky");
+    expect(submitBar).toHaveClass("grid-cols-[auto_minmax(0,1fr)]", "sm:flex");
     expect(within(submitBar).getByRole("button", { name: "提交订单" })).toBeDisabled();
   });
 

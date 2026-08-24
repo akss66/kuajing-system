@@ -97,7 +97,7 @@ export function ImportReviewTable({
         </label>
       </div>
 
-      <dl className="grid grid-cols-2 border-b border-border bg-surface/35 sm:grid-cols-5">
+      <dl className="grid grid-cols-3 border-b border-border bg-surface/35 sm:grid-cols-5">
         {metrics.map((metric) => (
           <div className="border-r border-border px-4 py-2.5 last:border-r-0" key={metric.label}>
             <dt className="text-xs text-muted">{metric.label}</dt>
@@ -106,8 +106,8 @@ export function ImportReviewTable({
         ))}
       </dl>
 
-      <Table className="min-w-[980px]" aria-label="逐行校验结果">
-        <TableHeader>
+      <Table className="block w-full md:table md:min-w-[980px]" aria-label="逐行校验结果">
+        <TableHeader className="hidden md:table-header-group">
           <TableRow>
             <TableHead className="w-16">行</TableHead>
             <TableHead className="w-[17rem]">订单号 / 子订单号</TableHead>
@@ -118,7 +118,7 @@ export function ImportReviewTable({
             <TableHead className="w-24 text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
+        <TableBody className="block divide-y divide-border md:table-row-group md:divide-y-0">
           {visibleRows.map((row) => (
             <ImportRowEditor
               action={action}
@@ -128,8 +128,8 @@ export function ImportReviewTable({
             />
           ))}
           {visibleRows.length === 0 ? (
-            <TableRow>
-              <TableCell className="h-24 text-center text-muted" colSpan={7}>
+            <TableRow className="block md:table-row">
+              <TableCell className="block h-24 pt-9 text-center text-muted md:table-cell md:pt-2" colSpan={7}>
                 当前没有需要处理的行。
               </TableCell>
             </TableRow>

@@ -87,9 +87,14 @@ export function ImportRowEditor({
 
   return (
     <>
-      <TableRow aria-label={`Excel 第 ${row.rowNumber} 行`}>
-        <TableCell className="text-muted">{row.rowNumber}</TableCell>
-        <TableCell className="whitespace-normal">
+      <TableRow
+        aria-label={`Excel 第 ${row.rowNumber} 行`}
+        className="grid grid-cols-2 gap-x-3 gap-y-3 border-b-0 bg-background p-4 hover:!bg-background has-aria-expanded:!bg-background md:table-row md:p-0 md:hover:!bg-muted/40"
+      >
+        <TableCell className="col-span-2 h-auto p-0 text-xs font-medium text-muted md:table-cell md:h-11 md:w-16 md:px-3 md:py-2 md:font-normal">
+          <span className="md:hidden">Excel 第 </span>{row.rowNumber}<span className="md:hidden"> 行</span>
+        </TableCell>
+        <TableCell className="col-span-2 h-auto whitespace-normal p-0 md:table-cell md:h-11 md:px-3 md:py-2">
           <p className="break-all font-semibold text-ink">
             {row.externalOrderNo ?? "无法读取订单号"}
           </p>
@@ -97,7 +102,7 @@ export function ImportRowEditor({
             {row.externalSubOrderNo ?? "—"}
           </p>
         </TableCell>
-        <TableCell className="max-w-[26rem] whitespace-normal">
+        <TableCell className="col-span-2 h-auto max-w-[26rem] whitespace-normal p-0 md:table-cell md:h-11 md:px-3 md:py-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="break-all text-muted">{row.externalSku ?? "—"}</span>
             <span aria-hidden="true" className="text-muted">→</span>
@@ -112,30 +117,31 @@ export function ImportRowEditor({
             {importRowExplanation(row)}
           </p>
         </TableCell>
-        <TableCell className="tabular-nums">
+        <TableCell className="h-auto p-0 tabular-nums md:table-cell md:h-11 md:px-3 md:py-2">
+          <p className="text-xs text-muted md:hidden">发货数量</p>
           <p className="font-semibold text-ink">{effectiveQuantity ?? "—"}</p>
           {row.quantity !== null && effectiveQuantity !== row.quantity ? (
             <p className="mt-0.5 text-xs text-muted">原 {row.quantity}</p>
           ) : null}
         </TableCell>
-        <TableCell className="tabular-nums text-muted">
-          {row.fulfillmentMode === "CUSTOMER_SUPPLIED"
-            ? "—"
-            : availableQuantity ?? "—"}
+        <TableCell className="h-auto p-0 tabular-nums text-muted md:table-cell md:h-11 md:px-3 md:py-2">
+          <p className="text-xs text-muted md:hidden">可用库存</p>
+          <p>{row.fulfillmentMode === "CUSTOMER_SUPPLIED" ? "—" : availableQuantity ?? "—"}</p>
         </TableCell>
-        <TableCell>
+        <TableCell className="h-auto p-0 md:table-cell md:h-11 md:px-3 md:py-2">
           <Badge className={cn("w-fit gap-1.5", result.className)} variant="outline">
             <ResultIcon aria-hidden="true" className="size-3.5" />
             {result.label}
           </Badge>
         </TableCell>
-        <TableCell className="text-right">
+        <TableCell className="h-auto p-0 text-right md:table-cell md:h-11 md:px-3 md:py-2">
           {editable ? (
             <Button
               aria-controls={editorId}
               aria-expanded={expanded}
               aria-label={`${expanded ? "收起" : "修改"} Excel 第 ${row.rowNumber} 行`}
               onClick={() => setExpanded((current) => !current)}
+              className="w-full md:w-auto"
               size="sm"
               type="button"
               variant="outline"
@@ -151,8 +157,12 @@ export function ImportRowEditor({
         </TableCell>
       </TableRow>
       {editable && expanded ? (
-        <TableRow aria-label={`Excel 第 ${row.rowNumber} 行编辑器`} id={editorId}>
-          <TableCell className="whitespace-normal bg-surface/35 px-4 py-3" colSpan={7}>
+        <TableRow
+          aria-label={`Excel 第 ${row.rowNumber} 行编辑器`}
+          className="block border-t border-border bg-surface/35 md:table-row"
+          id={editorId}
+        >
+          <TableCell className="block h-auto w-full whitespace-normal bg-surface/35 px-4 py-3 md:table-cell" colSpan={7}>
             <ImportRowOverrideForm action={action} batchId={batchId} row={row} />
           </TableCell>
         </TableRow>

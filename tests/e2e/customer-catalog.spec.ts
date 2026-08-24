@@ -590,6 +590,13 @@ test("customer import preview uses the compact review workspace and sticky submi
   const workspace = page.getByRole("region", { name: "逐行校验工作台" });
   await expect(workspace).toBeVisible();
   await expect(workspace.getByRole("table", { name: "逐行校验结果" })).toBeVisible();
+  if (testInfo.project.name === "mobile-chromium") {
+    const workspaceWidth = await workspace.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(workspaceWidth.scrollWidth).toBeLessThanOrEqual(workspaceWidth.clientWidth + 1);
+  }
   await expect(workspace.getByText("可提交", { exact: true })).toBeVisible();
   await expect(workspace.getByText("需处理", { exact: true })).toBeVisible();
   await expect(workspace.getByText("重复跳过", { exact: true })).toBeVisible();
@@ -605,6 +612,10 @@ test("customer import preview uses the compact review workspace and sticky submi
   await expect(row.getByText("校验通过", { exact: true })).toBeVisible();
   await expect(row.getByText("TZX-PREVIEW-1", { exact: true })).toBeVisible();
   await expect(page.getByLabel("同系列替代 SKU")).toHaveCount(0);
+  await testInfo.attach("import-review-scheme-a-viewport", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
   await row.getByRole("button", { name: "修改 Excel 第 2 行" }).click();
   await expect(page.getByLabel("同系列替代 SKU")).toBeVisible();
   await expect(page.getByLabel("手动填写最终 SKU")).toBeVisible();
@@ -619,8 +630,8 @@ test("customer import preview uses the compact review workspace and sticky submi
   expect(failures.consoleErrors).toEqual([]);
   expect(failures.pageErrors).toEqual([]);
   expect(failures.hydrationErrors).toEqual([]);
-  await testInfo.attach("import-review-scheme-a", {
-    body: await page.screenshot({ fullPage: true }),
+  await testInfo.attach("import-review-scheme-a-expanded", {
+    body: await page.screenshot(),
     contentType: "image/png",
   });
 });

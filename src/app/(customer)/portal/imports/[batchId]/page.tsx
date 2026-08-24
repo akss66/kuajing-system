@@ -95,9 +95,9 @@ export default async function ImportPreviewPage({
 
       <section
         aria-label="提交拿货单操作栏"
-        className="sticky bottom-0 z-20 flex flex-col gap-3 rounded-t-[var(--radius-surface)] border border-border bg-background/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex-row sm:items-center sm:justify-between sm:rounded-[var(--radius-surface)] sm:px-5"
+        className="sticky bottom-2 z-20 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-surface)] border border-border bg-background/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex sm:justify-between sm:px-5 sm:py-3"
       >
-        <div className="flex min-w-0 items-start gap-3">
+        <div className="hidden min-w-0 items-start gap-3 sm:flex">
           {blocking ? (
             <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
           ) : (
@@ -116,13 +116,14 @@ export default async function ImportPreviewPage({
             </p>
           </div>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end">
+        <div className="contents sm:flex sm:w-auto sm:items-end sm:gap-2">
           <Link
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-4 text-sm font-medium text-ink hover:bg-[var(--merchant-nav-hover)]"
+            aria-label="返回重新上传"
+            className="inline-flex size-11 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background text-sm font-medium text-ink hover:bg-[var(--merchant-nav-hover)] sm:h-11 sm:w-auto sm:px-4"
             href="/portal/imports/new"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            返回重新上传
+            <span className="sr-only sm:not-sr-only">返回重新上传</span>
           </Link>
           <OrderSubmitButton
             action={submitImportBatchAction}

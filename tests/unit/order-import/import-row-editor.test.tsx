@@ -62,6 +62,7 @@ describe("ImportRowEditor", () => {
     renderEditor(systemRow());
 
     const row = screen.getByRole("row", { name: "Excel 第 2 行" });
+    expect(row).toHaveClass("grid", "md:table-row");
     expect(within(row).getByText("TZX-024-2PCS")).toBeVisible();
     expect(within(row).getByText("TZX-024", { exact: true })).toBeVisible();
     expect(within(row).getByText("原 1")).toBeVisible();
