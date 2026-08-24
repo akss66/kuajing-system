@@ -750,6 +750,116 @@ describe("customer-scoped TEMU import preview", () => {
       externalSku: "TZX-NORMALIZED-BASE-LK",
       status: "UNKNOWN_SKU",
     });
+
+    const refreshed = await db.transaction((tx) =>
+      refreshActiveImportPreviewsForAlias(tx, {
+        actorUserId: "auth-admin-1",
+        externalSku: "TZX-NORMALIZED-BASE",
+        skuId: baseSku.id,
+        storeId: fixture.store.id,
+      }),
+    );
+    expect(refreshed).toBe(0);
+    await expect(
+      getCustomerImportPreview(fixture.customer.id, preview.batchId),
+    ).resolves.toMatchObject({
+      rows: [{ status: "UNKNOWN_SKU" }],
+      summary: { ready: 0, unknownSku: 1 },
+    });
+    await expect(
+      db
+        .select({ resolvedSkuId: orderImportRows.resolvedSkuId })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.batchId, preview.batchId)),
+    ).resolves.toEqual([{ resolvedSkuId: null }]);
+  });
+
+  test("refreshes unknown LK and PCS rows after their normalized base alias is added", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          应履约件数: 2,
+          SKU货号: "TZX-LATER-NORMALIZED-LK",
+          子订单号: "SUB-LATER-NORMALIZED-LK",
+        },
+        {
+          应履约件数: 3,
+          SKU货号: "TZX-LATER-NORMALIZED-2PCS",
+          子订单号: "SUB-LATER-NORMALIZED-PCS",
+        },
+        {
+          应履约件数: 4,
+          SKU货号: "TZX-LATER-NORMALIZED-2PCS-lk",
+          子订单号: "SUB-LATER-NORMALIZED-PCS-LK",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "later-normalized-alias.xlsx",
+      storeId: fixture.store.id,
+    });
+    expect(preview.summary).toMatchObject({ ready: 0, unknownSku: 3 });
+
+    await db.insert(skuAliases).values({
+      externalSku: "TZX-LATER-NORMALIZED",
+      skuId: fixture.sku.id,
+      storeId: fixture.store.id,
+    });
+    const refreshed = await db.transaction((tx) =>
+      refreshActiveImportPreviewsForAlias(tx, {
+        actorUserId: "auth-admin-1",
+        externalSku: "TZX-LATER-NORMALIZED",
+        skuId: fixture.sku.id,
+        storeId: fixture.store.id,
+      }),
+    );
+
+    expect(refreshed).toBe(3);
+    await expect(
+      db
+        .select({
+          effectiveQuantity: orderImportRows.effectiveQuantity,
+          externalSku: orderImportRows.externalSku,
+          quantityMultiplier: orderImportRows.quantityMultiplier,
+          resolutionMethod: orderImportRows.resolutionMethod,
+          resolvedSkuId: orderImportRows.resolvedSkuId,
+          status: orderImportRows.status,
+        })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.batchId, preview.batchId))
+        .orderBy(orderImportRows.rowNumber),
+    ).resolves.toEqual([
+      {
+        effectiveQuantity: 2,
+        externalSku: "TZX-LATER-NORMALIZED-LK",
+        quantityMultiplier: 1,
+        resolutionMethod: "NORMALIZED_SUFFIX",
+        resolvedSkuId: fixture.sku.id,
+        status: "READY",
+      },
+      {
+        effectiveQuantity: 6,
+        externalSku: "TZX-LATER-NORMALIZED-2PCS",
+        quantityMultiplier: 2,
+        resolutionMethod: "NORMALIZED_SUFFIX",
+        resolvedSkuId: fixture.sku.id,
+        status: "READY",
+      },
+      {
+        effectiveQuantity: 8,
+        externalSku: "TZX-LATER-NORMALIZED-2PCS-lk",
+        quantityMultiplier: 2,
+        resolutionMethod: "NORMALIZED_SUFFIX",
+        resolvedSkuId: fixture.sku.id,
+        status: "READY",
+      },
+    ]);
+    await expect(
+      getCustomerImportPreview(fixture.customer.id, preview.batchId),
+    ).resolves.toMatchObject({
+      summary: { ready: 3, unknownSku: 0 },
+    });
   });
 
   test("does not refresh an unknown preview row to an unavailable mapped SKU", async () => {

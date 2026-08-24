@@ -34,7 +34,10 @@ import {
   parseTemuOrderWorkbook,
   type ClassifiedTemuResult,
 } from "./temu-parser";
-import { deriveImportSkuResolution } from "./sku-resolution";
+import {
+  deriveImportSkuResolution,
+  multiplyImportQuantity,
+} from "./sku-resolution";
 
 const PREVIEW_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const INSERT_CHUNK_SIZE = 400;
@@ -616,43 +619,83 @@ export async function refreshActiveImportPreviewsForAlias(
     .for("update");
   if (activeBatches.length === 0) return 0;
 
-  const updatedRows = await tx
-    .update(orderImportRows)
-    .set({
-      errorCode: null,
-      errorMessage: null,
-      resolvedSkuId: input.skuId,
-      status: "READY",
+  const unknownRows = await tx
+    .select({
+      batchId: orderImportRows.batchId,
+      externalSku: orderImportRows.externalSku,
+      id: orderImportRows.id,
+      quantity: orderImportRows.quantity,
     })
+    .from(orderImportRows)
     .where(
       and(
         inArray(
           orderImportRows.batchId,
           activeBatches.map((batch) => batch.id),
         ),
+        eq(orderImportRows.fulfillmentMode, "SYSTEM_SKU"),
         eq(orderImportRows.status, "UNKNOWN_SKU"),
-        eq(orderImportRows.externalSku, input.externalSku),
+        isNotNull(orderImportRows.externalSku),
+        isNotNull(orderImportRows.quantity),
+        isNull(orderImportRows.resolvedSkuId),
       ),
     )
-    .returning({ batchId: orderImportRows.batchId });
+    .for("update");
+
+  const candidates = unknownRows.flatMap((row) => {
+    const externalSku = row.externalSku;
+    const quantity = row.quantity;
+    if (!externalSku || !quantity) return [];
+    try {
+      const derivation = deriveImportSkuResolution(externalSku);
+      return derivation.lookupCandidates.includes(input.externalSku)
+        ? [{ ...row, derivation, externalSku, quantity }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const resolutions = await exactSkuResolutionMap(
+    tx,
+    input.storeId,
+    candidates.map((row) => row.externalSku),
+  );
 
   const affectedByBatch = new Map<string, number>();
-  for (const row of updatedRows) {
+  for (const row of candidates) {
+    const resolution = resolutions.get(row.externalSku);
+    if (!resolution) continue;
+    const [updatedRow] = await tx
+      .update(orderImportRows)
+      .set({
+        effectiveQuantity: multiplyImportQuantity(
+          row.quantity,
+          row.derivation.quantityMultiplier,
+        ),
+        errorCode: null,
+        errorMessage: null,
+        quantityMultiplier: row.derivation.quantityMultiplier,
+        resolutionMethod: resolution.resolutionMethod,
+        resolvedSkuId: resolution.skuId,
+        status: "READY",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(orderImportRows.id, row.id),
+          eq(orderImportRows.status, "UNKNOWN_SKU"),
+        ),
+      )
+      .returning({ batchId: orderImportRows.batchId });
+    if (!updatedRow) continue;
     affectedByBatch.set(
-      row.batchId,
-      (affectedByBatch.get(row.batchId) ?? 0) + 1,
+      updatedRow.batchId,
+      (affectedByBatch.get(updatedRow.batchId) ?? 0) + 1,
     );
   }
 
   for (const [batchId, affectedRows] of affectedByBatch) {
-    await tx
-      .update(orderImportBatches)
-      .set({
-        readyRows: sql`${orderImportBatches.readyRows} + ${affectedRows}`,
-        unknownSkuRows: sql`${orderImportBatches.unknownSkuRows} - ${affectedRows}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(orderImportBatches.id, batchId));
+    await revalidateBatchInventory(tx, batchId);
     await tx.insert(auditLogs).values({
       action: "TEMU_IMPORT_PREVIEW_RECLASSIFIED",
       actorId: input.actorUserId,
@@ -669,7 +712,10 @@ export async function refreshActiveImportPreviewsForAlias(
     });
   }
 
-  return updatedRows.length;
+  return [...affectedByBatch.values()].reduce(
+    (total, affectedRows) => total + affectedRows,
+    0,
+  );
 }
 
 async function loadStoredPreviewRows(
