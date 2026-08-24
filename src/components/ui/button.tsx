@@ -9,7 +9,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary-hover",
+        default: "bg-primary text-primary-foreground hover:bg-primary-hover disabled:bg-primary-hover disabled:opacity-100 disabled:saturate-50",
         outline: "border-border bg-background text-foreground hover:bg-[var(--merchant-nav-hover)]",
         secondary: "border-border/70 bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]",
         ghost: "bg-transparent text-foreground hover:bg-[var(--merchant-nav-hover)]",

@@ -86,7 +86,9 @@ export function MerchantShellFrame({
         data-merchant-content
       >
         <main className="mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full max-w-[1600px] min-w-0 bg-[var(--merchant-canvas)] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8 lg:py-6">
-          {children}
+          <div className={audience === "customer" ? "customer-surface-enter" : undefined}>
+            {children}
+          </div>
         </main>
       </div>
       {mobileDock}

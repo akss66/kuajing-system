@@ -27,7 +27,7 @@ const navigation = {
   },
   customer: {
     drawerTitle: "客户导航",
-    groups: ["拿货", "订单与付款"],
+    groups: ["拿货", "履约", "资金"],
     label: "客户主导航",
     quickLabel: "客户快捷导航",
   },
@@ -50,7 +50,7 @@ const audiences = [
     account: accounts.customer,
     ...navigation.customer,
     genericAccountLabel: "客户账号",
-    sectionCount: 3,
+    sectionCount: 4,
     identity: {
       displayName: "渥太华演示客户",
       email: accounts.customer.email,

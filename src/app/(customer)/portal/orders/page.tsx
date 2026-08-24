@@ -13,9 +13,9 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 const labels = {
   PENDING_PAYMENT: "待付款",
   PAID_PENDING_FULFILLMENT: "已付款，待发货",
-  FULFILLING: "待仓库发货",
-  SHIPPED: "仓库已发货",
-  FULFILLMENT_EXCEPTION: "仓库处理异常",
+  FULFILLING: "仓库处理中",
+  SHIPPED: "已发货",
+  FULFILLMENT_EXCEPTION: "需要协助",
   CANCELLED: "已取消",
   EXPIRED: "已超时",
 } as const;
@@ -39,7 +39,7 @@ function localDate(value: Date) {
 
 function nextAction(status: keyof typeof labels) {
   if (status === "PENDING_PAYMENT") return "去付款";
-  if (status === "FULFILLMENT_EXCEPTION") return "处理异常";
+  if (status === "FULFILLMENT_EXCEPTION") return "查看详情";
   if (status === "SHIPPED") return "查看物流";
   return "查看进度";
 }
@@ -99,7 +99,7 @@ export default async function CustomerOrdersPage({
     <div className="space-y-6">
       <PageHeading
         breadcrumbs={[
-          { href: "/portal", label: "商家中心" },
+          { href: "/portal", label: "客户首页" },
           {
             label: pendingOnly
               ? "待付款订单"
@@ -242,7 +242,7 @@ export default async function CustomerOrdersPage({
             <p className="mt-1 text-sm text-muted">
               {pendingOnly
                 ? "余额自动扣款的订单不会出现在这里。"
-                : "上传 TEMU 订单并确认提交后，会显示在这里。"}
+                : "上传订单并确认提交后，会显示在这里。"}
             </p>
           </div>
         )}

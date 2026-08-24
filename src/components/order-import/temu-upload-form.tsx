@@ -37,7 +37,7 @@ export function TemuUploadForm({
 
   return (
     <form action={formAction} className="space-y-5">
-      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(15rem,0.7fr)_minmax(0,1.3fr)]">
         <label className="min-w-0 space-y-2 text-sm font-medium text-ink">
           选择店铺
           <select
@@ -56,11 +56,11 @@ export function TemuUploadForm({
 
         <label className="min-w-0 space-y-2 text-sm font-medium text-ink">
           TEMU 订单 Excel
-          <span className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg border border-dashed border-primary/35 bg-primary-soft/40 px-3">
-            <FileSpreadsheet aria-hidden="true" className="size-5 text-primary" />
+          <span className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-primary/35 bg-primary-soft/35 px-4 py-4 text-center transition-colors hover:border-primary/60 hover:bg-primary-soft/55 sm:flex-row sm:text-left">
+            <FileSpreadsheet aria-hidden="true" className="size-6 shrink-0 text-primary" />
             <input
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="min-w-0 flex-1 cursor-pointer text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+              className="min-w-0 max-w-full cursor-pointer text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white"
               name="temuWorkbook"
               required
               type="file"
@@ -91,7 +91,7 @@ export function TemuUploadForm({
       ) : null}
 
       <Button
-        className="min-h-11 w-full px-5 sm:w-auto"
+        className="min-h-11 w-full px-5 sm:w-auto sm:min-w-48"
         disabled={pending || stores.length === 0}
         type="submit"
       >

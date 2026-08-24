@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export type NavigationItem = {
+  activePrefixes?: string[];
   href: string;
   icon: LucideIcon;
   label: string;
@@ -30,10 +31,17 @@ export type NavigationSectionProps = {
 };
 
 function matchesPath(item: NavigationItem, activePath: string) {
-  if (item.exact) return activePath === item.href;
-
   const activePathname = activePath.split("?")[0];
   const itemPathname = item.href.split("?")[0];
+  if (
+    item.activePrefixes?.some(
+      (prefix) => activePathname === prefix || activePathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return true;
+  }
+  if (item.exact) return activePath === item.href;
+
   return activePathname === itemPathname || activePathname.startsWith(`${itemPathname}/`);
 }
 

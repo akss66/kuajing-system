@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, ImageIcon, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, ImageIcon, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -289,58 +289,51 @@ function CustomerCatalogCards({
     >
       {groups.map((group) => (
         <li
-          className="min-w-0 rounded-[var(--radius-surface)] border border-border bg-background p-4"
+          className="min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
           data-testid={`catalog-product-${group.productId}`}
           key={group.productId}
         >
           <ProductGroupHeader group={group} />
-          <ul aria-label={`${group.productName} SKU 变体`} className="mt-4 space-y-3">
+          <ul aria-label={`${group.productName} SKU 变体`} className="divide-y divide-border">
             {group.variants.map((item) => (
               <li
-                className="min-w-0 rounded-[var(--radius-control)] border border-border bg-background p-3"
+                className="min-w-0 p-4 transition-colors hover:bg-surface/60"
                 data-testid={`catalog-${item.id}`}
                 key={item.id}
               >
-                <div data-customer-catalog-section="identity">
+                <div className="flex min-w-0 items-start justify-between gap-3" data-customer-catalog-section="identity">
                   <VariantIdentity item={item} />
-                </div>
-                <div
-                  className="mt-4 border-t border-border pt-3"
-                  data-customer-catalog-section="attributes"
-                >
-                  <p className="mb-1 text-xs font-medium text-muted-foreground">规格/属性</p>
-                  <CatalogAttributes item={item} />
-                </div>
-                <dl
-                  className="mt-4 border-t border-border pt-3"
-                  data-customer-catalog-section="price"
-                >
-                  <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
-                  <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
-                  </dd>
-                </dl>
-                <dl
-                  className="mt-4 border-t border-border pt-3"
-                  data-customer-catalog-section="inventory"
-                >
-                  <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
-                  <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                    {item.availableQuantity}
-                  </dd>
-                </dl>
-                <div
-                  className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
-                  data-customer-catalog-section="status"
-                >
-                  <span className="text-xs font-medium text-muted-foreground">状态</span>
                   <CatalogStatus item={item} />
                 </div>
                 <div
-                  className="mt-3 flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3"
+                  className="mt-3 pl-[3.75rem]"
+                  data-customer-catalog-section="attributes"
+                >
+                  <CatalogAttributes item={item} />
+                </div>
+                <div
+                  className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3"
+                >
+                  <dl data-customer-catalog-section="price">
+                    <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
+                    <dd className="mt-1 text-base font-semibold tabular-nums text-foreground">
+                      <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
+                    </dd>
+                  </dl>
+                  <dl className="text-right" data-customer-catalog-section="inventory">
+                    <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
+                    <dd className="mt-1 font-semibold tabular-nums text-foreground">
+                      {item.availableQuantity}
+                    </dd>
+                  </dl>
+                </div>
+                <span className="sr-only" data-customer-catalog-section="status">
+                  状态：{availabilityLabel(item.availabilityReason)}
+                </span>
+                <div
+                  className="mt-2 flex min-h-11 items-center justify-end"
                   data-customer-catalog-section="link"
                 >
-                  <span className="text-xs font-medium text-muted-foreground">链接</span>
                   <CatalogProductLink item={item} />
                 </div>
               </li>
@@ -414,10 +407,24 @@ export function CustomerCatalogWorkspace({
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
       <PageHeading
-        description="这里显示商品货品价格对应的拿货价，以及扣除有效锁定后的实时可售库存。"
-        title="货盘选品"
+        description="查看你的拿货价和扣除有效锁定后的可售库存；最终库存会在提交订单时再次校验。"
+        title="实时货盘"
       />
-      <section aria-label="货盘搜索" className="border-y border-border py-4">
+      <div className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border py-3 text-sm text-muted-foreground" aria-label="货盘说明">
+        <span className="inline-flex items-center gap-2">
+          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+          库存实时更新
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+          仅显示你的拿货价
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+          提交前再次校验
+        </span>
+      </div>
+      <section aria-label="货盘搜索" className="py-1">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
           <form
             className="grid min-w-0 gap-3 sm:flex-1 sm:grid-cols-[minmax(0,36rem)_auto] sm:justify-start"

@@ -42,5 +42,10 @@ describe("NewTemuImportPage", () => {
       "aria-current",
       "step",
     );
+    expect(screen.getByRole("link", { name: /多店铺批量上传/ })).toHaveAttribute(
+      "href",
+      "/portal/bulk-orders",
+    );
+    expect(screen.getByText("上传前确认")).toBeVisible();
   });
 });

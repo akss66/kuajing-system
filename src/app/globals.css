@@ -24,7 +24,7 @@
   --login-hero-foreground: rgb(247 245 239);
   --login-hero-muted: rgb(199 202 202);
   --login-canvas: rgb(247 247 245);
-  --tzx-primary: oklch(0.55 0.105 180);
+  --tzx-primary: rgb(0 124 111);
   --tzx-primary-hover: oklch(0.47 0.093 180);
   --tzx-primary-soft: oklch(0.942 0.028 182);
   --tzx-background: var(--merchant-panel);
@@ -191,6 +191,24 @@ textarea {
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+@keyframes customer-surface-in {
+  from {
+    transform: translateY(5px);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.customer-surface-enter {
+  animation: customer-surface-in 200ms ease-out both;
+}
+
+[data-merchant-shell="customer"] [data-workspace-panel] {
+  box-shadow: 0 1px 2px rgb(22 46 43 / 4%);
 }
 
 @media (prefers-reduced-motion: reduce) {

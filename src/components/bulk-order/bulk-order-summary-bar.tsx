@@ -102,7 +102,7 @@ export function BulkOrderSummaryBar({
             <div className="rounded-lg border border-border bg-surface px-3 py-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <WalletCards className="size-4 text-primary" />
-                余额抵扣与批量付款
+                余额抵扣与合并付款
               </div>
               <label className="mt-3 block space-y-2 text-sm font-medium text-ink">
                 本次使用钱包抵扣（元）

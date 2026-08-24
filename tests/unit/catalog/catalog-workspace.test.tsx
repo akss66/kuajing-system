@@ -527,6 +527,8 @@ describe("catalog workspaces", () => {
       />,
     );
 
+    expect(screen.getByRole("heading", { name: "实时货盘" })).toBeVisible();
+    expect(screen.getByText("库存实时更新")).toBeVisible();
     expect(screen.getByRole("searchbox")).toBeVisible();
     const results = within(screen.getByTestId("customer-catalog-results"));
     expect(results.getAllByText("¥7.60")).toHaveLength(2);

@@ -478,7 +478,7 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
     await page.setViewportSize({ height: viewport.height, width: viewport.width });
     await page.goto("/portal/catalog");
     await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
-    await expect(page.getByRole("heading", { name: "货盘选品" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "实时货盘" })).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.manualUnavailableSku.id)).toContainText("不可售");
     await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("售罄");

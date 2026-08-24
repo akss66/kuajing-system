@@ -38,13 +38,14 @@ describe("CustomerSettlementListPage", () => {
 
     render(await CustomerSettlementListPage());
 
-    expect(screen.getByRole("heading", { level: 1, name: "批量付款" })).toBeVisible();
-    expect(screen.getByText("多店铺批量拿货提交后，每次合并付款都会保留在这里。")).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "合并付款记录" })).toBeVisible();
+    expect(screen.getByText("多店铺订单提交后，每次合并付款都会保留在这里。")).toBeVisible();
     expect(screen.getByText("微信待付")).toBeVisible();
     expect(screen.getAllByText("¥13.00").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: /继续付款/ })).toHaveAttribute(
       "href",
       "/portal/settlements/settlement-1",
     );
+    expect(document.body).not.toHaveTextContent("批量付款");
   });
 });

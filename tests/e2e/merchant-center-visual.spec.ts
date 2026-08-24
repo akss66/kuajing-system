@@ -110,7 +110,7 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
-    heading: "货盘选品",
+    heading: "实时货盘",
     expectedTexts: ["TZX-DEMO-001", "¥7.60", "10", "可售"],
     path: "/portal/catalog",
     screenshot: "customer-catalog",
@@ -119,7 +119,7 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
-    heading: "多店铺批量拿货",
+    heading: "多店铺批量上传",
     expectedTexts: ["还没有批量草稿", "新建批量草稿"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
@@ -136,11 +136,11 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
-    heading: "上传 TEMU 订单",
+    heading: "上传订单",
     expectedTexts: ["选择店铺", "上传文件", "校验预览", "确认提交"],
     path: "/portal/imports/new",
     screenshot: "customer-import-flow",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
   },
 ];
 

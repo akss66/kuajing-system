@@ -65,7 +65,7 @@ export default async function ImportPreviewPage({
           </div>
         }
         breadcrumbs={[
-          { href: "/portal", label: "商家中心" },
+          { href: "/portal", label: "客户首页" },
           { href: "/portal/imports/new", label: "导入订单" },
           { label: "核对 TEMU 订单" },
         ]}

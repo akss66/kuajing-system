@@ -44,11 +44,11 @@ export default async function CustomerSettlementDetailPage({
     <div className="space-y-5">
       <PageHeading
         breadcrumbs={[
-          { href: "/portal/settlements", label: "批量付款" },
+          { href: "/portal/settlements", label: "合并付款记录" },
           { label: "本次付款" },
         ]}
         description={`付款编号 ${detail.batchNumber} · 截止 ${dateTime(detail.paymentDueAt)}（渥太华）`}
-        title="本次批量拿货付款"
+        title="本次合并付款"
       />
 
       <p className="text-sm font-medium text-ink">
@@ -58,7 +58,7 @@ export default async function CustomerSettlementDetailPage({
       <div className="flex flex-wrap items-center gap-3">
         <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/settlements">
           <ArrowLeft className="size-4" />
-          返回批量付款
+          返回合并付款记录
         </Link>
         <a className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface" href="#settlement-payment-form">
           跳到付款声明

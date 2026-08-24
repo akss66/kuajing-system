@@ -39,12 +39,12 @@ export default async function CustomerSettlementListPage() {
             className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary transition-colors hover:bg-surface"
             href="/portal/bulk-orders"
           >
-            发起批量拿货
+            多店铺批量上传
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         }
-        description="多店铺批量拿货提交后，每次合并付款都会保留在这里。"
-        title="批量付款"
+        description="多店铺订单提交后，每次合并付款都会保留在这里。"
+        title="合并付款记录"
       />
 
       <MetricStrip
@@ -68,9 +68,9 @@ export default async function CustomerSettlementListPage() {
       <SettlementWorkspace>
         <SettlementRegion
           action={<WalletCards aria-hidden="true" className="size-5 text-primary" />}
-          description="每次批量提交只需支付一次；进入详情可付款、查看核款进度和所包含的拿货单。"
+          description="多个店铺的订单可合并为一次付款；进入详情可继续付款、查看确认进度和所包含的拿货单。"
           kind="batches"
-          title="最近批量付款"
+          title="最近合并付款"
         >
           {batches.length ? (
             <div className="divide-y divide-border">
@@ -118,8 +118,8 @@ export default async function CustomerSettlementListPage() {
             </div>
           ) : (
             <div className="px-5 py-16 text-center">
-              <p className="font-medium text-ink">暂无批量付款记录</p>
-              <p className="mt-1 text-sm text-muted">提交多店铺批量拿货后，会在这里保留付款历史与状态。</p>
+              <p className="font-medium text-ink">暂无合并付款记录</p>
+              <p className="mt-1 text-sm text-muted">提交多店铺订单后，会在这里保留付款历史与状态。</p>
             </div>
           )}
         </SettlementRegion>

@@ -230,13 +230,28 @@ describe("merchant shells", () => {
     const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "客户首页" })).toBeVisible();
-    expect(within(navigation).getByRole("link", { name: "多店铺批量拿货" })).toBeVisible();
-    expect(within(navigation).getByRole("link", { name: "批量付款" })).toHaveAttribute(
+    expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
       "href",
-      "/portal/settlements",
+      "/portal/catalog",
     );
-    expect(screen.getByText("拿货")).toBeVisible();
-    expect(screen.getByText("订单与付款")).toBeVisible();
+    expect(within(navigation).getByRole("link", { name: "上传订单" })).toHaveAttribute(
+      "href",
+      "/portal/imports/new",
+    );
+    expect(within(navigation).getByRole("link", { name: "我的订单" })).toHaveAttribute(
+      "href",
+      "/portal/orders",
+    );
+    expect(within(navigation).getByRole("link", { name: "资金中心" })).toHaveAttribute(
+      "href",
+      "/portal/wallet",
+    );
+    expect(within(navigation).queryByRole("link", { name: "多店铺批量拿货" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: "待付款" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: "批量付款" })).not.toBeInTheDocument();
+    expect(within(navigation).getByRole("heading", { name: "拿货" })).toBeVisible();
+    expect(within(navigation).getByRole("heading", { name: "履约" })).toBeVisible();
+    expect(within(navigation).getByRole("heading", { name: "资金" })).toBeVisible();
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
 
@@ -271,9 +286,30 @@ describe("merchant shells", () => {
       "href",
       "/portal/orders",
     );
-    expect(within(quickNavigation).getByRole("link", { name: "余额" })).toHaveAttribute(
+    expect(within(quickNavigation).getByRole("link", { name: "资金" })).toHaveAttribute(
       "href",
       "/portal/wallet",
+    );
+  });
+
+  it("keeps the advanced multi-store flow under the upload navigation task", () => {
+    navigationState.pathname = "/portal/bulk-orders/draft-1";
+
+    render(
+      <CustomerShell identity={customerIdentity}>
+        <div>多店铺上传内容</div>
+      </CustomerShell>,
+    );
+
+    const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
+    expect(within(navigation).getByRole("link", { name: "上传订单" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const quickNavigation = screen.getByRole("navigation", { name: "客户快捷导航" });
+    expect(within(quickNavigation).getByRole("link", { name: "上传" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
   });
 });

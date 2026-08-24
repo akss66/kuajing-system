@@ -120,9 +120,23 @@ describe("operations dashboards", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /查看批量付款 SETTLEMENT-1 的核款进度/ }),
+      screen.getByRole("link", { name: /查看付款确认进度/ }),
     ).toHaveAttribute("href", "/portal/settlements/settlement-1");
+    expect(screen.getByRole("link", { name: /实时货盘/ })).toHaveAttribute(
+      "href",
+      "/portal/catalog",
+    );
+    expect(screen.getByRole("link", { name: /资金中心/ })).toHaveAttribute(
+      "href",
+      "/portal/wallet",
+    );
+    expect(screen.getByRole("link", { name: /需要协助/ })).toHaveAttribute(
+      "href",
+      "/portal/orders?status=FULFILLMENT_EXCEPTION",
+    );
     expect(screen.getByText("北美主店")).toBeVisible();
+    expect(document.body).not.toHaveTextContent("批量付款");
+    expect(document.body).not.toHaveTextContent("仓库处理异常");
     expect(document.body).not.toHaveTextContent("390 px");
     expect(document.body).not.toHaveTextContent("2 种");
     expect(document.body).not.toHaveTextContent("快捷入口");

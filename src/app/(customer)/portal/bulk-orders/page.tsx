@@ -70,23 +70,23 @@ export default async function CustomerBulkOrdersPage() {
             className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary-hover transition-colors hover:bg-surface"
             href="/portal/settlements"
           >
-            查看批量付款
+            查看合并付款记录
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         }
-        description="按店铺分组上传多个 TEMU 原始 Excel，系统会跨文件去重；提交后把所选拿货单合并为一次批量付款。"
-        title="多店铺批量拿货"
+        description="按店铺上传多个 TEMU 原始 Excel，系统会跨文件去重；提交后可把所选拿货单合并为一次付款。"
+        title="多店铺批量上传"
       />
 
       <section
-        aria-label="批量拿货下一步"
+        aria-label="多店铺上传下一步"
         className="grid gap-3 border-y border-border bg-background px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
       >
         {latestDraft ? (
           <div className="flex min-w-0 items-start gap-3">
             <Clock3 aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
             <div className="min-w-0">
-              <p className="font-semibold text-ink">继续最近一次批量拿货</p>
+              <p className="font-semibold text-ink">继续最近一次多店铺上传</p>
               <p className="mt-1 text-sm text-muted">
                 {latestDraft.groupCount} 个店铺 · {latestDraft.fileCount} 个文件 · 更新于 {dateTime(latestDraft.updatedAt)}
               </p>
@@ -101,7 +101,7 @@ export default async function CustomerBulkOrdersPage() {
           </div>
         ) : (
           <div>
-            <p className="font-semibold text-ink">开始一次新的批量拿货</p>
+            <p className="font-semibold text-ink">开始一次新的多店铺上传</p>
             <p className="mt-1 text-sm text-muted">暂无可继续的草稿，新建后即可按店铺上传文件。</p>
           </div>
         )}

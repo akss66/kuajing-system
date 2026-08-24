@@ -59,14 +59,14 @@ export function CustomerOrderActions({ order }: { order: CustomerOrderDetail }) 
       {order.status === "PENDING_PAYMENT" && usesActiveSettlement ? (
         <div className="p-4 sm:p-5">
           <p className="text-xs font-medium text-primary">当前需要处理</p>
-          <h2 className="mt-1 font-semibold text-ink">完成批量付款</h2>
-          <p className="mt-1 text-sm text-muted">本单已包含在一次批量付款中，请在批量付款页面完成支付。</p>
+          <h2 className="mt-1 font-semibold text-ink">完成合并付款</h2>
+          <p className="mt-1 text-sm text-muted">本单已与其他拿货单合并付款，请在合并付款详情中完成支付。</p>
           {order.settlementBatchId ? (
             <a
               className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-primary-hover"
               href={`/portal/settlements/${order.settlementBatchId}`}
             >
-              查看本次批量付款
+              查看本次合并付款
             </a>
           ) : null}
         </div>

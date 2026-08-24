@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 export type MobileTaskDockItem = {
+  activePrefixes?: string[];
   exact?: boolean;
   href: string;
   icon: LucideIcon;
@@ -14,6 +15,13 @@ export type MobileTaskDockItem = {
 };
 
 function itemIsActive(pathname: string, item: MobileTaskDockItem) {
+  if (
+    item.activePrefixes?.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return true;
+  }
   return item.exact
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(`${item.href}/`);

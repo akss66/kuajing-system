@@ -644,12 +644,12 @@ export function BulkOrderWorkspace({
           </div>
         }
         breadcrumbs={[
-          { href: "/portal", label: "商家中心" },
-          { href: "/portal/bulk-orders", label: "批量拿货" },
-          { label: "多店铺批量拿货" },
+          { href: "/portal", label: "客户首页" },
+          { href: "/portal/bulk-orders", label: "多店铺上传" },
+          { label: "多店铺批量上传" },
         ]}
-        description="按店铺上传 TEMU 原始 Excel。系统会跨文件去重、识别跨店冲突，并把所选拿货单合并成一次批量付款。"
-        title="多店铺批量拿货"
+        description="按店铺上传 TEMU 原始 Excel。系统会跨文件去重、识别跨店冲突，并把所选拿货单合并成一次付款。"
+        title="多店铺批量上传"
       />
 
       <MetricStrip

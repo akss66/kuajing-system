@@ -250,7 +250,7 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   await expect(page).toHaveURL(/\/portal/);
 
   await page.goto("/portal/bulk-orders");
-  const nextStep = page.getByRole("region", { name: "批量拿货下一步" });
+  const nextStep = page.getByRole("region", { name: "多店铺上传下一步" });
   await expect(nextStep.getByRole("link", { name: "继续上次草稿" })).toHaveAttribute(
     "href",
     `/portal/bulk-orders/${fixture.draftId}`,
@@ -259,7 +259,7 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
   await expect(
-    page.getByRole("heading", { name: "多店铺批量拿货" }),
+    page.getByRole("heading", { name: "多店铺批量上传" }),
   ).toBeVisible();
   await expect(page.getByText("8 个店铺可提交")).toBeVisible();
   await expect(page.getByRole("button", { name: "提交拿货单" }).first()).toBeEnabled();
@@ -280,12 +280,12 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   await page.getByRole("button", { name: "提交拿货单" }).first().click();
 
   await expect(page).toHaveURL(/\/portal\/settlements\//, { timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "本次批量拿货付款" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "本次合并付款" })).toBeVisible();
   await expect(page.getByRole("region", { name: "付款任务" })).toBeVisible();
   await expect(page.getByRole("region", { name: "本次包含的拿货单" })).toBeVisible();
   // 只读付款输入展示当前微信待付，不重复展示已由钱包冻结抵扣的部分。
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("104.00");
-  await expect(page.getByRole("heading", { name: "本次批量拿货付款" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "本次合并付款" })).toBeVisible();
   await expect(page.getByRole("link", { name: "跳到付款声明" })).toHaveAttribute(
     "href",
     "#settlement-payment-form",
@@ -302,9 +302,9 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
     path: `${VISUAL_REVIEW_DIR}/settlement-1440.png`,
   });
 
-  await page.getByRole("link", { name: "返回批量付款" }).click();
+  await page.getByRole("link", { name: "返回合并付款记录" }).click();
   await expect(page).toHaveURL(/\/portal\/settlements$/);
-  await expect(page.getByRole("heading", { exact: true, name: "批量付款" })).toBeVisible();
+  await expect(page.getByRole("heading", { exact: true, name: "合并付款记录" })).toBeVisible();
   await expect(page.getByRole("link", { name: "继续付款" })).toHaveAttribute(
     "href",
     settlementPath,
@@ -329,7 +329,7 @@ test("customer bulk workspace stays usable at approved mobile widths @mobile-onl
     await page.setViewportSize({ height: 844, width });
     await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
     await expect(
-      page.getByRole("heading", { name: "多店铺批量拿货" }),
+      page.getByRole("heading", { name: "多店铺批量上传" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "提交拿货单" }).first(),
@@ -386,7 +386,7 @@ test("administrator can open unified settlement/bulk diagnostics routes", async 
   await expect(page.locator("main h1")).toBeVisible();
   await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
   await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量付款记录" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "批量付款审核" })).toBeVisible();
   await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
   const settlementShortcut = page.locator("main a[href='/admin/settlement-batches']").last();
   await expect(settlementShortcut).toBeVisible();

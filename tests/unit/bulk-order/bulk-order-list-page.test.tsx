@@ -62,14 +62,14 @@ describe("CustomerBulkOrdersPage", () => {
   it("prioritizes continuing the latest writable draft beside starting a new batch", async () => {
     render(await CustomerBulkOrdersPage());
 
-    const actions = screen.getByRole("region", { name: "批量拿货下一步" });
+    const actions = screen.getByRole("region", { name: "多店铺上传下一步" });
     const continuation = within(actions).getByRole("link", { name: "继续上次草稿" });
 
     expect(continuation).toHaveAttribute("href", "/portal/bulk-orders/draft-latest");
     expect(within(actions).getByRole("button", { name: "新建批量草稿" })).toBeEnabled();
     expect(actions).toHaveTextContent("2 个店铺");
     expect(actions).toHaveTextContent("3 个文件");
-    expect(screen.getByRole("link", { name: "查看批量付款" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "查看合并付款记录" })).toHaveAttribute(
       "href",
       "/portal/settlements",
     );

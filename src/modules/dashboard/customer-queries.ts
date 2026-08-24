@@ -214,7 +214,7 @@ export async function getCustomerTaskDashboard(
     primaryContinuationTarget = {
       href: `/portal/bulk-orders/${summary.latestDraftId}`,
       kind: "BULK_DRAFT",
-      label: "继续批量拿货草稿",
+      label: "继续多店铺上传草稿",
     };
   } else if (pendingPaymentCount > 0) {
     primaryContinuationTarget = {
@@ -227,7 +227,7 @@ export async function getCustomerTaskDashboard(
       ? {
           href: `/portal/settlements/${latestPaymentReport.referenceId}`,
           kind: "PAYMENT_REPORTED",
-          label: `查看批量付款 ${latestPaymentReport.referenceNumber} 的核款进度`,
+          label: `查看合并付款 ${latestPaymentReport.referenceNumber} 的确认进度`,
         }
       : {
           href: `/portal/orders/${latestPaymentReport.referenceId}`,
@@ -236,9 +236,9 @@ export async function getCustomerTaskDashboard(
         };
   } else if (fulfillmentExceptionCount > 0) {
     primaryContinuationTarget = {
-      href: "/portal/orders",
+      href: "/portal/orders?status=FULFILLMENT_EXCEPTION",
       kind: "FULFILLMENT_EXCEPTION",
-      label: "查看仓库处理异常",
+      label: "查看需要协助的订单",
     };
   }
 

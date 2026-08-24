@@ -582,7 +582,7 @@ describe("dashboard queries", () => {
     expect(dashboard.primaryContinuationTarget).toEqual({
       href: `/portal/bulk-orders/${latestDraft.id}`,
       kind: "BULK_DRAFT",
-      label: "继续批量拿货草稿",
+      label: "继续多店铺上传草稿",
     });
 
     expect(pendingOrder.customerId).toBe(customer.id);
@@ -626,7 +626,7 @@ describe("dashboard queries", () => {
     expect(settlementOnly.primaryContinuationTarget).toEqual({
       href: `/portal/settlements/${settlement.id}`,
       kind: "PAYMENT_REPORTED",
-      label: `查看批量付款 ${settlement.batchNumber} 的核款进度`,
+      label: `查看合并付款 ${settlement.batchNumber} 的确认进度`,
     });
 
     const [directOrder] = await db
@@ -659,6 +659,38 @@ describe("dashboard queries", () => {
       href: `/portal/orders/${directOrder.id}`,
       kind: "PAYMENT_REPORTED",
       label: `查看订单 ${directOrder.orderNumber} 的付款确认`,
+    });
+  });
+
+  test("routes fulfillment exceptions directly to the filtered assistance queue", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `EXCEPTION-FLOW-${suffix}`, name: "异常履约客户" })
+      .returning();
+    const [store] = await db
+      .insert(stores)
+      .values({ customerId: customer.id, name: `异常履约店铺 ${suffix}` })
+      .returning();
+    await db.insert(fulfillmentOrders).values({
+      customerId: customer.id,
+      orderNumber: `EXCEPTION-FLOW-${suffix}`,
+      paidAt: new Date("2026-08-13T07:00:00.000Z"),
+      paymentMode: "WALLET",
+      status: "FULFILLMENT_EXCEPTION",
+      storeId: store.id,
+      submittedAt: new Date("2026-08-13T06:00:00.000Z"),
+      totalAmountFen: 2_000,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    });
+
+    const dashboard = await getCustomerTaskDashboard(customer.id, FIXED_NOW);
+
+    expect(dashboard.primaryContinuationTarget).toEqual({
+      href: "/portal/orders?status=FULFILLMENT_EXCEPTION",
+      kind: "FULFILLMENT_EXCEPTION",
+      label: "查看需要协助的订单",
     });
   });
 });

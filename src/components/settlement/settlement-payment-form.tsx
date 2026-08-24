@@ -116,7 +116,7 @@ export function SettlementPaymentForm({
           className="grid gap-4"
           confirmDescription="撤回后整笔结算会关闭，相关拿货单同步取消，冻结的余额与库存锁定一并释放。"
           confirmLabel="确认撤回"
-          confirmTitle="确定撤回这笔批量付款声明？"
+          confirmTitle="确定撤回这笔合并付款声明？"
           onErrorFocus={() => withdrawReasonRef.current?.focus()}
           submitLabel="撤回整笔声明"
         >

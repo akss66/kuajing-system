@@ -28,7 +28,7 @@ export function CatalogSaleStatusFilterControl({
             <Button
               aria-label={option.accessibleName}
               aria-pressed={selected}
-              className={selected ? "min-h-11 border-primary-hover bg-primary-soft font-semibold text-primary-hover hover:bg-primary-soft" : "min-h-11 border-dashed font-medium"}
+              className={selected ? "min-h-12 border-primary-hover bg-primary-soft font-semibold text-primary-hover hover:bg-primary-soft" : "min-h-12 border-dashed font-medium"}
               key={option.value}
               onClick={() => onValueChange(option.value)}
               type="button"

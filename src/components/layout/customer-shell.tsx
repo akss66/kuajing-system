@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, ClipboardList, Clock3, LayoutDashboard, PackageSearch, ReceiptText, Store, Upload } from "lucide-react";
+import { Banknote, ClipboardList, LayoutDashboard, PackageSearch, Upload } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { AuthenticatedIdentity } from "@/modules/identity/principal";
@@ -23,25 +23,19 @@ const customerNavigation: Array<{
     id: "customer-purchasing",
     label: "拿货",
     items: [
-      { href: "/portal/catalog", icon: PackageSearch, label: "货盘选品" },
-      { href: "/portal/imports/new", icon: Upload, label: "上传 TEMU 订单" },
-      { href: "/portal/bulk-orders", icon: Store, label: "多店铺批量拿货" },
+      { href: "/portal/catalog", icon: PackageSearch, label: "实时货盘" },
+      { activePrefixes: ["/portal/bulk-orders"], href: "/portal/imports/new", icon: Upload, label: "上传订单" },
     ],
   },
   {
-    id: "customer-orders-payment",
-    label: "订单与付款",
-    items: [
-      { href: "/portal/orders", icon: ClipboardList, label: "我的订单" },
-      {
-        href: "/portal/orders?status=PENDING_PAYMENT",
-        icon: Clock3,
-        label: "待付款",
-        exact: true,
-      },
-      { href: "/portal/settlements", icon: ReceiptText, label: "批量付款" },
-      { href: "/portal/wallet", icon: Banknote, label: "余额与流水" },
-    ],
+    id: "customer-fulfillment",
+    label: "履约",
+    items: [{ href: "/portal/orders", icon: ClipboardList, label: "我的订单" }],
+  },
+  {
+    id: "customer-funds",
+    label: "资金",
+    items: [{ href: "/portal/wallet", icon: Banknote, label: "资金中心" }],
   },
 ];
 
@@ -82,9 +76,9 @@ export function CustomerShell({
           ariaLabel="客户快捷导航"
           items={[
             { exact: true, href: "/portal", icon: LayoutDashboard, label: "首页" },
-            { href: "/portal/imports/new", icon: Upload, label: "上传" },
+            { activePrefixes: ["/portal/bulk-orders"], href: "/portal/imports/new", icon: Upload, label: "上传" },
             { href: "/portal/orders", icon: ClipboardList, label: "订单" },
-            { href: "/portal/wallet", icon: Banknote, label: "余额" },
+            { href: "/portal/wallet", icon: Banknote, label: "资金" },
           ]}
         />
       }

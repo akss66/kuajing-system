@@ -61,55 +61,79 @@ function TaskLink({
   );
 }
 
+const continuationCopy: Record<
+  NonNullable<CustomerDashboardData["primaryContinuationTarget"]>["kind"],
+  { description: string; label: string }
+> = {
+  BULK_DRAFT: {
+    description: "继续完成多个店铺的订单上传。",
+    label: "继续未完成的上传",
+  },
+  FULFILLMENT_EXCEPTION: {
+    description: "有订单需要确认处理方式。",
+    label: "查看需要协助的订单",
+  },
+  PAYMENT_REPORTED: {
+    description: "付款资料已提交，正在等待运营确认。",
+    label: "查看付款确认进度",
+  },
+  PENDING_PAYMENT: {
+    description: "完成付款后，订单才会进入仓库处理。",
+    label: "完成待付款订单",
+  },
+};
+
 export function CustomerTaskDashboard({
   dashboard,
 }: {
   dashboard: CustomerDashboardData;
 }) {
   const quickPurchase = [
-    { description: "查看自己的价格与可售库存", href: "/portal/catalog", icon: PackageSearch, label: "货盘选品" },
-    { description: "上传单店 TEMU 原始订单", href: "/portal/imports/new", icon: Upload, label: "上传订单" },
-    { description: "多店文件合并为一次付款", href: "/portal/bulk-orders", icon: Store, label: "批量拿货" },
+    { description: "浏览自己的价格和实时可售库存", href: "/portal/catalog", icon: PackageSearch, label: "实时货盘" },
+    { description: "上传一个店铺的 TEMU 原始订单", href: "/portal/imports/new", icon: Upload, label: "上传订单" },
   ];
+  const continuation = dashboard.primaryContinuationTarget
+    ? continuationCopy[dashboard.primaryContinuationTarget.kind]
+    : null;
 
   return (
     <div className="space-y-7">
       <section aria-labelledby="continuation-title" className="space-y-3">
-        <SectionHeading description="先完成影响付款、库存锁定和发货的事项。" id="continuation-title" title="继续处理" />
+        <SectionHeading description="优先处理会影响付款或发货的事项。" id="continuation-title" title="继续处理" />
         <WorkspacePanel className="overflow-hidden">
-          {dashboard.primaryContinuationTarget ? (
-            <div className="flex flex-col gap-4 border-b border-primary/15 bg-primary-soft px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          {dashboard.primaryContinuationTarget && continuation ? (
+            <div className="flex flex-col gap-4 border-b border-primary/15 bg-primary-soft px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="min-w-0">
-                <p className="font-semibold text-primary-hover">{dashboard.primaryContinuationTarget.label}</p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">系统已按最近进度为你定位下一步。</p>
+                <p className="font-semibold text-primary-hover">{continuation.label}</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{continuation.description}</p>
               </div>
-              <Link aria-label={`${dashboard.primaryContinuationTarget.label}，继续处理`} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-4 text-sm font-medium text-white outline-none transition-colors hover:bg-primary-hover" href={dashboard.primaryContinuationTarget.href}>
+              <Link aria-label={`${continuation.label}，继续处理`} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-4 text-sm font-medium text-white outline-none transition-colors hover:bg-primary-hover" href={dashboard.primaryContinuationTarget.href}>
                 继续处理 <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </div>
           ) : (
             <div className="border-b border-border px-4 py-5 sm:px-5" role="status">
               <p className="font-medium text-foreground">当前没有未完成任务</p>
-              <p className="mt-1 text-sm text-muted-foreground">可以从货盘选品开始新的拿货流程。</p>
+              <p className="mt-1 text-sm text-muted-foreground">可以先查看实时货盘，再上传新的订单。</p>
             </div>
           )}
           <div className="divide-y divide-border md:grid md:grid-cols-2 md:divide-x md:divide-y-0">
             <div className="divide-y divide-border">
-              <TaskLink count={dashboard.unfinishedDraftCount} description="草稿或部分已提交的批量拿货" href="/portal/bulk-orders" icon={Clock3} label="未完成草稿" />
+              <TaskLink count={dashboard.unfinishedDraftCount} description="多个店铺尚未完成的上传记录" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
               <TaskLink count={dashboard.pendingPaymentCount} description={`${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`} href="/portal/orders?status=PENDING_PAYMENT" icon={ReceiptText} label="待付款" tone="warning" />
             </div>
             <div className="divide-y divide-border">
               <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
-              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要查看订单进度或联系运营" href="/portal/orders" icon={AlertTriangle} label="仓库处理异常" tone="danger" />
+              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认订单进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
             </div>
           </div>
         </WorkspacePanel>
       </section>
 
       <section aria-labelledby="quick-purchase-title" className="space-y-3">
-        <SectionHeading description="从选品到多店批量付款，直接进入对应流程。" id="quick-purchase-title" title="快捷拿货" />
+        <SectionHeading description="查看库存，或上传新的 TEMU 订单。" id="quick-purchase-title" title="快捷拿货" />
         <WorkspacePanel className="overflow-hidden">
-          <nav aria-label="快捷拿货" className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
+          <nav aria-label="快捷拿货" className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
             {quickPurchase.map((item) => (
               <Link className="group flex min-h-[5.5rem] items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:px-5" href={item.href} key={item.href}>
                 <item.icon aria-hidden="true" className="size-5 shrink-0 text-primary" />
@@ -121,6 +145,12 @@ export function CustomerTaskDashboard({
               </Link>
             ))}
           </nav>
+          <div className="flex flex-col gap-2 border-t border-border bg-surface/55 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <span className="text-muted-foreground">多个店铺都有订单文件？</span>
+            <Link className="inline-flex min-h-11 items-center gap-2 font-medium text-primary-hover" href="/portal/bulk-orders">
+              使用多店铺批量上传 <Store aria-hidden="true" className="size-4" />
+            </Link>
+          </div>
         </WorkspacePanel>
       </section>
 
@@ -155,13 +185,13 @@ export function CustomerTaskDashboard({
       </section>
 
       <section aria-labelledby="funds-summary-title" className="space-y-3">
-        <SectionHeading description="余额与冻结金额来自当前客户钱包，不含其他客户资金。" id="funds-summary-title" title="资金摘要" />
+        <SectionHeading description="查看账户余额与订单占用，不含其他客户资金。" id="funds-summary-title" title="资金摘要" />
         <WorkspacePanel className="overflow-hidden">
           <div className="grid divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {[
               { icon: WalletCards, label: "可用余额", value: dashboard.walletAvailableFen },
               { icon: Banknote, label: "账户余额", value: dashboard.walletBalanceFen },
-              { icon: Boxes, label: "冻结金额", value: dashboard.walletHoldFen },
+              { icon: Boxes, label: "订单占用", value: dashboard.walletHoldFen },
             ].map((item) => (
               <div className="flex items-center gap-3 px-4 py-4 sm:px-5" key={item.label}>
                 <item.icon aria-hidden="true" className="size-4 text-primary" />
@@ -174,7 +204,7 @@ export function CustomerTaskDashboard({
           </div>
           <div className="border-t border-border px-4 py-2.5 text-right sm:px-5">
             <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/wallet">
-              查看余额与流水 <ArrowRight aria-hidden="true" className="size-4" />
+              进入资金中心 <ArrowRight aria-hidden="true" className="size-4" />
             </Link>
           </div>
         </WorkspacePanel>

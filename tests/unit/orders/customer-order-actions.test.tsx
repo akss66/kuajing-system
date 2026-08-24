@@ -60,11 +60,11 @@ describe("CustomerOrderActions", () => {
       render(<CustomerOrderActions order={orderWithSettlement(status)} />);
 
       expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "完成批量付款" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "完成合并付款" })).toBeVisible();
       expect(
-        screen.getByText("本单已包含在一次批量付款中，请在批量付款页面完成支付。"),
+        screen.getByText("本单已与其他拿货单合并付款，请在合并付款详情中完成支付。"),
       ).toBeVisible();
-      expect(screen.getByRole("link", { name: "查看本次批量付款" })).toBeVisible();
+      expect(screen.getByRole("link", { name: "查看本次合并付款" })).toBeVisible();
     },
   );
 
@@ -72,7 +72,7 @@ describe("CustomerOrderActions", () => {
     render(<CustomerOrderActions order={orderWithSettlement("CANCELLED")} />);
 
     expect(screen.getByRole("button", { name: "我已微信付款" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "完成批量付款" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "完成合并付款" })).not.toBeInTheDocument();
   });
 
   test("keeps payment primary and protects cancellation behind secondary actions", () => {

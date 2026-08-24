@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -27,20 +27,25 @@ export default async function CustomerWalletPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        description="余额足够时提交拿货单会自动扣款；充值仍通过线下微信联系管理员。"
-        title="余额与流水"
+        action={
+          <Link className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface" href="/portal/settlements">
+            合并付款记录 <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        }
+        description="查看可用余额、订单占用和每一笔资金变化；充值仍通过线下微信联系管理员。"
+        title="资金中心"
       />
 
       <SettlementWorkspace>
         <SettlementRegion
           contentClassName="grid divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0"
-          description="先确认可用余额，再查看冻结批次与每一笔资金变化。"
+          description="提交订单前可先确认可用余额；所有资金变化都会保留记录。"
           kind="balances"
         >
           {[
             { featured: true, hint: "当前可直接用于下单", label: "可用余额", value: money(wallet.availableFen) },
             { hint: "客户账户账面余额", label: "账面余额", value: money(wallet.balanceFen) },
-            { hint: "批量付款时暂时冻结的金额", label: "已冻结", value: money(wallet.activeHoldFen) },
+            { hint: "等待付款确认的订单暂时占用", label: "订单占用", value: money(wallet.activeHoldFen) },
           ].map((item) => (
             <div className={item.featured ? "min-w-0 bg-primary/5 px-4 py-4 sm:px-5" : "min-w-0 px-4 py-4 sm:px-5"} key={item.label}>
               <p className="text-xs font-medium text-muted">{item.label}</p>
@@ -52,9 +57,9 @@ export default async function CustomerWalletPage() {
 
         <SettlementRegion
           action={<LockKeyhole aria-hidden="true" className="size-5 text-primary" />}
-          description="批量付款时会先冻结钱包抵扣金额，付款完成或关闭后自动释放或扣除。"
+          description="多张拿货单合并付款时会暂时占用钱包金额，付款完成或关闭后自动扣除或释放。"
           kind="batches"
-          title="批量付款冻结"
+          title="订单资金占用"
         >
 
         {wallet.holds.length ? (
@@ -67,7 +72,7 @@ export default async function CustomerWalletPage() {
                       <p className="font-medium text-ink">付款编号 {hold.batchNumber}</p>
                       <Badge variant="secondary">{hold.status}</Badge>
                     </div>
-                    <p className="mt-1 text-xs text-muted">冻结于 {dateTime(hold.createdAt)}（渥太华）</p>
+                    <p className="mt-1 text-xs text-muted">占用于 {dateTime(hold.createdAt)}（渥太华）</p>
                     {hold.releasedAt ? <p className="mt-1 text-xs text-muted">处理于 {dateTime(hold.releasedAt)}（渥太华）</p> : null}
                     {hold.releaseReason ? <p className="mt-1 text-xs text-muted">{hold.releaseReason}</p> : null}
                   </div>
@@ -83,8 +88,8 @@ export default async function CustomerWalletPage() {
           </div>
         ) : (
           <div className="px-5 py-14 text-center">
-            <p className="font-medium text-ink">暂无冻结记录</p>
-            <p className="mt-1 text-sm text-muted">提交批量付款后会在这里记录冻结历史。</p>
+            <p className="font-medium text-ink">暂无订单资金占用</p>
+            <p className="mt-1 text-sm text-muted">使用余额支付或合并付款后，会在这里保留占用记录。</p>
           </div>
         )}
         </SettlementRegion>

@@ -105,7 +105,7 @@ describe("CustomerSettlementDetailPage", () => {
       }),
     );
 
-    expect(screen.getByRole("heading", { name: "本次批量拿货付款" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本次合并付款" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "付款任务" })).toBeVisible();
     expect(screen.getByRole("region", { name: "本次包含的拿货单" })).toBeVisible();
     expect(screen.getByText("1 张拿货单合并为一次付款")).toBeVisible();
@@ -122,6 +122,7 @@ describe("CustomerSettlementDetailPage", () => {
     expect(screen.queryByText("PENDING_PAYMENT")).not.toBeInTheDocument();
     expect(screen.queryByText("PAID_PENDING_FULFILLMENT")).not.toBeInTheDocument();
     expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("批量付款");
   });
 
   it("keeps the payment declaration skip target focusable without a claim", async () => {

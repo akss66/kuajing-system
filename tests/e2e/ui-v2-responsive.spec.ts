@@ -60,14 +60,14 @@ const navigation = {
   },
   customer: {
     drawerTitle: "客户导航",
-    groups: ["拿货", "订单与付款"],
+    groups: ["拿货", "履约", "资金"],
     label: "客户主导航",
   },
 } as const;
 
 const navigationSectionCounts = {
   admin: 5,
-  customer: 3,
+  customer: 4,
 } as const;
 
 function observeBrowserErrors(page: Page) {
@@ -329,13 +329,13 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     {
       audience: "customer",
       heading: "客户首页",
-      keyTarget: { name: /货盘选品/, role: "link" },
+      keyTarget: { name: /实时货盘/, role: "link" },
       pageType: "operations-dashboard",
       path: "/portal",
     },
     {
       audience: "customer",
-      heading: "货盘选品",
+      heading: "实时货盘",
       keyTarget: { name: "搜索 SKU、商品、规格或链接文字", role: "searchbox" },
       pageType: "resource-list",
       path: "/portal/catalog",
@@ -349,14 +349,14 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     },
     {
       audience: "customer",
-      heading: "上传 TEMU 订单",
+      heading: "上传订单",
       keyTarget: { name: "上传并生成预览", role: "button" },
       pageType: "task-flow",
       path: "/portal/imports/new",
     },
     {
       audience: "customer",
-      heading: "多店铺批量拿货",
+      heading: "多店铺批量上传",
       keyTarget: { name: "新建批量草稿", role: "button" },
       pageType: "task-flow",
       path: "/portal/bulk-orders",

@@ -46,10 +46,16 @@ describe("settlement page regions", () => {
   it("separates wallet balance, holds and immutable transactions", async () => {
     render(await CustomerWalletPage());
 
+    expect(screen.getByRole("heading", { level: 1, name: "资金中心" })).toBeVisible();
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
     expect(screen.getByText("可用余额")).toBeVisible();
     expect(screen.queryByText("流水条数")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "批量付款冻结" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "订单资金占用" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
+    expect(screen.getByRole("link", { name: /合并付款记录/ })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
+    expect(document.body).not.toHaveTextContent("批量付款冻结");
   });
 });
