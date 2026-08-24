@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireAdmin } from "@/modules/identity/guards";
+import { requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
 import {
@@ -23,6 +23,7 @@ const schema = z.object({
   amountFen: moneySchema,
   customerId: z.string().uuid("请选择客户"),
   operation: z.enum(["CREDIT", "DEBIT"]),
+  requestId: z.string().uuid(),
   reason: z.string().trim().min(2, "请填写调整原因").max(300),
 });
 
@@ -30,11 +31,12 @@ export async function adjustWalletAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const principal = await requireAdmin();
+  const principal = await requireSuperAdmin();
   const parsed = schema.safeParse({
     amountFen: formData.get("amountYuan"),
     customerId: formData.get("customerId"),
     operation: formData.get("operation"),
+    requestId: formData.get("requestId"),
     reason: formData.get("reason"),
   });
   if (!parsed.success) {
@@ -52,6 +54,7 @@ export async function adjustWalletAction(
         parsed.data.operation === "CREDIT"
           ? parsed.data.amountFen
           : -parsed.data.amountFen,
+      idempotencyKey: parsed.data.requestId,
       reason: parsed.data.reason,
     });
   } catch (error) {

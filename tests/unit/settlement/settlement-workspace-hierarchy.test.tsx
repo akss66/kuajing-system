@@ -2,8 +2,12 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const authMocks = vi.hoisted(() => ({
+  requireAdmin: vi.fn(),
+}));
 
 const orderQueryMocks = vi.hoisted(() => ({
   listPendingPaymentClaims: vi.fn(),
@@ -20,6 +24,7 @@ const walletQueryMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/modules/orders/queries", () => orderQueryMocks);
+vi.mock("@/modules/identity/guards", () => authMocks);
 vi.mock("@/modules/settlement/admin-queries", () => settlementQueryMocks);
 vi.mock("@/modules/wallet/queries", () => walletQueryMocks);
 vi.mock("@/modules/wallet/actions", () => ({ adjustWalletAction: vi.fn() }));
@@ -30,6 +35,10 @@ vi.mock("@/components/orders/payment-claim-review", () => ({
 import SettlementPage from "@/app/(admin)/admin/settlement/page";
 
 describe("settlement workspace hierarchy", () => {
+  beforeEach(() => {
+    authMocks.requireAdmin.mockResolvedValue({ kind: "SUPER_ADMIN", userId: "super-admin-1" });
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -73,5 +82,24 @@ describe("settlement workspace hierarchy", () => {
       "href",
       "/admin/orders/order-1",
     );
+    expect(screen.getByRole("combobox", { name: "操作" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "核对并调整余额" }));
+    expect(screen.getByRole("alertdialog")).toBeVisible();
+    expect(screen.getByText("确认执行余额调整？")).toBeVisible();
+    expect(screen.getByRole("button", { name: "返回检查" })).toBeVisible();
+  });
+
+  it("keeps balance mutation controls unavailable to an ordinary administrator", async () => {
+    authMocks.requireAdmin.mockResolvedValueOnce({ kind: "ADMIN", userId: "admin-1" });
+    orderQueryMocks.listPendingPaymentClaims.mockResolvedValue([]);
+    settlementQueryMocks.listAdminSettlementBatches.mockResolvedValue([]);
+    settlementQueryMocks.listPendingOfflineRefunds.mockResolvedValue([]);
+    walletQueryMocks.listAdminWalletAccounts.mockResolvedValue([]);
+    walletQueryMocks.listAdminWalletTransactions.mockResolvedValue([]);
+
+    render(await SettlementPage());
+
+    expect(screen.queryByRole("button", { name: "核对并调整余额" })).not.toBeInTheDocument();
+    expect(screen.getByText("余额调整仅限超级管理员操作")).toBeVisible();
   });
 });

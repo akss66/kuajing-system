@@ -73,6 +73,38 @@ describe("wallet administration", () => {
     ).toHaveLength(2);
   });
 
+  test("applies a repeated administrative adjustment request only once", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `W-${crypto.randomUUID()}`, name: "幂等余额客户" })
+      .returning();
+    const idempotencyKey = crypto.randomUUID();
+    const input = {
+      actorUserId: "admin-wallet",
+      customerId: customer.id,
+      deltaFen: 2_000,
+      idempotencyKey,
+      reason: "同一请求重复提交",
+    };
+
+    const first = await adjustWalletBalance(input);
+    const repeated = await adjustWalletBalance(input);
+
+    expect(repeated).toEqual(first);
+    const [wallet] = await db
+      .select()
+      .from(walletAccounts)
+      .where(eq(walletAccounts.customerId, customer.id));
+    expect(wallet.balanceFen).toBe(2_000);
+    expect(await db.select().from(walletTransactions)).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "WALLET_ADJUSTED")),
+    ).toHaveLength(1);
+  });
+
   test("never allows an administrative adjustment to make balance negative", async () => {
     const [customer] = await db
       .insert(customers)

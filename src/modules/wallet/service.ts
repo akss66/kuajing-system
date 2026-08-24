@@ -374,6 +374,7 @@ export async function adjustWalletBalance(input: {
   actorUserId: string;
   customerId: string;
   deltaFen: number;
+  idempotencyKey?: string;
   reason: string;
 }) {
   assertFen(input.deltaFen, false);
@@ -387,6 +388,39 @@ export async function adjustWalletBalance(input: {
 
   return db.transaction(async (tx) => {
     const wallet = await lockWalletFunding(tx, input.customerId);
+    if (input.idempotencyKey) {
+      const [existingTransaction] = await tx
+        .select({
+          actorId: walletTransactions.actorId,
+          afterBalanceFen: walletTransactions.afterBalanceFen,
+          beforeBalanceFen: walletTransactions.beforeBalanceFen,
+          customerId: walletTransactions.customerId,
+          deltaFen: walletTransactions.deltaFen,
+          id: walletTransactions.id,
+          reason: walletTransactions.reason,
+          transactionType: walletTransactions.transactionType,
+        })
+        .from(walletTransactions)
+        .where(eq(walletTransactions.id, input.idempotencyKey))
+        .limit(1);
+      if (existingTransaction) {
+        if (
+          existingTransaction.actorId !== input.actorUserId ||
+          existingTransaction.customerId !== input.customerId ||
+          existingTransaction.deltaFen !== input.deltaFen ||
+          existingTransaction.reason !== reason ||
+          existingTransaction.transactionType !==
+            (input.deltaFen > 0 ? "ADMIN_CREDIT" : "ADMIN_DEBIT")
+        ) {
+          throw new WalletValidationError("余额调整请求编号已被其他操作使用");
+        }
+        return {
+          afterBalanceFen: existingTransaction.afterBalanceFen,
+          beforeBalanceFen: existingTransaction.beforeBalanceFen,
+          transactionId: existingTransaction.id,
+        };
+      }
+    }
     const afterBalanceFen = wallet.balanceFen + input.deltaFen;
     if (
       afterBalanceFen < 0 ||
@@ -415,6 +449,7 @@ export async function adjustWalletBalance(input: {
         beforeBalanceFen: wallet.balanceFen,
         customerId: input.customerId,
         deltaFen: input.deltaFen,
+        ...(input.idempotencyKey ? { id: input.idempotencyKey } : {}),
         reason,
         transactionType: input.deltaFen > 0 ? "ADMIN_CREDIT" : "ADMIN_DEBIT",
       })

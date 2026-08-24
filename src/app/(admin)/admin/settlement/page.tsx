@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
-import { ActionForm } from "@/components/forms/action-form";
+import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { PaymentClaimReview } from "@/components/orders/payment-claim-review";
 import {
@@ -14,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listPendingPaymentClaims } from "@/modules/orders/queries";
+import { requireAdmin } from "@/modules/identity/guards";
 import {
   listAdminSettlementBatches,
   listPendingOfflineRefunds,
@@ -43,6 +46,7 @@ function refundAge(value: Date, now = new Date()) {
 }
 
 export default async function SettlementPage() {
+  const principal = await requireAdmin();
   const [accounts, transactions, pendingClaims, pendingBatches, pendingRefunds] = await Promise.all([
     listAdminWalletAccounts(),
     listAdminWalletTransactions(),
@@ -181,12 +185,18 @@ export default async function SettlementPage() {
           description="线下微信收款后可调整余额；每次增加或扣减都必须填写审计原因。"
           kind="balances"
         >
-          <ActionForm
-            action={adjustWalletAction}
-            className="grid gap-4 border-b border-border p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end"
-            submitLabel="确认调整余额"
-          >
-            <label className="space-y-2 text-sm font-medium text-ink">
+          {principal.kind === "SUPER_ADMIN" ? (
+            <ConfirmedActionForm
+              action={adjustWalletAction}
+              className="grid gap-4 border-b border-border p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end"
+              confirmDescription="请返回核对客户、增加或扣减方向、金额和原因。确认后会立即改变客户可用余额并写入不可变资金流水。"
+              confirmLabel="确认执行余额调整"
+              confirmTitle="确认执行余额调整？"
+              submitLabel="核对并调整余额"
+              variant="default"
+            >
+              <input name="requestId" type="hidden" value={randomUUID()} />
+              <label className="space-y-2 text-sm font-medium text-ink">
               客户
               <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="customerId" required>
                 <option value="">选择客户</option>
@@ -198,19 +208,26 @@ export default async function SettlementPage() {
             <label className="space-y-2 text-sm font-medium text-ink">
               操作
               <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="operation" required>
+                <option value="">选择增加或扣减</option>
                 <option value="CREDIT">增加余额</option>
                 <option value="DEBIT">扣减余额</option>
               </select>
             </label>
             <label className="space-y-2 text-sm font-medium text-ink">
               金额（元）
-              <Input className="min-h-11 tabular-nums" inputMode="decimal" min="0.01" name="amountYuan" placeholder="500.00" required />
+              <Input className="min-h-11 tabular-nums" inputMode="decimal" min="0.01" name="amountYuan" placeholder="0.00" required />
             </label>
             <label className="space-y-2 text-sm font-medium text-ink">
               调整原因
               <Input className="min-h-11" maxLength={300} name="reason" placeholder="例如：收到微信转账" required />
             </label>
-          </ActionForm>
+            </ConfirmedActionForm>
+          ) : (
+            <div className="border-b border-border bg-surface-muted/55 px-4 py-3 text-sm text-muted sm:px-5">
+              <p className="font-medium text-ink">余额调整仅限超级管理员操作</p>
+              <p className="mt-1">普通管理员可查看客户余额和资金流水，但不能创建或扣减现金等价余额。</p>
+            </div>
+          )}
 
           <ResponsiveDataTable>
             <Table>
