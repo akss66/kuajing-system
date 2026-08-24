@@ -132,8 +132,51 @@ describe("ImportPreviewPage", () => {
     expect(recovery).toHaveTextContent("不可提交");
     expect(metricStrip?.textContent).toContain("可提交");
     expect(metricStrip?.textContent).toContain("重复订单");
-    expect(metricStrip?.textContent).toContain("未映射 SKU");
+    expect(metricStrip?.textContent).toContain("SKU 不可用");
     expect(metricStrip?.textContent).toContain("格式错误");
     expect(metricStrip?.querySelectorAll("article")).toHaveLength(4);
+  });
+
+  it("explains that an unavailable SKU may be unmapped or taken off sale", async () => {
+    authMocks.requireCustomer.mockResolvedValue({
+      customerId: "customer-1",
+      userId: "user-1",
+    });
+    previewMocks.getCustomerImportPreview.mockResolvedValue({
+      batchId: "batch-1",
+      expiresAt: new Date("2026-08-13T10:00:00.000Z"),
+      fileName: "orders.xlsx",
+      rows: [
+        {
+          errorCode: "SKU_UNAVAILABLE",
+          errorMessage: "SKU 已下架或不可售，请联系管理员处理",
+          externalOrderNo: "PO-1",
+          externalSku: "SKU-1",
+          externalSubOrderNo: "SUB-1",
+          quantity: 1,
+          rowNumber: 2,
+          status: "UNKNOWN_SKU",
+        },
+      ],
+      storeId: "store-1",
+      storeName: "TEMU 店铺",
+      summary: {
+        duplicate: 0,
+        invalid: 0,
+        ready: 0,
+        total: 1,
+        unknownSku: 1,
+      },
+    });
+
+    render(
+      await ImportPreviewPage({
+        params: Promise.resolve({ batchId: "batch-1" }),
+      }),
+    );
+
+    expect(screen.getAllByText("SKU 不可用").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/未建立映射或已下架/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "提交订单" })).toBeDisabled();
   });
 });

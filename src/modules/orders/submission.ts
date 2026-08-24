@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -305,6 +305,7 @@ export async function submitTemuImportBatch(input: {
     const skuIds = [...new Set(readyRows.map((row) => row.resolvedSkuId!))].sort();
     const skuRows = await tx
       .select({
+        archivedAt: skus.archivedAt,
         id: skus.id,
         lifecycleStatus: skus.lifecycleStatus,
         name: skus.name,
@@ -312,20 +313,69 @@ export async function submitTemuImportBatch(input: {
         skuCode: skus.skuCode,
       })
       .from(skus)
-      .where(inArray(skus.id, skuIds));
+      .where(inArray(skus.id, skuIds))
+      .for("share");
     const skuById = new Map(skuRows.map((sku) => [sku.id, sku]));
+    const unavailableSkuIds = skuIds.filter((skuId) => {
+      const sku = skuById.get(skuId);
+      return (
+        !sku ||
+        sku.lifecycleStatus !== "ACTIVE" ||
+        sku.saleStatus !== "SELLABLE" ||
+        sku.archivedAt !== null
+      );
+    });
+    if (unavailableSkuIds.length > 0) {
+      const reclassifiedRows = await tx
+        .update(orderImportRows)
+        .set({
+          errorCode: "SKU_UNAVAILABLE",
+          errorMessage: "SKU 已下架或不可售，请联系管理员处理",
+          resolvedSkuId: null,
+          status: "UNKNOWN_SKU",
+        })
+        .where(
+          and(
+            eq(orderImportRows.batchId, batch.id),
+            eq(orderImportRows.status, "READY"),
+            inArray(orderImportRows.resolvedSkuId, unavailableSkuIds),
+          ),
+        )
+        .returning({ rowNumber: orderImportRows.rowNumber });
+      if (reclassifiedRows.length > 0) {
+        await tx
+          .update(orderImportBatches)
+          .set({
+            readyRows: sql`${orderImportBatches.readyRows} - ${reclassifiedRows.length}`,
+            unknownSkuRows: sql`${orderImportBatches.unknownSkuRows} + ${reclassifiedRows.length}`,
+            updatedAt: now,
+          })
+          .where(eq(orderImportBatches.id, batch.id));
+        await tx.insert(auditLogs).values({
+          action: "TEMU_IMPORT_PREVIEW_RECLASSIFIED",
+          actorId: input.actorUserId,
+          actorType: "CUSTOMER",
+          afterJson: {
+            affectedRows: reclassifiedRows.length,
+            reason: "SKU_UNAVAILABLE",
+          },
+          beforeJson: { status: "READY" },
+          entityId: batch.id,
+          entityType: "ORDER_IMPORT_BATCH",
+          reason: "提交时发现 SKU 已下架或不可售，阻止创建拿货单",
+        });
+      }
+      return {
+        code: "SKU_NOT_SELLABLE",
+        kind: "ERROR",
+        message: "订单中有 SKU 已下架或不可售，预览已更新，请联系管理员处理",
+      };
+    }
     const priceBySkuId = new Map<
       string,
       Awaited<ReturnType<typeof resolveUnitPrice>>
     >();
     for (const skuId of skuIds) {
-      const sku = skuById.get(skuId);
-      if (!sku || sku.lifecycleStatus !== "ACTIVE" || sku.saleStatus !== "SELLABLE") {
-        throw new OrderSubmissionError(
-          "SKU_NOT_SELLABLE",
-          "订单中有已下架 SKU，请重新预览",
-        );
-      }
       priceBySkuId.set(
         skuId,
         await resolveUnitPrice(tx, {

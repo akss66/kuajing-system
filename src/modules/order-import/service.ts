@@ -79,6 +79,18 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
   return result;
 }
 
+function isSkuAvailable(input: {
+  archivedAt: Date | null;
+  lifecycleStatus: string;
+  saleStatus: string;
+}) {
+  return (
+    input.lifecycleStatus === "ACTIVE" &&
+    input.saleStatus === "SELLABLE" &&
+    input.archivedAt === null
+  );
+}
+
 async function exactSkuResolutionMap(
   tx: DbTransaction,
   storeId: string,
@@ -89,22 +101,26 @@ async function exactSkuResolutionMap(
   const uniqueExternalSkus = [...new Set(externalSkus)];
   const [standardSkus, aliases] = await Promise.all([
     tx
-      .select({ skuCode: skus.skuCode, skuId: skus.id })
+      .select({
+        archivedAt: skus.archivedAt,
+        lifecycleStatus: skus.lifecycleStatus,
+        saleStatus: skus.saleStatus,
+        skuCode: skus.skuCode,
+        skuId: skus.id,
+      })
       .from(skus)
-      .where(
-        and(
-          inArray(skus.skuCode, uniqueExternalSkus),
-          eq(skus.lifecycleStatus, "ACTIVE"),
-          isNull(skus.archivedAt),
-        ),
-      ),
+      .where(inArray(skus.skuCode, uniqueExternalSkus)),
     tx
       .select({
+        archivedAt: skus.archivedAt,
         externalSku: skuAliases.externalSku,
+        lifecycleStatus: skus.lifecycleStatus,
+        saleStatus: skus.saleStatus,
         skuId: skuAliases.skuId,
         storeId: skuAliases.storeId,
       })
       .from(skuAliases)
+      .innerJoin(skus, eq(skus.id, skuAliases.skuId))
       .where(
         and(
           eq(skuAliases.active, true),
@@ -114,15 +130,37 @@ async function exactSkuResolutionMap(
       ),
   ]);
 
-  const resolved = new Map<string, string>();
+  const candidates = new Map<
+    string,
+    {
+      eligible: boolean;
+      skuId: string;
+    }
+  >();
   for (const standardSku of standardSkus) {
-    resolved.set(standardSku.skuCode, standardSku.skuId);
+    candidates.set(standardSku.skuCode, {
+      eligible: isSkuAvailable(standardSku),
+      skuId: standardSku.skuId,
+    });
   }
   for (const alias of aliases.filter((row) => row.storeId === null)) {
-    resolved.set(alias.externalSku, alias.skuId);
+    candidates.set(alias.externalSku, {
+      eligible: isSkuAvailable(alias),
+      skuId: alias.skuId,
+    });
   }
   for (const alias of aliases.filter((row) => row.storeId === storeId)) {
-    resolved.set(alias.externalSku, alias.skuId);
+    candidates.set(alias.externalSku, {
+      eligible: isSkuAvailable(alias),
+      skuId: alias.skuId,
+    });
+  }
+
+  const resolved = new Map<string, string>();
+  for (const [externalSku, candidate] of candidates) {
+    if (candidate.eligible) {
+      resolved.set(externalSku, candidate.skuId);
+    }
   }
   return resolved;
 }
@@ -480,6 +518,21 @@ export async function refreshActiveImportPreviewsForAlias(
     skuId: string;
   },
 ) {
+  const [eligibleSku] = await tx
+    .select({ id: skus.id })
+    .from(skus)
+    .where(
+      and(
+        eq(skus.id, input.skuId),
+        eq(skus.lifecycleStatus, "ACTIVE"),
+        eq(skus.saleStatus, "SELLABLE"),
+        isNull(skus.archivedAt),
+      ),
+    )
+    .for("share")
+    .limit(1);
+  if (!eligibleSku) return 0;
+
   const activeBatches = await tx
     .select({ id: orderImportBatches.id })
     .from(orderImportBatches)

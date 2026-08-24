@@ -11,6 +11,7 @@ import {
   inventoryBalances,
   inventoryReservations,
   orderImportBatches,
+  orderImportRows,
   orderLines,
   orderShipments,
   products,
@@ -577,13 +578,12 @@ describe("atomic TEMU take-order submission", () => {
     ]);
   });
 
-  test("rejects a manually not-sellable SKU even when stock is available", async () => {
+  test("reclassifies a preview when its SKU becomes not sellable before submission", async () => {
     const { customer, store } = await createCustomerAndStore();
-    await createSku({
+    const sku = await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
       externalSku: "EXT-BLOCKED",
-      saleStatus: "NOT_SELLABLE",
       storeId: store.id,
       totalQuantity: 5,
     });
@@ -592,6 +592,11 @@ describe("atomic TEMU take-order submission", () => {
       storeId: store.id,
       rows: [{ SKU货号: "EXT-BLOCKED" }],
     });
+    expect(preview.summary).toMatchObject({ ready: 1, unknownSku: 0 });
+    await db
+      .update(skus)
+      .set({ saleStatus: "NOT_SELLABLE" })
+      .where(eq(skus.id, sku.id));
 
     await expect(
       submitTemuImportBatch({
@@ -601,6 +606,31 @@ describe("atomic TEMU take-order submission", () => {
       }),
     ).rejects.toMatchObject({ code: "SKU_NOT_SELLABLE" });
 
+    await expect(
+      db
+        .select({
+          readyRows: orderImportBatches.readyRows,
+          unknownSkuRows: orderImportBatches.unknownSkuRows,
+        })
+        .from(orderImportBatches)
+        .where(eq(orderImportBatches.id, preview.batchId)),
+    ).resolves.toEqual([{ readyRows: 0, unknownSkuRows: 1 }]);
+    await expect(
+      db
+        .select({
+          errorCode: orderImportRows.errorCode,
+          resolvedSkuId: orderImportRows.resolvedSkuId,
+          status: orderImportRows.status,
+        })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.batchId, preview.batchId)),
+    ).resolves.toEqual([
+      {
+        errorCode: "SKU_UNAVAILABLE",
+        resolvedSkuId: null,
+        status: "UNKNOWN_SKU",
+      },
+    ]);
     expect(await db.select().from(fulfillmentOrders)).toEqual([]);
     expect(await db.select().from(inventoryReservations)).toEqual([]);
   });

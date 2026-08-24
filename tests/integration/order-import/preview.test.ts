@@ -368,6 +368,140 @@ describe("customer-scoped TEMU import preview", () => {
     ).resolves.toEqual([{ resolvedSkuId: fixture.sku.id }]);
   });
 
+  test("keeps direct and aliased unavailable SKUs blocked in preview", async () => {
+    const fixture = await createFixture();
+    const [product] = await db
+      .insert(products)
+      .values({ name: "不可售预览商品" })
+      .returning();
+    const [directNotSellable, storeNotSellable, globalArchived] = await db
+      .insert(skus)
+      .values([
+        {
+          defaultUnitPriceFen: 500,
+          name: "标准 SKU 已下架",
+          productId: product.id,
+          saleStatus: "NOT_SELLABLE",
+          skuCode: "TZX-DIRECT-NOT-SELLABLE",
+        },
+        {
+          defaultUnitPriceFen: 500,
+          name: "店铺映射 SKU 已下架",
+          productId: product.id,
+          saleStatus: "NOT_SELLABLE",
+          skuCode: "TZX-" + crypto.randomUUID(),
+        },
+        {
+          archivedAt: new Date(),
+          defaultUnitPriceFen: 500,
+          lifecycleStatus: "ARCHIVED",
+          name: "全局映射 SKU 已归档",
+          productId: product.id,
+          skuCode: "TZX-" + crypto.randomUUID(),
+        },
+      ])
+      .returning();
+    await db.insert(skuAliases).values([
+      {
+        externalSku: "STORE-NOT-SELLABLE",
+        skuId: fixture.sku.id,
+        storeId: null,
+      },
+      {
+        externalSku: "STORE-NOT-SELLABLE",
+        skuId: storeNotSellable.id,
+        storeId: fixture.store.id,
+      },
+      {
+        externalSku: "GLOBAL-ARCHIVED",
+        skuId: globalArchived.id,
+        storeId: null,
+      },
+    ]);
+
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: directNotSellable.skuCode,
+          子订单号: "SUB-DIRECT-NOT-SELLABLE",
+        },
+        {
+          订单号: "PO-STORE-NOT-SELLABLE",
+          SKU货号: "STORE-NOT-SELLABLE",
+          子订单号: "SUB-STORE-NOT-SELLABLE",
+        },
+        {
+          订单号: "PO-GLOBAL-ARCHIVED",
+          SKU货号: "GLOBAL-ARCHIVED",
+          子订单号: "SUB-GLOBAL-ARCHIVED",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "unavailable-skus.xlsx",
+      storeId: fixture.store.id,
+    });
+
+    expect(preview.summary).toEqual({
+      total: 3,
+      ready: 0,
+      duplicate: 0,
+      unknownSku: 3,
+      invalid: 0,
+    });
+    await expect(
+      db
+        .select({
+          resolvedSkuId: orderImportRows.resolvedSkuId,
+          status: orderImportRows.status,
+        })
+        .from(orderImportRows)
+        .where(sql`${orderImportRows.batchId} = ${preview.batchId}`)
+        .orderBy(orderImportRows.rowNumber),
+    ).resolves.toEqual([
+      { resolvedSkuId: null, status: "UNKNOWN_SKU" },
+      { resolvedSkuId: null, status: "UNKNOWN_SKU" },
+      { resolvedSkuId: null, status: "UNKNOWN_SKU" },
+    ]);
+  });
+
+  test("does not refresh an unknown preview row to an unavailable mapped SKU", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-1",
+      buffer: await workbookBuffer([
+        {
+          SKU货号: "LATER-BLOCKED-ALIAS",
+          子订单号: "SUB-LATER-BLOCKED-ALIAS",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "later-blocked-alias.xlsx",
+      storeId: fixture.store.id,
+    });
+    await db
+      .update(skus)
+      .set({ saleStatus: "NOT_SELLABLE" })
+      .where(sql`${skus.id} = ${fixture.sku.id}`);
+
+    const refreshed = await db.transaction((tx) =>
+      refreshActiveImportPreviewsForAlias(tx, {
+        actorUserId: "auth-admin-1",
+        externalSku: "LATER-BLOCKED-ALIAS",
+        skuId: fixture.sku.id,
+        storeId: fixture.store.id,
+      }),
+    );
+
+    expect(refreshed).toBe(0);
+    await expect(
+      getCustomerImportPreview(fixture.customer.id, preview.batchId),
+    ).resolves.toMatchObject({
+      rows: [{ status: "UNKNOWN_SKU" }],
+      summary: { ready: 0, unknownSku: 1 },
+    });
+  });
+
   test("keeps store aliases ahead of global aliases and standard SKU fallback", async () => {
     const fixture = await createFixture();
     const [product] = await db
