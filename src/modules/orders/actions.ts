@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { InsufficientInventoryError } from "@/modules/inventory/service";
@@ -39,6 +39,9 @@ export async function submitImportBatchAction(
       return { status: "error", message: "部分 SKU 库存不足，请联系管理员补货后重试。" };
     }
     if (error instanceof OrderSubmissionError) {
+      if (error.code === "SKU_NOT_SELLABLE") {
+        refresh();
+      }
       return { status: "error", message: error.message };
     }
     return { status: "error", message: "拿货单提交失败，请稍后重试。" };
