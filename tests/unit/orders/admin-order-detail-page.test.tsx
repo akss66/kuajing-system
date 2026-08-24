@@ -118,9 +118,7 @@ describe("AdminOrderDetailPage", () => {
     expect(screen.queryByText("FULFILLING")).not.toBeInTheDocument();
     expect(screen.getByText("ERP-1")).toBeVisible();
     expect(screen.getByText("TRACK-1")).toBeVisible();
-    expect(
-      screen.getByRole("group", { name: "查看补发包裹详情" }),
-    ).not.toHaveAttribute("open");
+    expect(screen.getByRole("group", { name: "补发包裹工作区" })).not.toHaveAttribute("open");
   });
 
   it("keeps a matched Jifeng order as a compact manual-action summary", async () => {
@@ -181,12 +179,7 @@ describe("AdminOrderDetailPage", () => {
       ),
     ).toBeVisible();
     expect(screen.getByText("OPNJ-1")).toBeVisible();
-    expect(
-      screen.getByRole("group", { name: "查看普通包裹 1详情" }),
-    ).not.toHaveAttribute("open");
-    expect(
-      screen.getByRole("group", { name: "处理普通包裹 1" }),
-    ).not.toHaveAttribute("open");
+    expect(screen.getByRole("group", { name: "普通包裹 1工作区" })).toHaveAttribute("open");
   });
 
   it("presents retry and cancellation as independent package operations", async () => {
@@ -259,6 +252,7 @@ describe("AdminOrderDetailPage", () => {
 
     expect(screen.getAllByRole("button", { name: "取消此包裹" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "重试这个包裹" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "普通包裹 1工作区" })).toHaveAttribute("open");
     expect(screen.getByText("已提交重试，等待系统处理")).toBeVisible();
     expect(
       screen.queryByText("MANUAL_CONFIRMED_FAILURE_RETRY"),

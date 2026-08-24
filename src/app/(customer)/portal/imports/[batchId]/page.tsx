@@ -54,7 +54,7 @@ export default async function ImportPreviewPage({
   );
 
   return (
-    <div className="space-y-5 pb-2">
+    <div className="space-y-5 pb-3">
       <PageHeading
         action={
           <div className="text-sm text-muted sm:text-right">
@@ -80,7 +80,7 @@ export default async function ImportPreviewPage({
           <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
           <div>
             <p className="font-semibold">还有 {blocking} 行需要处理，暂不能提交拿货单</p>
-            <p className="mt-1 text-warning">
+            <p className="mt-1">
               请选择同系列替代 SKU、手动输入或调整数量；格式错误请修正 TEMU 文件后重新上传。重复订单会自动跳过。
             </p>
           </div>
@@ -95,35 +95,40 @@ export default async function ImportPreviewPage({
 
       <section
         aria-label="提交拿货单操作栏"
-        className="sticky bottom-2 z-20 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-surface)] border border-border bg-background/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex sm:justify-between sm:px-5 sm:py-3"
+        className="sticky bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)] z-20 rounded-[var(--radius-surface)] border border-border bg-background/96 p-3 shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:flex sm:items-end sm:justify-between sm:gap-3 sm:px-5 sm:py-4 lg:bottom-4"
       >
-        <div className="hidden min-w-0 items-start gap-3 sm:flex">
-          {blocking ? (
-            <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
-          ) : (
-            <ShieldCheck aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
-          )}
-          <div className="min-w-0">
-            <p className="font-semibold text-ink">
-              {blocking
-                ? `还有 ${blocking} 行待处理，暂不能提交`
-                : `已校验 ${preview.summary.ready} 行，可安全提交`}
-            </p>
-            <p className="mt-0.5 text-xs leading-5 text-muted">
-              {packageCount} 个包裹 · {quantity} 件商品
-              {preview.summary.duplicate ? ` · ${preview.summary.duplicate} 个重复订单自动跳过` : ""}
-              ；提交时会再次校验库存和重复订单。
-            </p>
+        <div className="min-w-0">
+          <div className="flex items-start gap-3">
+            {blocking ? (
+              <AlertTriangle aria-hidden="true" className="mt-0.5 hidden size-5 shrink-0 text-warning sm:block" />
+            ) : (
+              <ShieldCheck aria-hidden="true" className="mt-0.5 hidden size-5 shrink-0 text-success sm:block" />
+            )}
+            <div className="min-w-0">
+              <p className="font-semibold text-ink">
+                {blocking
+                  ? `还有 ${blocking} 行待处理，暂不能提交`
+                  : `已校验 ${preview.summary.ready} 行，可安全提交`}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                {packageCount} 个包裹 · {quantity} 件商品
+                {preview.summary.duplicate
+                  ? ` · ${preview.summary.duplicate} 个重复订单自动跳过`
+                  : ""}
+                。提交时会再次校验库存和重复订单。
+              </p>
+            </div>
           </div>
         </div>
-        <div className="contents sm:flex sm:w-auto sm:items-end sm:gap-2">
+
+        <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-2 sm:mt-0 sm:flex sm:w-auto sm:items-end">
           <Link
             aria-label="返回重新上传"
-            className="inline-flex size-11 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background text-sm font-medium text-ink hover:bg-[var(--merchant-nav-hover)] sm:h-11 sm:w-auto sm:px-4"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-3 text-sm font-medium text-ink hover:bg-[var(--merchant-nav-hover)] sm:px-4"
             href="/portal/imports/new"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            <span className="sr-only sm:not-sr-only">返回重新上传</span>
+            <span className="hidden sm:inline">返回重新上传</span>
           </Link>
           <OrderSubmitButton
             action={submitImportBatchAction}

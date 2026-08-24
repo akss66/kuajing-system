@@ -191,8 +191,8 @@ export default async function IntegrationsPage() {
     ? (connection as JifengConnectionAdminView)
     : null;
   const jifengConfigured = jifengConfiguration.developer.configured;
-  const integrationStatus = (isConfigured: boolean) =>
-    isConfigured ? "已配置" : "未配置";
+  const integrationStatus = (isConfigured: boolean, configuredLabel: string, missingLabel: string) =>
+    isConfigured ? configuredLabel : missingLabel;
   const integrationStatusClass = (isConfigured: boolean) =>
     isConfigured
       ? "bg-success/10 text-success"
@@ -216,10 +216,10 @@ export default async function IntegrationsPage() {
             className="text-base font-semibold text-foreground"
             id="integration-status-title"
           >
-            集成运行状态
+            集成配置与运行状态
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            配置完整性与最近任务结果分开展示，不回显密钥或授权内容。
+            卡片徽标只表示前置配置；真实授权、自动履约和最近任务结果在对应运行区单独展示。
           </p>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -240,21 +240,32 @@ export default async function IntegrationsPage() {
                 className={integrationStatusClass(jifengConfigured)}
                 variant="secondary"
               >
-                {integrationStatus(jifengConfigured)}
+                {integrationStatus(jifengConfigured, "开发者配置已就绪", "待补开发者凭证")}
               </Badge>
             </div>
-            <div className="mt-5 flex items-center gap-2 text-sm text-muted">
-              {jifengConfigured ? (
-                <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-              ) : (
-                <CircleDashed aria-hidden="true" className="size-4" />
-              )}
-              <span>
-                {jifengConfigured
-                  ? "开发者配置已就绪；实际授权与履约状态见下方连接卡。"
-                  : "仍需配置开发者凭证，之后由超级管理员完成官方授权。"}
-              </span>
-            </div>
+            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-lg bg-surface/55 px-3 py-3">
+                <dt className="text-xs font-medium text-muted">开发者配置</dt>
+                <dd className="mt-1 flex items-center gap-2 text-ink">
+                  {jifengConfigured ? (
+                    <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+                  ) : (
+                    <CircleDashed aria-hidden="true" className="size-4" />
+                  )}
+                  <span>
+                    {jifengConfigured
+                      ? "系统已具备发起授权与读取订单的前置配置。"
+                      : "仍需配置开发者凭证，之后由超级管理员完成官方授权。"}
+                  </span>
+                </dd>
+              </div>
+              <div className="rounded-lg bg-surface/55 px-3 py-3">
+                <dt className="text-xs font-medium text-muted">当前业务状态</dt>
+                <dd className="mt-1 text-ink">
+                  开发者配置不等于已可自动履约；实际授权、仓库、物流渠道和自动履约状态见下方连接卡。
+                </dd>
+              </div>
+            </dl>
             <Link
               className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary-hover underline-offset-4 hover:underline"
               href="https://s.apifox.cn/25bf1c44-f535-4c37-9bf4-7244130a67ce"
@@ -283,9 +294,23 @@ export default async function IntegrationsPage() {
                 className={integrationStatusClass(feishuConfigured)}
                 variant="secondary"
               >
-                {integrationStatus(feishuConfigured)}
+                {integrationStatus(feishuConfigured, "源读取已配置", "待补飞书配置")}
               </Badge>
             </div>
+            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-lg bg-surface/55 px-3 py-3">
+                <dt className="text-xs font-medium text-muted">当前同步方式</dt>
+                <dd className="mt-1 text-ink">
+                  源 wiki 只读；导入系统与字段镜像分步执行，不会直接把第三方状态当作系统事实。
+                </dd>
+              </div>
+              <div className="rounded-lg bg-surface/55 px-3 py-3">
+                <dt className="text-xs font-medium text-muted">写入保护</dt>
+                <dd className="mt-1 text-ink">
+                  飞书源货盘保持只读；一键同步只把飞书数据镜像到系统数据库，不会向飞书写入。
+                </dd>
+              </div>
+            </dl>
             <div className="mt-5">
               <EntityDrawer
                 description="连接验证只做只读校验；目标测试表重试与首批迁移确认分离执行。"

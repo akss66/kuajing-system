@@ -2,6 +2,7 @@ import { desc } from "drizzle-orm";
 import { AlertTriangle, BellRing, CheckCircle2, Info } from "lucide-react";
 import Link from "next/link";
 
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ActionForm } from "@/components/forms/action-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
@@ -46,6 +47,8 @@ export default async function NotificationsPage() {
   const archivedNotifications = notifications.filter((notification) => notification.status === "RESOLVED");
   const openNotificationGroups = groupSystemNotifications(openNotifications);
   const archivedNotificationGroups = groupSystemNotifications(archivedNotifications);
+  const unreadGroups = openNotificationGroups.filter((notification) => notification.status === "UNREAD").length;
+  const severeGroups = openNotificationGroups.filter((notification) => notification.severity === "ERROR").length;
 
   function notificationRow(notification: SystemNotificationGroup) {
     const severity = severityPresentation(notification.severity);
@@ -99,6 +102,35 @@ export default async function NotificationsPage() {
         title="系统通知"
       />
 
+      <MetricStrip
+        compact
+        items={[
+          {
+            hint: "仍影响履约、库存或补发的通知组",
+            label: "待处理通知组",
+            tone: openNotificationGroups.length ? "warning" : "default",
+            value: String(openNotificationGroups.length),
+          },
+          {
+            hint: "尚未确认已看的通知组",
+            label: "未读",
+            tone: unreadGroups ? "warning" : "default",
+            value: String(unreadGroups),
+          },
+          {
+            hint: "需优先处理的严重告警",
+            label: "严重",
+            tone: severeGroups ? "danger" : "default",
+            value: String(severeGroups),
+          },
+          {
+            hint: "保留历史以便回溯",
+            label: "已归档",
+            value: String(archivedNotificationGroups.length),
+          },
+        ]}
+      />
+
       {notifications.length === 0 ? (
         <ActionableEmptyState
           action={<Button asChild size="sm" variant="outline"><Link href="/admin/system/health">查看系统健康</Link></Button>}
@@ -116,13 +148,16 @@ export default async function NotificationsPage() {
         {openNotificationGroups.length > 0 ? <ul className="divide-y divide-border border-b border-border">{openNotificationGroups.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">当前没有未解决通知。</p>}
       </section>
 
-      <section aria-labelledby="archived-notifications-title" className="space-y-3">
-        <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
-          <div><h2 className="text-base font-semibold text-foreground" id="archived-notifications-title">已归档通知</h2><p className="mt-1 text-sm text-muted-foreground">保留已解决事件，便于回看影响范围和发生时间。</p></div>
+      <details className="group space-y-3" open={archivedNotificationGroups.length > 0 && archivedNotificationGroups.length <= 3}>
+        <summary className="flex cursor-pointer list-none items-end justify-between gap-4 border-b border-border pb-3 [&::-webkit-details-marker]:hidden">
+          <div>
+            <h2 className="text-base font-semibold text-foreground" id="archived-notifications-title">已归档通知</h2>
+            <p className="mt-1 text-sm text-muted-foreground">少量历史直接展开，超过 3 组后默认折叠，避免淹没当前待办。</p>
+          </div>
           <span className="text-sm tabular-nums text-muted-foreground">{archivedNotificationGroups.length} 组</span>
-        </div>
+        </summary>
         {archivedNotificationGroups.length > 0 ? <ul className="divide-y divide-border border-b border-border">{archivedNotificationGroups.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">暂无已解决通知。</p>}
-      </section>
+      </details>
     </div>
   );
 }

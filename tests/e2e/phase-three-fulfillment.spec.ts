@@ -139,6 +139,10 @@ test("administrator can inspect a shipped package and create a replacement @desk
   await expect(page.getByText("创建时间", { exact: true })).toHaveCount(1);
   await expect(page.getByText(`ERP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
   await expect(page.getByText(`CP-${fixture.order.orderNumber.slice(-8)}`)).toBeVisible();
+  await page
+    .getByRole("group", { name: "普通包裹 1工作区" })
+    .locator("summary")
+    .click();
   await expect(page.getByText("CAD 8.99")).toBeVisible();
   await page.getByLabel(`${fixture.sku.skuCode}（原 2 件）`).fill("1");
   await page.getByPlaceholder("填写补发原因，例如：运输破损").fill("E2E 运输破损补发");
@@ -177,6 +181,10 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
     await page.goto(`/admin/orders/${fixture.order.id}`);
     await expect(page.getByRole("heading", { name: fixture.order.orderNumber })).toBeVisible();
     await expect(page.getByRole("region", { name: "订单状态时间线" })).toContainText("已发货");
+    await page
+      .getByRole("group", { name: "普通包裹 1工作区" })
+      .locator("summary")
+      .click();
     await expect(page.getByRole("button", { name: "创建补发并锁定库存" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   }
@@ -192,8 +200,8 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
   const feishuSummary = integrationStatus.locator("article").filter({
     has: page.getByRole("heading", { name: "飞书货盘与机器人" }),
   });
-  await expect(feishuSummary.getByText("已配置", { exact: true })).toHaveCount(1);
-  await expect(jifengSummary.getByText("未配置", { exact: true })).toHaveCount(1);
+  await expect(feishuSummary.getByText("源读取已配置", { exact: true })).toHaveCount(1);
+  await expect(jifengSummary.getByText("待补开发者凭证", { exact: true })).toHaveCount(1);
   await expect(
     jifengSummary.getByText("仍需配置开发者凭证，之后由超级管理员完成官方授权。"),
   ).toBeVisible();

@@ -61,7 +61,7 @@ export function BulkOrderSummaryBar({
   return (
     <section
       aria-label="批次摘要"
-      className="sticky bottom-0 z-20 rounded-t-[var(--radius-surface)] border border-border bg-background px-3 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] sm:bottom-4 sm:rounded-[var(--radius-surface)] sm:px-5 sm:py-4 xl:py-2"
+      className="sticky bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.5rem)] z-20 rounded-[var(--radius-surface)] border border-border bg-background px-3 py-1 shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] sm:px-5 sm:py-4 lg:bottom-4 xl:py-2"
       data-testid="bulk-order-summary"
     >
       <span className="sr-only">{`已选 ${selectedCount} 个店铺`}</span>
@@ -82,7 +82,7 @@ export function BulkOrderSummaryBar({
             variant="outline"
           >
             {mobileExpanded ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}
-            {mobileExpanded ? "收起" : "查看汇总"}
+            {mobileExpanded ? "收起汇总" : "查看汇总"}
           </Button>
           <Button className="min-h-11 px-4" disabled={submitDisabled} type="submit">
             {submitting ? "提交中" : "提交拿货单"}

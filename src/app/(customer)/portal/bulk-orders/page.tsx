@@ -67,7 +67,7 @@ export default async function CustomerBulkOrdersPage() {
       <PageHeading
         action={
           <Link
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary transition-colors hover:bg-surface"
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary-hover transition-colors hover:bg-surface"
             href="/portal/settlements"
           >
             查看批量付款

@@ -464,7 +464,7 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     expect(pageMocks.getAdminView).toHaveBeenCalledOnce();
     expect(pageMocks.getPublicStatus).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("heading", { name: "集成运行状态" }),
+      screen.getByRole("heading", { name: "集成配置与运行状态" }),
     ).toBeVisible();
     expect(document.querySelector("[data-metric-strip]")).toBeNull();
     expect(screen.getByText("de***76")).toBeVisible();
@@ -514,8 +514,8 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
 
     render(await IntegrationsPage());
 
-    const statusRegion = screen.getByRole("region", { name: "集成运行状态" });
-    expect(within(statusRegion).getByText("已配置", { exact: true })).toBeVisible();
+    const statusRegion = screen.getByRole("region", { name: "集成配置与运行状态" });
+    expect(within(statusRegion).getByText("开发者配置已就绪", { exact: true })).toBeVisible();
     expect(within(statusRegion).queryByText("运行降级", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "最近失败任务" })).toBeVisible();
     expect(screen.getByText("第三方响应超时")).toBeVisible();

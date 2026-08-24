@@ -29,18 +29,34 @@ export function WorkspacePanel<T extends ElementType = "section">({
 
 export function WorkspacePanelHeader({
   action,
+  compact = false,
   description,
   title,
 }: {
   action?: ReactNode;
+  compact?: boolean;
   description?: ReactNode;
   title: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 border-b border-border px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+    <div
+      className={cn(
+        "flex flex-col border-b border-border px-4 sm:flex-row sm:items-start sm:justify-between sm:px-5",
+        compact ? "gap-3 py-3" : "gap-4 py-3.5",
+      )}
+    >
       <div className="min-w-0">
         <h2 className="text-sm font-semibold text-ink sm:text-[0.95rem]">{title}</h2>
-        {description ? <p className="mt-1 text-sm leading-6 text-muted">{description}</p> : null}
+        {description ? (
+          <p
+            className={cn(
+              "mt-1 text-sm text-muted",
+              compact ? "leading-5.5" : "leading-6",
+            )}
+          >
+            {description}
+          </p>
+        ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

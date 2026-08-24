@@ -87,8 +87,14 @@ describe("settlement workspace hierarchy", () => {
     expect(screen.getByRole("region", { name: "待核款队列" })).toBeVisible();
     expect(screen.getByRole("region", { name: "待线下退款" })).toBeVisible();
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "批量付款记录" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "批量付款审核" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
+    expect(screen.getByText("资金处理路径")).toBeVisible();
+    expect(
+      screen.getByText(
+        "把管理员每天真正要处理的资金动作收束成一条流程，不再把核款、合并付款、退款和余额拆散。",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("PO-10001")).toBeVisible();
     expect(screen.getByText("¥13.00")).toBeVisible();
     expect(screen.getByRole("link", { name: /进入订单详情处理/ })).toHaveAttribute(

@@ -1,8 +1,16 @@
 import type { ReactNode } from "react";
 
-export function ResponsiveDataTable({ children }: { children: ReactNode }) {
+import { cn } from "@/lib/utils";
+
+export function ResponsiveDataTable({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="overflow-x-auto" data-workspace-table>
+    <div className={cn("overflow-x-auto", className)} data-workspace-table>
       {children}
     </div>
   );

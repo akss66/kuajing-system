@@ -23,11 +23,13 @@ const navigation = {
     drawerTitle: "管理员导航",
     groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
     label: "管理员主导航",
+    quickLabel: "管理员快捷导航",
   },
   customer: {
     drawerTitle: "客户导航",
     groups: ["拿货", "订单与付款"],
     label: "客户主导航",
+    quickLabel: "客户快捷导航",
   },
 } as const;
 
@@ -148,6 +150,7 @@ for (const audience of audiences) {
         await waitForResponsiveLayout(page);
 
         if (viewport.kind === "desktop") {
+          await expect(page.getByRole("navigation", { name: audience.quickLabel })).toBeHidden();
           const topbar = await page.locator("[data-merchant-topbar]").boundingBox();
           const brand = await page.locator("[data-merchant-brand]").boundingBox();
           const sidebar = await page.locator("[data-merchant-sidebar]").boundingBox();
@@ -171,6 +174,14 @@ for (const audience of audiences) {
           }
           await expect(desktopNavigation.locator("[aria-expanded]")).toHaveCount(0);
         } else {
+          const quickNavigation = page.getByRole("navigation", { name: audience.quickLabel });
+          await expect(quickNavigation).toBeVisible();
+          await expect(quickNavigation.getByRole("link")).toHaveCount(4);
+          const quickNavigationBox = await quickNavigation.boundingBox();
+          expect(quickNavigationBox).not.toBeNull();
+          expect(quickNavigationBox!.y + quickNavigationBox!.height).toBeGreaterThanOrEqual(
+            viewport.height - 1,
+          );
           const menuButton = page.getByRole("button", { name: "打开导航" });
           await menuButton.click();
 

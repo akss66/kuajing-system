@@ -112,6 +112,23 @@ describe("merchant shells", () => {
     );
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
     expect(within(navigation).getByRole("link", { name: "账号管理" })).toBeVisible();
+    const quickNavigation = screen.getByRole("navigation", { name: "管理员快捷导航" });
+    expect(within(quickNavigation).getByRole("link", { name: "总览" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "订单" })).toHaveAttribute(
+      "href",
+      "/admin/orders",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "收款" })).toHaveAttribute(
+      "href",
+      "/admin/settlement",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "通知" })).toHaveAttribute(
+      "href",
+      "/admin/notifications",
+    );
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
     const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
     expect(accountMenu).not.toBeNull();
@@ -241,5 +258,22 @@ describe("merchant shells", () => {
     expect(within(navigation).queryByRole("link", { name: "运营总览" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
     expect(screen.getByText("客户内容")).toBeVisible();
+    const quickNavigation = screen.getByRole("navigation", { name: "客户快捷导航" });
+    expect(within(quickNavigation).getByRole("link", { name: "首页" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "上传" })).toHaveAttribute(
+      "href",
+      "/portal/imports/new",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "订单" })).toHaveAttribute(
+      "href",
+      "/portal/orders",
+    );
+    expect(within(quickNavigation).getByRole("link", { name: "余额" })).toHaveAttribute(
+      "href",
+      "/portal/wallet",
+    );
   });
 });

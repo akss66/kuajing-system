@@ -7,6 +7,7 @@ import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { PageHeading } from "@/components/layout/page-heading";
+import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { PaymentClaimReview } from "@/components/orders/payment-claim-review";
 import {
   SettlementRegion,
@@ -59,11 +60,12 @@ export default async function SettlementPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        description="先处理待核款，再查看批量付款记录、客户余额与不可变资金流水。"
+        description="按 单张拿货单核款 → 多单合并付款 → 退款/余额 的顺序处理，所有资金变化都会落到同一条流水。"
         title="收款与余额"
       />
 
       <MetricStrip
+        compact
         items={[
           {
             hint: `单张拿货单 ${pendingClaims.length} · 批量付款 ${pendingBatches.length}`,
@@ -76,6 +78,48 @@ export default async function SettlementPage() {
           { hint: "已启用客户钱包账户", label: "钱包账户", value: String(accounts.length) },
         ]}
       />
+
+      <WorkspacePanel>
+        <WorkspacePanelHeader
+          compact
+          description="把管理员每天真正要处理的资金动作收束成一条流程，不再把核款、合并付款、退款和余额拆散。"
+          title="资金处理路径"
+        />
+        <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_20rem] sm:p-5">
+          <ol className="grid gap-3 md:grid-cols-3">
+            <li className="rounded-lg border border-border bg-surface/45 p-4">
+              <p className="text-xs font-medium text-muted">步骤 1</p>
+              <p className="mt-1 text-sm font-semibold text-ink">单张拿货单核款</p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                当前 {pendingClaims.length} 张待核对；确认后对应包裹直接进入待发货。
+              </p>
+            </li>
+            <li className="rounded-lg border border-border bg-surface/45 p-4">
+              <p className="text-xs font-medium text-muted">步骤 2</p>
+              <p className="mt-1 text-sm font-semibold text-ink">批量付款审核</p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                当前 {pendingBatches.length} 个待审核；用于多张拿货单合并成一次付款。
+              </p>
+            </li>
+            <li className="rounded-lg border border-border bg-surface/45 p-4">
+              <p className="text-xs font-medium text-muted">步骤 3</p>
+              <p className="mt-1 text-sm font-semibold text-ink">退款与余额回看</p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                当前 {pendingRefunds.length} 笔线下退款待处理；余额与流水只做最终核对。
+              </p>
+            </li>
+          </ol>
+          <aside className="rounded-lg border border-border bg-primary-soft p-4">
+            <p className="text-xs font-medium text-primary-hover">今日总览</p>
+            <p className="mt-1 text-base font-semibold text-ink">
+              余额合计 {money(totalBalanceFen)}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              普通管理员只查看余额与流水；高风险人工调账仍需超级管理员展开确认并填写原因。
+            </p>
+          </aside>
+        </div>
+      </WorkspacePanel>
 
       <SettlementWorkspace>
         <SettlementRegion
@@ -158,15 +202,15 @@ export default async function SettlementPage() {
         </SettlementRegion>
 
         <SettlementRegion
-          description="批量拿货会合并为一次付款；这里核对余额抵扣、微信待付与审计记录。"
+          description="客户一次性支付多张拿货单时，会形成一笔批量付款；这里核对余额抵扣、微信待付和整笔审核结果。"
           kind="batches"
-          title="批量付款记录"
+          title="批量付款审核"
           contentClassName="grid gap-0 divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0"
         >
           <Link className="flex min-h-24 items-center justify-between gap-4 p-4 transition-colors hover:bg-surface sm:p-5" href="/admin/settlement-batches">
             <span>
-              <strong className="text-ink">批量付款审核</strong>
-              <span className="mt-1 block text-sm text-muted">查看每次合并付款、余额冻结、微信待付与整笔审核。</span>
+              <strong className="text-ink">进入批量付款审核</strong>
+              <span className="mt-1 block text-sm text-muted">查看每次多单合并付款、余额冻结、微信待付与整笔审核。</span>
             </span>
             <span className="flex shrink-0 items-center gap-2">
               <Badge variant="secondary">{`待审核 ${pendingBatches.length}`}</Badge>

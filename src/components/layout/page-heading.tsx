@@ -36,11 +36,11 @@ export function PageHeading({ action, breadcrumbs = [], description, title }: Pa
           </nav>
         ) : null}
         <div className="space-y-1.5">
-          <h1 className="text-[1.9rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[2rem]">{title}</h1>
+          <h1 className="text-[1.55rem] font-semibold tracking-[-0.025em] text-foreground sm:text-[1.8rem]">{title}</h1>
           {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
         </div>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="w-full shrink-0 sm:w-auto" data-page-heading-action>{action}</div> : null}
     </section>
   );
 }

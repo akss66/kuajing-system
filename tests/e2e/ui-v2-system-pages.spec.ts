@@ -28,9 +28,9 @@ async function resetAndLogin(page: Page, context: string) {
   await expect(page).toHaveURL(/\/admin$/);
 }
 
-async function expectPageQuality(page: Page) {
+async function expectPageQuality(page: Page, metricStripCount = 0) {
   await expect(page.locator("h1")).toHaveCount(1);
-  await expect(page.locator('[data-metric-strip]')).toHaveCount(0);
+  await expect(page.locator('[data-metric-strip]')).toHaveCount(metricStripCount);
   await expect(
     page.locator('nav[aria-label="管理员主导航"] [aria-current="page"]'),
   ).toHaveCount(1);
@@ -96,14 +96,15 @@ test("notifications communicate severity, impact and resolution state", async ({
 
   await expect(page.getByRole("heading", { exact: true, name: "需要处理" })).toBeVisible();
   await expect(page.getByRole("heading", { exact: true, name: "已归档通知" })).toBeVisible();
-  await expect(page.getByText("严重", { exact: true })).toBeVisible();
+  const actionableNotifications = page.getByLabel("需要处理");
+  await expect(actionableNotifications.getByText("严重", { exact: true })).toBeVisible();
   await expect(page.getByText("影响库存", { exact: true })).toBeVisible();
-  await expect(page.getByText("未读", { exact: true })).toBeVisible();
+  await expect(actionableNotifications.getByText("未读", { exact: true })).toBeVisible();
   await expect(page.getByText("已解决", { exact: true })).toBeVisible();
   await expect(page.getByText("ERROR", { exact: true })).toHaveCount(0);
   await expect(page.getByText("UNREAD", { exact: true })).toHaveCount(0);
   await expect(page.getByText("RESOLVED", { exact: true })).toHaveCount(0);
-  await expectPageQuality(page);
+  await expectPageQuality(page, 1);
 });
 
 test("integrations keep configuration state separate from failed task history", async ({ page }) => {
@@ -114,10 +115,10 @@ test("integrations keep configuration state separate from failed task history", 
     'section[aria-labelledby="integration-status-title"]',
   );
   await expect(
-    integrationStatus.getByRole("heading", { name: "集成运行状态" }),
+    integrationStatus.getByRole("heading", { name: "集成配置与运行状态" }),
   ).toBeVisible();
-  await expect(integrationStatus.getByText("未配置", { exact: true })).toHaveCount(1);
-  await expect(integrationStatus.getByText("已配置", { exact: true })).toHaveCount(1);
+  await expect(integrationStatus.getByText("待补开发者凭证", { exact: true })).toHaveCount(1);
+  await expect(integrationStatus.getByText("源读取已配置", { exact: true })).toHaveCount(1);
   await expect(page.getByRole("status", { name: "当前没有失败任务" })).toContainText(
     "查看系统健康",
   );
@@ -141,7 +142,7 @@ test("integrations keep configuration state separate from failed task history", 
   await page.reload();
 
   await expect(page.getByText("运行降级", { exact: true })).toHaveCount(0);
-  await expect(integrationStatus.getByText("已配置", { exact: true })).toBeVisible();
+  await expect(integrationStatus.getByText("源读取已配置", { exact: true })).toBeVisible();
   await expect(page.getByText("极风仓储", { exact: true })).toBeVisible();
   await expect(page.getByText("已有订单匹配", { exact: true })).toBeVisible();
   await expect(page.getByText("执行失败", { exact: true })).toBeVisible();
@@ -228,8 +229,15 @@ test("secondary admin pages fit every approved mobile width @mobile-only", async
       await page.setViewportSize({ height: width === 360 ? 800 : width === 390 ? 844 : 900, width });
       await page.goto(route);
       await expect(page.locator("h1")).toHaveCount(1);
-      await expect(page.locator('[aria-current="page"]')).toHaveCount(1);
-      await expect(page.locator('[data-metric-strip]')).toHaveCount(0);
+      await expect(
+        page.locator('nav[aria-label="管理员主导航"] [aria-current="page"]'),
+      ).toHaveCount(1);
+      await expect(
+        page.locator('nav[aria-label="管理员快捷导航"] [aria-current="page"]'),
+      ).toHaveCount(route === "/admin/notifications" ? 1 : 0);
+      await expect(page.locator('[data-metric-strip]')).toHaveCount(
+        route === "/admin/notifications" ? 1 : 0,
+      );
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

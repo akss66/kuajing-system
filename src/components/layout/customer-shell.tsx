@@ -7,6 +7,7 @@ import type { AuthenticatedIdentity } from "@/modules/identity/principal";
 
 import { MerchantShellFrame } from "./merchant-shell-frame";
 import { MerchantTopbar } from "./merchant-topbar";
+import { MobileTaskDock } from "./mobile-task-dock";
 import { NavigationSection, type NavigationItem } from "./navigation-section";
 
 const customerNavigation: Array<{
@@ -76,6 +77,17 @@ export function CustomerShell({
   return (
     <MerchantShellFrame
       audience="customer"
+      mobileDock={
+        <MobileTaskDock
+          ariaLabel="客户快捷导航"
+          items={[
+            { exact: true, href: "/portal", icon: LayoutDashboard, label: "首页" },
+            { href: "/portal/imports/new", icon: Upload, label: "上传" },
+            { href: "/portal/orders", icon: ClipboardList, label: "订单" },
+            { href: "/portal/wallet", icon: Banknote, label: "余额" },
+          ]}
+        />
+      }
       navigation={<CustomerNavigation />}
       topbar={
         <MerchantTopbar

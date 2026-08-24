@@ -54,6 +54,14 @@ function money(fen: number) {
   return `¥${(fen / 100).toFixed(2)}`;
 }
 
+function totalLineQuantity(
+  lines: Array<{
+    quantity: number;
+  }>,
+) {
+  return lines.reduce((sum, line) => sum + line.quantity, 0);
+}
+
 function statusClass(status: string | null) {
   if (status === "EXCEPTION") return "bg-danger/10 text-danger";
   if (status === "SHIPPED") return "bg-success/10 text-success";
@@ -97,6 +105,8 @@ export default async function AdminOrderDetailPage({
       />
 
       <MetricStrip
+        compact
+        columns={5}
         items={[
           { label: "包裹数", value: `${order.shipments.length}` },
           { label: "商品件数", value: `${order.totalQuantity}` },
@@ -139,117 +149,351 @@ export default async function AdminOrderDetailPage({
             shipment.kind === "REPLACEMENT"
               ? "补发包裹"
               : `普通包裹 ${shipmentIndex + 1}`;
+          const packageSummary = `${shipment.lines.length} 个 SKU · ${totalLineQuantity(shipment.lines)} 件`;
           const openOperationsByDefault =
             shipment.fulfillmentStatus === "EXCEPTION" ||
             shipment.fulfillmentStatus === "CANCEL_PENDING" ||
             (shipment.fulfillmentStatus === "CANCELLED" &&
               order.status === "FULFILLMENT_EXCEPTION");
+          const openPackageByDefault =
+            openOperationsByDefault ||
+            waitingForMatch ||
+            retryQueued ||
+            Boolean(shipment.cancellationAdjustment);
           return (
-            <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background" key={shipment.id}>
-              <div className="grid gap-3 border-b border-border px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center sm:px-5">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
-                    <Box className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <h2 className="font-semibold text-ink">{packageLabel}</h2>
-                    <p className="mt-0.5 truncate text-xs text-muted">平台订单 {shipment.externalOrderNo}</p>
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] text-muted">极风 ERP 单号</p>
-                  <p className="truncate text-sm font-medium text-ink">{shipment.erpNo ?? "—"}</p>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] text-muted">加拿大邮政运单</p>
-                  <p className="truncate text-sm font-medium text-ink">{shipment.trackingNumber ?? "—"}</p>
-                </div>
-                <Badge className={statusClass(shipment.fulfillmentStatus)} variant="secondary">
-                  {statusLabels[shipment.fulfillmentStatus ?? ""] ?? "尚未进入极风"}
-                </Badge>
-              </div>
-
-              {shipment.lastErrorCode ? (
-                <div className={`flex gap-3 border-b px-4 py-3 text-sm sm:px-5 ${retryQueued || waitingForMatch ? "border-primary/20 bg-primary-soft text-primary-hover" : "border-danger/20 bg-danger/5 text-danger"}`}>
-                  {retryQueued || waitingForMatch ? <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> : <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
-                  <div>
-                    <p className="font-semibold">{errorPresentation?.title}</p>
-                    <p className="mt-1">{errorPresentation?.message}</p>
-                  </div>
-                </div>
-              ) : null}
-
-              <details aria-label={`查看${packageLabel}详情`} className="group/details border-b border-border">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface-muted sm:px-5">
-                  <span>查看包裹详情与商品</span>
-                  <span className="text-xs font-normal text-muted group-open/details:hidden">展开</span>
-                  <span className="hidden text-xs font-normal text-muted group-open/details:inline">收起</span>
-                </summary>
-              <div className="grid gap-x-6 gap-y-4 border-b border-border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
-                <div><p className="text-xs text-muted">极风状态码</p><p className="mt-1 font-medium text-ink">{shipment.jifengStatus ?? "—"}</p></div>
-                <div><p className="text-xs text-muted">物流费用</p><p className="mt-1 font-medium text-ink">{fee(shipment.logisticsFeeMinor, shipment.logisticsCurrency)}</p></div>
-                <div><p className="text-xs text-muted">发货时间</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.shippedAt)}</p></div>
-                <div><p className="text-xs text-muted">外部调用次数</p><p className="mt-1 font-medium text-ink">{shipment.attemptCount ?? 0} 次</p></div>
-                <div><p className="text-xs text-muted">下次重试</p><p className="mt-1 font-medium text-ink">{dateTime(shipment.nextRetryAt)}</p></div>
-                <div><p className="text-xs text-muted">补发状态 / 原因</p><p className="mt-1 font-medium text-ink">{shipment.replacementStatus === "FULFILLING" ? "补发待仓库发货" : shipment.replacementStatus === "SHIPPED" ? "补发仓库已发货" : shipment.replacementStatus ? formatReplacementStatus(shipment.replacementStatus) : "—"}{shipment.replacementReason ? ` · ${shipment.replacementReason}` : ""}</p></div>
-              </div>
-
-              {shipment.cancellationAdjustment ? (
-                <div className="border-b border-border bg-warning/5 px-4 py-4 text-sm sm:px-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-ink">取消金额调整</p>
-                      <p className="mt-1 text-muted">
-                        商品 {money(shipment.cancellationAdjustment.merchandiseAmountFen)} + 物流费 {money(shipment.cancellationAdjustment.shippingFeeFen)} = {money(shipment.cancellationAdjustment.totalAmountFen)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted">
-                        钱包退回 {money(shipment.cancellationAdjustment.walletAmountFen)} · 线下退款 {money(shipment.cancellationAdjustment.offlineAmountFen)}
-                      </p>
+            <details
+              aria-label={`${packageLabel}工作区`}
+              className="group/shipment overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
+              key={shipment.id}
+              open={openPackageByDefault}
+            >
+              <summary className="list-none cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <div className="px-4 py-3 sm:px-5">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,0.9fr)_auto] lg:items-center">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                      <Box className="size-4" />
                     </div>
-                    <Badge className="bg-warning/10 text-warning" variant="secondary">
-                      {shipment.cancellationAdjustment.status === "NOT_PAID"
-                        ? "未付款，已冲减应付"
-                        : shipment.cancellationAdjustment.status === "PENDING_OFFLINE"
-                          ? "待确认线下退款"
-                          : "退款处理完成"}
-                    </Badge>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="font-semibold text-ink">{packageLabel}</h2>
+                        <span className="text-xs text-muted">{packageSummary}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted">平台订单 {shipment.externalOrderNo}</p>
+                    </div>
                   </div>
-                  {shipment.cancellationAdjustment.status === "PENDING_OFFLINE" ? (
-                    <ActionForm action={completeOfflinePackageRefundAction} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end" submitLabel="确认线下退款完成">
-                      <input name="adjustmentId" type="hidden" value={shipment.cancellationAdjustment.id} />
-                      <label className="space-y-1 text-xs font-medium text-ink">
-                        退款凭证或备注
-                        <Input maxLength={1000} name="note" placeholder="例如：微信退款流水号与退款时间" required />
-                      </label>
-                    </ActionForm>
-                  ) : shipment.cancellationAdjustment.offlineCompletedAt ? (
-                    <p className="mt-3 text-xs text-muted">线下退款完成于 {dateTime(shipment.cancellationAdjustment.offlineCompletedAt)}{shipment.cancellationAdjustment.offlineCompletionNote ? ` · ${shipment.cancellationAdjustment.offlineCompletionNote}` : ""}</p>
+                  <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-sm lg:grid-cols-1">
+                    <div className="min-w-0">
+                      <dt className="text-[11px] text-muted">极风 ERP 单号</dt>
+                      <dd className="truncate font-medium text-ink">{shipment.erpNo ?? "—"}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-[11px] text-muted">加拿大邮政运单</dt>
+                      <dd className="truncate font-medium text-ink">{shipment.trackingNumber ?? "—"}</dd>
+                    </div>
+                  </dl>
+                  <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-sm lg:grid-cols-1">
+                    <div>
+                      <dt className="text-[11px] text-muted">极风状态 / 调用</dt>
+                      <dd className="font-medium text-ink">
+                        {shipment.jifengStatus ?? "—"} · {shipment.attemptCount ?? 0} 次
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] text-muted">下次重试</dt>
+                      <dd className="font-medium text-ink">{dateTime(shipment.nextRetryAt)}</dd>
+                    </div>
+                  </dl>
+                  <div className="flex items-center justify-between gap-3 lg:flex-col lg:items-end">
+                    <Badge className={statusClass(shipment.fulfillmentStatus)} variant="secondary">
+                      {statusLabels[shipment.fulfillmentStatus ?? ""] ?? "尚未进入极风"}
+                    </Badge>
+                    <span className="text-xs text-muted group-open/shipment:hidden">展开详情</span>
+                    <span className="hidden text-xs text-muted group-open/shipment:block">收起详情</span>
+                  </div>
+                  </div>
+                </div>
+
+                {shipment.lastErrorCode ? (
+                  <div
+                    className={`flex gap-3 border-t px-4 py-3 text-sm sm:px-5 ${
+                      retryQueued || waitingForMatch
+                        ? "border-primary/20 bg-primary-soft text-primary-hover"
+                        : "border-danger/20 bg-danger/5 text-danger"
+                    }`}
+                  >
+                    {retryQueued || waitingForMatch ? (
+                      <RefreshCcw aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-semibold">{errorPresentation?.title}</p>
+                      <p className="mt-1">{errorPresentation?.message}</p>
+                    </div>
+                  </div>
+                ) : null}
+              </summary>
+
+              <div className="grid gap-4 border-t border-border bg-surface/28 p-4 sm:p-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
+                <section aria-label={`${packageLabel}商品`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-ink">包裹商品</h3>
+                    <span className="text-xs text-muted">{packageSummary}</span>
+                  </div>
+                  <div className="mt-3 divide-y divide-border rounded-lg border border-border bg-background">
+                    {shipment.lines.map((line) => (
+                      <div
+                        className="grid grid-cols-[1fr_auto] gap-4 px-3 py-3 text-sm sm:grid-cols-[1fr_0.7fr_auto]"
+                        key={line.id}
+                      >
+                        <div>
+                          <p className="font-medium text-ink">{line.skuCode}</p>
+                          <p className="mt-0.5 text-xs text-muted">{line.skuName}</p>
+                        </div>
+                        <p className="hidden self-center text-muted sm:block">
+                          {formatMilliYuan(line.unitPriceMilliYuan)} / 件
+                        </p>
+                        <p className="self-center font-semibold tabular-nums">× {line.quantity}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section aria-label={`${packageLabel}履约信息`} className="space-y-4">
+                  <div className="rounded-lg border border-border bg-background p-4">
+                    <h3 className="text-sm font-semibold text-ink">履约信息</h3>
+                    <dl className="mt-3 grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs text-muted">物流费用</dt>
+                        <dd className="mt-1 font-medium text-ink">
+                          {fee(shipment.logisticsFeeMinor, shipment.logisticsCurrency)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted">发货时间</dt>
+                        <dd className="mt-1 font-medium text-ink">{dateTime(shipment.shippedAt)}</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs text-muted">补发状态 / 原因</dt>
+                        <dd className="mt-1 font-medium text-ink">
+                          {shipment.replacementStatus === "FULFILLING"
+                            ? "补发待仓库发货"
+                            : shipment.replacementStatus === "SHIPPED"
+                              ? "补发仓库已发货"
+                              : shipment.replacementStatus
+                                ? formatReplacementStatus(shipment.replacementStatus)
+                                : "—"}
+                          {shipment.replacementReason
+                            ? ` · ${shipment.replacementReason}`
+                            : ""}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  {shipment.cancellationAdjustment ? (
+                    <div className="rounded-lg border border-warning/20 bg-warning/5 p-4 text-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-ink">取消金额调整</p>
+                          <p className="mt-1 text-muted">
+                            商品{" "}
+                            {money(
+                              shipment.cancellationAdjustment.merchandiseAmountFen,
+                            )}{" "}
+                            + 物流费{" "}
+                            {money(
+                              shipment.cancellationAdjustment.shippingFeeFen,
+                            )}{" "}
+                            ={" "}
+                            {money(shipment.cancellationAdjustment.totalAmountFen)}
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            钱包退回{" "}
+                            {money(
+                              shipment.cancellationAdjustment.walletAmountFen,
+                            )}{" "}
+                            · 线下退款{" "}
+                            {money(
+                              shipment.cancellationAdjustment.offlineAmountFen,
+                            )}
+                          </p>
+                        </div>
+                        <Badge className="bg-warning/10 text-warning" variant="secondary">
+                          {shipment.cancellationAdjustment.status === "NOT_PAID"
+                            ? "未付款，已冲减应付"
+                            : shipment.cancellationAdjustment.status ===
+                                "PENDING_OFFLINE"
+                              ? "待确认线下退款"
+                              : "退款处理完成"}
+                        </Badge>
+                      </div>
+                      {shipment.cancellationAdjustment.status === "PENDING_OFFLINE" ? (
+                        <ActionForm
+                          action={completeOfflinePackageRefundAction}
+                          className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+                          submitLabel="确认线下退款完成"
+                        >
+                          <input
+                            name="adjustmentId"
+                            type="hidden"
+                            value={shipment.cancellationAdjustment.id}
+                          />
+                          <label className="space-y-1 text-xs font-medium text-ink">
+                            退款凭证或备注
+                            <Input
+                              maxLength={1000}
+                              name="note"
+                              placeholder="例如：微信退款流水号与退款时间"
+                              required
+                            />
+                          </label>
+                        </ActionForm>
+                      ) : shipment.cancellationAdjustment.offlineCompletedAt ? (
+                        <p className="mt-3 text-xs text-muted">
+                          线下退款完成于{" "}
+                          {dateTime(
+                            shipment.cancellationAdjustment.offlineCompletedAt,
+                          )}
+                          {shipment.cancellationAdjustment.offlineCompletionNote
+                            ? ` · ${shipment.cancellationAdjustment.offlineCompletionNote}`
+                            : ""}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
+                </section>
+              </div>
+
+              {canRetry || canRefresh || canCancel || canReplace ? (
+                <div className="border-t border-border px-4 py-4 sm:px-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-ink">处理此包裹</h3>
+                    <span className="text-xs text-muted">仅影响当前包裹，不影响同单其他包裹</span>
+                  </div>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                    {canRetry ? (
+                      <ActionForm
+                        action={retryJifengShipmentAction}
+                        className="space-y-3 rounded-lg border border-border bg-background p-4"
+                        submitLabel="重试这个包裹"
+                      >
+                        <input name="orderId" type="hidden" value={order.id} />
+                        <input name="shipmentId" type="hidden" value={shipment.id} />
+                        <div>
+                          <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                            <RefreshCcw className="size-4" />
+                            重试这个包裹
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            只重新处理当前平台订单，不影响同一拿货单的其他包裹。
+                          </p>
+                        </div>
+                        <Input maxLength={1000} name="reason" placeholder="填写重试原因" required />
+                        <label className="flex items-start gap-2 text-xs text-muted">
+                          <input className="mt-0.5" required type="checkbox" />
+                          我已核对错误信息并确认重试
+                        </label>
+                      </ActionForm>
+                    ) : null}
+                    {canRefresh ? (
+                      <ActionForm
+                        action={refreshJifengShipmentStatusAction}
+                        className="space-y-3 rounded-lg border border-border bg-background p-4"
+                        submitLabel={
+                          shipment.fulfillmentStatus === "CANCELLED"
+                            ? "重新核对取消状态"
+                            : "重新查询极风状态"
+                        }
+                      >
+                        <input name="shipmentId" type="hidden" value={shipment.id} />
+                        <div>
+                          <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                            <RefreshCcw className="size-4" />
+                            {shipment.fulfillmentStatus === "CANCELLED"
+                              ? "修复父单进度"
+                              : "重新查询极风状态"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            直接读取极风当前结果并更新本包裹；不会重复创建订单。
+                          </p>
+                        </div>
+                        <label className="flex items-start gap-2 text-xs text-muted">
+                          <input className="mt-0.5" required type="checkbox" />
+                          我确认立即向极风查询当前状态
+                        </label>
+                      </ActionForm>
+                    ) : null}
+                    {canCancel ? (
+                      <ActionForm
+                        action={cancelJifengShipmentAction}
+                        className="space-y-3 rounded-lg border border-border bg-background p-4"
+                        submitLabel="取消此包裹"
+                      >
+                        <input name="orderId" type="hidden" value={order.id} />
+                        <input name="shipmentId" type="hidden" value={shipment.id} />
+                        <div>
+                          <p className="text-sm font-semibold text-ink">取消此包裹</p>
+                          <p className="mt-1 text-xs text-muted">
+                            尚未绑定极风订单时直接本地取消；已绑定时，确认极风取消后再释放库存。其他包裹不受影响。
+                          </p>
+                        </div>
+                        <Input maxLength={1000} name="reason" placeholder="填写取消原因" required />
+                        <label className="flex items-start gap-2 text-xs text-muted">
+                          <input className="mt-0.5" required type="checkbox" />
+                          我确认只取消当前平台订单对应的包裹
+                        </label>
+                      </ActionForm>
+                    ) : null}
+                    {canReplace ? (
+                      <ActionForm
+                        action={createReplacementAction}
+                        className="space-y-3 rounded-lg border border-border bg-background p-4 lg:col-span-3"
+                        submitLabel="创建补发并锁定库存"
+                      >
+                        <input name="orderId" type="hidden" value={order.id} />
+                        <input name="shipmentId" type="hidden" value={shipment.id} />
+                        <div>
+                          <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                            <PackageCheck className="size-4" />
+                            创建补发
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            只可选择原包裹 SKU，填 0 表示不补发。
+                          </p>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {shipment.lines.map((line) => (
+                            <label className="space-y-1 text-xs text-muted" key={line.id}>
+                              {line.skuCode}（原 {line.quantity} 件）
+                              <Input
+                                defaultValue="0"
+                                inputMode="numeric"
+                                max={line.quantity}
+                                min="0"
+                                name={`quantity:${line.skuId}`}
+                                type="number"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <Input
+                          maxLength={1000}
+                          name="reason"
+                          placeholder="填写补发原因，例如：运输破损"
+                          required
+                        />
+                        <label className="flex items-start gap-2 text-xs text-muted">
+                          <input className="mt-0.5" required type="checkbox" />
+                          我确认补发将立即锁定所选库存
+                        </label>
+                      </ActionForm>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
-
-              <div className="p-4 sm:p-5">
-                <h3 className="text-sm font-semibold text-ink">包裹商品</h3>
-                <div className="mt-3 divide-y divide-border rounded-xl border border-border">
-                  {shipment.lines.map((line) => <div className="grid grid-cols-[1fr_auto] gap-4 px-3 py-3 text-sm sm:grid-cols-[1fr_0.7fr_auto]" key={line.id}><div><p className="font-medium text-ink">{line.skuCode}</p><p className="mt-0.5 text-xs text-muted">{line.skuName}</p></div><p className="hidden self-center text-muted sm:block">{formatMilliYuan(line.unitPriceMilliYuan)} / 件</p><p className="self-center font-semibold tabular-nums">× {line.quantity}</p></div>)}
-                </div>
-              </div>
-              </details>
-
-              {(canRetry || canRefresh || canCancel || canReplace) ? <details aria-label={`处理${packageLabel}`} className="group/actions" open={openOperationsByDefault}>
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-primary-hover hover:bg-primary-soft sm:px-5">
-                  <span>处理此包裹</span>
-                  <span className="text-xs font-normal text-muted group-open/actions:hidden">展开操作</span>
-                  <span className="hidden text-xs font-normal text-muted group-open/actions:inline">收起操作</span>
-                </summary>
-                <div className="grid gap-4 border-t border-border bg-surface/60 p-4 lg:grid-cols-3 sm:p-5">
-                {canRetry ? <ActionForm action={retryJifengShipmentAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel="重试这个包裹"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCcw className="size-4" />重试这个包裹</p><p className="mt-1 text-xs text-muted">只重新处理当前平台订单，不影响同一拿货单的其他包裹。</p></div><Input maxLength={1000} name="reason" placeholder="填写重试原因" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我已核对错误信息并确认重试</label></ActionForm> : null}
-                {canRefresh ? <ActionForm action={refreshJifengShipmentStatusAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel={shipment.fulfillmentStatus === "CANCELLED" ? "重新核对取消状态" : "重新查询极风状态"}><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCcw className="size-4" />{shipment.fulfillmentStatus === "CANCELLED" ? "修复父单进度" : "重新查询极风状态"}</p><p className="mt-1 text-xs text-muted">直接读取极风当前结果并更新本包裹；不会重复创建订单。</p></div><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认立即向极风查询当前状态</label></ActionForm> : null}
-                {canCancel ? <ActionForm action={cancelJifengShipmentAction} className="space-y-3 rounded-xl border border-border bg-background p-4" submitLabel="取消此包裹"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="text-sm font-semibold text-ink">取消此包裹</p><p className="mt-1 text-xs text-muted">尚未绑定极风订单时直接本地取消；已绑定时，确认极风取消后再释放库存。其他包裹不受影响。</p></div><Input maxLength={1000} name="reason" placeholder="填写取消原因" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认只取消当前平台订单对应的包裹</label></ActionForm> : null}
-                {canReplace ? <ActionForm action={createReplacementAction} className="space-y-3 rounded-xl border border-border bg-background p-4 lg:col-span-3" submitLabel="创建补发并锁定库存"><input name="orderId" type="hidden" value={order.id} /><input name="shipmentId" type="hidden" value={shipment.id} /><div><p className="flex items-center gap-2 text-sm font-semibold text-ink"><PackageCheck className="size-4" />创建补发</p><p className="mt-1 text-xs text-muted">只可选择原包裹 SKU，填 0 表示不补发。</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{shipment.lines.map((line) => <label className="space-y-1 text-xs text-muted" key={line.id}>{line.skuCode}（原 {line.quantity} 件）<Input defaultValue="0" inputMode="numeric" max={line.quantity} min="0" name={`quantity:${line.skuId}`} type="number" /></label>)}</div><Input maxLength={1000} name="reason" placeholder="填写补发原因，例如：运输破损" required /><label className="flex items-start gap-2 text-xs text-muted"><input className="mt-0.5" required type="checkbox" />我确认补发将立即锁定所选库存</label></ActionForm> : null}
-                </div>
-              </details> : null}
-            </section>
+            </details>
           );
         })}
       </div>

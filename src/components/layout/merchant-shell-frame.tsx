@@ -10,6 +10,7 @@ export type MerchantShellFrameProps = {
   audience: MerchantAudience;
   navigation: ReactNode;
   topbar: ReactNode;
+  mobileDock: ReactNode;
   children: ReactNode;
 };
 
@@ -52,6 +53,7 @@ export function MerchantShellFrame({
   audience,
   navigation,
   topbar,
+  mobileDock,
   children,
 }: MerchantShellFrameProps) {
   return (
@@ -83,10 +85,11 @@ export function MerchantShellFrame({
         className="min-w-0 pt-[var(--merchant-header-height)] lg:pl-[var(--merchant-sidebar-width)]"
         data-merchant-content
       >
-        <main className="mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full max-w-[1600px] min-w-0 bg-[var(--merchant-canvas)] px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+        <main className="mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full max-w-[1600px] min-w-0 bg-[var(--merchant-canvas)] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8 lg:py-6">
           {children}
         </main>
       </div>
+      {mobileDock}
     </div>
   );
 }

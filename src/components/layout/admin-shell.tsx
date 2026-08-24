@@ -24,6 +24,7 @@ import { INVENTORY_MOVEMENTS_PATH } from "@/modules/inventory/movement-navigatio
 
 import { MerchantShellFrame } from "./merchant-shell-frame";
 import { MerchantTopbar } from "./merchant-topbar";
+import { MobileTaskDock } from "./mobile-task-dock";
 import { NavigationSection, type NavigationItem } from "./navigation-section";
 
 type AdminPrincipalKind = "ADMIN" | "SUPER_ADMIN";
@@ -123,6 +124,17 @@ export function AdminShell({
   return (
     <MerchantShellFrame
       audience="admin"
+      mobileDock={
+        <MobileTaskDock
+          ariaLabel="管理员快捷导航"
+          items={[
+            { exact: true, href: "/admin", icon: LayoutDashboard, label: "总览" },
+            { href: "/admin/orders", icon: ClipboardList, label: "订单" },
+            { href: "/admin/settlement", icon: Banknote, label: "收款" },
+            { href: "/admin/notifications", icon: BellRing, label: "通知" },
+          ]}
+        />
+      }
       navigation={<AdminNavigation principalKind={principalKind} />}
       topbar={
         <MerchantTopbar

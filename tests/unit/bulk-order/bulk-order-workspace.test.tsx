@@ -272,6 +272,10 @@ describe("BulkOrderWorkspace", () => {
     );
 
     const summary = screen.getByRole("region", { name: "批次摘要" });
+    expect(summary).toHaveClass(
+      "bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.5rem)]",
+      "lg:bottom-4",
+    );
     expect(within(summary).getAllByText("店铺").length).toBeGreaterThan(0);
     expect(within(summary).getAllByText("订单").length).toBeGreaterThan(0);
     expect(within(summary).getAllByText("件数").length).toBeGreaterThan(0);

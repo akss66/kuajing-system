@@ -190,7 +190,7 @@ test("customer declares an exact WeChat payment and admin confirms it without us
   await page.goto("/admin/settlement");
   await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
   await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量付款记录" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "批量付款审核" })).toBeVisible();
   await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
   const claimCard = page.locator("article").filter({
     hasText: fixture.order.orderNumber,
