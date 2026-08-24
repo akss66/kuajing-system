@@ -1046,8 +1046,15 @@ function addSyncDegradation(input: {
  * Parses the live cargo sheet without changing the strict legacy-migration
  * contract. A SKU is the only required row identity in this mode. Incomplete
  * rows remain observable as non-sellable drafts with nullable source fields.
+ * Mirror mode is stricter because skipping a nonblank row would make its
+ * existing system SKU look deleted and trigger destructive reconciliation.
  */
-export function parseCargoSheetForSync(values: unknown[][]): CargoSyncParseResult {
+export function parseCargoSheetForSync(
+  values: unknown[][],
+  options: {
+    mode?: "CATALOG_FIELDS_ONLY" | "MIGRATION_MIRROR";
+  } = {},
+): CargoSyncParseResult {
   const headerRowIndex = findHeaderRow(values);
   if (headerRowIndex === -1) {
     const issues: MigrationIssue[] = [
@@ -1085,10 +1092,15 @@ export function parseCargoSheetForSync(values: unknown[][]): CargoSyncParseResul
     const sourceRowNumber = offset + 1;
     const skuCode = extractDisplayText(row[headerMap.sku]);
     if (!skuCode) {
+      const isMigrationMirror = options.mode === "MIGRATION_MIRROR";
       issues.push({
-        code: "CARGO_SYNC_MISSING_SKU_SKIPPED",
-        message: `第 ${sourceRowNumber} 行没有 SKU，已按残留或草稿行跳过`,
-        severity: "WARNING",
+        code: isMigrationMirror
+          ? "CARGO_SYNC_MISSING_SKU_BLOCKING"
+          : "CARGO_SYNC_MISSING_SKU_SKIPPED",
+        message: isMigrationMirror
+          ? `第 ${sourceRowNumber} 行存在货盘内容但缺少 SKU，镜像同步已阻止`
+          : `第 ${sourceRowNumber} 行没有 SKU，已按残留或草稿行跳过`,
+        severity: isMigrationMirror ? "BLOCKING" : "WARNING",
         sourceRowNumber,
       });
       continue;

@@ -109,6 +109,19 @@ function createValuesWithoutSku(skuCode: string) {
   return values;
 }
 
+function createValuesWithClearedSkuCell(skuCode: string) {
+  const values = structuredClone(buildFieldAlignedCargoSourceFixture().value);
+  const skuIndex = values[0].indexOf("SKU");
+  const row = values.find(
+    (candidate, index) => index > 0 && candidate[skuIndex] === skuCode,
+  );
+  if (skuIndex < 0 || !row) {
+    throw new Error("FIELD_ALIGNED_CLEAR_SKU_FIXTURE_SETUP_FAILED");
+  }
+  row[skuIndex] = "";
+  return values;
+}
+
 function createValuesWithQuantity(skuCode: string, quantity: string) {
   const values = structuredClone(buildFieldAlignedCargoSourceFixture().value);
   const skuIndex = values[0].indexOf("SKU");
@@ -618,6 +631,33 @@ describe("catalog field refresh", () => {
         }),
       ],
     });
+  });
+
+  test("migration mirror rejects a nonblank source row whose existing SKU cell was cleared without changing catalog or inventory", async () => {
+    const { protectedSkuId } = await seedCatalog();
+    await db
+      .update(inventoryReservations)
+      .set({ status: "RELEASED" })
+      .where(eq(inventoryReservations.skuId, protectedSkuId));
+    const before = {
+      inventory: await readInventoryFacts(),
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    };
+
+    await expect(
+      createCatalogFieldRefreshService({ assetDir: assetRoot }).apply({
+        actorUserId: "refresh-actor",
+        client: createReadOnlyClient(createValuesWithClearedSkuCell("TZX-074-1")),
+        mode: "MIGRATION_MIRROR",
+        ...validInput,
+      }),
+    ).rejects.toThrow("PARSER_BLOCKING_ISSUES");
+    expect({
+      inventory: await readInventoryFacts(),
+      products: await db.select().from(products).orderBy(asc(products.id)),
+      skus: await db.select().from(skus).orderBy(asc(skus.id)),
+    }).toEqual(before);
   });
 
   test("migration mirror rejects active reservations and rolls back catalog and inventory changes", async () => {

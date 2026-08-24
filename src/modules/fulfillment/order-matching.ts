@@ -16,7 +16,10 @@ import {
 } from "@/modules/notifications/service";
 
 import { refreshParentFulfillmentStatus } from "./order-rollup";
-import { applyJifengOrderStatus } from "./status-sync";
+import {
+  applyJifengOrderStatus,
+  isRemoteShippedInventoryInvariantFailure,
+} from "./status-sync";
 
 const LEGACY_MATCH_EVENT_TYPE = "JIFENG_CREATE_ORDER";
 export const JIFENG_MATCH_LEASE_MS = 5 * 60 * 1000;
@@ -103,16 +106,6 @@ async function lockMatchRows(
   await tx.execute(sql`
     select id from integration_outbox where id = ${input.eventId} for update
   `);
-}
-
-function isRemoteShippedInvariantFailure(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  return (
-    error.message.includes("库存余额不足") ||
-    error.message.includes("库存锁定") ||
-    error.message.includes("缺少足额库存锁定") ||
-    error.message.includes("没有对应的商品明细")
-  );
 }
 
 async function claimExistingOrderMatch(eventId: string, now: Date) {
@@ -642,7 +635,7 @@ async function finalizeExistingOrderMatch(input: {
     } catch (error) {
       if (
         input.detail.status === 7 &&
-        isRemoteShippedInvariantFailure(error)
+        isRemoteShippedInventoryInvariantFailure(error)
       ) {
         const failure: MatchFailure = {
           code: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",

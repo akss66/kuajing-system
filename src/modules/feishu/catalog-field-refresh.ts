@@ -109,6 +109,7 @@ async function prepareSource(input: {
   client: CatalogFieldRefreshReadPort;
   expectedSkuCount?: number;
   expectedSourceSequenceCount?: number;
+  mode?: CatalogFieldRefreshMode;
   sourceSheetId: string;
   sourceWikiToken: string;
 }): Promise<PreparedSource> {
@@ -127,7 +128,9 @@ async function prepareSource(input: {
   });
   if ("status" in snapshot) fail(snapshot.status);
 
-  const parsed = parseCargoSheetForSync(snapshot.values);
+  const parsed = parseCargoSheetForSync(snapshot.values, {
+    mode: input.mode ?? "CATALOG_FIELDS_ONLY",
+  });
   if (parsed.issues.some((issue) => issue.severity === "BLOCKING")) {
     fail("PARSER_BLOCKING_ISSUES");
   }

@@ -1122,6 +1122,108 @@ describe("Jifeng order status convergence", () => {
     });
   });
 
+  test("parks the first polled remote-shipped inventory invariant failure as an operational exception", async () => {
+    const fixture = await createTwoPackageFixture();
+    const now = new Date("2026-08-21T05:30:00.000Z");
+    const first = fixture.fulfillments[0];
+    await db
+      .delete(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, fixture.order.id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: now })
+      .where(eq(shipmentFulfillments.id, first.id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ nextRetryAt: new Date("2026-08-22T00:00:00.000Z") })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+
+    const result = await pollActiveJifengFulfillments({
+      client: {
+        getOrder: async ({ erpNo }) => ({
+          currency: "CAD",
+          erpNo,
+          logisticsFee: 12.5,
+          orderNo: "JF-INVARIANT-POLL",
+          shippedTime: "2026-08-21T05:20:00.000Z",
+          status: 7,
+          trackingNo: "CP-INVARIANT-POLL",
+        }),
+      },
+      limit: 1,
+      now,
+    });
+
+    expect(result).toMatchObject({ exceptions: 1, pollFailures: 0 });
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, first.id));
+    expect(fulfillment).toMatchObject({
+      externalOrderNo: "JF-INVARIANT-POLL",
+      jifengStatus: 7,
+      lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+      lastStatusPollErrorCode: null,
+      nextRetryAt: null,
+      status: "EXCEPTION",
+      statusPollClaimToken: null,
+    });
+    const [shipment] = await db
+      .select()
+      .from(orderShipments)
+      .where(eq(orderShipments.id, fixture.shipments[0].id));
+    expect(shipment).toMatchObject({
+      logisticsCurrency: "CAD",
+      logisticsFeeMinor: 1250,
+      trackingNumber: "CP-INVARIANT-POLL",
+    });
+    const notification = (await db.select().from(systemNotifications).where(
+      eq(systemNotifications.entityId, first.id),
+    ))[0];
+    expect(notification).toMatchObject({
+      severity: "ERROR",
+      title: "极风已发货但本地库存异常",
+    });
+  });
+
+  test("parks a manually refreshed remote-shipped inventory invariant failure with the same semantics", async () => {
+    const fixture = await createTwoPackageFixture();
+    const first = fixture.fulfillments[0];
+    await db
+      .delete(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, fixture.order.id));
+
+    await expect(
+      refreshJifengShipmentStatus({
+        client: {
+          getOrder: async ({ erpNo }) => ({
+            erpNo,
+            orderNo: "JF-INVARIANT-MANUAL",
+            status: 7,
+            trackingNo: "CP-INVARIANT-MANUAL",
+          }),
+        },
+        now: new Date("2026-08-21T06:00:00.000Z"),
+        shipmentId: fixture.shipments[0].id,
+      }),
+    ).resolves.toMatchObject({
+      orderId: fixture.order.id,
+      status: "EXCEPTION",
+    });
+
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, first.id));
+    expect(fulfillment).toMatchObject({
+      jifengStatus: 7,
+      lastErrorCode: "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH",
+      nextRetryAt: null,
+      status: "EXCEPTION",
+      statusPollClaimToken: null,
+    });
+  });
+
   test("backs off transient poll failures without replacing fulfillment errors or warning immediately", async () => {
     const fixture = await createTwoPackageFixture();
     await db

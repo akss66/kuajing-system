@@ -35,6 +35,8 @@ const STATUS_POLL_WARNING_THRESHOLD = 3;
 const STATUS_POLL_NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 const CANCEL_CONFIRMATION_TIMEOUT_MS = 6 * 60 * 60_000;
 const CANCEL_CONFIRMATION_TIMEOUT_CODE = "CANCEL_CONFIRMATION_TIMEOUT";
+export const REMOTE_SHIP_INVENTORY_INVARIANT_CODE =
+  "REMOTE_SHIP_INVENTORY_INVARIANT_MISMATCH";
 
 export type JifengOrderStatusPort = {
   getOrder(input: { erpNo: string }): Promise<JifengOrderDetail>;
@@ -104,6 +106,17 @@ function clearedStatusPollState(input: {
     statusPollFailureCount: 0,
     statusPollLockedAt: null,
   };
+}
+
+export class RemoteShippedInventoryInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RemoteShippedInventoryInvariantError";
+  }
+}
+
+export function isRemoteShippedInventoryInvariantFailure(error: unknown) {
+  return error instanceof RemoteShippedInventoryInvariantError;
 }
 
 function cancellationConfirmationPolicy(requestedAt: Date, now: Date) {
@@ -428,7 +441,9 @@ export async function applyJifengOrderStatus(input: {
         order by sku_id
       `);
       if (lineQuantities.length === 0) {
-        throw new Error("极风已发货包裹没有对应的商品明细");
+        throw new RemoteShippedInventoryInvariantError(
+          "极风已发货包裹没有对应的商品明细",
+        );
       }
 
       for (const line of lineQuantities) {
@@ -458,10 +473,14 @@ export async function applyJifengOrderStatus(input: {
         const balance = balanceRows[0];
         const reservation = reservationRows[0];
         if (!balance || balance.totalQuantity < line.quantity) {
-          throw new Error("极风发货扣减时库存余额不足，请人工核查");
+          throw new RemoteShippedInventoryInvariantError(
+            "极风发货扣减时库存余额不足，请人工核查",
+          );
         }
         if (!reservation || reservation.quantity < line.quantity) {
-          throw new Error("极风发货包裹缺少足额库存锁定，请人工核查");
+          throw new RemoteShippedInventoryInvariantError(
+            "极风发货包裹缺少足额库存锁定，请人工核查",
+          );
         }
 
         const afterQuantity = balance.totalQuantity - line.quantity;
@@ -866,6 +885,109 @@ export async function applyJifengOrderStatus(input: {
   return existingTx ? apply(existingTx) : db.transaction(apply);
 }
 
+async function parkRemoteShippedInventoryInvariant(input: {
+  claimToken: string;
+  detail: JifengOrderDetail;
+  fulfillmentId: string;
+  now: Date;
+  source: "MANUAL" | "POLL";
+}) {
+  return db.transaction(async (tx) => {
+    const rows = await tx.execute<{
+      orderId: string;
+      orderStatus: string;
+      shipmentId: string;
+    }>(sql`
+      select
+        shipment.order_id as "orderId",
+        parent.status as "orderStatus",
+        shipment.id as "shipmentId"
+      from shipment_fulfillments fulfillment
+      inner join order_shipments shipment on shipment.id = fulfillment.shipment_id
+      inner join fulfillment_orders parent on parent.id = shipment.order_id
+      where fulfillment.id = ${input.fulfillmentId}
+        and fulfillment.status_poll_claim_token = ${input.claimToken}
+      for update of fulfillment, shipment
+    `);
+    const current = rows[0];
+    if (!current) return null;
+
+    const shippedAt = parsedRemoteShippedAt(input.detail.shippedTime);
+    const feeMinor =
+      input.detail.logisticsFee === undefined
+        ? null
+        : Math.round(input.detail.logisticsFee * 100);
+    await tx
+      .update(orderShipments)
+      .set({
+        logisticsCurrency:
+          feeMinor === null ? null : logisticsCurrency(input.detail.currency),
+        logisticsFeeMinor: feeMinor,
+        shippedAt,
+        trackingNumber: input.detail.trackingNo?.trim() || null,
+        updatedAt: input.now,
+      })
+      .where(eq(orderShipments.id, current.shipmentId));
+    await tx
+      .update(shipmentFulfillments)
+      .set({
+        ...clearedStatusPollState({
+          nextRetryAt: null,
+          now: input.now,
+          source: input.source,
+        }),
+        externalOrderNo: input.detail.orderNo ?? null,
+        jifengStatus: 7,
+        lastErrorCode: REMOTE_SHIP_INVENTORY_INVARIANT_CODE,
+        lastErrorMessage:
+          "极风显示已发货，但本地库存/锁定状态异常，请人工完成库存对账。",
+        status: "EXCEPTION",
+        updatedAt: input.now,
+      })
+      .where(
+        and(
+          eq(shipmentFulfillments.id, input.fulfillmentId),
+          eq(shipmentFulfillments.statusPollClaimToken, input.claimToken),
+        ),
+      );
+    const orderStatus = await refreshParentFulfillmentStatus(tx, {
+      now: input.now,
+      orderId: current.orderId,
+    });
+    await tx.insert(auditLogs).values({
+      action: "JIFENG_REMOTE_SHIPPED_INVENTORY_INVARIANT",
+      actorId: null,
+      actorType: "SYSTEM",
+      afterJson: {
+        errorCode: REMOTE_SHIP_INVENTORY_INVARIANT_CODE,
+        jifengStatus: 7,
+        orderStatus,
+        source: input.source,
+      },
+      beforeJson: { orderStatus: current.orderStatus },
+      entityId: current.shipmentId,
+      entityType: "ORDER_SHIPMENT",
+      reason: "极风已发货但本地库存无法安全扣减，已停止自动重试",
+    });
+    await createSystemNotification(tx, {
+      deduplicationKey: `jifeng-remote-shipped-inventory:${input.fulfillmentId}`,
+      entityId: input.fulfillmentId,
+      entityType: "SHIPMENT_FULFILLMENT",
+      message:
+        "极风已确认发货，但本地库存余额或锁定记录不一致。系统已停止自动重试，请人工核对库存和运单。",
+      now: input.now,
+      severity: "ERROR",
+      title: "极风已发货但本地库存异常",
+      type: "JIFENG_EXCEPTION",
+    });
+    return {
+      orderId: current.orderId,
+      orderStatus,
+      status: "EXCEPTION" as const,
+    };
+  });
+}
+
 export async function refreshJifengShipmentStatus(input: {
   client: JifengOrderStatusPort;
   now?: Date;
@@ -939,8 +1061,9 @@ export async function refreshJifengShipmentStatus(input: {
     );
   }
 
+  let detail: JifengOrderDetail | null = null;
   try {
-    const detail = await input.client.getOrder({ erpNo: claim.erpNo });
+    detail = await input.client.getOrder({ erpNo: claim.erpNo });
     if (detail.erpNo !== claim.erpNo) {
       throw new JifengApiError({
         code: "INVALID_RESPONSE",
@@ -970,6 +1093,19 @@ export async function refreshJifengShipmentStatus(input: {
       return { ...result, orderId: reference.orderId };
     });
   } catch (error) {
+    if (
+      detail?.status === 7 &&
+      isRemoteShippedInventoryInvariantFailure(error)
+    ) {
+      const parked = await parkRemoteShippedInventoryInvariant({
+        claimToken,
+        detail,
+        fulfillmentId: claim.id,
+        now,
+        source: "MANUAL",
+      });
+      if (parked) return parked;
+    }
     await db
       .update(shipmentFulfillments)
       .set({
@@ -1006,7 +1142,7 @@ export async function pollActiveJifengFulfillments(input: {
     const now = input.now ?? new Date();
     const claimToken = crypto.randomUUID();
     const staleLeaseCutoff = new Date(now.getTime() - STATUS_POLL_LEASE_MS);
-    const claimedRows = await db.execute<{ erpNo: string }>(sql`
+    const claimedRows = await db.execute<{ erpNo: string; id: string }>(sql`
       with due as (
         select id
         from shipment_fulfillments
@@ -1070,12 +1206,13 @@ export async function pollActiveJifengFulfillments(input: {
         status_poll_locked_at = ${now.toISOString()}::timestamptz
       from due
       where fulfillment.id = due.id
-      returning fulfillment.erp_no as "erpNo"
+      returning fulfillment.erp_no as "erpNo", fulfillment.id
     `);
     const fulfillment = claimedRows[0];
     if (!fulfillment) break;
+    let detail: JifengOrderDetail | null = null;
     try {
-      const detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
+      detail = await input.client.getOrder({ erpNo: fulfillment.erpNo });
       if (detail.erpNo !== fulfillment.erpNo) {
         throw new JifengApiError({
           code: "INVALID_RESPONSE",
@@ -1099,6 +1236,22 @@ export async function pollActiveJifengFulfillments(input: {
       else if (result.status === "EXCEPTION") summary.exceptions += 1;
       else summary.synced += 1;
     } catch (error) {
+      if (
+        detail?.status === 7 &&
+        isRemoteShippedInventoryInvariantFailure(error)
+      ) {
+        const parked = await parkRemoteShippedInventoryInvariant({
+          claimToken,
+          detail,
+          fulfillmentId: fulfillment.id,
+          now,
+          source: "POLL",
+        });
+        if (parked) {
+          summary.exceptions += 1;
+          continue;
+        }
+      }
       const failure = statusPollFailure(error);
       await db.transaction(async (tx) => {
         const locked = await tx.execute<{

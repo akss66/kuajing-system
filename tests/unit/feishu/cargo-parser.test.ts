@@ -1096,6 +1096,23 @@ describe("parseCargoSheetForSync", () => {
     });
   });
 
+  test("blocks a nonblank row without a SKU when parsing for migration mirror", () => {
+    const values = sampleRows();
+    values.push(["77", "", "", "原有商品名称"]);
+
+    const result = parseCargoSheetForSync(values, {
+      mode: "MIGRATION_MIRROR",
+    });
+
+    expect(result.rows).toHaveLength(4);
+    expect(result.issues).toContainEqual({
+      code: "CARGO_SYNC_MISSING_SKU_BLOCKING",
+      message: "第 6 行存在货盘内容但缺少 SKU，镜像同步已阻止",
+      severity: "BLOCKING",
+      sourceRowNumber: 6,
+    });
+  });
+
   test("inherits merged product fields for later SKUs without degrading valid data", () => {
     const values = sampleRows();
     values[2][2] = "";
