@@ -1,9 +1,13 @@
-import { PackageSearch } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { AdminOrderCancel } from "@/components/orders/admin-order-cancel";
+import {
+  OrderExportCheckbox,
+  OrderExportProvider,
+  OrderExportToolbar,
+} from "@/components/orders/admin-order-export";
 import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
@@ -16,6 +20,10 @@ import {
   type AdminOrderFilters,
   type AdminOrderStatus,
 } from "@/modules/orders/queries";
+import {
+  canExportOrderToJifeng,
+  jifengExportBlockedReason,
+} from "@/modules/orders/jifeng-export-policy";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const statuses: Array<{ label: string; value: AdminOrderStatus }> = [
@@ -77,6 +85,9 @@ export default async function AdminOrdersPage({
   const isCancelledView = filters.status === "CANCELLED";
   const isExpiredView = filters.status === "EXPIRED";
   const isHistoricalView = isCancelledView || isExpiredView;
+  const exportableOrders = isHistoricalView
+    ? []
+    : orders.filter((order) => canExportOrderToJifeng(order.status));
   const historyLabel = isExpiredView ? "超时" : "取消";
   const pendingPaymentCount = orders.filter((order) => order.status === "PENDING_PAYMENT").length;
   const exceptionCount = orders.filter((order) => order.status === "FULFILLMENT_EXCEPTION").length;
@@ -135,17 +146,19 @@ export default async function AdminOrdersPage({
         values={filters}
       />
 
-      <WorkspacePanel className="overflow-hidden">
-        <WorkspacePanelHeader
-          action={<PackageSearch className="size-4 text-primary" />}
-          description={`当前条件共 ${orders.length} 条，最多显示 500 条。`}
-          title={isHistoricalView ? `已${historyLabel}拿货单` : "拿货单"}
-        />
+      <OrderExportProvider orderIds={exportableOrders.map((order) => order.id)}>
+        <WorkspacePanel className="overflow-hidden">
+          <WorkspacePanelHeader
+            description={`当前条件共 ${orders.length} 条，最多显示 500 条。`}
+            title={isHistoricalView ? `已${historyLabel}拿货单` : "拿货单"}
+          />
+          {!isHistoricalView ? <OrderExportToolbar /> : null}
         <div className="hidden md:block">
           <ResponsiveDataTable>
             <Table>
               <TableHeader>
                 <TableRow>
+                  {!isHistoricalView ? <TableHead className="w-10"><span className="sr-only">选择</span></TableHead> : null}
                   <TableHead>拿货单 / 时间</TableHead>
                   <TableHead>客户 / 店铺</TableHead>
                   <TableHead>状态</TableHead>
@@ -158,6 +171,17 @@ export default async function AdminOrdersPage({
                 {orders.length ? (
                   orders.map((order) => (
                     <TableRow key={order.id}>
+                      {!isHistoricalView ? (
+                        <TableCell>
+                          {canExportOrderToJifeng(order.status) ? (
+                            <OrderExportCheckbox orderId={order.id} orderNumber={order.orderNumber} />
+                          ) : (
+                            <span className="text-xs text-muted">
+                              {jifengExportBlockedReason(order.status)}
+                            </span>
+                          )}
+                        </TableCell>
+                      ) : null}
                       <TableCell>
                         <Link className="font-semibold text-primary hover:underline" href={`/admin/orders/${order.id}`}>
                           {order.orderNumber}
@@ -196,7 +220,7 @@ export default async function AdminOrdersPage({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell className="h-28 text-center text-muted" colSpan={6}>
+                    <TableCell className="h-28 text-center text-muted" colSpan={isHistoricalView ? 6 : 7}>
                       没有符合条件的拿货单。
                     </TableCell>
                   </TableRow>
@@ -217,11 +241,24 @@ export default async function AdminOrdersPage({
                 key={order.id}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex min-w-0 items-start gap-3">
+                    {!isHistoricalView ? (
+                      <div className="pt-1">
+                        {canExportOrderToJifeng(order.status) ? (
+                          <OrderExportCheckbox orderId={order.id} orderNumber={order.orderNumber} />
+                        ) : (
+                          <span className="text-xs text-muted">
+                            {jifengExportBlockedReason(order.status)}
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="min-w-0">
                     <Link className="font-semibold text-primary" href={`/admin/orders/${order.id}`}>
                       {order.orderNumber}
                     </Link>
                     <p className="mt-1 text-xs text-muted">{dateTime(order.createdAt)}</p>
+                    </div>
                   </div>
                   <Badge className={badgeClass(order.status)} variant="secondary">
                     {statuses.find((status) => status.value === order.status)?.label}
@@ -255,7 +292,8 @@ export default async function AdminOrdersPage({
             <div className="p-10 text-center text-sm text-muted">没有符合条件的拿货单。</div>
           )}
         </div>
-      </WorkspacePanel>
+        </WorkspacePanel>
+      </OrderExportProvider>
     </div>
   );
 }

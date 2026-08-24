@@ -496,6 +496,31 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     expect(screen.queryByText("de***76")).not.toBeInTheDocument();
   });
 
+  it("keeps connector configuration truth separate from a failed task backlog", async () => {
+    pageMocks.requireAdmin.mockResolvedValue({
+      kind: "SUPER_ADMIN",
+      userId: "super-admin-user",
+    });
+    pageMocks.getAdminView.mockResolvedValue(connection("READY_DISABLED"));
+    pageMocks.recentQuery.limit.mockResolvedValueOnce([
+      {
+        eventType: "JIFENG_CREATE_ORDER",
+        lastErrorCode: "REMOTE_TIMEOUT",
+        status: "FAILED",
+        target: "JIFENG",
+        updatedAt: new Date("2026-08-24T08:00:00.000Z"),
+      },
+    ]);
+
+    render(await IntegrationsPage());
+
+    const statusRegion = screen.getByRole("region", { name: "集成运行状态" });
+    expect(within(statusRegion).getByText("已配置", { exact: true })).toBeVisible();
+    expect(within(statusRegion).queryByText("运行降级", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "最近失败任务" })).toBeVisible();
+    expect(screen.getByText("第三方响应超时")).toBeVisible();
+  });
+
   it("does not rediscover Feishu source sheets after the imported baseline exists", async () => {
     vi.stubEnv("FEISHU_APP_ID", "app-id");
     vi.stubEnv("FEISHU_APP_SECRET", "app-secret");

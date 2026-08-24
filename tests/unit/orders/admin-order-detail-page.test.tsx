@@ -116,6 +116,77 @@ describe("AdminOrderDetailPage", () => {
     expect(screen.getByRole("region", { name: "订单状态时间线" })).toBeVisible();
     expect(screen.getAllByText("补发待仓库发货")).toHaveLength(2);
     expect(screen.queryByText("FULFILLING")).not.toBeInTheDocument();
+    expect(screen.getByText("ERP-1")).toBeVisible();
+    expect(screen.getByText("TRACK-1")).toBeVisible();
+    expect(
+      screen.getByRole("group", { name: "查看补发包裹详情" }),
+    ).not.toHaveAttribute("open");
+  });
+
+  it("keeps a matched Jifeng order as a compact manual-action summary", async () => {
+    queryMocks.getAdminOrderDetail.mockResolvedValue({
+      adjustedAmountFen: 0,
+      cancelReason: null,
+      cancellationState: "NONE",
+      createdAt: new Date("2026-08-24T02:00:00.000Z"),
+      customerCode: "C-004",
+      customerName: "待提交客户",
+      id: "order-4",
+      netAmountFen: 1700,
+      orderNumber: "TH-20260824-MANUAL",
+      paidAt: new Date("2026-08-24T02:01:00.000Z"),
+      paymentMode: "DIRECT_OFFLINE",
+      refundedAt: null,
+      shipments: [
+        {
+          attemptCount: 1,
+          cancellationAdjustment: null,
+          cancelledAt: null,
+          erpNo: "OPNJ-1",
+          externalOrderNo: "PO-MANUAL-1",
+          fulfillmentId: "fulfillment-manual",
+          fulfillmentStatus: "PENDING",
+          id: "00000000-0000-4000-8000-000000000005",
+          jifengStatus: null,
+          kind: "NORMAL",
+          lastErrorCode: "50017",
+          lastErrorMessage: null,
+          lines: [],
+          logisticsCurrency: null,
+          logisticsFeeMinor: null,
+          nextRetryAt: new Date("2026-08-24T02:05:00.000Z"),
+          replacementReason: null,
+          replacementStatus: null,
+          shippedAt: null,
+          trackingNumber: null,
+        },
+      ],
+      status: "FULFILLING",
+      storeName: "店铺四",
+      totalAmountFen: 1700,
+      totalPackageCount: 1,
+      totalQuantity: 1,
+    });
+
+    render(
+      await AdminOrderDetailPage({
+        params: Promise.resolve({ orderId: "order-4" }),
+      }),
+    );
+
+    expect(screen.getByText("待在极风后台提交仓库")).toBeVisible();
+    expect(
+      screen.getByText(
+        "已匹配到极风订单，请在极风后台选择物流渠道并提交仓库；系统随后自动同步。",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("OPNJ-1")).toBeVisible();
+    expect(
+      screen.getByRole("group", { name: "查看普通包裹 1详情" }),
+    ).not.toHaveAttribute("open");
+    expect(
+      screen.getByRole("group", { name: "处理普通包裹 1" }),
+    ).not.toHaveAttribute("open");
   });
 
   it("presents retry and cancellation as independent package operations", async () => {

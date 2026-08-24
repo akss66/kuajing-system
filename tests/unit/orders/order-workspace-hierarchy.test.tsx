@@ -141,6 +141,40 @@ describe("order workspace hierarchy", () => {
     );
   });
 
+  it("lets an administrator select one or many active fulfillment orders for Jifeng export", async () => {
+    queryMocks.listAdminOrders.mockResolvedValueOnce([
+      {
+        ...order,
+        customerCode: "C-001",
+        customerName: "客户一",
+        status: "PAID_PENDING_FULFILLMENT",
+      },
+    ]);
+
+    render(await AdminOrdersPage({ searchParams: Promise.resolve({}) }));
+
+    const exportRegion = screen.getByRole("region", { name: "极风发货导出" });
+    const exportButton = within(exportRegion).getByRole("button", { name: "导出所选拿货单" });
+    const orderCheckboxes = screen.getAllByRole("checkbox", { name: "选择拿货单 FH-20260812-01" });
+
+    expect(exportButton).toBeDisabled();
+    expect(exportRegion).toHaveTextContent("已选择 0 个拿货单");
+
+    fireEvent.click(orderCheckboxes[0]);
+
+    expect(exportButton).toBeEnabled();
+    expect(exportRegion).toHaveTextContent("已选择 1 个拿货单");
+  });
+
+  it("does not expose unpaid orders to the Jifeng fulfillment export", async () => {
+    render(await AdminOrdersPage({ searchParams: Promise.resolve({}) }));
+
+    expect(
+      screen.queryByRole("checkbox", { name: "选择拿货单 FH-20260812-01" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText("未付款，不可导出")).toHaveLength(2);
+  });
+
   it("removes one active URL filter without losing the others", async () => {
     navigationMocks.searchParams = new URLSearchParams(
       "status=PENDING_PAYMENT&dateFrom=2026-08-01",
