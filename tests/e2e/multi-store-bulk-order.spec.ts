@@ -296,10 +296,19 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
   await expect(
     page.getByRole("button", { name: "我已微信付款" }),
   ).toBeVisible();
+  const settlementPath = new URL(page.url()).pathname;
   await page.screenshot({
     fullPage: true,
     path: `${VISUAL_REVIEW_DIR}/settlement-1440.png`,
   });
+
+  await page.getByRole("link", { name: "返回批量付款" }).click();
+  await expect(page).toHaveURL(/\/portal\/settlements$/);
+  await expect(page.getByRole("heading", { exact: true, name: "批量付款" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "继续付款" })).toHaveAttribute(
+    "href",
+    settlementPath,
+  );
 });
 
 test("customer bulk workspace stays usable at approved mobile widths @mobile-only", async ({
