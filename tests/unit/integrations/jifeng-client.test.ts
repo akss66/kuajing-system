@@ -437,20 +437,28 @@ describe("Jifeng API client", () => {
     },
   );
 
-  test("queries Jifeng order by platform order number and submits platformOrderNo in request body", async () => {
+  test("queries Jifeng order by platform order number through the documented page endpoint", async () => {
     const fetchMock = vi.fn<
       (url: RequestInfo | URL, request?: RequestInit) => Promise<Response>
     >(async () =>
       Response.json({
         code: 0,
         data: {
-          currency: "CAD",
-          erpNo: "TZX-PLAT-001",
-          logisticsFee: 5.2,
-          orderNo: "TEMU-PLAT-001",
-          platformOrderNo: "TEMU-PLAT-001",
-          status: 6,
-          trackingNo: "T001PLAT",
+          pageNo: 1,
+          pageSize: 300,
+          rows: [
+            {
+              currency: "CAD",
+              erpNo: "TZX-PLAT-001",
+              logisticsFee: 5.2,
+              orderNo: "TEMU-PLAT-001",
+              platformOrderNo: "TEMU-PLAT-001",
+              status: 6,
+              trackingNo: "T001PLAT",
+            },
+          ],
+          totalPage: 1,
+          totalSize: 1,
         },
         message: "SUCCESS",
         requestId: "platform-query",
@@ -464,7 +472,7 @@ describe("Jifeng API client", () => {
     });
 
     await expect(
-      client.getOrder({ platformOrderNo: "TEMU-PLAT-001" } as { platformOrderNo: string }),
+      client.getOrder({ platformOrderNo: "TEMU-PLAT-001" }),
     ).resolves.toMatchObject({
       erpNo: "TZX-PLAT-001",
       orderNo: "TEMU-PLAT-001",
@@ -473,9 +481,114 @@ describe("Jifeng API client", () => {
     });
 
     const [url, request] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://test.jfwms.com/api/order/get");
+    expect(url).toBe("https://test.jfwms.com/api/order/page");
     expect(JSON.parse(String(request?.body))).toEqual({
+      pageNo: 1,
+      pageSize: 300,
       platformOrderNo: "TEMU-PLAT-001",
+    });
+  });
+
+  test("keeps scanning later pages until it finds the exact platform order number", async () => {
+    const fetchMock = vi.fn<
+      (url: RequestInfo | URL, request?: RequestInit) => Promise<Response>
+    >(async (_url, request) => {
+      const { pageNo } = JSON.parse(String(request?.body)) as { pageNo: number };
+      return Response.json({
+        code: 0,
+        data: pageNo === 1
+          ? {
+              pageNo: 1,
+              pageSize: 300,
+              rows: [{
+                erpNo: "OTHER-ERP-001",
+                platformOrderNo: "TEMU-OTHER-001",
+                status: 2,
+              }],
+              totalPage: 2,
+              totalSize: 301,
+            }
+          : {
+              pageNo: 2,
+              pageSize: 300,
+              rows: [{
+                erpNo: "TZX-PLAT-002",
+                orderNo: "TEMU-PLAT-002",
+                platformOrderNo: "TEMU-PLAT-002",
+                status: 2,
+              }],
+              totalPage: 2,
+              totalSize: 301,
+            },
+        message: "SUCCESS",
+        requestId: `platform-query-${pageNo}`,
+      });
+    });
+    const client = new JifengClient({
+      credentials,
+      fetch: fetchMock,
+      nonce: () => "platform-query-pagination",
+      now: () => 1_692_889_556_000,
+    });
+
+    await expect(
+      client.getOrder({ platformOrderNo: "TEMU-PLAT-002" }),
+    ).resolves.toMatchObject({
+      erpNo: "TZX-PLAT-002",
+      orderNo: "TEMU-PLAT-002",
+      platformOrderNo: "TEMU-PLAT-002",
+      status: 2,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, request]) => JSON.parse(String(request?.body)).pageNo))
+      .toEqual([1, 2]);
+  });
+
+  test("reports a missing platform order when the documented page query returns no exact row", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: async () => Response.json({
+        code: 0,
+        data: {
+          pageNo: 1,
+          pageSize: 300,
+          rows: [],
+          totalPage: 0,
+          totalSize: 0,
+        },
+        message: "SUCCESS",
+      }),
+    });
+
+    await expect(
+      client.getOrder({ platformOrderNo: "TEMU-MISSING" }),
+    ).rejects.toMatchObject({ code: "50017", retryable: false });
+  });
+
+  test("rejects ambiguous exact platform order matches instead of binding an arbitrary order", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: async () => Response.json({
+        code: 0,
+        data: {
+          pageNo: 1,
+          pageSize: 300,
+          rows: [
+            { erpNo: "ERP-A", platformOrderNo: "TEMU-DUPLICATE", status: 2 },
+            { erpNo: "ERP-B", platformOrderNo: "TEMU-DUPLICATE", status: 2 },
+          ],
+          totalPage: 1,
+          totalSize: 2,
+        },
+        message: "SUCCESS",
+      }),
+    });
+
+    await expect(
+      client.getOrder({ platformOrderNo: "TEMU-DUPLICATE" }),
+    ).rejects.toMatchObject({
+      code: "AMBIGUOUS_PLATFORM_ORDER",
+      retryable: false,
     });
   });
 });

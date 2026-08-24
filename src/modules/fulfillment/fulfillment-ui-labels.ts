@@ -36,8 +36,9 @@ export function safeFulfillmentError(
   }
   if (code === "50017" || code === "50071") {
     return {
-      message: "极风暂未找到这个平台订单，系统会按退避计划继续匹配。",
-      title: "等待极风已有订单",
+      message:
+        "请先在极风平台订单中选择物流并提交到仓库；提交后系统会自动按平台订单号匹配，不会新建订单。",
+      title: "等待极风提交到仓库",
     };
   }
   if (code === "PLATFORM_ORDER_NO_MISMATCH") {

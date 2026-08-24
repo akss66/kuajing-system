@@ -249,7 +249,7 @@ describe("paid order Jifeng dispatch", () => {
     const { order } = await createShipmentFixture();
     const admin = await insertRuntimeConnection("READY_DISABLED");
     const fetchMock = vi.fn(async (url: RequestInfo | URL, request?: RequestInit) => {
-      const isOrderQuery = String(url).endsWith("/api/order/get");
+      const isOrderQuery = String(url).endsWith("/api/order/page");
       const platformOrderNo = isOrderQuery
         ? String(JSON.parse(String(request?.body)).platformOrderNo)
         : undefined;
@@ -257,10 +257,14 @@ describe("paid order Jifeng dispatch", () => {
         code: 0,
         data: isOrderQuery
           ? {
-              erpNo: "JF-ERP-CYCLE-1",
-              orderNo: "JF-CYCLE-1",
-              platformOrderNo,
-              status: 2,
+              rows: [
+                {
+                  erpNo: "JF-ERP-CYCLE-1",
+                  orderNo: "JF-CYCLE-1",
+                  platformOrderNo,
+                  status: 2,
+                },
+              ],
             }
           : { orderNo: "JF-CYCLE-1" },
         message: "SUCCESS",

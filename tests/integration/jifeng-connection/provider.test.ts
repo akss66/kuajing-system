@@ -235,10 +235,14 @@ describe("Jifeng runtime credential provider", () => {
       Response.json({
         code: 0,
         data: {
-          erpNo: "REMOTE-ERP-LOOKUP",
-          orderNo: "JF-ORDER-LOOKUP",
-          platformOrderNo: "TEMU-ORDER-LOOKUP",
-          status: 2,
+          rows: [
+            {
+              erpNo: "REMOTE-ERP-LOOKUP",
+              orderNo: "JF-ORDER-LOOKUP",
+              platformOrderNo: "TEMU-ORDER-LOOKUP",
+              status: 2,
+            },
+          ],
         },
         message: "SUCCESS",
       }),
@@ -254,7 +258,7 @@ describe("Jifeng runtime credential provider", () => {
     });
     expect(runtime).not.toHaveProperty("config");
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
-      "/api/order/get",
+      "/api/order/page",
     );
   });
 

@@ -60,6 +60,14 @@ const orderDetailSchema = z.object({
   trackingNo: nullableOptionalString,
 });
 
+const orderPageSchema = z.object({
+  pageNo: z.coerce.number().int().optional(),
+  pageSize: z.coerce.number().int().optional(),
+  rows: z.array(orderDetailSchema),
+  totalPage: z.coerce.number().int().optional(),
+  totalSize: z.coerce.number().int().optional(),
+});
+
 const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
 // Official business codes 50019 (ERP order exists) and 50038 (processing)
 // require an order query/reconciliation; blind create retries can duplicate orders.
@@ -130,6 +138,9 @@ export class JifengClient {
     erpNo?: string;
     platformOrderNo?: string;
   }): Promise<JifengOrderDetail> {
+    if (input.platformOrderNo !== undefined) {
+      return this.getOrderByPlatformOrderNo(input.platformOrderNo);
+    }
     const response = await this.businessPost("/api/order/get", input);
     const parsed = orderDetailSchema.safeParse(response.data);
     if (!parsed.success) {
@@ -141,6 +152,62 @@ export class JifengClient {
       });
     }
     return parsed.data;
+  }
+
+  private async getOrderByPlatformOrderNo(
+    platformOrderNo: string,
+  ): Promise<JifengOrderDetail> {
+    // The single-order endpoint is keyed by erpNo. Jifeng's documented exact
+    // platform-order lookup is the paged endpoint:
+    // https://s.apifox.cn/25bf1c44-f535-4c37-9bf4-7244130a67ce/api-505074713
+    const exactMatches = new Map<string, JifengOrderDetail>();
+    let currentPage = 1;
+    let requestId: string | undefined;
+    let totalPage = 1;
+
+    while (currentPage <= totalPage) {
+      const response = await this.businessPost("/api/order/page", {
+        pageNo: currentPage,
+        pageSize: 300,
+        platformOrderNo,
+      });
+      requestId = response.requestId;
+      const parsed = orderPageSchema.safeParse(response.data);
+      if (!parsed.success) {
+        throw new JifengApiError({
+          code: "INVALID_RESPONSE",
+          message: "极风订单分页响应格式无效",
+          requestId: response.requestId,
+          retryable: true,
+        });
+      }
+
+      totalPage = Math.max(parsed.data.totalPage ?? currentPage, currentPage);
+      for (const order of parsed.data.rows) {
+        if (order.platformOrderNo === platformOrderNo) {
+          exactMatches.set(order.erpNo, order);
+        }
+      }
+      currentPage += 1;
+    }
+
+    if (exactMatches.size === 0) {
+      throw new JifengApiError({
+        code: "50017",
+        message: "极风仓库暂未找到该平台订单",
+        requestId,
+        retryable: false,
+      });
+    }
+    if (exactMatches.size > 1) {
+      throw new JifengApiError({
+        code: "AMBIGUOUS_PLATFORM_ORDER",
+        message: "极风返回多个相同平台订单号，已停止自动绑定",
+        requestId,
+        retryable: false,
+      });
+    }
+    return exactMatches.values().next().value as JifengOrderDetail;
   }
 
   async cancelOrder(input: { deleteRecord?: boolean; erpNo: string }) {

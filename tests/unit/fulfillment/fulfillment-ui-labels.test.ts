@@ -10,6 +10,17 @@ describe("safeFulfillmentError", () => {
     });
   });
 
+  it.each(["50017", "50071"])(
+    "explains how to submit an OMS platform order before warehouse matching for %s",
+    (code) => {
+      expect(safeFulfillmentError(code)).toEqual({
+        message:
+          "请先在极风平台订单中选择物流并提交到仓库；提交后系统会自动按平台订单号匹配，不会新建订单。",
+        title: "等待极风提交到仓库",
+      });
+    },
+  );
+
   it.each([
     "POST_SUCCESS_PERSISTENCE_ERROR",
     "RECONCILIATION_REQUIRED:NETWORK_ERROR",
