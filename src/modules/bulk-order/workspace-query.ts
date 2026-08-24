@@ -9,6 +9,7 @@ import {
   skus,
 } from "@/db/schema";
 import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
+import { calculateOrderPricing } from "@/modules/orders/pricing";
 
 import { getBulkDraft } from "./draft-service";
 import { validateBulkDraft } from "./validation-service";
@@ -17,6 +18,7 @@ type WorkspaceRow = {
   batchId: string;
   createdAt: Date;
   effectiveQuantity: number | null;
+  externalOrderNo: string | null;
   externalSubOrderNo: string | null;
   fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
   quantity: number | null;
@@ -63,6 +65,7 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
             batchId: orderImportRows.batchId,
             createdAt: orderImportBatches.createdAt,
             effectiveQuantity: orderImportRows.effectiveQuantity,
+            externalOrderNo: orderImportRows.externalOrderNo,
             externalSubOrderNo: orderImportRows.externalSubOrderNo,
             fulfillmentMode: orderImportRows.fulfillmentMode,
             quantity: orderImportRows.quantity,
@@ -136,7 +139,8 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         firstBySubOrder.set(row.externalSubOrderNo, row);
       }
 
-      let totalAmountFen = 0;
+      let merchandiseAmountFen = 0;
+      const packageOrderNumbers = new Set<string>();
       for (const row of firstBySubOrder.values()) {
         const key = `${group.storeId}:${row.externalSubOrderNo}`;
         if (
@@ -147,13 +151,20 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         ) {
           continue;
         }
+        if (row.externalOrderNo) {
+          packageOrderNumbers.add(row.externalOrderNo);
+        }
         if (row.fulfillmentMode === "SYSTEM_SKU" && row.resolvedSkuId) {
-          totalAmountFen += calculateLineAmountFen(
+          merchandiseAmountFen += calculateLineAmountFen(
             row.effectiveQuantity,
             priceBySku.get(row.resolvedSkuId) ?? 0,
           );
         }
       }
+      const { totalAmountFen } = calculateOrderPricing({
+        merchandiseAmountFen,
+        packageCount: packageOrderNumbers.size,
+      });
 
       return {
         deduplicatedOrderCount: groupValidation?.deduplicatedOrderCount ?? 0,
