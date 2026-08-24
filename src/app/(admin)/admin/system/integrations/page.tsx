@@ -36,6 +36,7 @@ import {
 } from "@/modules/feishu/actions";
 import {
   findLatestImportedCargoRefreshBaseline,
+  getLatestCatalogMirrorTaskState,
   getLatestCatalogFieldRefreshState,
   getLatestCargoMigrationRun,
   getLatestCargoTargetSyncState,
@@ -135,6 +136,7 @@ export default async function IntegrationsPage() {
     targetSyncState,
     catalogRefreshBaseline,
     catalogRefreshState,
+    catalogMirrorTaskState,
   ] =
     await Promise.all([
       canManageJifeng
@@ -165,6 +167,16 @@ export default async function IntegrationsPage() {
       canManageJifeng
         ? getLatestCatalogFieldRefreshState()
         : Promise.resolve({ lastUpdatedLabel: null }),
+      canManageJifeng
+        ? getLatestCatalogMirrorTaskState()
+        : Promise.resolve({
+            isActive: false,
+            lastUpdatedLabel: null,
+            result: null,
+            safeErrorMessage: null,
+            statusLabel: "尚未执行",
+            tone: "default" as const,
+          }),
     ]);
 
   const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
@@ -293,6 +305,7 @@ export default async function IntegrationsPage() {
                   actorKind={principal.kind}
                   cargoImportEnabled={cargoImportEnabled}
                   catalogMirrorEnabled={catalogMirrorEnabled}
+                  catalogMirrorTaskState={catalogMirrorTaskState}
                   cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}
                   createCargoPreflightAction={createCargoPreflightAction}

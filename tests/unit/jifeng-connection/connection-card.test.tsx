@@ -33,6 +33,7 @@ const pageMocks = vi.hoisted(() => {
     findLatestImportedCargoRefreshBaseline: vi.fn(),
     getAdminView: vi.fn(),
     getLatestCatalogFieldRefreshState: vi.fn(),
+    getLatestCatalogMirrorTaskState: vi.fn(),
     getLatestCargoMigrationRun: vi.fn(),
     getLatestCargoTargetSyncState: vi.fn(),
     getPublicStatus: vi.fn(),
@@ -101,6 +102,8 @@ vi.mock("@/modules/feishu/queries", () => ({
     pageMocks.findLatestImportedCargoRefreshBaseline,
   getLatestCatalogFieldRefreshState:
     pageMocks.getLatestCatalogFieldRefreshState,
+  getLatestCatalogMirrorTaskState:
+    pageMocks.getLatestCatalogMirrorTaskState,
   getLatestCargoMigrationRun: pageMocks.getLatestCargoMigrationRun,
   getLatestCargoTargetSyncState: pageMocks.getLatestCargoTargetSyncState,
 }));
@@ -394,6 +397,7 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     pageMocks.discoverFeishuSourceSheets.mockReset();
     pageMocks.findLatestImportedCargoRefreshBaseline.mockReset();
     pageMocks.getLatestCatalogFieldRefreshState.mockReset();
+    pageMocks.getLatestCatalogMirrorTaskState.mockReset();
     pageMocks.getLatestCargoMigrationRun.mockReset();
     pageMocks.getLatestCargoTargetSyncState.mockReset();
     pageMocks.recentQuery.limit.mockClear();
@@ -411,6 +415,14 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     pageMocks.findLatestImportedCargoRefreshBaseline.mockResolvedValue(null);
     pageMocks.getLatestCatalogFieldRefreshState.mockResolvedValue({
       lastUpdatedLabel: null,
+    });
+    pageMocks.getLatestCatalogMirrorTaskState.mockResolvedValue({
+      isActive: false,
+      lastUpdatedLabel: null,
+      result: null,
+      safeErrorMessage: null,
+      statusLabel: "尚未执行",
+      tone: "default",
     });
     pageMocks.getLatestCargoMigrationRun.mockResolvedValue(null);
     pageMocks.getLatestCargoTargetSyncState.mockResolvedValue({

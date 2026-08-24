@@ -39,6 +39,7 @@ const queryMocks = vi.hoisted(() => ({
 
 const outboxMocks = vi.hoisted(() => ({
   enqueueCargoSyncEvent: vi.fn(),
+  enqueueCatalogMirror: vi.fn(),
 }));
 
 const clientMocks = vi.hoisted(() => ({
@@ -83,6 +84,9 @@ vi.mock("@/modules/feishu/queries", () => ({
 vi.mock("@/modules/feishu/outbox", () => ({
   enqueueCargoSyncEvent: outboxMocks.enqueueCargoSyncEvent,
 }));
+vi.mock("@/modules/feishu/catalog-mirror-outbox", () => ({
+  enqueueCatalogMirror: outboxMocks.enqueueCatalogMirror,
+}));
 vi.mock("@/integrations/feishu/client", () => constructorMocks);
 
 import {
@@ -113,6 +117,7 @@ describe("feishu admin actions", () => {
     queryMocks.findCargoMigrationRunConfirmationSummary.mockReset();
     queryMocks.findLatestImportedCargoRefreshBaseline.mockReset();
     outboxMocks.enqueueCargoSyncEvent.mockReset();
+    outboxMocks.enqueueCatalogMirror.mockReset();
     constructorMocks.FeishuClient.mockClear();
     Object.values(clientMocks).forEach((mock) => mock.mockReset());
 
@@ -162,6 +167,10 @@ describe("feishu admin actions", () => {
       runId: "run-74",
       skuCount: 74,
       status: "PREFLIGHT_READY",
+    });
+    outboxMocks.enqueueCatalogMirror.mockResolvedValue({
+      created: true,
+      eventId: "catalog-mirror-event-1",
     });
     clientMocks.resolveWikiSpreadsheet.mockResolvedValue({
       spreadsheetToken: "source-spreadsheet-token",
@@ -510,7 +519,7 @@ describe("feishu admin actions", () => {
     expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
   });
 
-  it("synchronizes exact Feishu catalog rows without legacy counts or placeholders", async () => {
+  it("queues the exact Feishu catalog mirror without holding the server action open", async () => {
     serviceMocks.applyCatalogFieldRefresh.mockResolvedValue({
       cargoPricePlaceholders: [],
       createdProductCount: 2,
@@ -531,16 +540,15 @@ describe("feishu admin actions", () => {
     );
 
     expect(result).toEqual({
-      message: "飞书迁移镜像完成：共 143 个 SKU；新增 3 个 SKU、2 个商品，更新 140 个 SKU，归档 4 个飞书缺失 SKU；12 个 SKU 的库存已按飞书校准；1 个资料不完整的 SKU 已保持不可售。",
+      message: "飞书货盘同步已加入后台队列，可以离开页面；系统会自动显示最终结果。",
       status: "success",
     });
-    expect(serviceMocks.applyCatalogFieldRefresh).toHaveBeenCalledWith({
+    expect(serviceMocks.applyCatalogFieldRefresh).not.toHaveBeenCalled();
+    expect(serviceMocks.createCatalogFieldRefreshService).not.toHaveBeenCalled();
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+    expect(outboxMocks.enqueueCatalogMirror).toHaveBeenCalledWith({
       actorUserId: "super-admin-user-1",
-      client: clientMocks,
-      mode: "MIGRATION_MIRROR",
-      reason: "超级管理员执行迁移期飞书货盘全量镜像",
       sourceSheetId: "sheet-source-a",
-      sourceWikiToken: "wiki-source-token",
     });
     expect(clientMocks.writeRange).not.toHaveBeenCalled();
     expect(clientMocks.writeImage).not.toHaveBeenCalled();
@@ -548,10 +556,9 @@ describe("feishu admin actions", () => {
     expect(clientMocks.updateDimension).not.toHaveBeenCalled();
     expect(clientMocks.updateSheetProperties).not.toHaveBeenCalled();
     expect(clientMocks.createFilter).not.toHaveBeenCalled();
-    expect(cacheMocks.revalidatePath.mock.calls).toEqual([
-      ["/admin/catalog"],
-      ["/admin/inventory"],
-    ]);
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
+      "/admin/system/integrations",
+    );
   });
 
   it("rejects migration mirror while its temporary rollout flag is disabled", async () => {
@@ -587,30 +594,26 @@ describe("feishu admin actions", () => {
     expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["PRODUCT_GROUPING_CONFLICT", "商品分组"],
-    ["PARSER_BLOCKING_ISSUES", "阻断问题"],
-    ["NO_SYNCABLE_SKUS", "有效 SKU"],
-    ["SOURCE_IMAGE_DOWNLOAD_FAILED", "图片"],
-    ["SOURCE_CHANGED_DURING_SYNC", "发生了变化"],
-    ["SOURCE_SYNC_SUPERSEDED", "较早请求"],
-    ["MIRROR_ACTIVE_RESERVATIONS", "库存占用"],
-  ])("maps catalog refresh failure %s to safe Chinese", async (code, label) => {
-    serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(new Error(code));
+  it("does not expose database details when the mirror task cannot be queued", async () => {
+    outboxMocks.enqueueCatalogMirror.mockRejectedValue(
+      new Error("postgres password=secret-value relation=integration_outbox"),
+    );
 
     const result = await syncFeishuCatalogFieldsAction(
       { status: "idle" },
       new FormData(),
     );
 
-    expect(result.status).toBe("error");
-    expect(result.message).toContain(label);
-    expect(result.message).not.toContain(code);
+    expect(result).toEqual({
+      message: "暂时无法读取飞书货盘，请稍后重试；本次未修改商品或库存。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("secret-value");
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("does not expose third-party error codes or tokens from a failed refresh", async () => {
-    serviceMocks.applyCatalogFieldRefresh.mockRejectedValue(
+    outboxMocks.enqueueCatalogMirror.mockRejectedValue(
       new Error("FeishuApiError code=999 token=secret-value"),
     );
 

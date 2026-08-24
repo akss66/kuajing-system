@@ -21,6 +21,8 @@ import {
   skus,
 } from "@/db/schema";
 import { FeishuClient } from "@/integrations/feishu/client";
+import { createCatalogFieldRefreshService } from "@/modules/feishu/catalog-field-refresh";
+import { processCatalogMirrorOutbox } from "@/modules/feishu/catalog-mirror-outbox";
 import { createFeishuCargoMigrationService } from "@/modules/feishu/migration-service";
 
 import { createManagedUser, loginThroughUi } from "./support/managed-user";
@@ -472,6 +474,26 @@ async function runReadyPreflight(assetDir: string) {
   return result.runId;
 }
 
+async function runCatalogMirrorWorker(assetDir: string) {
+  const service = createCatalogFieldRefreshService({ assetDir });
+  const client = new FeishuClient({
+    appId: "e2e-feishu-app-id",
+    appSecret: "e2e-feishu-app-secret",
+    baseUrl: FEISHU_BASE_URL,
+  });
+  return processCatalogMirrorOutbox({
+    apply: ({ actorUserId, sourceSheetId }) =>
+      service.apply({
+        actorUserId,
+        client,
+        mode: "MIGRATION_MIRROR",
+        reason: "E2E 后台镜像",
+        sourceSheetId,
+        sourceWikiToken: SOURCE_WIKI_TOKEN,
+      }),
+  });
+}
+
 test.describe.serial("Feishu cargo migration", () => {
   test.setTimeout(180_000);
   let fakeServer: FakeFeishuServer | null = null;
@@ -626,8 +648,22 @@ test.describe.serial("Feishu cargo migration", () => {
       .getByRole("button", { name: "一键同步飞书货盘" })
       .click();
     await expect(
-      drawer.getByText(/飞书迁移镜像完成：共 140 个 SKU；新增 0 个 SKU、0 个商品，更新 140 个 SKU/),
-    ).toBeVisible({ timeout: 90_000 });
+      drawer.getByText("飞书货盘同步已加入后台队列，可以离开页面；系统会自动显示最终结果。"),
+    ).toBeVisible();
+    await expect.poll(async () => {
+      const [event] = await db
+        .select({ status: integrationOutbox.status })
+        .from(integrationOutbox)
+        .where(eq(integrationOutbox.eventType, "FEISHU_CATALOG_MIRROR"));
+      return event?.status;
+    }).toBe("PENDING");
+    await expect(runCatalogMirrorWorker(assetDir)).resolves.toMatchObject({
+      completed: 1,
+      processed: 1,
+    });
+    await expect(drawer.getByText("任务状态：同步完成")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(
       drawer.getByRole("button", { name: "一键同步飞书货盘" }),
     ).toBeEnabled({ timeout: 10_000 });

@@ -17,10 +17,7 @@ import {
 import { requireAdmin, requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
-import {
-  createCatalogFieldRefreshService,
-  type CatalogFieldRefreshPreview,
-} from "./catalog-field-refresh";
+import { enqueueCatalogMirror } from "./catalog-mirror-outbox";
 import { createFeishuCargoMigrationService } from "./migration-service";
 import { enqueueCargoSyncEvent } from "./outbox";
 import {
@@ -30,8 +27,6 @@ import {
 import type { FeishuSourceSheet } from "./source-reader";
 
 const INTEGRATIONS_PATH = "/admin/system/integrations";
-const CATALOG_PATH = "/admin/catalog";
-const INVENTORY_PATH = "/admin/inventory";
 
 const READ_ONLY_CONFIRM_MESSAGE =
   "系统数据库导入尚未启用，需显式设置 FEISHU_CARGO_IMPORT_ENABLED=true 后才允许确认首批导入；飞书源表仍保持只读。";
@@ -128,7 +123,6 @@ export async function syncFeishuCatalogFieldsAction(
   void _formData;
   const actor = await requireSuperAdmin();
 
-  let result: CatalogFieldRefreshPreview;
   try {
     const baseline = await findLatestImportedCargoRefreshBaseline();
     if (!baseline) {
@@ -145,16 +139,17 @@ export async function syncFeishuCatalogFieldsAction(
         status: "error",
       };
     }
-    const { client } = createFeishuClient(config);
-    const service = createCatalogFieldRefreshService();
-    result = await service.apply({
+    const queued = await enqueueCatalogMirror({
       actorUserId: actor.userId,
-      client,
-      mode: "MIGRATION_MIRROR",
-      reason: "超级管理员执行迁移期飞书货盘全量镜像",
       sourceSheetId: baseline.sourceSheetId,
-      sourceWikiToken: config.sourceWikiToken,
     });
+    revalidatePath(INTEGRATIONS_PATH);
+    return {
+      message: queued.created
+        ? "飞书货盘同步已加入后台队列，可以离开页面；系统会自动显示最终结果。"
+        : "已有飞书货盘同步任务正在排队或执行，请勿重复提交。",
+      status: "success",
+    };
   } catch (error) {
     return {
       message: mapCatalogRefreshErrorMessage(error),
@@ -162,12 +157,6 @@ export async function syncFeishuCatalogFieldsAction(
     };
   }
 
-  revalidatePath(CATALOG_PATH);
-  revalidatePath(INVENTORY_PATH);
-  return {
-    message: `飞书迁移镜像完成：共 ${result.skuCount} 个 SKU；新增 ${result.createdSkuCount} 个 SKU、${result.createdProductCount} 个商品，更新 ${result.matchedSkuCount} 个 SKU，归档 ${result.archivedSkuCount} 个飞书缺失 SKU；${result.inventoryAdjustedSkuCount} 个 SKU 的库存已按飞书校准；${result.degradedSkuCount} 个资料不完整的 SKU 已保持不可售。`,
-    status: "success",
-  };
 }
 
 export async function retryFeishuCargoSyncAction(

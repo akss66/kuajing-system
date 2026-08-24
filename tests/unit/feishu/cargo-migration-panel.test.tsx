@@ -76,6 +76,14 @@ function createProps(
     actorKind: "SUPER_ADMIN",
     cargoImportEnabled: true,
     catalogMirrorEnabled: true,
+    catalogMirrorTaskState: {
+      isActive: false,
+      lastUpdatedLabel: null,
+      result: null,
+      safeErrorMessage: null,
+      statusLabel: "尚未执行",
+      tone: "default",
+    },
     createCargoPreflightAction: idleAction,
     importedCargoBaseline: {
       importedAtLabel: "2026/08/13 14:12",
@@ -272,7 +280,7 @@ describe("CargoMigrationPanel", () => {
     );
 
     const pendingButton = await screen.findByRole("button", {
-      name: "正在同步",
+      name: "正在加入队列",
     });
     expect(pendingButton).toBeDisabled();
     expect(pendingButton).toHaveAttribute("aria-busy", "true");
@@ -289,6 +297,28 @@ describe("CargoMigrationPanel", () => {
       ).toBeEnabled(),
     );
     expect(navigationMocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a durable background mirror visibly disabled across page refreshes", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps()}
+        catalogMirrorTaskState={{
+          isActive: true,
+          lastUpdatedLabel: "2026/08/24 10:00",
+          result: null,
+          safeErrorMessage: null,
+          statusLabel: "同步中",
+          tone: "warning",
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "后台同步中" }),
+    ).toBeDisabled();
+    expect(screen.getByText("任务状态：同步中")).toBeVisible();
+    expect(screen.getByText("可以离开本页面，后台任务不会中断。")).toBeVisible();
   });
 
   it("shows immediate multi-sheet selection for super admins before preflight can start", () => {

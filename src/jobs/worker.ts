@@ -6,6 +6,7 @@ import {
 } from "@/jobs/worker-health";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
+  canMirrorFeishuCatalog,
   canProcessFeishuBot,
   canWriteFeishuCargo,
   hasFeishuRuntimeConfiguration,
@@ -13,6 +14,7 @@ import {
   readFeishuConfig,
 } from "@/integrations/feishu/config";
 import { runJifengFulfillmentCycle } from "@/modules/jifeng-connection/provider";
+import { runFeishuCatalogMirrorCycle } from "@/modules/feishu/catalog-mirror-provider";
 import {
   enqueueFeishuCargoSync,
   processFeishuOutbox,
@@ -29,6 +31,7 @@ const EXPIRE_PENDING_ORDERS_QUEUE = "expire-pending-payment-orders";
 const EXPIRE_SETTLEMENT_BATCHES_QUEUE = "expire-settlement-batches";
 const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
 const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
+const FEISHU_CATALOG_MIRROR_QUEUE = "feishu-catalog-mirror-cycle";
 const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
 const boss = new PgBoss(connectionString);
 const expectedWorkerQueues = [
@@ -98,6 +101,27 @@ if (hasAnyFeishuConfiguration) {
   const feishuConfig = readFeishuConfig();
   const cargoWriterEnabled = canWriteFeishuCargo(feishuConfig);
   const botEnabled = canProcessFeishuBot(feishuConfig);
+  const catalogMirrorEnabled = canMirrorFeishuCatalog(feishuConfig);
+
+  if (catalogMirrorEnabled) {
+    await boss.createQueue(FEISHU_CATALOG_MIRROR_QUEUE);
+    await boss.schedule(FEISHU_CATALOG_MIRROR_QUEUE, "* * * * *", null, {
+      tz: "UTC",
+    });
+    await boss.work(
+      FEISHU_CATALOG_MIRROR_QUEUE,
+      { batchSize: 1 },
+      async () => {
+        const result = await runFeishuCatalogMirrorCycle();
+        console.info(
+          `[worker] Feishu catalog mirror processed=${result.processed} completed=${result.completed} failed=${result.failed}`,
+        );
+        return result;
+      },
+    );
+    expectedWorkerQueues.push(FEISHU_CATALOG_MIRROR_QUEUE);
+    console.info("[worker] Feishu catalog mirror job enabled");
+  }
 
   if (cargoWriterEnabled || botEnabled) {
     const feishuClient = new FeishuClient({

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { CargoMigrationActionState } from "@/modules/feishu/actions";
 import type {
   CargoMigrationPanelRun,
+  CatalogMirrorTaskState,
   CargoMigrationTargetSyncState,
 } from "@/modules/feishu/queries";
 import {
@@ -43,6 +44,7 @@ export type CargoMigrationPanelProps = {
   actorKind: ActorKind;
   cargoImportEnabled: boolean;
   catalogMirrorEnabled: boolean;
+  catalogMirrorTaskState: CatalogMirrorTaskState;
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
   createCargoPreflightAction: PreflightManagedAction;
@@ -103,6 +105,7 @@ export function CargoMigrationPanel({
   actorKind,
   cargoImportEnabled,
   catalogMirrorEnabled,
+  catalogMirrorTaskState,
   cargoWritesEnabled,
   confirmCargoMigrationAction,
   createCargoPreflightAction,
@@ -146,6 +149,12 @@ export function CargoMigrationPanel({
     refreshedCatalogSyncStateRef.current = catalogSyncState;
     router.refresh();
   }, [catalogSyncState, router]);
+
+  useEffect(() => {
+    if (!catalogMirrorTaskState.isActive) return;
+    const timer = window.setInterval(() => router.refresh(), 3_000);
+    return () => window.clearInterval(timer);
+  }, [catalogMirrorTaskState.isActive, router]);
 
   const availableSourceSheets = useMemo(
     () =>
@@ -416,6 +425,15 @@ export function CargoMigrationPanel({
               <p>
                 最近同步：{latestCatalogRefreshLabel ?? "尚未执行"}
               </p>
+              <p>任务状态：{catalogMirrorTaskState.statusLabel}</p>
+              {catalogMirrorTaskState.isActive ? (
+                <p>可以离开本页面，后台任务不会中断。</p>
+              ) : null}
+              {catalogMirrorTaskState.safeErrorMessage ? (
+                <p className="text-danger">
+                  最近失败原因：{catalogMirrorTaskState.safeErrorMessage}
+                </p>
+              ) : null}
             </div>
             <div
               aria-atomic="true"
@@ -430,15 +448,23 @@ export function CargoMigrationPanel({
               {catalogSyncState.message ?? ""}
             </div>
             <button
-              aria-busy={catalogSyncPending}
+              aria-busy={catalogSyncPending || catalogMirrorTaskState.isActive}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
-              disabled={catalogSyncPending || !sourceConfigured}
+              disabled={
+                catalogSyncPending ||
+                catalogMirrorTaskState.isActive ||
+                !sourceConfigured
+              }
               type="submit"
             >
-              {catalogSyncPending ? (
+              {catalogSyncPending || catalogMirrorTaskState.isActive ? (
                 <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
               ) : null}
-              {catalogSyncPending ? "正在同步" : "一键同步飞书货盘"}
+              {catalogSyncPending
+                ? "正在加入队列"
+                : catalogMirrorTaskState.isActive
+                  ? "后台同步中"
+                  : "一键同步飞书货盘"}
             </button>
           </form>
         </WorkspacePanel>

@@ -20,6 +20,7 @@ import type {
   MigrationSummary,
   NormalizedCargoRow,
 } from "./cargo-types";
+import { FEISHU_CATALOG_MIRROR_EVENT } from "./catalog-mirror-outbox";
 
 type DatabaseLike = DbTransaction | typeof db;
 
@@ -202,6 +203,105 @@ export type ImportedCargoRefreshBaseline = {
 export type CatalogFieldRefreshState = {
   lastUpdatedLabel: string | null;
 };
+
+export type CatalogMirrorTaskState = {
+  isActive: boolean;
+  lastUpdatedLabel: string | null;
+  result: {
+    archivedSkuCount?: number;
+    createdProductCount?: number;
+    createdSkuCount?: number;
+    degradedSkuCount?: number;
+    inventoryAdjustedSkuCount?: number;
+    matchedSkuCount?: number;
+    skuCount?: number;
+  } | null;
+  safeErrorMessage: string | null;
+  statusLabel: string;
+  tone: "danger" | "default" | "success" | "warning";
+};
+
+function safeCatalogMirrorError(errorCode: string | null) {
+  if (!errorCode) return null;
+  if (errorCode === "PARSER_BLOCKING_ISSUES") {
+    return "飞书货盘存在阻断问题，请修正后重新同步。";
+  }
+  if (errorCode === "PRODUCT_GROUPING_CONFLICT") {
+    return "飞书商品分组与系统归属冲突，请核对后重新同步。";
+  }
+  if (errorCode === "NO_SYNCABLE_SKUS") {
+    return "飞书货盘中没有可同步的有效 SKU。";
+  }
+  if (errorCode === "MIRROR_ACTIVE_RESERVATIONS") {
+    return "系统存在活动库存占用，后台稍后会自动重试。";
+  }
+  if (errorCode === "SOURCE_IMAGE_DOWNLOAD_FAILED") {
+    return "读取飞书货盘图片失败，后台稍后会自动重试。";
+  }
+  if (errorCode.startsWith("RETRY_EXHAUSTED:")) {
+    return "连续重试仍未成功，请检查飞书连接和货盘内容后重新发起。";
+  }
+  return "同步暂时失败；后台会自动重试，或稍后重新发起。";
+}
+
+function safeCargoTargetSyncError(errorCode: string | null) {
+  if (!errorCode) return "飞书目标表同步暂时失败，请稍后重试。";
+  if (errorCode.startsWith("RETRY_EXHAUSTED:")) {
+    return "飞书目标表连续重试仍失败，请检查连接配置后人工重试。";
+  }
+  if (errorCode === "STALE_PROCESSING") {
+    return "飞书目标表同步中断，系统将自动重试。";
+  }
+  return "飞书目标表同步暂时失败，请稍后重试。";
+}
+
+export async function getLatestCatalogMirrorTaskState(): Promise<CatalogMirrorTaskState> {
+  const [event] = await db
+    .select({
+      lastErrorCode: integrationOutbox.lastErrorCode,
+      nextAttemptAt: integrationOutbox.nextAttemptAt,
+      payload: integrationOutbox.payload,
+      status: integrationOutbox.status,
+      updatedAt: integrationOutbox.updatedAt,
+    })
+    .from(integrationOutbox)
+    .where(eq(integrationOutbox.eventType, FEISHU_CATALOG_MIRROR_EVENT))
+    .orderBy(desc(integrationOutbox.updatedAt))
+    .limit(1);
+
+  if (!event) {
+    return {
+      isActive: false,
+      lastUpdatedLabel: null,
+      result: null,
+      safeErrorMessage: null,
+      statusLabel: "尚未执行",
+      tone: "default",
+    };
+  }
+  const isTerminalFailure =
+    event.status === "FAILED" &&
+    event.nextAttemptAt.getTime() >= new Date("9999-12-31T23:59:59.999Z").getTime();
+  const isActive =
+    event.status === "PENDING" ||
+    event.status === "PROCESSING" ||
+    (event.status === "FAILED" && !isTerminalFailure);
+  const status = isTerminalFailure
+    ? { label: "需要处理", tone: "danger" as const }
+    : mapTargetSyncLabel(event.status);
+  const payload = event.payload as { result?: CatalogMirrorTaskState["result"] };
+  return {
+    isActive,
+    lastUpdatedLabel: formatDateTime(event.updatedAt),
+    result: payload.result ?? null,
+    safeErrorMessage:
+      event.status === "FAILED"
+        ? safeCatalogMirrorError(event.lastErrorCode)
+        : null,
+    statusLabel: status.label,
+    tone: event.status === "FAILED" && !isActive ? "danger" : status.tone,
+  };
+}
 
 const auditedCargoPricePlaceholder = {
   skuCode: "TZX-076",
@@ -481,7 +581,7 @@ export async function getLatestCargoMigrationRun() {
 export async function getLatestCargoTargetSyncState(targetSheetId?: string | null) {
   const [event] = await db
     .select({
-      lastErrorMessage: integrationOutbox.lastErrorMessage,
+      lastErrorCode: integrationOutbox.lastErrorCode,
       payload: integrationOutbox.payload,
       status: integrationOutbox.status,
       updatedAt: integrationOutbox.updatedAt,
@@ -515,7 +615,10 @@ export async function getLatestCargoTargetSyncState(targetSheetId?: string | nul
   return {
     canRetry: event.status === "FAILED",
     imageCount: payload?.imageCount ?? null,
-    lastErrorMessage: event.lastErrorMessage,
+    lastErrorMessage:
+      event.status === "FAILED"
+        ? safeCargoTargetSyncError(event.lastErrorCode)
+        : null,
     lastUpdatedLabel: formatDateTime(event.updatedAt),
     rowCount: payload?.rowCount ?? null,
     statusLabel: status.label,
