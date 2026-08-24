@@ -1,29 +1,17 @@
-import { randomUUID } from "node:crypto";
-
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
-import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { PaymentClaimReview } from "@/components/orders/payment-claim-review";
-import {
-  SettlementRegion,
-  SettlementWorkspace,
-} from "@/components/settlement/settlement-workspace";
+import { AdminFinanceNavigation } from "@/components/settlement/admin-finance-navigation";
+import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { listPendingPaymentClaims } from "@/modules/orders/queries";
 import { requireAdmin } from "@/modules/identity/guards";
-import {
-  listAdminSettlementBatches,
-  listPendingOfflineRefunds,
-} from "@/modules/settlement/admin-queries";
-import { adjustWalletAction } from "@/modules/wallet/actions";
-import { listAdminWalletAccounts, listAdminWalletTransactions } from "@/modules/wallet/queries";
+import { listPendingPaymentClaims } from "@/modules/orders/queries";
+import { listAdminSettlementBatches, listPendingOfflineRefunds } from "@/modules/settlement/admin-queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 function money(fen: number) {
@@ -39,92 +27,42 @@ function dateTime(value: Date) {
 }
 
 function refundAge(value: Date, now = new Date()) {
-  const elapsedDays = Math.max(
-    0,
-    Math.floor((now.getTime() - value.getTime()) / (24 * 60 * 60 * 1_000)),
-  );
+  const elapsedDays = Math.max(0, Math.floor((now.getTime() - value.getTime()) / 86_400_000));
   return elapsedDays === 0 ? "等待不足 1 天" : `已等待 ${elapsedDays} 天`;
 }
 
 export default async function SettlementPage() {
-  const principal = await requireAdmin();
-  const [accounts, transactions, pendingClaims, pendingBatches, pendingRefunds] = await Promise.all([
-    listAdminWalletAccounts(),
-    listAdminWalletTransactions(),
+  await requireAdmin();
+  const [pendingClaims, pendingBatches, pendingRefunds] = await Promise.all([
     listPendingPaymentClaims(),
     listAdminSettlementBatches({ status: "PAYMENT_REPORTED" }),
     listPendingOfflineRefunds(),
   ]);
-  const totalBalanceFen = accounts.reduce((sum, account) => sum + account.balanceFen, 0);
+  const pendingClaimFen = pendingClaims.reduce((sum, claim) => sum + claim.amountFen, 0);
+  const pendingRefundFen = pendingRefunds.reduce((sum, refund) => sum + refund.offlineAmountFen, 0);
 
   return (
     <div className="space-y-5">
       <PageHeading
-        description="按 单张拿货单核款 → 多单合并付款 → 退款/余额 的顺序处理，所有资金变化都会落到同一条流水。"
-        title="收款与余额"
+        breadcrumbs={[{ href: "/admin", label: "管理工作台" }, { label: "收款审核" }]}
+        description="集中处理单张拿货单收款和取消后的线下退款；客户余额与合并付款分别在独立工作区处理。"
+        title="收款审核"
       />
-
+      <AdminFinanceNavigation active="payments" />
       <MetricStrip
         compact
         items={[
-          {
-            hint: `单张拿货单 ${pendingClaims.length} · 批量付款 ${pendingBatches.length}`,
-            label: "待核款",
-            tone: pendingClaims.length + pendingBatches.length ? "warning" : "default",
-            value: String(pendingClaims.length + pendingBatches.length),
-          },
-          { hint: "已取消包裹的微信退款", label: "待线下退款", tone: pendingRefunds.length ? "warning" : "default", value: String(pendingRefunds.length) },
-          { hint: "所有客户钱包余额", label: "客户余额合计", value: money(totalBalanceFen) },
-          { hint: "已启用客户钱包账户", label: "钱包账户", value: String(accounts.length) },
+          { hint: `待核金额 ${money(pendingClaimFen)}`, label: "单张待核款", tone: pendingClaims.length ? "warning" : "default", value: String(pendingClaims.length) },
+          { hint: `待退金额 ${money(pendingRefundFen)}`, label: "待线下退款", tone: pendingRefunds.length ? "danger" : "default", value: String(pendingRefunds.length) },
+          { hint: "在合并付款审核工作区处理", label: "合并付款待审核", tone: pendingBatches.length ? "warning" : "default", value: String(pendingBatches.length) },
         ]}
       />
 
-      <WorkspacePanel>
-        <WorkspacePanelHeader
-          compact
-          description="把管理员每天真正要处理的资金动作收束成一条流程，不再把核款、合并付款、退款和余额拆散。"
-          title="资金处理路径"
-        />
-        <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_20rem] sm:p-5">
-          <ol className="grid gap-3 md:grid-cols-3">
-            <li className="rounded-lg border border-border bg-surface/45 p-4">
-              <p className="text-xs font-medium text-muted">步骤 1</p>
-              <p className="mt-1 text-sm font-semibold text-ink">单张拿货单核款</p>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                当前 {pendingClaims.length} 张待核对；确认后对应包裹直接进入待发货。
-              </p>
-            </li>
-            <li className="rounded-lg border border-border bg-surface/45 p-4">
-              <p className="text-xs font-medium text-muted">步骤 2</p>
-              <p className="mt-1 text-sm font-semibold text-ink">批量付款审核</p>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                当前 {pendingBatches.length} 个待审核；用于多张拿货单合并成一次付款。
-              </p>
-            </li>
-            <li className="rounded-lg border border-border bg-surface/45 p-4">
-              <p className="text-xs font-medium text-muted">步骤 3</p>
-              <p className="mt-1 text-sm font-semibold text-ink">退款与余额回看</p>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                当前 {pendingRefunds.length} 笔线下退款待处理；余额与流水只做最终核对。
-              </p>
-            </li>
-          </ol>
-          <aside className="rounded-lg border border-border bg-primary-soft p-4">
-            <p className="text-xs font-medium text-primary-hover">今日总览</p>
-            <p className="mt-1 text-base font-semibold text-ink">
-              余额合计 {money(totalBalanceFen)}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-muted">
-              普通管理员只查看余额与流水；高风险人工调账仍需超级管理员展开确认并填写原因。
-            </p>
-          </aside>
-        </div>
-      </WorkspacePanel>
-
       <SettlementWorkspace>
         <SettlementRegion
-          description="只核对客户为当前拿货单支付的微信款；确认后直接进入待发货，不经过钱包。"
+          description="客户为单张拿货单申报微信付款后出现在这里；确认到账后订单直接进入待发货。"
           kind="review"
+          title="单张拿货单待核款"
         >
           {pendingClaims.length ? (
             <div className="divide-y divide-border">
@@ -144,226 +82,41 @@ export default async function SettlementPage() {
                 </article>
               ))}
             </div>
-          ) : (
-            <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无需要核对的微信付款。</div>
-          )}
+          ) : <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无需要核对的单张微信付款。</div>}
         </SettlementRegion>
 
         <SettlementRegion
-          description="已取消且使用微信线下付款的包裹，需要人工退款；完成后会自动移出本列表。"
+          description="已取消且使用微信线下付款的包裹需要人工退款；进入订单详情登记完成结果。"
           id="pending-offline-refunds"
           kind="refunds"
         >
           {pendingRefunds.length ? (
             <ResponsiveDataTable>
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>客户</TableHead>
-                    <TableHead>拿货单 / 平台单号</TableHead>
-                    <TableHead>创建时间 / 账龄</TableHead>
-                    <TableHead className="text-right">待退款</TableHead>
-                    <TableHead className="text-right">处理</TableHead>
+                <TableHeader><TableRow><TableHead>客户</TableHead><TableHead>拿货单 / 平台单号</TableHead><TableHead>创建时间 / 账龄</TableHead><TableHead className="text-right">待退款</TableHead><TableHead className="text-right">处理</TableHead></TableRow></TableHeader>
+                <TableBody>{pendingRefunds.map((refund) => (
+                  <TableRow key={refund.shipmentId}>
+                    <TableCell><p className="font-medium">{refund.customerCode}</p><p className="text-xs text-muted">{refund.customerName}</p></TableCell>
+                    <TableCell><p className="font-medium">{refund.orderNumber}</p><p className="text-xs text-muted">{refund.externalOrderNo}</p></TableCell>
+                    <TableCell><p>{dateTime(refund.createdAt)}</p><p className="text-xs text-warning">{refundAge(refund.createdAt)}</p></TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-danger">{money(refund.offlineAmountFen)}</TableCell>
+                    <TableCell className="text-right"><Link className="font-medium text-primary hover:underline" href={`/admin/orders/${refund.orderId}`}>进入订单详情处理</Link></TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pendingRefunds.map((refund) => (
-                    <TableRow key={refund.shipmentId}>
-                      <TableCell>
-                        <p className="font-medium">{refund.customerCode}</p>
-                        <p className="text-xs text-muted">{refund.customerName}</p>
-                      </TableCell>
-                      <TableCell>
-                        <p className="font-medium">{refund.orderNumber}</p>
-                        <p className="text-xs text-muted">{refund.externalOrderNo}</p>
-                      </TableCell>
-                      <TableCell>
-                        <p>{dateTime(refund.createdAt)}</p>
-                        <p className="text-xs text-warning">{refundAge(refund.createdAt)}</p>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums text-danger">
-                        {money(refund.offlineAmountFen)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link className="font-medium text-primary hover:underline" href={`/admin/orders/${refund.orderId}`}>
-                          进入订单详情处理
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                ))}</TableBody>
               </Table>
             </ResponsiveDataTable>
-          ) : (
-            <div className="px-5 py-10 text-center text-sm text-muted" role="status">
-              暂无线下退款待办。
-            </div>
-          )}
+          ) : <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无线下退款待办。</div>}
         </SettlementRegion>
 
         <SettlementRegion
-          description="客户一次性支付多张拿货单时，会形成一笔批量付款；这里核对余额抵扣、微信待付和整笔审核结果。"
+          description="客户一次支付多张拿货单时形成一笔合并付款，需要整笔确认或拒绝。"
           kind="batches"
-          title="批量付款审核"
-          contentClassName="grid gap-0 divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0"
+          title="合并付款审核"
         >
-          <Link className="flex min-h-24 items-center justify-between gap-4 p-4 transition-colors hover:bg-surface sm:p-5" href="/admin/settlement-batches">
-            <span>
-              <strong className="text-ink">进入批量付款审核</strong>
-              <span className="mt-1 block text-sm text-muted">查看每次多单合并付款、余额冻结、微信待付与整笔审核。</span>
-            </span>
-            <span className="flex shrink-0 items-center gap-2">
-              <Badge variant="secondary">{`待审核 ${pendingBatches.length}`}</Badge>
-              <ChevronRight aria-hidden="true" className="size-4 text-primary" />
-            </span>
+          <Link className="flex min-h-20 items-center justify-between gap-4 p-4 transition-colors hover:bg-surface sm:p-5" href="/admin/settlement-batches">
+            <span><strong className="text-ink">进入合并付款审核</strong><span className="mt-1 block text-sm text-muted">查看订单组成、余额抵扣、微信待付和审核结果。</span></span>
+            <span className="flex shrink-0 items-center gap-2"><Badge variant="secondary">待审核 {pendingBatches.length}</Badge><ChevronRight aria-hidden="true" className="size-4 text-primary" /></span>
           </Link>
-          <Link className="flex min-h-24 items-center justify-between gap-4 p-4 transition-colors hover:bg-surface sm:p-5" href="/admin/bulk-orders">
-            <span>
-              <strong className="text-ink">批量草稿诊断</strong>
-              <span className="mt-1 block text-sm text-muted">只读查看文件摘要、冲突和部分提交结果。</span>
-            </span>
-            <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-primary" />
-          </Link>
-        </SettlementRegion>
-
-        <SettlementRegion
-          description="先查看客户当前余额；只有超级管理员可展开并执行人工调整。"
-          kind="balances"
-        >
-          <ResponsiveDataTable>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>客户</TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead className="text-right">当前余额</TableHead>
-                  <TableHead>状态</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {accounts.map((account) => (
-                  <TableRow key={account.customerId}>
-                    <TableCell className="font-semibold">{account.customerCode}</TableCell>
-                    <TableCell>{account.customerName}</TableCell>
-                    <TableCell className="text-right text-base font-semibold tabular-nums">{money(account.balanceFen)}</TableCell>
-                    <TableCell>
-                      <Badge className={account.status === "ACTIVE" ? "bg-success/10 text-success" : "bg-surface-muted text-muted"} variant="secondary">
-                        {account.status === "ACTIVE" ? "启用" : "停用"}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ResponsiveDataTable>
-
-          {principal.kind === "SUPER_ADMIN" ? (
-            <details aria-label="调整客户余额（超级管理员）" className="group border-t border-border">
-              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 transition-colors hover:bg-surface-muted/60 sm:px-5 [&::-webkit-details-marker]:hidden">
-                <span className="flex min-w-0 items-center gap-3">
-                  <ShieldCheck aria-hidden="true" className="size-5 shrink-0 text-warning" />
-                  <span>
-                    <strong className="block text-sm text-ink">调整客户余额（超级管理员）</strong>
-                    <span className="mt-0.5 block text-xs text-muted">高风险操作：展开后核对客户、方向、金额和审计原因。</span>
-                  </span>
-                </span>
-                <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
-              </summary>
-              <ConfirmedActionForm
-                action={adjustWalletAction}
-                className="grid gap-4 border-t border-border bg-warning/5 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end"
-                confirmDescription="请返回核对客户、增加或扣减方向、金额和原因。确认后会立即改变客户可用余额并写入不可变资金流水。"
-                confirmLabel="确认执行余额调整"
-                confirmTitle="确认执行余额调整？"
-                submitLabel="核对并调整余额"
-                variant="default"
-              >
-                <input name="requestId" type="hidden" value={randomUUID()} />
-                <label className="space-y-2 text-sm font-medium text-ink">
-                  客户
-                  <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="customerId" required>
-                    <option value="">选择客户</option>
-                    {accounts.map((account) => (
-                      <option key={account.customerId} value={account.customerId}>{`${account.customerCode} · ${account.customerName}`}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="space-y-2 text-sm font-medium text-ink">
-                  操作
-                  <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="operation" required>
-                    <option value="">选择增加或扣减</option>
-                    <option value="CREDIT">增加余额</option>
-                    <option value="DEBIT">扣减余额</option>
-                  </select>
-                </label>
-                <label className="space-y-2 text-sm font-medium text-ink">
-                  金额（元）
-                  <Input className="min-h-11 tabular-nums" inputMode="decimal" min="0.01" name="amountYuan" placeholder="0.00" required />
-                </label>
-                <label className="space-y-2 text-sm font-medium text-ink">
-                  调整原因
-                  <Input className="min-h-11" maxLength={300} name="reason" placeholder="例如：收到微信转账" required />
-                </label>
-              </ConfirmedActionForm>
-            </details>
-          ) : (
-            <div className="border-t border-border bg-surface-muted/55 px-4 py-3 text-sm text-muted sm:px-5">
-              <p className="font-medium text-ink">余额调整仅限超级管理员操作</p>
-              <p className="mt-1">普通管理员可查看客户余额和资金流水，但不能创建或扣减现金等价余额。</p>
-            </div>
-          )}
-        </SettlementRegion>
-
-        <SettlementRegion description="按时间倒序展示最近 100 条，每笔记录均不可修改。" kind="transactions">
-          {transactions.length ? (
-            <details aria-label="查看资金流水" className="group">
-              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 transition-colors hover:bg-surface-muted/60 sm:px-5 [&::-webkit-details-marker]:hidden">
-                <span>
-                  <strong className="block text-sm text-ink">查看最近资金流水（{transactions.length}）</strong>
-                  <span className="mt-0.5 block text-xs text-muted">默认收起，展开后可核对时间、原因与变动后余额。</span>
-                </span>
-                <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="border-t border-border">
-                <ResponsiveDataTable>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>时间（渥太华）</TableHead>
-                        <TableHead>客户</TableHead>
-                        <TableHead>类型</TableHead>
-                        <TableHead>原因 / 拿货单</TableHead>
-                        <TableHead className="text-right">变动</TableHead>
-                        <TableHead className="text-right">变动后</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {transactions.map((transaction) => (
-                        <TableRow key={transaction.id}>
-                          <TableCell className="text-muted">{dateTime(transaction.createdAt)}</TableCell>
-                          <TableCell><p className="font-medium">{transaction.customerCode}</p><p className="text-xs text-muted">{transaction.customerName}</p></TableCell>
-                          <TableCell>
-                            {transaction.deltaFen > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-success"><ArrowDownLeft aria-hidden="true" className="size-4" />入账</span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-danger"><ArrowUpRight aria-hidden="true" className="size-4" />扣款</span>
-                            )}
-                          </TableCell>
-                          <TableCell><p>{transaction.reason}</p>{transaction.orderNumber ? <p className="mt-1 text-xs text-muted">{transaction.orderNumber}</p> : null}</TableCell>
-                          <TableCell className={`text-right font-semibold tabular-nums ${transaction.deltaFen > 0 ? "text-success" : "text-danger"}`}>
-                            {transaction.deltaFen > 0 ? "+" : "−"}{money(Math.abs(transaction.deltaFen))}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">{money(transaction.afterBalanceFen)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ResponsiveDataTable>
-              </div>
-            </details>
-          ) : (
-            <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无资金流水。</div>
-          )}
         </SettlementRegion>
       </SettlementWorkspace>
     </div>

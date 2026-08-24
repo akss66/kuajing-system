@@ -59,16 +59,16 @@ export default async function AdminBulkOrdersPage({
       <PageHeading
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
-          { label: "批量草稿诊断" },
+          { label: "多店铺上传记录" },
         ]}
-        description="按客户、店铺、状态和时间筛选多店铺批量草稿。这里只读展示文件摘要、冲突、错误码和部分提交结果。"
-        title="批量草稿诊断"
+        description="用于协助客户处理尚未提交的多店铺上传。草稿不是拿货单，在正式提交前不会扣款、占用库存或进入履约。"
+        title="多店铺上传记录"
       />
 
       <MetricStrip
         items={[
-          { label: "草稿数", value: `${drafts.length}` },
-          { label: "可提交", value: `${drafts.filter((draft) => draft.statusLabel.includes("可")).length}` },
+          { label: "上传草稿", value: `${drafts.length}` },
+          { label: "可继续提交", value: `${drafts.filter((draft) => draft.statusLabel.includes("可")).length}` },
           { label: "已过期", value: `${drafts.filter((draft) => draft.statusLabel.includes("过期")).length}` },
         ]}
       />
@@ -106,7 +106,7 @@ export default async function AdminBulkOrdersPage({
             </select>
           </label>
           <label className="space-y-2 text-sm font-medium text-ink">
-            诊断状态
+            校验结果
             <select
               className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
               defaultValue={filters.status ?? ""}
@@ -140,7 +140,7 @@ export default async function AdminBulkOrdersPage({
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
           description={`当前条件共 ${drafts.length} 条。`}
-          title="草稿列表"
+          title="上传记录"
         />
         <div className="hidden md:block">
           <ResponsiveDataTable>
@@ -148,7 +148,7 @@ export default async function AdminBulkOrdersPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>客户 / 更新时间</TableHead>
-                  <TableHead>草稿状态 / 诊断状态</TableHead>
+                  <TableHead>草稿状态 / 校验结果</TableHead>
                   <TableHead>店铺 / 文件</TableHead>
                   <TableHead>过期时间</TableHead>
                   <TableHead>操作</TableHead>
@@ -173,7 +173,7 @@ export default async function AdminBulkOrdersPage({
                       <TableCell className="text-sm text-muted">{dateTime(draft.expiresAt)}</TableCell>
                       <TableCell>
                         <Button asChild size="sm" variant="outline">
-                          <Link href={`/admin/bulk-orders/${draft.id}`}>查看诊断</Link>
+                          <Link href={`/admin/bulk-orders/${draft.id}`}>查看上传详情</Link>
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -203,7 +203,7 @@ export default async function AdminBulkOrdersPage({
                 <p className="text-sm text-muted">{`${draft.groupCount} 个店铺 · ${draft.fileCount} 个文件`}</p>
                 <p className="text-xs text-muted">{draft.validationStatusLabel}</p>
                 <Button asChild size="sm" variant="outline">
-                  <Link href={`/admin/bulk-orders/${draft.id}`}>查看诊断</Link>
+                  <Link href={`/admin/bulk-orders/${draft.id}`}>查看上传详情</Link>
                 </Button>
               </article>
             ))

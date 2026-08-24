@@ -34,11 +34,11 @@ export default async function AdminBulkOrderDetailPage({
         action={<Badge variant="secondary">{detail.statusLabel}</Badge>}
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
-          { href: "/admin/bulk-orders", label: "批量草稿诊断" },
+          { href: "/admin/bulk-orders", label: "多店铺上传记录" },
           { label: "草稿详情" },
         ]}
         description={`${detail.customerLabel} · 更新于 ${dateTime(detail.updatedAt)} · 过期于 ${dateTime(detail.expiresAt)}`}
-        title="批量草稿诊断"
+        title="上传草稿详情"
       />
 
       <MetricStrip
@@ -93,7 +93,7 @@ export default async function AdminBulkOrderDetailPage({
               </section>
 
               <section className="space-y-3">
-                <h3 className="text-sm font-semibold text-ink">冲突与错误码</h3>
+                <h3 className="text-sm font-semibold text-ink">校验问题</h3>
                 {group.errorCodeLabels.length ? (
                   group.errorCodeLabels.map((label) => (
                     <div
@@ -105,7 +105,7 @@ export default async function AdminBulkOrderDetailPage({
                   ))
                 ) : (
                   <div className="rounded-lg bg-surface px-3 py-3 text-sm text-muted">
-                    当前没有诊断错误码。
+                    当前没有校验问题。
                   </div>
                 )}
               </section>

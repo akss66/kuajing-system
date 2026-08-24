@@ -2,7 +2,7 @@ const batchStatusLabels = {
   CANCELLED: "已关闭",
   EXPIRED: "已超时",
   PAID: "已收款",
-  PAYMENT_REPORTED: "等待统一核款",
+  PAYMENT_REPORTED: "等待核款",
   PENDING_PAYMENT: "待付款",
   REJECTED: "已拒绝",
   WITHDRAWN: "已撤回",
@@ -96,7 +96,7 @@ export function getAdminBulkDraftStatusLabel(status: string) {
 export function getAdminBulkDraftValidationLabel(status: string) {
   return bulkDraftValidationStatusLabels[
     status as keyof typeof bulkDraftValidationStatusLabels
-  ] ?? "诊断处理中";
+  ] ?? "校验处理中";
 }
 
 export function getAdminBulkDraftErrorLabel(code: string) {

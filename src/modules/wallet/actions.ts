@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireSuperAdmin } from "@/modules/identity/guards";
+import { requireAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
 import {
@@ -31,7 +31,7 @@ export async function adjustWalletAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const principal = await requireSuperAdmin();
+  const principal = await requireAdmin();
   const parsed = schema.safeParse({
     amountFen: formData.get("amountYuan"),
     customerId: formData.get("customerId"),
@@ -68,6 +68,7 @@ export async function adjustWalletAction(
   }
 
   revalidatePath("/admin/settlement");
+  revalidatePath("/admin/wallets");
   revalidatePath("/portal/wallet");
   return { status: "success", message: "余额已调整并写入资金流水。" };
 }

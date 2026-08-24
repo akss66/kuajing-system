@@ -33,17 +33,18 @@ vi.mock("@/components/orders/payment-claim-review", () => ({
 }));
 
 import SettlementPage from "@/app/(admin)/admin/settlement/page";
+import AdminWalletsPage from "@/app/(admin)/admin/wallets/page";
 
 describe("settlement workspace hierarchy", () => {
   beforeEach(() => {
-    authMocks.requireAdmin.mockResolvedValue({ kind: "SUPER_ADMIN", userId: "super-admin-1" });
+    authMocks.requireAdmin.mockResolvedValue({ kind: "ADMIN", userId: "admin-1" });
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("separates review queue, balances, batches and transactions into named financial regions", async () => {
+  it("keeps collection work focused on payment review and refunds", async () => {
     orderQueryMocks.listPendingPaymentClaims.mockResolvedValue([]);
     settlementQueryMocks.listAdminSettlementBatches.mockResolvedValue([]);
     settlementQueryMocks.listPendingOfflineRefunds.mockResolvedValue([
@@ -65,6 +66,7 @@ describe("settlement workspace hierarchy", () => {
         customerId: "customer-1",
         customerName: "客户一",
         status: "ACTIVE",
+        updatedAt: new Date("2026-08-10T05:00:00.000Z"),
       },
     ]);
     walletQueryMocks.listAdminWalletTransactions.mockResolvedValue([
@@ -84,58 +86,41 @@ describe("settlement workspace hierarchy", () => {
 
     render(await SettlementPage());
 
-    expect(screen.getByRole("region", { name: "待核款队列" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "收款审核" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "资金管理" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "单张拿货单待核款" })).toBeVisible();
     expect(screen.getByRole("region", { name: "待线下退款" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "批量付款审核" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
-    expect(screen.getByText("资金处理路径")).toBeVisible();
-    expect(
-      screen.getByText(
-        "把管理员每天真正要处理的资金动作收束成一条流程，不再把核款、合并付款、退款和余额拆散。",
-      ),
-    ).toBeVisible();
+    expect(screen.getByRole("region", { name: "合并付款审核" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "客户余额" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "资金流水" })).not.toBeInTheDocument();
     expect(screen.getByText("PO-10001")).toBeVisible();
     expect(screen.getByText("¥13.00")).toBeVisible();
     expect(screen.getByRole("link", { name: /进入订单详情处理/ })).toHaveAttribute(
       "href",
       "/admin/orders/order-1",
     );
-    const adjustment = screen.getByRole("group", { name: "调整客户余额（超级管理员）" });
-    expect(adjustment).not.toHaveAttribute("open");
-    expect(screen.getByRole("button", { name: "核对并调整余额" })).not.toBeVisible();
-
-    fireEvent.click(screen.getByText("调整客户余额（超级管理员）"));
-
-    expect(adjustment).toHaveAttribute("open");
-    expect(screen.getByRole("combobox", { name: "操作" })).toHaveValue("");
-    fireEvent.click(screen.getByRole("button", { name: "核对并调整余额" }));
-    expect(screen.getByRole("alertdialog")).toBeVisible();
-    expect(screen.getByText("确认执行余额调整？")).toBeVisible();
-    expect(screen.getByRole("button", { name: "返回检查" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "返回检查" }));
-
-    const transactions = screen.getByRole("group", { name: "查看资金流水" });
-    expect(transactions).not.toHaveAttribute("open");
-    expect(screen.getByText("线下充值")).not.toBeVisible();
-
-    fireEvent.click(screen.getByText("查看最近资金流水（1）"));
-
-    expect(transactions).toHaveAttribute("open");
-    expect(screen.getByText("线下充值")).toBeVisible();
+    expect(screen.queryByText("批量草稿诊断")).not.toBeInTheDocument();
   });
 
-  it("keeps balance mutation controls unavailable to an ordinary administrator", async () => {
-    authMocks.requireAdmin.mockResolvedValueOnce({ kind: "ADMIN", userId: "admin-1" });
-    orderQueryMocks.listPendingPaymentClaims.mockResolvedValue([]);
-    settlementQueryMocks.listAdminSettlementBatches.mockResolvedValue([]);
-    settlementQueryMocks.listPendingOfflineRefunds.mockResolvedValue([]);
-    walletQueryMocks.listAdminWalletAccounts.mockResolvedValue([]);
+  it("gives ordinary system administrators a visible, confirmed balance workspace", async () => {
+    walletQueryMocks.listAdminWalletAccounts.mockResolvedValue([{
+      balanceFen: 168800,
+      customerCode: "C-001",
+      customerId: "11111111-1111-4111-8111-111111111111",
+      customerName: "客户一",
+      status: "ACTIVE",
+      updatedAt: new Date("2026-08-10T05:00:00.000Z"),
+    }]);
     walletQueryMocks.listAdminWalletTransactions.mockResolvedValue([]);
 
-    render(await SettlementPage());
+    render(await AdminWalletsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.queryByRole("button", { name: "核对并调整余额" })).not.toBeInTheDocument();
-    expect(screen.getByText("余额调整仅限超级管理员操作")).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "客户余额" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "调整客户余额" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "核对并调整" })).toBeVisible();
+    expect(screen.getByRole("table", { name: "客户余额账户" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "核对并调整" }));
+    expect(screen.getByRole("alertdialog")).toBeVisible();
+    expect(screen.getByText("确认执行余额调整？")).toBeVisible();
   });
 });

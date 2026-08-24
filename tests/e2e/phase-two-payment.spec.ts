@@ -188,10 +188,9 @@ test("customer declares an exact WeChat payment and admin confirms it without us
     page.getByRole("cell", { name: fixture.order.orderNumber }),
   ).toBeVisible();
   await page.goto("/admin/settlement");
-  await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量付款审核" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "单张拿货单待核款" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "待线下退款" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "合并付款审核" })).toBeVisible();
   const claimCard = page.locator("article").filter({
     hasText: fixture.order.orderNumber,
   });

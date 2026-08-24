@@ -8,7 +8,6 @@ import {
   Boxes,
   Building2,
   ClipboardList,
-  FileSearch,
   History,
   LayoutDashboard,
   PackageSearch,
@@ -56,7 +55,6 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
       label: "订单履约",
       items: [
         { href: "/admin/orders", icon: ClipboardList, label: "订单管理" },
-        { href: "/admin/bulk-orders", icon: FileSearch, label: "批量草稿诊断" },
         { href: "/admin/replacements", icon: RotateCcw, label: "补发管理" },
       ],
     },
@@ -64,8 +62,9 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
       id: "admin-funds-data",
       label: "资金与数据",
       items: [
-        { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
-        { href: "/admin/settlement-batches", icon: WalletCards, label: "批量付款审核" },
+        { href: "/admin/settlement", icon: Banknote, label: "收款审核" },
+        { href: "/admin/wallets", icon: WalletCards, label: "客户余额" },
+        { href: "/admin/settlement-batches", icon: WalletCards, label: "合并付款审核" },
         { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
       ],
     },

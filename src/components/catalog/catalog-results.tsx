@@ -165,76 +165,62 @@ function CatalogTable({ actions, groups, onSelectionChange, selectedIds }: Catal
     <div className="hidden min-w-0 xl:block" data-admin-catalog-table>
       <Table aria-label="商品与 SKU 列表" className="w-full table-fixed">
         <colgroup>
-          <col className="w-[3%]" />
-          <col className="w-[6%]" />
-          <col className="w-[10%]" />
-          <col className="w-[15%]" />
-          <col className="w-[15%]" />
-          <col className="w-[8%]" />
-          <col className="w-[7%]" />
-          <col className="w-[7%]" />
-          <col className="w-[8%]" />
-          <col className="w-[7%]" />
-          <col className="w-[8%]" />
+          <col className="w-[4%]" />
+          <col className="w-[21%]" />
+          <col className="w-[23%]" />
+          <col className="w-[14%]" />
+          <col className="w-[11%]" />
+          <col className="w-[9%]" />
+          <col className="w-[11%]" />
           <col className="w-[7%]" />
         </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead><input aria-label="选择当前结果全部 SKU" checked={allSelected} onChange={(event) => onSelectionChange(event.target.checked ? new Set([...selectedIds, ...visibleIds]) : new Set([...selectedIds].filter((id) => !visibleIds.includes(id))))} type="checkbox" /></TableHead>
-            <TableHead className="text-right">序号</TableHead>
-            <TableHead>商品</TableHead>
             <TableHead>SKU</TableHead>
             <TableHead>规格/属性</TableHead>
-            <TableHead className="text-right">采购价</TableHead>
-            <TableHead className="text-right">总库存</TableHead>
-            <TableHead className="text-right">可售库存</TableHead>
-            <TableHead className="text-right">货品价格</TableHead>
+            <TableHead className="text-right">采购价 / 货品价</TableHead>
+            <TableHead className="text-right">库存</TableHead>
             <TableHead>状态</TableHead>
             <TableHead>SKU 链接</TableHead>
             <TableHead>操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {groups.flatMap((group) =>
-            group.variants.map((row, index) => (
+          {groups.flatMap((group) => [
+              <TableRow className="border-t-2 border-border bg-surface-muted/55" key={`${group.productId}-heading`}>
+                <TableCell colSpan={8}>
+                  <div className="flex min-w-0 items-center justify-between gap-4 py-0.5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold tabular-nums text-muted-foreground">
+                        序号 {group.sourceSequence ?? "—"}
+                      </span>
+                      <span className="truncate font-semibold text-foreground">{group.productName}</span>
+                    </div>
+                    <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                      {group.variants.length} 个 SKU
+                    </span>
+                  </div>
+                </TableCell>
+              </TableRow>,
+              ...group.variants.map((row) => (
               <TableRow
-                className={index === 0 ? "border-t-2 border-border" : undefined}
                 key={row.id}
               >
                 <TableCell className="align-top"><input aria-label={`选择 ${row.skuCode}`} checked={selectedIds.has(row.id)} onChange={(event) => onSelectionChange(selectionToggle(selectedIds, row.id, event.target.checked))} type="checkbox" /></TableCell>
-                {index === 0 ? (
-                  <TableCell
-                    className="whitespace-normal text-right align-top font-semibold tabular-nums"
-                    rowSpan={group.variants.length}
-                  >
-                    {group.sourceSequence ?? "—"}
-                  </TableCell>
-                ) : null}
-                {index === 0 ? (
-                  <TableCell
-                    className="min-w-0 whitespace-normal align-top font-medium text-foreground"
-                    rowSpan={group.variants.length}
-                  >
-                    <p className="line-clamp-3 break-words">{group.productName}</p>
-                  </TableCell>
-                ) : null}
                 <TableCell className="min-w-0 whitespace-normal align-top">
                   <CatalogSkuIdentity row={row} />
                 </TableCell>
                 <TableCell className="min-w-0 whitespace-normal align-top">
                   <CatalogAttributes row={row} />
                 </TableCell>
-                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                  <PriceValue value={row.defaultUnitPriceMilliYuan} />
+                <TableCell className="whitespace-normal text-right align-top tabular-nums">
+                  <p className="font-semibold"><PriceValue value={row.defaultUnitPriceMilliYuan} /></p>
+                  <p className="mt-1 text-xs text-muted-foreground">货品 <PriceValue value={row.cargoUnitPriceMilliYuan} /></p>
                 </TableCell>
-                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                  {row.totalQuantity}
-                </TableCell>
-                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                  {row.availableQuantity}
-                </TableCell>
-                <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                  <PriceValue value={row.cargoUnitPriceMilliYuan} />
+                <TableCell className="whitespace-normal text-right align-top tabular-nums">
+                  <p className="font-semibold">可售 {row.availableQuantity}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">总数 {row.totalQuantity}</p>
                 </TableCell>
                 <TableCell className="whitespace-normal align-top">
                   <CatalogStatus row={row} />
@@ -245,7 +231,7 @@ function CatalogTable({ actions, groups, onSelectionChange, selectedIds }: Catal
                 <TableCell className="whitespace-normal align-top"><ManageSkuDrawer actions={actions} groupSize={group.variants.length} row={row} /></TableCell>
               </TableRow>
             )),
-          )}
+          ])}
         </TableBody>
       </Table>
     </div>

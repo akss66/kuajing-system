@@ -110,6 +110,19 @@ describe("merchant shells", () => {
       "href",
       "/admin/inventory/movements",
     );
+    expect(within(navigation).getByRole("link", { name: "收款审核" })).toHaveAttribute(
+      "href",
+      "/admin/settlement",
+    );
+    expect(within(navigation).getByRole("link", { name: "客户余额" })).toHaveAttribute(
+      "href",
+      "/admin/wallets",
+    );
+    expect(within(navigation).getByRole("link", { name: "合并付款审核" })).toHaveAttribute(
+      "href",
+      "/admin/settlement-batches",
+    );
+    expect(within(navigation).queryByRole("link", { name: "批量草稿诊断" })).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
     expect(within(navigation).getByRole("link", { name: "账号管理" })).toBeVisible();
     const quickNavigation = screen.getByRole("navigation", { name: "管理员快捷导航" });

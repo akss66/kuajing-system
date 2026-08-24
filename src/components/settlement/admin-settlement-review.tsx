@@ -75,11 +75,11 @@ export function AdminSettlementReview({
         }
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
-          { href: "/admin/settlement-batches", label: "批量付款审核" },
+          { href: "/admin/settlement-batches", label: "合并付款审核" },
           { label: "付款审核" },
         ]}
         description={`${batch.customerLabel} · 付款编号 ${batch.batchNumber} · ${orders.length} 张拿货单合并为一次付款`}
-        title="本次批量付款审核"
+        title="本次合并付款审核"
       />
 
       <MetricStrip
@@ -99,7 +99,7 @@ export function AdminSettlementReview({
             </>
           }
           kind="batches"
-          title="本次批量付款明细"
+          title="本次合并付款明细"
         >
           <div className="divide-y divide-border">
             {orders.map((order) => (
@@ -163,7 +163,7 @@ export function AdminSettlementReview({
                   action={reviewAction}
                   confirmDescription={`确认后将一次性影响 ${orders.length} 张拿货单，相关订单会统一进入待发货。`}
                   confirmLabel="确认到款"
-                  confirmTitle="确认这笔批量付款已经到账？"
+                  confirmTitle="确认这笔合并付款已经到账？"
                   submitLabel="确认已收款"
                 >
                   <input name="settlementBatchId" type="hidden" value={batch.id} />
@@ -175,7 +175,7 @@ export function AdminSettlementReview({
                   className="grid gap-3"
                   confirmDescription={`拒绝后将整批关闭，并同步取消这 ${orders.length} 张拿货单。拒绝原因会写入审计。`}
                   confirmLabel="确认拒绝"
-                  confirmTitle="拒绝这笔批量付款声明？"
+                  confirmTitle="拒绝这笔合并付款声明？"
                   onErrorFocus={() => rejectionRef.current?.focus()}
                   submitLabel="拒绝付款声明"
                 >
@@ -187,7 +187,7 @@ export function AdminSettlementReview({
                       className="min-h-11"
                       maxLength={1000}
                       name="rejectionReason"
-                      placeholder="拒绝批量付款声明必须填写原因"
+                      placeholder="拒绝合并付款声明必须填写原因"
                       ref={rejectionRef}
                       required
                     />
@@ -196,7 +196,7 @@ export function AdminSettlementReview({
               </>
             ) : (
               <p className="text-sm text-muted">
-                {`本次批量付款当前为 ${batch.statusLabel}，审核操作已结束。`}
+                {`本次合并付款当前为 ${batch.statusLabel}，审核操作已结束。`}
               </p>
             )}
           </section>

@@ -200,8 +200,7 @@ describe("catalog workspaces", () => {
     );
 
     const desktopTable = screen.getByRole("table", { name: "商品与 SKU 列表" });
-    expect(within(desktopTable).getByText("1", { exact: true })).toBeVisible();
-    expect(within(desktopTable).queryByText("序号 1", { exact: true })).not.toBeInTheDocument();
+    expect(within(desktopTable).getByText("序号 1", { exact: true })).toBeVisible();
     for (const price of ["¥1.00", "¥2.00", "¥3.00"]) {
       expect(within(desktopTable).getByText(price, { exact: true })).toBeVisible();
     }
@@ -418,22 +417,20 @@ describe("catalog workspaces", () => {
         .map((header) => header.textContent),
     ).toEqual([
       "",
-      "序号",
-      "商品",
       "SKU",
       "规格/属性",
-      "采购价",
-      "总库存",
-      "可售库存",
-      "货品价格",
+      "采购价 / 货品价",
+      "库存",
       "状态",
       "SKU 链接",
       "操作",
     ]);
+    expect(within(desktopTable).getByText("序号 34")).toBeVisible();
+    expect(within(desktopTable).getAllByText("1 个 SKU")).toHaveLength(2);
     expect(within(desktopTable).getByText("¥0.325")).toBeVisible();
     expect(within(desktopTable).getByText("¥1.366")).toBeVisible();
-    expect(within(desktopTable).getByText("10")).toBeVisible();
-    expect(within(desktopTable).getByText("7")).toBeVisible();
+    expect(within(desktopTable).getByText("总数 10")).toBeVisible();
+    expect(within(desktopTable).getByText("可售 7")).toBeVisible();
 
     const links = screen.getAllByRole("link", { name: "查看飞书商品" });
     expect(links).toHaveLength(2);

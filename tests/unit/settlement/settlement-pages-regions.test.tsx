@@ -40,7 +40,7 @@ describe("settlement page regions", () => {
   it("gives the batch list one named financial region", async () => {
     render(await AdminSettlementBatchesPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByRole("region", { name: "批量付款记录" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "合并付款记录" })).toBeVisible();
   });
 
   it("separates wallet balance, holds and immutable transactions", async () => {

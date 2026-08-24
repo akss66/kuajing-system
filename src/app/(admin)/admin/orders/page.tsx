@@ -104,11 +104,14 @@ export default async function AdminOrdersPage({
     <div className="space-y-5">
       <PageHeading
         action={
-          <Button asChild variant="outline">
-            <Link href={isHistoricalView ? "/admin/orders" : "/admin/orders?status=CANCELLED"}>
-              {isHistoricalView ? "返回有效拿货单" : "查看已取消拿货单"}
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {!isHistoricalView ? <Button asChild variant="outline"><Link href="/admin/bulk-orders">多店铺上传记录</Link></Button> : null}
+            <Button asChild variant="outline">
+              <Link href={isHistoricalView ? "/admin/orders" : "/admin/orders?status=CANCELLED"}>
+                {isHistoricalView ? "返回有效拿货单" : "查看已取消拿货单"}
+              </Link>
+            </Button>
+          </div>
         }
         description={
           isHistoricalView

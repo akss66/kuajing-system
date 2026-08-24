@@ -84,12 +84,12 @@ test("admin catalog groups source products across desktop search and mobile vari
   await page.goto("/admin/catalog");
   const table = page.getByRole("table", { name: "商品与 SKU 列表" });
   await expect(table).toBeVisible();
-  await expect(table.locator('tbody td[rowspan="3"]').first()).toHaveText("1");
-  await expect(table.getByText("序号 1", { exact: true })).toHaveCount(0);
+  await expect(table.getByText("序号 1", { exact: true })).toBeVisible();
+  await expect(table.getByText("3 个 SKU", { exact: true })).toBeVisible();
   for (const price of ["¥1.366", "¥1.50", "¥1.70"]) {
     await expect(table.getByText(price, { exact: true })).toHaveCount(1);
   }
-  await expect(table.locator('td[rowspan="3"]')).toHaveCount(2);
+  await expect(table.getByText(/^序号 /)).toHaveCount(2);
   for (const skuCode of ["TZX-001-1", "TZX-001-2", "TZX-001-3"]) {
     await expect(table.getByText(skuCode, { exact: true })).toBeVisible();
   }

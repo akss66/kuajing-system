@@ -368,7 +368,7 @@ test("customer bulk workspace stays usable at approved mobile widths @mobile-onl
   expect(consoleErrors).toEqual([]);
 });
 
-test("administrator can open unified settlement/bulk diagnostics routes", async ({ page }) => {
+test("administrator can open finance workspaces and multi-store upload records", async ({ page }) => {
   const admin = await createManagedUser({ role: "admin" });
   const fixture = await seedSubmittedBulkWorkspace();
   const consoleErrors: string[] = [];
@@ -384,24 +384,29 @@ test("administrator can open unified settlement/bulk diagnostics routes", async 
 
   await page.goto("/admin/settlement");
   await expect(page.locator("main h1")).toBeVisible();
-  await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量付款审核" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "单张拿货单待核款" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "待线下退款" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "合并付款审核" })).toBeVisible();
   const settlementShortcut = page.locator("main a[href='/admin/settlement-batches']").last();
   await expect(settlementShortcut).toBeVisible();
   await expect(settlementShortcut).toContainText(/\d+/);
 
+  await page.goto("/admin/wallets");
+  await expect(page.locator("main h1")).toContainText("客户余额");
+  await expect(page.getByRole("region", { name: "调整客户余额" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "客户余额账户" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "最近资金流水" })).toBeVisible();
+
   await page.goto("/admin/settlement-batches");
   await expect(page.locator("main h1")).toBeVisible();
-  await expect(page.getByRole("region", { name: "批量付款记录" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "合并付款记录" })).toBeVisible();
 
   await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);
   await expect(page).toHaveURL(
     new RegExp(`/admin/settlement-batches/${fixture.settlementBatchId}`),
   );
   await expect(page.getByRole("heading").first()).toBeVisible();
-  await expect(page.getByRole("region", { name: "本次批量付款明细" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "本次合并付款明细" })).toBeVisible();
   await expect(page.getByRole("region", { name: "付款审核" })).toBeVisible();
   await page.screenshot({
     fullPage: true,
@@ -441,13 +446,16 @@ test("administrator can open unified settlement/bulk diagnostics routes", async 
   expect(consoleErrors).toEqual([]);
 });
 
-test("customer cannot access admin settlement and bulk settlement routes", async ({ page }) => {
+test("customer cannot access admin finance and multi-store upload routes", async ({ page }) => {
   const fixture = await seedSubmittedBulkWorkspace();
 
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal(?:\/|$)/);
 
   await page.goto("/admin/settlement");
+  await expect(page).toHaveURL(/\/portal(?:\/|$)/);
+
+  await page.goto("/admin/wallets");
   await expect(page).toHaveURL(/\/portal(?:\/|$)/);
 
   await page.goto(`/admin/settlement-batches/${fixture.settlementBatchId}`);

@@ -13,6 +13,7 @@ import {
   inventoryBalances,
   products,
   skus,
+  walletAccounts,
 } from "@/db/schema";
 import { commitCatalogAsset, stageCatalogAsset } from "@/modules/feishu/asset-storage";
 
@@ -94,10 +95,18 @@ const workspaceRoutes = [
   },
   {
     audience: "admin" as const,
-    heading: "收款与余额",
-    expectedTexts: ["DEMO-CUSTOMER", "渥太华演示客户", "暂无资金流水。"],
+    heading: "收款审核",
+    expectedTexts: ["单张拿货单待核款", "待线下退款", "合并付款审核"],
     path: "/admin/settlement",
     screenshot: "admin-settlement",
+    shouldShowMetricStrip: true,
+  },
+  {
+    audience: "admin" as const,
+    heading: "客户余额",
+    expectedTexts: ["调整客户余额", "DEMO-CUSTOMER", "渥太华演示客户", "暂无资金流水。"],
+    path: "/admin/wallets",
+    screenshot: "admin-wallets",
     shouldShowMetricStrip: true,
   },
   {
@@ -188,6 +197,9 @@ async function resetVisualBaseline() {
     database: db,
     reseed: seed,
   });
+  await db
+    .update(walletAccounts)
+    .set({ updatedAt: new Date("2026-08-14T00:37:00.000Z") });
 }
 
 async function waitForCatalogImages(page: import("@playwright/test").Page) {

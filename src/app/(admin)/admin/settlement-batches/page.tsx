@@ -4,6 +4,7 @@ import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { ResponsiveDataTable } from "@/components/data-workspace/responsive-data-table";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel } from "@/components/layout/workspace-panel";
+import { AdminFinanceNavigation } from "@/components/settlement/admin-finance-navigation";
 import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 const statusOptions = [
   { label: "待付款", value: "PENDING_PAYMENT" },
-  { label: "等待统一核款", value: "PAYMENT_REPORTED" },
+  { label: "等待核款", value: "PAYMENT_REPORTED" },
   { label: "已收款", value: "PAID" },
   { label: "已拒绝", value: "REJECTED" },
   { label: "已撤回", value: "WITHDRAWN" },
@@ -66,11 +67,13 @@ export default async function AdminSettlementBatchesPage({
       <PageHeading
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
-          { label: "批量付款审核" },
+          { label: "合并付款审核" },
         ]}
         description="客户多店铺批量拿货会合并为一次付款；管理员只能整笔确认或整笔拒绝，不能拆分到账。"
-        title="批量付款审核"
+        title="合并付款审核"
       />
+
+      <AdminFinanceNavigation active="combined" />
 
       <MetricStrip
         items={[
@@ -148,7 +151,7 @@ export default async function AdminSettlementBatchesPage({
         <SettlementRegion
           description={`当前条件共 ${batches.length} 条。`}
           kind="batches"
-          title="批量付款记录"
+          title="合并付款记录"
         >
         <div className="hidden md:block">
           <ResponsiveDataTable>
@@ -193,7 +196,7 @@ export default async function AdminSettlementBatchesPage({
                 ) : (
                   <TableRow>
                     <TableCell className="h-28 text-center text-muted" colSpan={6}>
-                      没有符合条件的批量付款记录。
+                      没有符合条件的合并付款记录。
                     </TableCell>
                   </TableRow>
                 )}
@@ -220,7 +223,7 @@ export default async function AdminSettlementBatchesPage({
               </article>
             ))
           ) : (
-            <div className="p-10 text-center text-sm text-muted">没有符合条件的批量付款记录。</div>
+            <div className="p-10 text-center text-sm text-muted">没有符合条件的合并付款记录。</div>
           )}
         </div>
         </SettlementRegion>
