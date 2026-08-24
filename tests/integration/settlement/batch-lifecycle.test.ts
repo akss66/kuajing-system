@@ -326,8 +326,9 @@ async function createSubmissionFixture(prices: readonly number[]) {
       .returning();
     await db.insert(orderImportRows).values({
       batchId: batch.id,
+      effectiveQuantity: 1,
       externalOrderNo: `PO-SETTLE-${draft.id}-${index}`,
-      externalSku: `EXT-SETTLE-${index}`,
+      externalSku: `TZX-SETTLE-${index}`,
       externalSubOrderNo: `SUB-SETTLE-${draft.id}-${index}`,
       quantity: 1,
       recipientPayloadEncrypted: `encrypted-settlement-${index}`,
