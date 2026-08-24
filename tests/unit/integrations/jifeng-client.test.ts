@@ -544,6 +544,33 @@ describe("Jifeng API client", () => {
       .toEqual([1, 2]);
   });
 
+  test("stops safely when Jifeng reports an unreasonable number of order pages", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      code: 0,
+      data: {
+        pageNo: 1,
+        pageSize: 300,
+        rows: [],
+        totalPage: 100_000,
+        totalSize: 30_000_000,
+      },
+      message: "SUCCESS",
+      requestId: "platform-query-unbounded",
+    }));
+    const client = new JifengClient({
+      credentials,
+      fetch: fetchMock,
+    });
+
+    await expect(
+      client.getOrder({ platformOrderNo: "TEMU-UNBOUNDED" }),
+    ).rejects.toMatchObject({
+      code: "PAGINATION_LIMIT_EXCEEDED",
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("reports a missing platform order when the documented page query returns no exact row", async () => {
     const client = new JifengClient({
       credentials,

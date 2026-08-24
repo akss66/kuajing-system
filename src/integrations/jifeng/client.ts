@@ -72,6 +72,7 @@ const accessTokenErrorCodes = new Set([10002, 10015, 10016]);
 // Official business codes 50019 (ERP order exists) and 50038 (processing)
 // require an order query/reconciliation; blind create retries can duplicate orders.
 const retryableCodes = new Set([-1, 1, 10017, 10018]);
+const MAX_PLATFORM_ORDER_LOOKUP_PAGES = 20;
 const safeBusinessErrorMessages = new Map<number, string>([
   [50026, "极风仓库对应 SKU 库存不足，请先同步或补充仓库库存"],
 ]);
@@ -183,6 +184,14 @@ export class JifengClient {
       }
 
       totalPage = Math.max(parsed.data.totalPage ?? currentPage, currentPage);
+      if (totalPage > MAX_PLATFORM_ORDER_LOOKUP_PAGES) {
+        throw new JifengApiError({
+          code: "PAGINATION_LIMIT_EXCEEDED",
+          message: "极风订单查询返回的分页数量异常",
+          requestId: response.requestId,
+          retryable: true,
+        });
+      }
       for (const order of parsed.data.rows) {
         if (order.platformOrderNo === platformOrderNo) {
           exactMatches.set(order.erpNo, order);
