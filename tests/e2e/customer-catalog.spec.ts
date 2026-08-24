@@ -250,7 +250,7 @@ async function previewWorkbookBuffer() {
     "SKUID-1",
     "SKCID-1",
     "SPUID-1",
-    "PREVIEW-SKU-1",
+    "TZX-PREVIEW-1",
     "黑色",
     "Preview Recipient",
     "+1 613 555 0110",
@@ -301,7 +301,7 @@ async function seedImportPreview() {
       defaultUnitPriceMilliYuan: 7600,
       name: "黑色",
       productId: product.id,
-      skuCode: `PREVIEW-SKU-${suffix}`,
+      skuCode: `TZX-PREVIEW-${suffix}`,
     })
     .returning();
 
@@ -311,8 +311,12 @@ async function seedImportPreview() {
     unitPriceFen: 760,
     unitPriceMilliYuan: 7600,
   });
+  await db.insert(inventoryBalances).values({
+    skuId: sku.id,
+    totalQuantity: 10,
+  });
   await db.insert(skuAliases).values({
-    externalSku: "PREVIEW-SKU-1",
+    externalSku: "TZX-PREVIEW-1",
     skuId: sku.id,
     storeId: store.id,
   });
