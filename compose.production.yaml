@@ -62,11 +62,35 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
 
+  worker-health-init:
+    image: tongzhouxing-shop:${APP_VERSION:-current}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "0:0"
+    command:
+      - sh
+      - -lc
+      - mkdir -p /app/runtime/worker-health && chown -R 1001:1001 /app/runtime/worker-health && chmod 0770 /app/runtime/worker-health
+    network_mode: none
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+    volumes:
+      - worker_health:/app/runtime/worker-health
+
   web:
     <<: *app
     depends_on:
       postgres:
         condition: service_healthy
+      worker-health-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -93,6 +117,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      worker-health-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
