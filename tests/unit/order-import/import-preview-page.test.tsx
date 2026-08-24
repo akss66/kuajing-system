@@ -41,6 +41,7 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => {
     throw new Error("notFound");
   }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 vi.mock("@/modules/identity/guards", () => authMocks);
@@ -59,6 +60,9 @@ vi.mock("@/components/orders/order-submit-button", () => ({
 }));
 vi.mock("@/modules/orders/actions", () => ({
   submitImportBatchAction: vi.fn(),
+}));
+vi.mock("@/modules/order-import/actions", () => ({
+  updateCustomerImportRowAction: vi.fn(),
 }));
 
 import ImportPreviewPage from "@/app/(customer)/portal/imports/[batchId]/page";
@@ -84,6 +88,7 @@ describe("ImportPreviewPage", () => {
       fileName: "orders.xlsx",
       rows: [
         {
+          id: "row-1",
           errorCode: null,
           errorMessage: null,
           externalOrderNo: "PO-1",
@@ -128,16 +133,16 @@ describe("ImportPreviewPage", () => {
     expect(importContext).toHaveTextContent("TEMU 店铺");
     expect(importContext).toHaveTextContent("orders.xlsx");
     expect(recovery).toHaveTextContent("可修复");
-    expect(recovery).toHaveTextContent("需管理员处理");
+    expect(recovery).toHaveTextContent("可自行处理");
     expect(recovery).toHaveTextContent("不可提交");
     expect(metricStrip?.textContent).toContain("可提交");
     expect(metricStrip?.textContent).toContain("重复订单");
-    expect(metricStrip?.textContent).toContain("SKU 不可用");
+    expect(metricStrip?.textContent).toContain("需处理");
     expect(metricStrip?.textContent).toContain("格式错误");
     expect(metricStrip?.querySelectorAll("article")).toHaveLength(4);
   });
 
-  it("explains that an unavailable SKU may be unmapped or taken off sale", async () => {
+  it("explains that customers can resolve unavailable SKUs before submission", async () => {
     authMocks.requireCustomer.mockResolvedValue({
       customerId: "customer-1",
       userId: "user-1",
@@ -148,6 +153,7 @@ describe("ImportPreviewPage", () => {
       fileName: "orders.xlsx",
       rows: [
         {
+          id: "row-1",
           errorCode: "SKU_UNAVAILABLE",
           errorMessage: "SKU 已下架或不可售，请联系管理员处理",
           externalOrderNo: "PO-1",
@@ -175,8 +181,9 @@ describe("ImportPreviewPage", () => {
       }),
     );
 
-    expect(screen.getAllByText("SKU 不可用").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/未建立映射或已下架/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("需处理").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/选择同系列替代 SKU、手动输入或调整数量/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/联系管理员处理/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提交订单" })).toBeDisabled();
   });
 });

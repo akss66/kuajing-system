@@ -1,14 +1,89 @@
 "use server";
 
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 
 import { AccessError, requireCustomer } from "@/modules/identity/guards";
 
-import { ImportPreviewError, createTemuImportPreview } from "./service";
+import {
+  ImportPreviewError,
+  createTemuImportPreview,
+  updateCustomerImportRowOverride,
+} from "./service";
 import { TemuWorkbookError } from "./temu-parser";
 import type { TemuUploadActionState } from "./action-state";
 
 const storeSchema = z.string().uuid("请选择有效店铺");
+
+export type ImportRowOverrideActionState = {
+  status: "idle" | "error" | "success";
+  message?: string;
+};
+
+const rowOverrideSchema = z.object({
+  batchId: z.string().uuid(),
+  effectiveQuantity: z.coerce.number().int().min(1).max(1_000_000),
+  expectedRevision: z.coerce.number().int().min(0),
+  rowId: z.string().uuid(),
+  skuCode: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim().length > 0
+        ? value
+        : undefined,
+    z.string().trim().min(1).max(80).optional(),
+  ),
+});
+
+function rowOverrideErrorMessage(error: unknown) {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String(error.code)
+      : null;
+  if (code === "IMPORT_ROW_CONFLICT") {
+    return "该行已被其他操作更新，请刷新后重试。";
+  }
+  if (code === "SKU_NOT_AVAILABLE") {
+    return "SKU 不存在、已下架或不可售，请重新选择。";
+  }
+  if (code === "INSUFFICIENT_STOCK") {
+    return "对应 SKU 库存不足，请更换 SKU 或减少数量。";
+  }
+  if (error instanceof ImportPreviewError) return error.message;
+  return "保存失败，请稍后重试。";
+}
+
+export async function updateCustomerImportRowAction(
+  _previousState: ImportRowOverrideActionState,
+  formData: FormData,
+): Promise<ImportRowOverrideActionState> {
+  const principal = await requireCustomer();
+  const parsed = rowOverrideSchema.safeParse({
+    batchId: formData.get("batchId"),
+    effectiveQuantity: formData.get("effectiveQuantity"),
+    expectedRevision: formData.get("expectedRevision"),
+    rowId: formData.get("rowId"),
+    skuCode: formData.get("skuCode"),
+  });
+  if (!parsed.success) {
+    return { status: "error", message: "请填写有效的 SKU 和实际发货数量。" };
+  }
+
+  try {
+    await updateCustomerImportRowOverride({
+      actorUserId: principal.userId,
+      batchId: parsed.data.batchId,
+      customerId: principal.customerId,
+      effectiveQuantity: parsed.data.effectiveQuantity,
+      expectedRevision: parsed.data.expectedRevision,
+      rowId: parsed.data.rowId,
+      skuCode: parsed.data.skuCode,
+    });
+    revalidatePath(`/portal/imports/${parsed.data.batchId}`);
+    return { status: "success", message: "已保存并重新校验。" };
+  } catch (error) {
+    return { status: "error", message: rowOverrideErrorMessage(error) };
+  }
+}
 
 export async function uploadTemuOrdersAction(
   _previousState: TemuUploadActionState,

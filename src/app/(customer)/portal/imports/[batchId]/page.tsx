@@ -5,22 +5,17 @@ import { notFound } from "next/navigation";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ImportProgress } from "@/components/order-import/import-progress";
+import { ImportRowEditor } from "@/components/order-import/import-row-editor";
 import { Badge } from "@/components/ui/badge";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
+import { updateCustomerImportRowAction } from "@/modules/order-import/actions";
 import { submitImportBatchAction } from "@/modules/orders/actions";
 import {
   ImportPreviewError,
   getCustomerImportPreview,
 } from "@/modules/order-import/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
-
-const statusMeta = {
-  READY: { label: "可提交", className: "bg-success/10 text-success" },
-  DUPLICATE: { label: "重复跳过", className: "bg-surface-muted text-muted" },
-  UNKNOWN_SKU: { label: "SKU 不可用", className: "bg-warning/10 text-warning" },
-  INVALID: { label: "格式错误", className: "bg-danger/10 text-danger" },
-} as const;
 
 function deadline(value: Date) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -98,7 +93,7 @@ export default async function ImportPreviewPage({
         items={[
           { label: "可提交", value: `${preview.summary.ready}` },
           { label: "重复订单", value: `${preview.summary.duplicate}` },
-          { label: "SKU 不可用", value: `${preview.summary.unknownSku}` },
+          { label: "需处理", value: `${preview.summary.unknownSku}` },
           { label: "格式错误", value: `${preview.summary.invalid}` },
         ]}
       />
@@ -109,7 +104,7 @@ export default async function ImportPreviewPage({
           <div>
             <p className="font-semibold">还有 {blocking} 行需要处理，暂不能提交拿货单</p>
             <p className="mt-1 text-warning">
-              SKU 未建立映射或已下架时请联系管理员处理；格式错误请修正 TEMU 文件后重新上传。重复订单会自动跳过。
+              请选择同系列替代 SKU、手动输入或调整数量；格式错误请修正 TEMU 文件后重新上传。重复订单会自动跳过。
             </p>
           </div>
         </div>
@@ -124,8 +119,8 @@ export default async function ImportPreviewPage({
           <p className="mt-1 text-sm text-muted">{preview.summary.invalid} 行格式问题，修正文件后重新上传。</p>
         </div>
         <div className="p-4">
-          <p className="text-sm font-semibold text-ink">需管理员处理</p>
-          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行 SKU 不可用（未建立映射或已下架），请联系管理员处理。</p>
+          <p className="text-sm font-semibold text-ink">可自行处理</p>
+          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行需选择同系列替代 SKU、手动输入或调整数量。</p>
         </div>
         <div className="p-4">
           <p className="text-sm font-semibold text-ink">不可提交</p>
@@ -137,70 +132,21 @@ export default async function ImportPreviewPage({
         <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">
           <div>
             <h2 className="font-semibold text-ink">逐行结果</h2>
-            <p className="mt-1 text-xs text-muted">收件信息已加密，预览中不展示。</p>
+            <p className="mt-1 text-xs text-muted">
+              收件信息已加密；可为系统货品选择同系列替代 SKU，或精确填写其他 SKU。
+            </p>
           </div>
           <Badge variant="secondary">{preview.rows.length} 行</Badge>
         </div>
 
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead className="bg-surface text-left text-xs text-muted">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Excel 行</th>
-                <th className="px-5 py-3 font-semibold">订单号</th>
-                <th className="px-5 py-3 font-semibold">子订单号</th>
-                <th className="px-5 py-3 font-semibold">SKU 货号</th>
-                <th className="px-5 py-3 text-right font-semibold">数量</th>
-                <th className="px-5 py-3 font-semibold">结果</th>
-                <th className="px-5 py-3 font-semibold">说明</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {preview.rows.map((row) => (
-                <tr key={row.rowNumber}>
-                  <td className="px-5 py-3 tabular-nums text-muted">{row.rowNumber}</td>
-                  <td className="px-5 py-3 font-medium text-ink">{row.externalOrderNo ?? "—"}</td>
-                  <td className="px-5 py-3 text-muted">{row.externalSubOrderNo ?? "—"}</td>
-                  <td className="px-5 py-3 font-medium text-ink">{row.externalSku ?? "—"}</td>
-                  <td className="px-5 py-3 text-right tabular-nums">{row.quantity ?? "—"}</td>
-                  <td className="px-5 py-3">
-                    <Badge className={statusMeta[row.status].className} variant="secondary">
-                      {statusMeta[row.status].label}
-                    </Badge>
-                  </td>
-                  <td className="max-w-64 px-5 py-3 text-muted">{row.errorMessage ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="divide-y divide-border md:hidden">
+        <div className="divide-y divide-border">
           {preview.rows.map((row) => (
-            <article className="space-y-3 p-4" key={row.rowNumber}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs text-muted">Excel 第 {row.rowNumber} 行</p>
-                  <p className="mt-1 font-semibold text-ink">{row.externalSku ?? "无法读取 SKU"}</p>
-                </div>
-                <Badge className={statusMeta[row.status].className} variant="secondary">
-                  {statusMeta[row.status].label}
-                </Badge>
-              </div>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-xs text-muted">订单号</dt>
-                  <dd className="mt-1 break-all text-ink">{row.externalOrderNo ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">子订单号</dt>
-                  <dd className="mt-1 break-all text-ink">{row.externalSubOrderNo ?? "—"}</dd>
-                </div>
-              </dl>
-              {row.errorMessage ? (
-                <p className="rounded-lg bg-surface px-3 py-2 text-sm text-muted">{row.errorMessage}</p>
-              ) : null}
-            </article>
+            <ImportRowEditor
+              action={updateCustomerImportRowAction}
+              batchId={preview.batchId}
+              key={row.id}
+              row={row}
+            />
           ))}
         </div>
       </section>
@@ -208,7 +154,7 @@ export default async function ImportPreviewPage({
       <div className="flex flex-col gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted">
           {blocking
-            ? "处理全部不可用 SKU 和格式错误后再提交。"
+            ? "处理全部待处理 SKU 和格式错误后再提交。"
             : `已核对 ${preview.summary.ready} 行可提交订单。`}
         </p>
         <OrderSubmitButton

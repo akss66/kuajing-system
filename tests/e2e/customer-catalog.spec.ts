@@ -584,13 +584,21 @@ test("customer import preview keeps re-upload navigation and unique heading metr
   await expect(page.getByRole("region", { name: "当前导入" })).toContainText("preview-orders.xlsx");
   const recovery = page.getByRole("region", { name: "错误处理分类" });
   await expect(recovery).toContainText("可修复");
-  await expect(recovery).toContainText("需管理员处理");
+  await expect(recovery).toContainText("可自行处理");
   await expect(recovery).toContainText("不可提交");
   const metricStrip = page.locator("[data-metric-strip]");
   await expect(metricStrip).toBeVisible();
   await expect(metricStrip.locator("article")).toHaveCount(4);
   await expect(metricStrip.getByText("可提交", { exact: true })).toHaveCount(1);
   await expect(metricStrip.getByText("重复订单", { exact: true })).toHaveCount(1);
-  await expect(metricStrip.getByText("未映射 SKU", { exact: true })).toHaveCount(1);
+  await expect(metricStrip.getByText("需处理", { exact: true })).toHaveCount(1);
   await expect(metricStrip.getByText("格式错误", { exact: true })).toHaveCount(1);
+
+  const row = page.getByRole("article", { name: "Excel 第 2 行" });
+  await expect(row.getByText("校验通过", { exact: true })).toBeVisible();
+  await expect(row.getByText("原始 SKU", { exact: true })).toBeVisible();
+  await expect(row.getByText("最终 SKU", { exact: true })).toBeVisible();
+  await expect(row.getByLabel("同系列替代 SKU")).toBeVisible();
+  await expect(row.getByLabel("手动填写最终 SKU")).toBeVisible();
+  await expect(row.getByLabel("实际发货数量")).toHaveValue("1");
 });
