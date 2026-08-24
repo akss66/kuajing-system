@@ -41,26 +41,34 @@ function systemRow(overrides: Partial<EditableImportRow> = {}): EditableImportRo
   };
 }
 
+function renderEditor(
+  row: EditableImportRow,
+  action: React.ComponentProps<typeof ImportRowEditor>["action"] = vi.fn(),
+) {
+  return render(
+    <table>
+      <tbody>
+        <ImportRowEditor action={action} batchId="batch-1" row={row} />
+      </tbody>
+    </table>,
+  );
+}
+
 describe("ImportRowEditor", () => {
   beforeEach(() => navigationMocks.refresh.mockReset());
   afterEach(cleanup);
 
   it("shows original and effective fulfillment data with an explicit pass result", () => {
-    render(
-      <ImportRowEditor
-        action={vi.fn()}
-        batchId="batch-1"
-        row={systemRow()}
-      />,
-    );
+    renderEditor(systemRow());
 
-    const row = screen.getByRole("article", { name: "Excel 第 2 行" });
+    const row = screen.getByRole("row", { name: "Excel 第 2 行" });
     expect(within(row).getByText("TZX-024-2PCS")).toBeVisible();
     expect(within(row).getByText("TZX-024", { exact: true })).toBeVisible();
-    expect(within(row).getByText("1", { exact: true })).toBeVisible();
-    expect(within(row).getByDisplayValue("2")).toBeVisible();
+    expect(within(row).getByText("原 1")).toBeVisible();
+    expect(within(row).getAllByText("2", { exact: true })).toHaveLength(2);
     expect(within(row).getByText("校验通过")).toBeVisible();
     expect(within(row).getByText(/2PCS.*实际发货 2 件/)).toBeVisible();
+    expect(screen.queryByLabelText("实际发货数量")).not.toBeInTheDocument();
   });
 
   it("offers same-product siblings, accepts an exact manual SKU, and saves with CAS", async () => {
@@ -72,8 +80,9 @@ describe("ImportRowEditor", () => {
         status: "success" as const,
       };
     });
-    render(<ImportRowEditor action={action} batchId="batch-1" row={systemRow()} />);
+    renderEditor(systemRow(), action);
 
+    fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
     expect(screen.getByRole("option", { name: /TZX-024 · 米白 · 可用库存 0/ })).toBeDisabled();
     expect(screen.getByRole("option", { name: /TZX-024-1 · 粉色 · 可用库存 8/ })).toBeEnabled();
     fireEvent.change(screen.getByLabelText("同系列替代 SKU"), {
@@ -113,24 +122,23 @@ describe("ImportRowEditor", () => {
         };
       },
     );
-    render(
-      <ImportRowEditor
-        action={action}
-        batchId="batch-1"
-        row={systemRow({
-          effectiveQuantity: 1,
-          externalSku: "QS-014-1-LK",
-          fulfillmentMode: "CUSTOMER_SUPPLIED",
-          quantityMultiplier: 1,
-          resolutionMethod: "CUSTOMER_SUPPLIED",
-          resolvedSku: null,
-          siblingCandidates: [],
-        })}
-      />,
+    renderEditor(
+      systemRow({
+        effectiveQuantity: 1,
+        externalSku: "QS-014-1-LK",
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        quantityMultiplier: 1,
+        resolutionMethod: "CUSTOMER_SUPPLIED",
+        resolvedSku: null,
+        siblingCandidates: [],
+      }),
+      action,
     );
 
     expect(screen.queryByLabelText("同系列替代 SKU")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("手动填写最终 SKU")).not.toBeInTheDocument();
+    expect(screen.getByText("仅收运费")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
     expect(screen.getByLabelText("实际发货数量")).toHaveValue(1);
     expect(screen.getByRole("button", { name: "保存并校验" })).toBeEnabled();
     expect(screen.getByText(/客户自有货.*商品.*0.*包裹仍收.*13/)).toBeVisible();
@@ -151,35 +159,27 @@ describe("ImportRowEditor", () => {
   });
 
   it("explains normalized LK suffix matching", () => {
-    render(
-      <ImportRowEditor
-        action={vi.fn()}
-        batchId="batch-1"
-        row={systemRow({
-          effectiveQuantity: 1,
-          externalSku: "TZX-014-3-lk",
-          quantityMultiplier: 1,
-          resolutionMethod: "NORMALIZED_SUFFIX",
-          resolvedSku: { id: "sku-14-3", name: "橙色", skuCode: "TZX-014-3" },
-        })}
-      />,
+    renderEditor(
+      systemRow({
+        effectiveQuantity: 1,
+        externalSku: "TZX-014-3-lk",
+        quantityMultiplier: 1,
+        resolutionMethod: "NORMALIZED_SUFFIX",
+        resolvedSku: { id: "sku-14-3", name: "橙色", skuCode: "TZX-014-3" },
+      }),
     );
 
     expect(screen.getByText("已忽略平台后缀并自动匹配 TZX-014-3。")).toBeVisible();
   });
 
   it("renders failures with a cross and a specific recovery message", () => {
-    render(
-      <ImportRowEditor
-        action={vi.fn()}
-        batchId="batch-1"
-        row={systemRow({
-          errorCode: "INSUFFICIENT_STOCK",
-          errorMessage: "对应 SKU 库存不足，请更换 SKU",
-          resolvedSku: null,
-          status: "UNKNOWN_SKU",
-        })}
-      />,
+    renderEditor(
+      systemRow({
+        errorCode: "INSUFFICIENT_STOCK",
+        errorMessage: "对应 SKU 库存不足，请更换 SKU",
+        resolvedSku: null,
+        status: "UNKNOWN_SKU",
+      }),
     );
 
     expect(screen.getByText("校验失败")).toBeVisible();
@@ -187,13 +187,7 @@ describe("ImportRowEditor", () => {
   });
 
   it("renders duplicate rows as a neutral skip without edit controls", () => {
-    render(
-      <ImportRowEditor
-        action={vi.fn()}
-        batchId="batch-1"
-        row={systemRow({ status: "DUPLICATE" })}
-      />,
-    );
+    renderEditor(systemRow({ status: "DUPLICATE" }));
 
     expect(screen.getByText("重复跳过")).toBeVisible();
     expect(screen.queryByRole("button", { name: "保存并校验" })).not.toBeInTheDocument();
@@ -207,8 +201,9 @@ describe("ImportRowEditor", () => {
           finish = resolve;
         }),
     );
-    render(<ImportRowEditor action={action} batchId="batch-1" row={systemRow()} />);
+    renderEditor(systemRow(), action);
 
+    fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
     fireEvent.click(screen.getByRole("button", { name: "保存并校验" }));
     const pendingButton = await screen.findByRole("button", { name: "正在校验" });
     expect(pendingButton).toBeDisabled();

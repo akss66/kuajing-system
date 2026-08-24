@@ -1,12 +1,10 @@
-import { AlertTriangle, ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ImportProgress } from "@/components/order-import/import-progress";
-import { ImportRowEditor } from "@/components/order-import/import-row-editor";
-import { Badge } from "@/components/ui/badge";
+import { ImportReviewTable } from "@/components/order-import/import-review-table";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
 import { updateCustomerImportRowAction } from "@/modules/order-import/actions";
@@ -44,25 +42,26 @@ export default async function ImportPreviewPage({
   }
 
   const blocking = preview.summary.unknownSku + preview.summary.invalid;
+  const readyRows = preview.rows.filter((row) => row.status === "READY");
+  const packageCount = new Set(
+    readyRows
+      .map((row) => row.externalOrderNo)
+      .filter((value): value is string => Boolean(value)),
+  ).size;
+  const quantity = readyRows.reduce(
+    (total, row) => total + (row.effectiveQuantity ?? row.quantity ?? 0),
+    0,
+  );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pb-2">
       <PageHeading
         action={
-          <div className="flex flex-col items-start gap-3 sm:items-end">
-            <Link
-              className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
-              href="/portal/imports/new"
-            >
-              <ArrowLeft aria-hidden="true" className="size-4" />
-              重新上传
-            </Link>
-            <div className="text-sm text-muted sm:text-right">
-              <p>预览有效期至</p>
-              <p className="mt-1 font-medium tabular-nums text-ink">
-                {deadline(preview.expiresAt)}（多伦多）
-              </p>
-            </div>
+          <div className="text-sm text-muted sm:text-right">
+            <p>预览有效期至</p>
+            <p className="mt-1 font-medium tabular-nums text-ink">
+              {deadline(preview.expiresAt)}（多伦多）
+            </p>
           </div>
         }
         breadcrumbs={[
@@ -76,28 +75,6 @@ export default async function ImportPreviewPage({
 
       <ImportProgress currentStep={3} />
 
-      <section
-        aria-label="当前导入"
-        className="flex flex-col gap-2 border-b border-border pb-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div>
-          <p className="text-xs font-medium text-muted">已保留的导入内容</p>
-          <p className="mt-1 font-semibold text-ink">{preview.storeName}</p>
-        </div>
-        <p className="min-w-0 break-all text-muted sm:text-right">
-          {preview.fileName} · {preview.summary.total} 行
-        </p>
-      </section>
-
-      <MetricStrip
-        items={[
-          { label: "可提交", value: `${preview.summary.ready}` },
-          { label: "重复订单", value: `${preview.summary.duplicate}` },
-          { label: "需处理", value: `${preview.summary.unknownSku}` },
-          { label: "格式错误", value: `${preview.summary.invalid}` },
-        ]}
-      />
-
       {blocking ? (
         <div className="flex gap-3 rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
           <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
@@ -110,59 +87,50 @@ export default async function ImportPreviewPage({
         </div>
       ) : null}
 
-      <section
-        aria-label="错误处理分类"
-        className="divide-y divide-border rounded-[var(--radius-surface)] border border-border bg-background sm:grid sm:grid-cols-3 sm:divide-x sm:divide-y-0"
-      >
-        <div className="p-4">
-          <p className="text-sm font-semibold text-ink">可修复</p>
-          <p className="mt-1 text-sm text-muted">{preview.summary.invalid} 行格式问题，修正文件后重新上传。</p>
-        </div>
-        <div className="p-4">
-          <p className="text-sm font-semibold text-ink">可自行处理</p>
-          <p className="mt-1 text-sm text-muted">{preview.summary.unknownSku} 行需选择同系列替代 SKU、手动输入或调整数量。</p>
-        </div>
-        <div className="p-4">
-          <p className="text-sm font-semibold text-ink">不可提交</p>
-          <p className="mt-1 text-sm text-muted">{blocking} 行仍会阻止本批次提交；重复订单不计入。</p>
-        </div>
-      </section>
+      <ImportReviewTable
+        action={updateCustomerImportRowAction}
+        batchId={preview.batchId}
+        rows={preview.rows}
+      />
 
-      <section className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5">
-          <div>
-            <h2 className="font-semibold text-ink">逐行结果</h2>
-            <p className="mt-1 text-xs text-muted">
-              收件信息已加密；可为系统货品选择同系列替代 SKU，或精确填写其他 SKU。
+      <section
+        aria-label="提交拿货单操作栏"
+        className="sticky bottom-0 z-20 flex flex-col gap-3 rounded-t-[var(--radius-surface)] border border-border bg-background/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:bottom-4 sm:flex-row sm:items-center sm:justify-between sm:rounded-[var(--radius-surface)] sm:px-5"
+      >
+        <div className="flex min-w-0 items-start gap-3">
+          {blocking ? (
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
+          ) : (
+            <ShieldCheck aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
+          )}
+          <div className="min-w-0">
+            <p className="font-semibold text-ink">
+              {blocking
+                ? `还有 ${blocking} 行待处理，暂不能提交`
+                : `已校验 ${preview.summary.ready} 行，可安全提交`}
+            </p>
+            <p className="mt-0.5 text-xs leading-5 text-muted">
+              {packageCount} 个包裹 · {quantity} 件商品
+              {preview.summary.duplicate ? ` · ${preview.summary.duplicate} 个重复订单自动跳过` : ""}
+              ；提交时会再次校验库存和重复订单。
             </p>
           </div>
-          <Badge variant="secondary">{preview.rows.length} 行</Badge>
         </div>
-
-        <div className="divide-y divide-border">
-          {preview.rows.map((row) => (
-            <ImportRowEditor
-              action={updateCustomerImportRowAction}
-              batchId={preview.batchId}
-              key={row.id}
-              row={row}
-            />
-          ))}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end">
+          <Link
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-4 text-sm font-medium text-ink hover:bg-[var(--merchant-nav-hover)]"
+            href="/portal/imports/new"
+          >
+            <ArrowLeft aria-hidden="true" className="size-4" />
+            返回重新上传
+          </Link>
+          <OrderSubmitButton
+            action={submitImportBatchAction}
+            batchId={preview.batchId}
+            disabled={blocking > 0 || preview.summary.ready === 0}
+          />
         </div>
       </section>
-
-      <div className="flex flex-col gap-3 rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted">
-          {blocking
-            ? "处理全部待处理 SKU 和格式错误后再提交。"
-            : `已核对 ${preview.summary.ready} 行可提交订单。`}
-        </p>
-        <OrderSubmitButton
-          action={submitImportBatchAction}
-          batchId={preview.batchId}
-          disabled={blocking > 0 || preview.summary.ready === 0}
-        />
-      </div>
     </div>
   );
 }

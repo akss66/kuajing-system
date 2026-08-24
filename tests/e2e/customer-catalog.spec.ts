@@ -558,7 +558,8 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
   await expect(page).toHaveURL(/\/login$/);
 });
 
-test("customer import preview keeps re-upload navigation and unique heading metrics", async ({ page }) => {
+test("customer import preview uses the compact review workspace and sticky submit bar", async ({ page }, testInfo) => {
+  const failures = observeBrowserFailures(page);
   const fixture = await seedImportPreview();
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/);
@@ -575,7 +576,7 @@ test("customer import preview keeps re-upload navigation and unique heading metr
   await page.goto(`/portal/imports/${fixture.preview.batchId}`);
 
   await expect(page.getByRole("heading", { name: "核对 TEMU 订单" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "重新上传" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "返回重新上传" })).toBeVisible();
   const progress = page.getByRole("navigation", { name: "订单导入进度" });
   await expect(progress.getByText("选择店铺")).toBeVisible();
   await expect(progress.getByText("上传文件")).toBeVisible();
@@ -585,24 +586,41 @@ test("customer import preview keeps re-upload navigation and unique heading metr
     "aria-current",
     "step",
   );
-  await expect(page.getByRole("region", { name: "当前导入" })).toContainText("preview-orders.xlsx");
-  const recovery = page.getByRole("region", { name: "错误处理分类" });
-  await expect(recovery).toContainText("可修复");
-  await expect(recovery).toContainText("可自行处理");
-  await expect(recovery).toContainText("不可提交");
-  const metricStrip = page.locator("[data-metric-strip]");
-  await expect(metricStrip).toBeVisible();
-  await expect(metricStrip.locator("article")).toHaveCount(4);
-  await expect(metricStrip.getByText("可提交", { exact: true })).toHaveCount(1);
-  await expect(metricStrip.getByText("重复订单", { exact: true })).toHaveCount(1);
-  await expect(metricStrip.getByText("需处理", { exact: true })).toHaveCount(1);
-  await expect(metricStrip.getByText("格式错误", { exact: true })).toHaveCount(1);
+  await expect(page.getByText(/preview-orders\.xlsx/)).toBeVisible();
+  const workspace = page.getByRole("region", { name: "逐行校验工作台" });
+  await expect(workspace).toBeVisible();
+  await expect(workspace.getByRole("table", { name: "逐行校验结果" })).toBeVisible();
+  await expect(workspace.getByText("可提交", { exact: true })).toBeVisible();
+  await expect(workspace.getByText("需处理", { exact: true })).toBeVisible();
+  await expect(workspace.getByText("重复跳过", { exact: true })).toBeVisible();
+  const submitBar = page.getByRole("region", { name: "提交拿货单操作栏" });
+  await expect(submitBar).toBeVisible();
+  const submitBarBox = await submitBar.boundingBox();
+  expect(submitBarBox).not.toBeNull();
+  expect((submitBarBox?.y ?? 0) + (submitBarBox?.height ?? 0)).toBeLessThanOrEqual(
+    (page.viewportSize()?.height ?? 0) + 1,
+  );
 
-  const row = page.getByRole("article", { name: "Excel 第 2 行" });
+  const row = page.getByRole("row", { name: "Excel 第 2 行" });
   await expect(row.getByText("校验通过", { exact: true })).toBeVisible();
-  await expect(row.getByText("原始 SKU", { exact: true })).toBeVisible();
-  await expect(row.getByText("最终 SKU", { exact: true })).toBeVisible();
-  await expect(row.getByLabel("同系列替代 SKU")).toBeVisible();
-  await expect(row.getByLabel("手动填写最终 SKU")).toBeVisible();
-  await expect(row.getByLabel("实际发货数量")).toHaveValue("1");
+  await expect(row.getByText("TZX-PREVIEW-1", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("同系列替代 SKU")).toHaveCount(0);
+  await row.getByRole("button", { name: "修改 Excel 第 2 行" }).click();
+  await expect(page.getByLabel("同系列替代 SKU")).toBeVisible();
+  await expect(page.getByLabel("手动填写最终 SKU")).toBeVisible();
+  await expect(page.getByLabel("实际发货数量")).toHaveValue("1");
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    accessibility.violations.filter((item) =>
+      ["serious", "critical"].includes(item.impact ?? ""),
+    ),
+  ).toEqual([]);
+  expect(failures.consoleErrors).toEqual([]);
+  expect(failures.pageErrors).toEqual([]);
+  expect(failures.hydrationErrors).toEqual([]);
+  await testInfo.attach("import-review-scheme-a", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
 });

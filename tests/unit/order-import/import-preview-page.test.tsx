@@ -77,7 +77,7 @@ describe("ImportPreviewPage", () => {
     cleanup();
   });
 
-  it("keeps the selected store in a continuous import flow and separates recovery paths", async () => {
+  it("uses a compact review workspace with an always-visible submit bar", async () => {
     authMocks.requireCustomer.mockResolvedValue({
       customerId: "customer-1",
       userId: "user-1",
@@ -88,14 +88,23 @@ describe("ImportPreviewPage", () => {
       fileName: "orders.xlsx",
       rows: [
         {
+          effectiveQuantity: 1,
           id: "row-1",
           errorCode: null,
           errorMessage: null,
           externalOrderNo: "PO-1",
           externalSku: "SKU-1",
           externalSubOrderNo: "SUB-1",
+          fulfillmentMode: "SYSTEM_SKU",
           quantity: 1,
+          quantityMultiplier: 1,
+          resolutionMethod: "EXACT",
+          resolvedSku: { id: "sku-1", name: "商品 1", skuCode: "SKU-1" },
+          revision: 1,
           rowNumber: 2,
+          siblingCandidates: [
+            { availableQuantity: 10, id: "sku-1", name: "商品 1", skuCode: "SKU-1" },
+          ],
           status: "READY",
         },
       ],
@@ -116,12 +125,11 @@ describe("ImportPreviewPage", () => {
       }),
     );
 
-    const metricStrip = document.querySelector("[data-metric-strip]");
     const progress = screen.getByRole("navigation", { name: "订单导入进度" });
-    const importContext = screen.getByRole("region", { name: "当前导入" });
-    const recovery = screen.getByRole("region", { name: "错误处理分类" });
+    const workspace = screen.getByRole("region", { name: "逐行校验工作台" });
+    const submitBar = screen.getByRole("region", { name: "提交拿货单操作栏" });
 
-    expect(screen.getByRole("link", { name: "重新上传" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "返回重新上传" })).toBeVisible();
     expect(within(progress).getByText("选择店铺")).toBeVisible();
     expect(within(progress).getByText("上传文件")).toBeVisible();
     expect(within(progress).getByText("校验预览")).toBeVisible();
@@ -130,16 +138,14 @@ describe("ImportPreviewPage", () => {
       "aria-current",
       "step",
     );
-    expect(importContext).toHaveTextContent("TEMU 店铺");
-    expect(importContext).toHaveTextContent("orders.xlsx");
-    expect(recovery).toHaveTextContent("可修复");
-    expect(recovery).toHaveTextContent("可自行处理");
-    expect(recovery).toHaveTextContent("不可提交");
-    expect(metricStrip?.textContent).toContain("可提交");
-    expect(metricStrip?.textContent).toContain("重复订单");
-    expect(metricStrip?.textContent).toContain("需处理");
-    expect(metricStrip?.textContent).toContain("格式错误");
-    expect(metricStrip?.querySelectorAll("article")).toHaveLength(4);
+    expect(screen.getByText(/TEMU 店铺.*orders\.xlsx.*15 行/)).toBeVisible();
+    expect(workspace).toHaveTextContent("逐行校验");
+    expect(workspace).toHaveTextContent("可提交1");
+    expect(workspace).toHaveTextContent("需处理0");
+    expect(workspace).toHaveTextContent("重复跳过0");
+    expect(within(workspace).getByRole("table", { name: "逐行校验结果" })).toBeVisible();
+    expect(submitBar).toHaveClass("sticky");
+    expect(within(submitBar).getByRole("button", { name: "提交订单" })).toBeDisabled();
   });
 
   it("explains that customers can resolve unavailable SKUs before submission", async () => {
@@ -153,14 +159,21 @@ describe("ImportPreviewPage", () => {
       fileName: "orders.xlsx",
       rows: [
         {
+          effectiveQuantity: 1,
           id: "row-1",
           errorCode: "SKU_UNAVAILABLE",
           errorMessage: "SKU 已下架或不可售，请联系管理员处理",
           externalOrderNo: "PO-1",
           externalSku: "SKU-1",
           externalSubOrderNo: "SUB-1",
+          fulfillmentMode: "SYSTEM_SKU",
           quantity: 1,
+          quantityMultiplier: 1,
+          resolutionMethod: "EXACT",
+          resolvedSku: null,
+          revision: 1,
           rowNumber: 2,
+          siblingCandidates: [],
           status: "UNKNOWN_SKU",
         },
       ],
