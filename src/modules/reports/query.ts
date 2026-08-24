@@ -124,12 +124,22 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
           and offline_completed_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
       `),
       db.execute<{ pendingReceivableFen: number | string }>(sql`
-        select coalesce(sum("order".total_amount_fen - coalesce((
-          select sum(adjustment.total_amount_fen)
-          from shipment_cancellation_adjustments adjustment
-          where adjustment.order_id = "order".id
-        ), 0)), 0) as "pendingReceivableFen"
+        select coalesce(sum(
+          case
+            when active_batch.id is not null then allocation.offline_amount_fen
+            else "order".total_amount_fen - coalesce((
+              select sum(adjustment.total_amount_fen)
+              from shipment_cancellation_adjustments adjustment
+              where adjustment.order_id = "order".id
+            ), 0)
+          end
+        ), 0) as "pendingReceivableFen"
         from fulfillment_orders "order"
+        left join settlement_batch_orders allocation
+          on allocation.order_id = "order".id
+        left join settlement_batches active_batch
+          on active_batch.id = allocation.settlement_batch_id
+          and active_batch.status in ('PENDING_PAYMENT', 'PAYMENT_REPORTED')
         where "order".status = 'PENDING_PAYMENT'
           and "order".submitted_at >= ${window.fromUtc.toISOString()}::timestamptz
           and "order".submitted_at < ${window.toExclusiveUtc.toISOString()}::timestamptz

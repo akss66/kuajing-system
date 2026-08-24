@@ -225,6 +225,27 @@ async function assertAllOrdersPending(
   }
 }
 
+async function assertNoOrderPaymentClaims(
+  tx: DbTransaction,
+  settlementBatchId: string,
+) {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select claim.id
+    from settlement_batch_orders allocation
+    inner join payment_claims claim on claim.order_id = allocation.order_id
+    where allocation.settlement_batch_id = ${settlementBatchId}
+      and claim.status <> 'REJECTED'
+    order by claim.id
+    for update of claim
+  `);
+  if (rows.length > 0) {
+    throw new SettlementBatchError(
+      "SETTLEMENT_ORDER_PAYMENT_CLAIM_EXISTS",
+      "结算批次中存在未驳回的单订单付款声明，请先驳回后再申报整批付款",
+    );
+  }
+}
+
 async function pendingClaim(tx: DbTransaction, settlementBatchId: string) {
   const rows = await tx.execute<{
     amountFen: number;
@@ -538,6 +559,7 @@ export async function reportSettlementPayment(input: {
       );
     }
     await assertAllOrdersPending(tx, input.settlementBatchId);
+    await assertNoOrderPaymentClaims(tx, input.settlementBatchId);
     const orderIds = await batchOrderIds(tx, input.settlementBatchId);
     const reviewDueAt = new Date(now.getTime() + PAYMENT_REVIEW_LOCK_MS);
     await tx.insert(settlementPaymentClaims).values({

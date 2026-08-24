@@ -9,6 +9,7 @@ import {
   paymentClaims,
   replacementRequests,
   settlementBatchOrders,
+  settlementBatches,
   shipmentCancellationAdjustments,
   shipmentFulfillments,
   stores,
@@ -101,6 +102,8 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
       paidAt: fulfillmentOrders.paidAt,
       paymentMode: fulfillmentOrders.paymentMode,
       status: fulfillmentOrders.status,
+      settlementBatchId: settlementBatchOrders.settlementBatchId,
+      settlementBatchStatus: settlementBatches.status,
       storeName: stores.name,
       totalAmountFen: fulfillmentOrders.totalAmountFen,
       totalPackageCount: fulfillmentOrders.totalPackageCount,
@@ -114,6 +117,13 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
       and(
         eq(settlementBatchOrders.orderId, fulfillmentOrders.id),
         eq(settlementBatchOrders.customerId, fulfillmentOrders.customerId),
+      ),
+    )
+    .leftJoin(
+      settlementBatches,
+      and(
+        eq(settlementBatches.id, settlementBatchOrders.settlementBatchId),
+        eq(settlementBatches.customerId, fulfillmentOrders.customerId),
       ),
     )
     .where(

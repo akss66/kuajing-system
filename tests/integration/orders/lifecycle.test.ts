@@ -189,6 +189,110 @@ describe("offline payment and order lifecycle", () => {
     expect(await db.select().from(paymentClaims)).toEqual([]);
   });
 
+  test.each(["PENDING_PAYMENT", "PAYMENT_REPORTED"] as const)(
+    "payment declaration is blocked while the order belongs to an active %s settlement",
+    async (settlementStatus) => {
+      const { customer, order } = await createOrder();
+      const [batch] = await db
+        .insert(settlementBatches)
+        .values({
+          batchNumber: `SET-ACTIVE-${crypto.randomUUID()}`,
+          customerId: customer.id,
+          idempotencyKey: `active-payment-guard-${crypto.randomUUID()}`,
+          offlineAmountFen: 500,
+          paymentDueAt: new Date("2026-08-22T00:00:00.000Z"),
+          paymentReportedAt:
+            settlementStatus === "PAYMENT_REPORTED" ? initialNow : null,
+          status: settlementStatus,
+          totalAmountFen: 500,
+          walletAmountFen: 0,
+        })
+        .returning();
+      await db.insert(settlementBatchOrders).values({
+        customerId: customer.id,
+        offlineAmountFen: 500,
+        orderId: order.id,
+        settlementBatchId: batch.id,
+        totalAmountFen: 500,
+        walletAmountFen: 0,
+      });
+
+      await expect(
+        declareOfflinePayment({
+          actorUserId: "customer-auth-1",
+          amountFen: 500,
+          customerId: customer.id,
+          now: initialNow,
+          orderId: order.id,
+        }),
+      ).rejects.toMatchObject({ code: "ORDER_PAYMENT_MANAGED_BY_SETTLEMENT" });
+      expect(await db.select().from(paymentClaims)).toEqual([]);
+    },
+  );
+
+  test("admin cannot approve a legacy order claim after the order enters active settlement", async () => {
+    const { customer, order } = await createOrder();
+    const [admin] = await db
+      .insert(adminUsers)
+      .values({ displayName: "结算保护管理员", loginIdentifier: `guard-${crypto.randomUUID()}@test.local` })
+      .returning();
+    const claim = await declareOfflinePayment({
+      actorUserId: "customer-auth-1",
+      amountFen: 500,
+      customerId: customer.id,
+      now: initialNow,
+      orderId: order.id,
+    });
+    const [batch] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `SET-LEGACY-${crypto.randomUUID()}`,
+        customerId: customer.id,
+        idempotencyKey: `legacy-claim-guard-${crypto.randomUUID()}`,
+        offlineAmountFen: 500,
+        paymentDueAt: new Date("2026-08-22T00:00:00.000Z"),
+        status: "PENDING_PAYMENT",
+        totalAmountFen: 500,
+        walletAmountFen: 0,
+      })
+      .returning();
+    await db.insert(settlementBatchOrders).values({
+      customerId: customer.id,
+      offlineAmountFen: 500,
+      orderId: order.id,
+      settlementBatchId: batch.id,
+      totalAmountFen: 500,
+      walletAmountFen: 0,
+    });
+
+    await expect(
+      reviewOfflinePayment({
+        actorUserId: "admin-auth-1",
+        adminUserId: admin.id,
+        claimId: claim.claimId,
+        decision: "APPROVE",
+        now: new Date("2026-08-12T10:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "ORDER_PAYMENT_MANAGED_BY_SETTLEMENT" });
+    await expect(
+      db.select().from(paymentClaims).where(eq(paymentClaims.id, claim.claimId)),
+    ).resolves.toEqual([expect.objectContaining({ status: "PENDING" })]);
+
+    await expect(
+      reviewOfflinePayment({
+        actorUserId: "admin-auth-1",
+        adminUserId: admin.id,
+        claimId: claim.claimId,
+        decision: "REJECT",
+        now: new Date("2026-08-12T10:31:00.000Z"),
+        rejectionReason: "统一结算前清理旧的单订单付款声明",
+      }),
+    ).resolves.toMatchObject({ status: "PENDING_PAYMENT" });
+    await expect(
+      db.select().from(paymentClaims).where(eq(paymentClaims.id, claim.claimId)),
+    ).resolves.toEqual([expect.objectContaining({ status: "REJECTED" })]);
+  });
+
   test("admin approval marks direct payment paid without touching the wallet", async () => {
     const { customer, order, reservation } = await createOrder();
     const [admin] = await db
@@ -469,12 +573,16 @@ describe("offline payment and order lifecycle", () => {
       getCustomerOrderDetail(first.customer.id, first.order.id),
     ).resolves.toMatchObject({
       offlineAmountFen: 500,
+      settlementBatchId: batch.id,
+      settlementBatchStatus: "PAID",
       walletAmountFen: 0,
     });
     await expect(
       getCustomerOrderDetail(first.customer.id, second.order.id),
     ).resolves.toMatchObject({
       offlineAmountFen: 300,
+      settlementBatchId: batch.id,
+      settlementBatchStatus: "PAID",
       walletAmountFen: 200,
     });
   });

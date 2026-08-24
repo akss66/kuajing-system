@@ -9,7 +9,11 @@ import type { CustomerOrderDetail } from "@/modules/orders/queries";
 
 export function CustomerOrderActions({ order }: { order: CustomerOrderDetail }) {
   const claimPending = order.latestPaymentClaim?.status === "PENDING";
-  const canDeclarePayment = order.status === "PENDING_PAYMENT" && !claimPending;
+  const usesActiveSettlement = ["PENDING_PAYMENT", "PAYMENT_REPORTED"].includes(
+    order.settlementBatchStatus ?? "",
+  );
+  const canDeclarePayment =
+    order.status === "PENDING_PAYMENT" && !claimPending && !usesActiveSettlement;
   const canCancel = ["PENDING_PAYMENT", "PAID_PENDING_FULFILLMENT"].includes(
     order.status,
   );
@@ -41,6 +45,21 @@ export function CustomerOrderActions({ order }: { order: CustomerOrderDetail }) 
               <Input className="min-h-11" maxLength={500} name="note" placeholder="例如：微信昵称或转账时间" />
             </label>
           </ActionForm>
+        </section>
+      ) : null}
+
+      {order.status === "PENDING_PAYMENT" && usesActiveSettlement ? (
+        <section className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5">
+          <h2 className="font-semibold text-ink">本单已进入统一结算</h2>
+          <p className="mt-1 text-sm text-muted">请在统一结算批次中申报付款</p>
+          {order.settlementBatchId ? (
+            <a
+              className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-primary-hover"
+              href={`/portal/settlements/${order.settlementBatchId}`}
+            >
+              查看统一结算批次
+            </a>
+          ) : null}
         </section>
       ) : null}
 

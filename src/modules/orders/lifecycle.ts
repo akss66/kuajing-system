@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/db/client";
+import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
@@ -35,6 +35,28 @@ function assertFen(value: number) {
 
 function asDate(value: Date | string | null): Date | null {
   return value === null ? null : value instanceof Date ? value : new Date(value);
+}
+
+async function assertOrderPaymentIsNotManagedBySettlement(
+  tx: DbTransaction,
+  orderId: string,
+) {
+  const rows = await tx.execute<{ active: boolean }>(sql`
+    select exists (
+      select 1
+      from settlement_batch_orders allocation
+      inner join settlement_batches batch
+        on batch.id = allocation.settlement_batch_id
+      where allocation.order_id = ${orderId}
+        and batch.status in ('PENDING_PAYMENT', 'PAYMENT_REPORTED')
+    ) as active
+  `);
+  if (rows[0]?.active) {
+    throw new OrderLifecycleError(
+      "ORDER_PAYMENT_MANAGED_BY_SETTLEMENT",
+      "该拿货单正在统一结算中，请在结算批次内处理付款",
+    );
+  }
 }
 
 export async function declareOfflinePayment(input: {
@@ -77,6 +99,7 @@ export async function declareOfflinePayment(input: {
     if (order.status !== "PENDING_PAYMENT") {
       throw new OrderLifecycleError("ORDER_NOT_PENDING_PAYMENT", "该拿货单当前不能申报付款");
     }
+    await assertOrderPaymentIsNotManagedBySettlement(tx, input.orderId);
     const previousLockExpiresAt = asDate(order.lockExpiresAt);
     const previousPaymentDeclaredAt = asDate(order.paymentDeclaredAt);
     if (previousLockExpiresAt && previousLockExpiresAt <= now) {
@@ -242,6 +265,9 @@ export async function reviewOfflinePayment(input: {
     }
     if (claim.orderStatus !== "PENDING_PAYMENT") {
       throw new OrderLifecycleError("ORDER_NOT_PENDING_PAYMENT", "该拿货单当前不能核款");
+    }
+    if (input.decision === "APPROVE") {
+      await assertOrderPaymentIsNotManagedBySettlement(tx, claim.orderId);
     }
     const lockExpiresAt = asDate(claim.lockExpiresAt);
     if (lockExpiresAt && lockExpiresAt <= now) {

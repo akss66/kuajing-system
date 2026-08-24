@@ -11,6 +11,7 @@ import {
   paymentClaims,
   products,
   replacementRequests,
+  settlementBatchOrders,
   settlementBatches,
   settlementPaymentClaims,
   shipmentCancellationAdjustments,
@@ -73,7 +74,7 @@ describe("operations reports", () => {
     const inRange = new Date("2026-08-11T15:00:00.000Z");
     const recipient = "encrypted-recipient";
 
-    const [directOrder, walletOrder, , unshippedOrder, cancelledOfflineOrder] = await db
+    const [directOrder, walletOrder, pendingOrder, unshippedOrder, cancelledOfflineOrder] = await db
       .insert(fulfillmentOrders)
       .values([
         {
@@ -173,6 +174,27 @@ describe("operations reports", () => {
       reviewedByAdminUserId: admin.id,
       status: "APPROVED",
     });
+    const [pendingMixedSettlement] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `R-PENDING-MIXED-${suffix}`,
+        customerId: customer.id,
+        idempotencyKey: `report-pending-mixed:${suffix}`,
+        offlineAmountFen: 800,
+        paymentDueAt: new Date("2026-08-12T04:00:00.000Z"),
+        status: "PENDING_PAYMENT",
+        totalAmountFen: 1_200,
+        walletAmountFen: 400,
+      })
+      .returning();
+    await db.insert(settlementBatchOrders).values({
+      customerId: customer.id,
+      offlineAmountFen: 800,
+      orderId: pendingOrder.id,
+      settlementBatchId: pendingMixedSettlement.id,
+      totalAmountFen: 1_200,
+      walletAmountFen: 400,
+    });
     const [paidSettlement] = await db
       .insert(settlementBatches)
       .values({
@@ -247,7 +269,7 @@ describe("operations reports", () => {
       completedOfflineRefundsFen: 1_800,
       orderDebitsFen: 700,
       orderRefundsFen: 700,
-      pendingReceivableFen: 1_200,
+      pendingReceivableFen: 800,
     });
   });
 
@@ -336,5 +358,62 @@ describe("operations reports", () => {
       { date: "2026-08-12", orderCount: 0, revenueFen: 0 },
       { date: "2026-08-13", orderCount: 1, revenueFen: 500 },
     ]);
+  });
+
+  test("uses order net amount after an old settlement allocation becomes terminal", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const submittedAt = new Date("2026-08-11T15:00:00.000Z");
+    const [customer] = await db
+      .insert(customers)
+      .values({ code: `TERM-${suffix}`, name: "终止结算客户" })
+      .returning();
+    const [store] = await db
+      .insert(stores)
+      .values({ customerId: customer.id, name: `终止结算店铺 ${suffix}` })
+      .returning();
+    const [order] = await db
+      .insert(fulfillmentOrders)
+      .values({
+        customerId: customer.id,
+        lockExpiresAt: new Date("2026-08-12T04:00:00.000Z"),
+        orderNumber: `TERM-${suffix}`,
+        status: "PENDING_PAYMENT",
+        storeId: store.id,
+        submittedAt,
+        totalAmountFen: 1_200,
+        totalPackageCount: 1,
+        totalQuantity: 1,
+      })
+      .returning();
+    const [terminalBatch] = await db
+      .insert(settlementBatches)
+      .values({
+        batchNumber: `TERM-SET-${suffix}`,
+        closedAt: submittedAt,
+        customerId: customer.id,
+        idempotencyKey: `terminal-report:${suffix}`,
+        offlineAmountFen: 200,
+        paymentDueAt: new Date("2026-08-12T04:00:00.000Z"),
+        status: "CANCELLED",
+        statusReason: "旧统一结算已失效",
+        totalAmountFen: 1_200,
+        walletAmountFen: 1_000,
+      })
+      .returning();
+    await db.insert(settlementBatchOrders).values({
+      customerId: customer.id,
+      offlineAmountFen: 200,
+      orderId: order.id,
+      settlementBatchId: terminalBatch.id,
+      totalAmountFen: 1_200,
+      walletAmountFen: 1_000,
+    });
+
+    const report = await getOperationsReport({
+      fromUtc: new Date("2026-08-11T04:00:00.000Z"),
+      toExclusiveUtc: new Date("2026-08-12T04:00:00.000Z"),
+    });
+
+    expect(report.funds.pendingReceivableFen).toBe(1_200);
   });
 });

@@ -33,6 +33,7 @@ import {
   orderImportBatches,
   orderImportRows,
   orderShipments,
+  paymentClaims,
   products,
   settlementBatchOrders,
   settlementBatches,
@@ -1549,6 +1550,64 @@ describe("unified offline settlement lifecycle", () => {
       }),
     ).rejects.toMatchObject({ code: "SETTLEMENT_ALREADY_PAID" });
     expect(await db.select().from(settlementPaymentClaims)).toEqual([]);
+  });
+
+  test("rejects batch payment reporting when an order still has a non-rejected payment claim", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    const result = await submitFixture(fixture, 0);
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!))
+      .limit(1);
+    await db.insert(paymentClaims).values({
+      amountFen: allocation.totalAmountFen,
+      customerId: fixture.customer.id,
+      orderId: allocation.orderId,
+      status: "PENDING",
+    });
+
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 400,
+        customerId: fixture.customer.id,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_ORDER_PAYMENT_CLAIM_EXISTS" });
+    await expect(
+      db
+        .select({ status: settlementBatches.status })
+        .from(settlementBatches)
+        .where(eq(settlementBatches.id, result.settlementBatchId!)),
+    ).resolves.toEqual([{ status: "PENDING_PAYMENT" }]);
+    expect(await db.select().from(settlementPaymentClaims)).toEqual([]);
+  });
+
+  test("allows batch payment reporting after every order-level claim is rejected", async () => {
+    const fixture = await createSubmissionFixture([100, 300]);
+    const result = await submitFixture(fixture, 0);
+    const [allocation] = await db
+      .select()
+      .from(settlementBatchOrders)
+      .where(eq(settlementBatchOrders.settlementBatchId, result.settlementBatchId!))
+      .limit(1);
+    await db.insert(paymentClaims).values({
+      amountFen: allocation.totalAmountFen,
+      customerId: fixture.customer.id,
+      orderId: allocation.orderId,
+      rejectionReason: "已切换为统一结算",
+      status: "REJECTED",
+    });
+
+    await expect(
+      reportSettlementPayment({
+        actorUserId: "customer-auth",
+        amountFen: 400,
+        customerId: fixture.customer.id,
+        settlementBatchId: result.settlementBatchId!,
+      }),
+    ).resolves.toMatchObject({ status: "PAYMENT_REPORTED" });
   });
 
   test("admin approval consumes one mixed-payment hold, marks all orders paid and atomically creates fulfillment outbox", async () => {
