@@ -10,6 +10,10 @@ import { Button } from "@/components/ui/button";
 import { db } from "@/db/client";
 import { systemNotifications } from "@/db/schema";
 import { markNotificationReadAction } from "@/modules/notifications/actions";
+import {
+  groupSystemNotifications,
+  type SystemNotificationGroup,
+} from "@/modules/notifications/presentation";
 
 function severityPresentation(severity: "INFO" | "WARNING" | "ERROR") {
   if (severity === "ERROR") return { className: "bg-danger/10 text-danger", icon: AlertTriangle, label: "严重" };
@@ -40,8 +44,10 @@ export default async function NotificationsPage() {
 
   const openNotifications = notifications.filter((notification) => notification.status !== "RESOLVED");
   const archivedNotifications = notifications.filter((notification) => notification.status === "RESOLVED");
+  const openNotificationGroups = groupSystemNotifications(openNotifications);
+  const archivedNotificationGroups = groupSystemNotifications(archivedNotifications);
 
-  function notificationRow(notification: (typeof notifications)[number]) {
+  function notificationRow(notification: SystemNotificationGroup) {
     const severity = severityPresentation(notification.severity);
     const SeverityIcon = severity.icon;
     return (
@@ -58,6 +64,13 @@ export default async function NotificationsPage() {
               <Badge className={notification.status === "RESOLVED" ? "bg-success/10 text-success" : "bg-surface-muted text-muted"} variant="secondary">
                 {notification.status === "RESOLVED" ? <CheckCircle2 aria-hidden="true" /> : null}{resolutionLabel(notification.status)}
               </Badge>
+              {notification.affectedEntityCount > 1 ? (
+                <Badge variant="outline">
+                  {notification.entityType === "ORDER_SHIPMENT" || notification.entityType === "FULFILLMENT_ORDER"
+                    ? `${notification.affectedEntityCount} 个包裹`
+                    : `关联 ${notification.affectedEntityCount} 项`}
+                </Badge>
+              ) : null}
               {notification.occurrenceCount > 1 ? <span className="text-xs tabular-nums text-muted">累计 {notification.occurrenceCount} 次</span> : null}
             </div>
             <p className="text-sm leading-6 text-muted">{notification.message}</p>
@@ -66,7 +79,9 @@ export default async function NotificationsPage() {
         </div>
         {notification.status === "UNREAD" ? (
           <ActionForm action={markNotificationReadAction} className="shrink-0" submitLabel="标记已读">
-            <input name="notificationId" type="hidden" value={notification.id} />
+            {notification.notificationIds.map((notificationId) => (
+              <input key={notificationId} name="notificationId" type="hidden" value={notificationId} />
+            ))}
           </ActionForm>
         ) : null}
       </li>
@@ -95,18 +110,18 @@ export default async function NotificationsPage() {
 
       <section aria-labelledby="open-notifications-title" className="space-y-3">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
-          <div><h2 className="text-base font-semibold text-foreground" id="open-notifications-title">需要处理</h2><p className="mt-1 text-sm text-muted-foreground">按最近发生时间排列；标记已读不会改变原始事件或解决状态。</p></div>
-          <span className="text-sm tabular-nums text-muted-foreground">{openNotifications.length} 项</span>
+          <div><h2 className="text-base font-semibold text-foreground" id="open-notifications-title">需要处理</h2><p className="mt-1 text-sm text-muted-foreground">相同问题按包裹聚合；标记已读不会改变原始事件或解决状态。</p></div>
+          <span className="text-sm tabular-nums text-muted-foreground">{openNotificationGroups.length} 组</span>
         </div>
-        {openNotifications.length > 0 ? <ul className="divide-y divide-border border-b border-border">{openNotifications.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">当前没有未解决通知。</p>}
+        {openNotificationGroups.length > 0 ? <ul className="divide-y divide-border border-b border-border">{openNotificationGroups.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">当前没有未解决通知。</p>}
       </section>
 
       <section aria-labelledby="archived-notifications-title" className="space-y-3">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
           <div><h2 className="text-base font-semibold text-foreground" id="archived-notifications-title">已归档通知</h2><p className="mt-1 text-sm text-muted-foreground">保留已解决事件，便于回看影响范围和发生时间。</p></div>
-          <span className="text-sm tabular-nums text-muted-foreground">{archivedNotifications.length} 项</span>
+          <span className="text-sm tabular-nums text-muted-foreground">{archivedNotificationGroups.length} 组</span>
         </div>
-        {archivedNotifications.length > 0 ? <ul className="divide-y divide-border border-b border-border">{archivedNotifications.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">暂无已解决通知。</p>}
+        {archivedNotificationGroups.length > 0 ? <ul className="divide-y divide-border border-b border-border">{archivedNotificationGroups.map(notificationRow)}</ul> : <p className="py-5 text-sm text-muted-foreground" role="status">暂无已解决通知。</p>}
       </section>
     </div>
   );

@@ -458,7 +458,7 @@ describe("Feishu integration outbox", () => {
       },
     });
 
-    expect(result).toEqual({ botCompleted: 2, cargoCompleted: 2, failed: 0 });
+    expect(result).toEqual({ botCompleted: 1, cargoCompleted: 2, failed: 0 });
     expect(sourceResolutions).toBe(1);
     expect(syncInputs).toHaveLength(1);
     expect(syncInputs[0]).toEqual({
@@ -472,13 +472,13 @@ describe("Feishu integration outbox", () => {
         spreadsheetToken: "spreadsheet-target",
       },
     });
-    expect(sentMessages).toHaveLength(2);
+    expect(sentMessages).toHaveLength(1);
     expect(sentMessages.every((message) => message.includes("【同舟行跨境】"))).toBe(
       true,
     );
     expect(sentMessages.every((message) => message.includes("TZX-001"))).toBe(true);
     expect(sentMessages.some((message) => message.includes("3 浠"))).toBe(true);
-    expect(sentMessages.some((message) => message.includes("2 浠"))).toBe(true);
+    expect(sentMessages.some((message) => message.includes("2 浠"))).toBe(false);
     const [notification] = await db.select().from(systemNotifications);
     expect(notification).toMatchObject({ occurrenceCount: 2, status: "UNREAD" });
     expect(
@@ -487,7 +487,7 @@ describe("Feishu integration outbox", () => {
       ),
     ).toBe(true);
     const attempts = await db.select().from(integrationAttempts);
-    expect(attempts).toHaveLength(4);
+    expect(attempts).toHaveLength(3);
     expect(attempts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ outcome: "SUCCESS", responseMetadata: {} }),

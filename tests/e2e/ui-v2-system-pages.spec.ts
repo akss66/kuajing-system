@@ -106,7 +106,7 @@ test("notifications communicate severity, impact and resolution state", async ({
   await expectPageQuality(page);
 });
 
-test("integrations show safe configuration and degraded states without secrets", async ({ page }) => {
+test("integrations keep configuration state separate from failed task history", async ({ page }) => {
   await resetAndLogin(page, "UI V2 integrations");
   await page.goto("/admin/system/integrations");
 
@@ -140,9 +140,10 @@ test("integrations show safe configuration and degraded states without secrets",
   });
   await page.reload();
 
-  await expect(page.getByText("运行降级", { exact: true })).toBeVisible();
+  await expect(page.getByText("运行降级", { exact: true })).toHaveCount(0);
+  await expect(integrationStatus.getByText("已配置", { exact: true })).toBeVisible();
   await expect(page.getByText("极风仓储", { exact: true })).toBeVisible();
-  await expect(page.getByText("订单推送", { exact: true })).toBeVisible();
+  await expect(page.getByText("已有订单匹配", { exact: true })).toBeVisible();
   await expect(page.getByText("执行失败", { exact: true })).toBeVisible();
   await expect(page.getByText("JIFENG", { exact: true })).toHaveCount(0);
   await expect(page.getByText("JIFENG_CREATE_ORDER", { exact: true })).toHaveCount(0);
@@ -157,7 +158,9 @@ test("health translates checks into read-only operational impact", async ({ page
   await page.goto("/admin/system/health");
 
   await expect(page.getByRole("heading", { name: "运营影响与下一步" })).toBeVisible();
-  await expect(page.getByText("订单推送或异常通知可能延迟")).toBeVisible();
+  await expect(
+    page.getByText("极风订单匹配、状态同步或异常通知可能延迟"),
+  ).toBeVisible();
   await expect(page.getByText("客户可能无法看到完整物流进度")).toBeVisible();
   await expect(page.getByRole("status", { name: "所有运营检查正常" })).toContainText(
     "查看审计日志",

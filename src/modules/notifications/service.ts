@@ -1,7 +1,16 @@
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import type { DbTransaction } from "@/db/client";
 import { integrationOutbox, systemNotifications } from "@/db/schema";
+
+function shouldFanOutToFeishu(occurrenceCount: number) {
+  return (
+    occurrenceCount === 1 ||
+    occurrenceCount === 5 ||
+    occurrenceCount === 10 ||
+    occurrenceCount % 25 === 0
+  );
+}
 
 export async function createSystemNotification(
   tx: DbTransaction,
@@ -18,6 +27,13 @@ export async function createSystemNotification(
   },
 ) {
   const now = input.now ?? new Date();
+  const [existingNotification] = await tx
+    .select({ status: systemNotifications.status })
+    .from(systemNotifications)
+    .where(eq(systemNotifications.deduplicationKey, input.deduplicationKey))
+    .limit(1)
+    .for("update");
+  const reopensResolvedIncident = existingNotification?.status === "RESOLVED";
   const [notification] = await tx
     .insert(systemNotifications)
     .values({
@@ -50,7 +66,11 @@ export async function createSystemNotification(
       occurrenceCount: systemNotifications.occurrenceCount,
     });
 
-  if (input.delivery !== "IN_APP_ONLY") {
+  if (
+    input.delivery !== "IN_APP_ONLY" &&
+    (reopensResolvedIncident ||
+      shouldFanOutToFeishu(notification.occurrenceCount))
+  ) {
     await tx.insert(integrationOutbox).values({
       aggregateId: notification.id,
       aggregateType: "SYSTEM_NOTIFICATION",

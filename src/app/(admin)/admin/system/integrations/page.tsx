@@ -191,16 +191,12 @@ export default async function IntegrationsPage() {
     ? (connection as JifengConnectionAdminView)
     : null;
   const jifengConfigured = jifengConfiguration.developer.configured;
-  const jifengDegraded = recent.some((item) => item.target === "JIFENG");
-  const feishuDegraded = recent.some((item) => item.target !== "JIFENG");
-  const integrationStatus = (isConfigured: boolean, degraded: boolean) =>
-    degraded ? "运行降级" : isConfigured ? "已配置" : "未配置";
-  const integrationStatusClass = (isConfigured: boolean, degraded: boolean) =>
-    degraded
-      ? "bg-danger/10 text-danger"
-      : isConfigured
-        ? "bg-success/10 text-success"
-        : "bg-warning/10 text-warning";
+  const integrationStatus = (isConfigured: boolean) =>
+    isConfigured ? "已配置" : "未配置";
+  const integrationStatusClass = (isConfigured: boolean) =>
+    isConfigured
+      ? "bg-success/10 text-success"
+      : "bg-warning/10 text-warning";
 
   return (
     <div className="space-y-6">
@@ -241,10 +237,10 @@ export default async function IntegrationsPage() {
                 </div>
               </div>
               <Badge
-                className={integrationStatusClass(jifengConfigured, jifengDegraded)}
+                className={integrationStatusClass(jifengConfigured)}
                 variant="secondary"
               >
-                {integrationStatus(jifengConfigured, jifengDegraded)}
+                {integrationStatus(jifengConfigured)}
               </Badge>
             </div>
             <div className="mt-5 flex items-center gap-2 text-sm text-muted">
@@ -284,10 +280,10 @@ export default async function IntegrationsPage() {
                 </div>
               </div>
               <Badge
-                className={integrationStatusClass(feishuConfigured, feishuDegraded)}
+                className={integrationStatusClass(feishuConfigured)}
                 variant="secondary"
               >
-                {integrationStatus(feishuConfigured, feishuDegraded)}
+                {integrationStatus(feishuConfigured)}
               </Badge>
             </div>
             <div className="mt-5">

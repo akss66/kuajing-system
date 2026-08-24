@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -14,13 +14,18 @@ export async function markNotificationReadAction(
   formData: FormData,
 ): Promise<ActionState> {
   await requireAdmin();
-  const id = z.string().uuid().safeParse(formData.get("notificationId"));
-  if (!id.success) return { message: "通知编号无效。", status: "error" };
+  const ids = z.array(z.string().uuid()).min(1).max(200).safeParse(
+    formData.getAll("notificationId"),
+  );
+  if (!ids.success) return { message: "通知编号无效。", status: "error" };
   const now = new Date();
   await db
     .update(systemNotifications)
     .set({ readAt: now, status: "READ", updatedAt: now })
-    .where(eq(systemNotifications.id, id.data));
+    .where(inArray(systemNotifications.id, ids.data));
   revalidatePath("/admin/notifications");
-  return { message: "通知已标记为已读。", status: "success" };
+  return {
+    message: ids.data.length > 1 ? `已将 ${ids.data.length} 条通知标记为已读。` : "通知已标记为已读。",
+    status: "success",
+  };
 }
