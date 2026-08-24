@@ -67,7 +67,7 @@ async function cleanupPhaseFixture() {
 
 test("phase one customer, price and inventory flow is operational @desktop-only", async ({ page }) => {
   await cleanupPhaseFixture();
-  const admin = await createManagedUser({ role: "admin" });
+  const admin = await createManagedUser({ role: "super_admin" });
   const customerEmail = "phase-customer@e2e.tongzhouxing.local";
   const customerPassword = "valid-test-password-2026";
 

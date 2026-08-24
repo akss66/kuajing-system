@@ -4,7 +4,7 @@ const password = "valid-e2e-password-2026";
 
 export async function createManagedUser(input: {
   customerId?: string;
-  role: "admin" | "user";
+  role: "admin" | "super_admin" | "user";
 }) {
   const { auth } = await import("@/modules/identity/auth");
   const email = `${input.role}-${crypto.randomUUID()}@e2e.tongzhouxing.local`;
@@ -12,7 +12,12 @@ export async function createManagedUser(input: {
     body: {
       data: input.customerId ? { customerId: input.customerId } : undefined,
       email,
-      name: input.role === "admin" ? "E2E administrator" : "E2E customer",
+      name:
+        input.role === "super_admin"
+          ? "E2E super administrator"
+          : input.role === "admin"
+            ? "E2E administrator"
+            : "E2E customer",
       password,
       role: input.role,
     },

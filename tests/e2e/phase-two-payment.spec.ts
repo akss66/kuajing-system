@@ -265,7 +265,8 @@ test("customer order payment controls remain usable at approved mobile widths @m
     const nextActionHeight = await orderCard.getByRole("link", { name: "去付款" }).evaluate(
       (link) => link.getBoundingClientRect().height,
     );
-    expect(nextActionHeight).toBeGreaterThanOrEqual(44);
+    // Chromium can report a 44 CSS-pixel control as 43.9999 due to device-pixel rounding.
+    expect(nextActionHeight).toBeGreaterThanOrEqual(44 - 0.01);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
     ).toBeLessThanOrEqual(0);
