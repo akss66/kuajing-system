@@ -42,21 +42,23 @@ export default async function CustomerSettlementDetailPage({
 
   return (
     <div className="space-y-5">
-      <header className="space-y-4">
       <PageHeading
         breadcrumbs={[
-          { href: "/portal/orders?status=PENDING_PAYMENT", label: "待付款" },
-          { label: "统一付款结算" },
+          { href: "/portal/settlements", label: "批量付款" },
+          { label: "本次付款" },
         ]}
-        description={`批次 ${detail.batchNumber} · 付款截止 ${dateTime(detail.paymentDueAt)}（渥太华）`}
-        title="统一付款结算"
+        description={`付款编号 ${detail.batchNumber} · 截止 ${dateTime(detail.paymentDueAt)}（渥太华）`}
+        title="本次批量拿货付款"
       />
-      </header>
+
+      <p className="text-sm font-medium text-ink">
+        {detail.orders.length} 张拿货单合并为一次付款
+      </p>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/orders?status=PENDING_PAYMENT">
+        <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/settlements">
           <ArrowLeft className="size-4" />
-          返回待付款
+          返回批量付款
         </Link>
         <a className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface" href="#settlement-payment-form">
           跳到付款声明
@@ -67,7 +69,7 @@ export default async function CustomerSettlementDetailPage({
 
       <MetricStrip
         items={[
-          { label: "批次总额", value: money(detail.totalAmountFen) },
+          { label: "本次总额", value: money(detail.totalAmountFen) },
           { label: "钱包抵扣", value: money(detail.walletAmountFen) },
           { label: "微信待付", tone: detail.offlineAmountFen ? "warning" : "default", value: money(detail.offlineAmountFen) },
           {
@@ -117,8 +119,9 @@ export default async function CustomerSettlementDetailPage({
         <SettlementRegion
           action={<WalletCards aria-hidden="true" className="size-4 text-primary" />}
           className="xl:order-1"
-          description="批次内所有成功提交的店铺会在这里集中付款与跟进。"
+          description="这些拿货单来自同一次多店铺批量提交，只需支付一次；付款通过后，每张拿货单分别进入待发货。"
           kind="batches"
+          title="本次包含的拿货单"
         >
           <div className="divide-y divide-border">
             {detail.orders.map((order) => (

@@ -71,7 +71,7 @@ async function lockWalletHold(
     .orderBy(asc(walletHolds.createdAt))
     .for("update")
     .limit(1);
-  if (!hold) throw new WalletValidationError("找不到该结算批次的钱包冻结");
+  if (!hold) throw new WalletValidationError("找不到该笔批量付款的钱包冻结");
   return hold;
 }
 
@@ -117,7 +117,7 @@ export async function createWalletHold(
     .limit(1);
   if (existing) {
     if (existing.amountFen !== input.amountFen) {
-      throw new WalletValidationError("该结算批次的钱包冻结金额不一致");
+      throw new WalletValidationError("该笔批量付款的钱包冻结金额不一致");
     }
     return existing;
   }
@@ -168,7 +168,7 @@ export async function consumeWalletHold(
     0,
   );
   if (!Number.isSafeInteger(allocatedFen) || allocatedFen !== hold.amountFen) {
-    throw new WalletValidationError("结算批次分摊与钱包冻结金额不一致");
+    throw new WalletValidationError("批量付款分摊与钱包冻结金额不一致");
   }
 
   let runningBalanceFen = wallet.balanceFen;

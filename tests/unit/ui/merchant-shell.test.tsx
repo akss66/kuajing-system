@@ -214,6 +214,10 @@ describe("merchant shells", () => {
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "客户首页" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "多店铺批量拿货" })).toBeVisible();
+    expect(within(navigation).getByRole("link", { name: "批量付款" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
     expect(screen.getByText("拿货")).toBeVisible();
     expect(screen.getByText("订单与付款")).toBeVisible();
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();

@@ -295,6 +295,39 @@ describe("order workspace hierarchy", () => {
     expect(within(timeline).queryByText("PENDING")).not.toBeInTheDocument();
   });
 
+  it("keeps the customer detail summary focused on money and quantity facts", async () => {
+    queryMocks.getCustomerOrderDetail.mockResolvedValue({
+      ...order,
+      adjustedAmountFen: 1300,
+      cancelReason: null,
+      cancellationAdjustments: [],
+      cancellationState: "PARTIAL",
+      latestPaymentClaim: null,
+      lines: [],
+      netAmountFen: 167500,
+      paidAt: new Date("2026-08-12T10:30:00.000Z"),
+      refundedAt: null,
+      shipments: [],
+      status: "PAID_PENDING_FULFILLMENT",
+    });
+
+    render(
+      await CustomerOrderDetailPage({
+        params: Promise.resolve({ orderId: "order-1" }),
+      }),
+    );
+
+    expect(screen.getByRole("link", { name: "返回我的订单" })).toHaveAttribute(
+      "href",
+      "/portal/orders",
+    );
+    expect(screen.getByText("已付款 / 待发货")).toBeVisible();
+    expect(screen.getByText("部分取消")).toBeVisible();
+    expect(screen.queryByText("订单状态")).not.toBeInTheDocument();
+    expect(screen.getByText("当前净额")).toBeVisible();
+    expect(screen.getByText("取消调整")).toBeVisible();
+  });
+
   it("keeps payment and proven wallet refund facts visible before cancellation", () => {
     render(
       <OrderStatusTimeline

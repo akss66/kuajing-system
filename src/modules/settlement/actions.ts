@@ -26,19 +26,19 @@ const yuanSchema = z
 const reportSchema = z.object({
   amountFen: yuanSchema,
   note: z.string().trim().max(500, "付款备注不能超过 500 个字符").optional(),
-  settlementBatchId: z.string().uuid("结算批次编号无效"),
+  settlementBatchId: z.string().uuid("批量付款编号无效"),
 });
 
 const withdrawSchema = z.object({
   reason: z.string().trim().min(2, "请填写撤回原因").max(1000, "撤回原因不能超过 1000 个字符"),
-  settlementBatchId: z.string().uuid("结算批次编号无效"),
+  settlementBatchId: z.string().uuid("批量付款编号无效"),
 });
 
 const reviewSchema = z
   .object({
     decision: z.enum(["APPROVE", "REJECT"]),
     rejectionReason: z.string().trim().max(1000, "拒绝原因不能超过 1000 个字符").optional(),
-    settlementBatchId: z.string().uuid("结算批次编号无效"),
+    settlementBatchId: z.string().uuid("批量付款编号无效"),
   })
   .superRefine((value, context) => {
     if (value.decision === "REJECT" && !value.rejectionReason) {
@@ -132,7 +132,7 @@ export async function withdrawSettlementPaymentAction(
     return serviceErrorState(error, "撤回付款声明失败，请稍后重试。");
   }
   revalidateSettlement(parsed.data.settlementBatchId);
-  return { message: "付款声明已撤回，结算批次及相关拿货单已取消。", status: "success" };
+  return { message: "付款声明已撤回，本次批量付款及相关拿货单已取消。", status: "success" };
 }
 
 export async function reviewSettlementPaymentAction(
@@ -154,14 +154,14 @@ export async function reviewSettlementPaymentAction(
       settlementBatchId: parsed.data.settlementBatchId,
     });
   } catch (error) {
-    return serviceErrorState(error, "结算批次核款失败，请稍后重试。");
+    return serviceErrorState(error, "批量付款核款失败，请稍后重试。");
   }
   revalidateSettlement(parsed.data.settlementBatchId);
   return {
     message:
       parsed.data.decision === "APPROVE"
         ? "已确认收款，批次内拿货单进入待发货。"
-        : "已拒绝付款声明并关闭整个结算批次。",
+        : "已拒绝付款声明并关闭本次批量付款。",
     status: "success",
   };
 }

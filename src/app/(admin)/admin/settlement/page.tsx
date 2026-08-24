@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
@@ -59,14 +59,14 @@ export default async function SettlementPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        description="先处理待核款，再查看统一结算批次、客户余额与不可变资金流水。"
+        description="先处理待核款，再查看批量付款记录、客户余额与不可变资金流水。"
         title="收款与余额"
       />
 
       <MetricStrip
         items={[
           {
-            hint: `直接付款 ${pendingClaims.length} · 统一结算 ${pendingBatches.length}`,
+            hint: `单张拿货单 ${pendingClaims.length} · 批量付款 ${pendingBatches.length}`,
             label: "待核款",
             tone: pendingClaims.length + pendingBatches.length ? "warning" : "default",
             value: String(pendingClaims.length + pendingBatches.length),
@@ -158,14 +158,15 @@ export default async function SettlementPage() {
         </SettlementRegion>
 
         <SettlementRegion
-          description="整批核对余额抵扣、微信待付与审计记录；批量草稿仅提供提交诊断。"
+          description="批量拿货会合并为一次付款；这里核对余额抵扣、微信待付与审计记录。"
           kind="batches"
+          title="批量付款记录"
           contentClassName="grid gap-0 divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0"
         >
           <Link className="flex min-h-24 items-center justify-between gap-4 p-4 transition-colors hover:bg-surface sm:p-5" href="/admin/settlement-batches">
             <span>
-              <strong className="text-ink">统一结算批次</strong>
-              <span className="mt-1 block text-sm text-muted">查看余额冻结、微信待付与整批审核。</span>
+              <strong className="text-ink">批量付款审核</strong>
+              <span className="mt-1 block text-sm text-muted">查看每次合并付款、余额冻结、微信待付与整笔审核。</span>
             </span>
             <span className="flex shrink-0 items-center gap-2">
               <Badge variant="secondary">{`待审核 ${pendingBatches.length}`}</Badge>
@@ -182,53 +183,9 @@ export default async function SettlementPage() {
         </SettlementRegion>
 
         <SettlementRegion
-          description="线下微信收款后可调整余额；每次增加或扣减都必须填写审计原因。"
+          description="先查看客户当前余额；只有超级管理员可展开并执行人工调整。"
           kind="balances"
         >
-          {principal.kind === "SUPER_ADMIN" ? (
-            <ConfirmedActionForm
-              action={adjustWalletAction}
-              className="grid gap-4 border-b border-border p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end"
-              confirmDescription="请返回核对客户、增加或扣减方向、金额和原因。确认后会立即改变客户可用余额并写入不可变资金流水。"
-              confirmLabel="确认执行余额调整"
-              confirmTitle="确认执行余额调整？"
-              submitLabel="核对并调整余额"
-              variant="default"
-            >
-              <input name="requestId" type="hidden" value={randomUUID()} />
-              <label className="space-y-2 text-sm font-medium text-ink">
-              客户
-              <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="customerId" required>
-                <option value="">选择客户</option>
-                {accounts.map((account) => (
-                  <option key={account.customerId} value={account.customerId}>{`${account.customerCode} · ${account.customerName}`}</option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-2 text-sm font-medium text-ink">
-              操作
-              <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="operation" required>
-                <option value="">选择增加或扣减</option>
-                <option value="CREDIT">增加余额</option>
-                <option value="DEBIT">扣减余额</option>
-              </select>
-            </label>
-            <label className="space-y-2 text-sm font-medium text-ink">
-              金额（元）
-              <Input className="min-h-11 tabular-nums" inputMode="decimal" min="0.01" name="amountYuan" placeholder="0.00" required />
-            </label>
-            <label className="space-y-2 text-sm font-medium text-ink">
-              调整原因
-              <Input className="min-h-11" maxLength={300} name="reason" placeholder="例如：收到微信转账" required />
-            </label>
-            </ConfirmedActionForm>
-          ) : (
-            <div className="border-b border-border bg-surface-muted/55 px-4 py-3 text-sm text-muted sm:px-5">
-              <p className="font-medium text-ink">余额调整仅限超级管理员操作</p>
-              <p className="mt-1">普通管理员可查看客户余额和资金流水，但不能创建或扣减现金等价余额。</p>
-            </div>
-          )}
-
           <ResponsiveDataTable>
             <Table>
               <TableHeader>
@@ -255,45 +212,114 @@ export default async function SettlementPage() {
               </TableBody>
             </Table>
           </ResponsiveDataTable>
+
+          {principal.kind === "SUPER_ADMIN" ? (
+            <details aria-label="调整客户余额（超级管理员）" className="group border-t border-border">
+              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 transition-colors hover:bg-surface-muted/60 sm:px-5 [&::-webkit-details-marker]:hidden">
+                <span className="flex min-w-0 items-center gap-3">
+                  <ShieldCheck aria-hidden="true" className="size-5 shrink-0 text-warning" />
+                  <span>
+                    <strong className="block text-sm text-ink">调整客户余额（超级管理员）</strong>
+                    <span className="mt-0.5 block text-xs text-muted">高风险操作：展开后核对客户、方向、金额和审计原因。</span>
+                  </span>
+                </span>
+                <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+              </summary>
+              <ConfirmedActionForm
+                action={adjustWalletAction}
+                className="grid gap-4 border-t border-border bg-warning/5 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-[1.1fr_0.8fr_0.8fr_1.6fr_auto] xl:items-end"
+                confirmDescription="请返回核对客户、增加或扣减方向、金额和原因。确认后会立即改变客户可用余额并写入不可变资金流水。"
+                confirmLabel="确认执行余额调整"
+                confirmTitle="确认执行余额调整？"
+                submitLabel="核对并调整余额"
+                variant="default"
+              >
+                <input name="requestId" type="hidden" value={randomUUID()} />
+                <label className="space-y-2 text-sm font-medium text-ink">
+                  客户
+                  <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="customerId" required>
+                    <option value="">选择客户</option>
+                    {accounts.map((account) => (
+                      <option key={account.customerId} value={account.customerId}>{`${account.customerCode} · ${account.customerName}`}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm font-medium text-ink">
+                  操作
+                  <select className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm" name="operation" required>
+                    <option value="">选择增加或扣减</option>
+                    <option value="CREDIT">增加余额</option>
+                    <option value="DEBIT">扣减余额</option>
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm font-medium text-ink">
+                  金额（元）
+                  <Input className="min-h-11 tabular-nums" inputMode="decimal" min="0.01" name="amountYuan" placeholder="0.00" required />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-ink">
+                  调整原因
+                  <Input className="min-h-11" maxLength={300} name="reason" placeholder="例如：收到微信转账" required />
+                </label>
+              </ConfirmedActionForm>
+            </details>
+          ) : (
+            <div className="border-t border-border bg-surface-muted/55 px-4 py-3 text-sm text-muted sm:px-5">
+              <p className="font-medium text-ink">余额调整仅限超级管理员操作</p>
+              <p className="mt-1">普通管理员可查看客户余额和资金流水，但不能创建或扣减现金等价余额。</p>
+            </div>
+          )}
         </SettlementRegion>
 
         <SettlementRegion description="按时间倒序展示最近 100 条，每笔记录均不可修改。" kind="transactions">
-          <ResponsiveDataTable>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>时间（渥太华）</TableHead>
-                  <TableHead>客户</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead>原因 / 拿货单</TableHead>
-                  <TableHead className="text-right">变动</TableHead>
-                  <TableHead className="text-right">变动后</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.length ? transactions.map((transaction) => (
-                  <TableRow key={transaction.id}>
-                    <TableCell className="text-muted">{dateTime(transaction.createdAt)}</TableCell>
-                    <TableCell><p className="font-medium">{transaction.customerCode}</p><p className="text-xs text-muted">{transaction.customerName}</p></TableCell>
-                    <TableCell>
-                      {transaction.deltaFen > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-success"><ArrowDownLeft aria-hidden="true" className="size-4" />入账</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-danger"><ArrowUpRight aria-hidden="true" className="size-4" />扣款</span>
-                      )}
-                    </TableCell>
-                    <TableCell><p>{transaction.reason}</p>{transaction.orderNumber ? <p className="mt-1 text-xs text-muted">{transaction.orderNumber}</p> : null}</TableCell>
-                    <TableCell className={`text-right font-semibold tabular-nums ${transaction.deltaFen > 0 ? "text-success" : "text-danger"}`}>
-                      {transaction.deltaFen > 0 ? "+" : "−"}{money(Math.abs(transaction.deltaFen))}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{money(transaction.afterBalanceFen)}</TableCell>
-                  </TableRow>
-                )) : (
-                  <TableRow><TableCell className="h-28 text-center text-muted" colSpan={6}>暂无资金流水。</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </ResponsiveDataTable>
+          {transactions.length ? (
+            <details aria-label="查看资金流水" className="group">
+              <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 transition-colors hover:bg-surface-muted/60 sm:px-5 [&::-webkit-details-marker]:hidden">
+                <span>
+                  <strong className="block text-sm text-ink">查看最近资金流水（{transactions.length}）</strong>
+                  <span className="mt-0.5 block text-xs text-muted">默认收起，展开后可核对时间、原因与变动后余额。</span>
+                </span>
+                <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="border-t border-border">
+                <ResponsiveDataTable>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>时间（渥太华）</TableHead>
+                        <TableHead>客户</TableHead>
+                        <TableHead>类型</TableHead>
+                        <TableHead>原因 / 拿货单</TableHead>
+                        <TableHead className="text-right">变动</TableHead>
+                        <TableHead className="text-right">变动后</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {transactions.map((transaction) => (
+                        <TableRow key={transaction.id}>
+                          <TableCell className="text-muted">{dateTime(transaction.createdAt)}</TableCell>
+                          <TableCell><p className="font-medium">{transaction.customerCode}</p><p className="text-xs text-muted">{transaction.customerName}</p></TableCell>
+                          <TableCell>
+                            {transaction.deltaFen > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-success"><ArrowDownLeft aria-hidden="true" className="size-4" />入账</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-danger"><ArrowUpRight aria-hidden="true" className="size-4" />扣款</span>
+                            )}
+                          </TableCell>
+                          <TableCell><p>{transaction.reason}</p>{transaction.orderNumber ? <p className="mt-1 text-xs text-muted">{transaction.orderNumber}</p> : null}</TableCell>
+                          <TableCell className={`text-right font-semibold tabular-nums ${transaction.deltaFen > 0 ? "text-success" : "text-danger"}`}>
+                            {transaction.deltaFen > 0 ? "+" : "−"}{money(Math.abs(transaction.deltaFen))}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{money(transaction.afterBalanceFen)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ResponsiveDataTable>
+              </div>
+            </details>
+          ) : (
+            <div className="px-5 py-10 text-center text-sm text-muted" role="status">暂无资金流水。</div>
+          )}
         </SettlementRegion>
       </SettlementWorkspace>
     </div>

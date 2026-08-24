@@ -66,15 +66,15 @@ export default async function AdminSettlementBatchesPage({
       <PageHeading
         breadcrumbs={[
           { href: "/admin", label: "管理工作台" },
-          { label: "统一结算批次" },
+          { label: "批量付款审核" },
         ]}
-        description="按客户、店铺、状态和时间筛选统一结算批次。管理员只能整批确认或整批拒绝。"
-        title="统一结算批次"
+        description="客户多店铺批量拿货会合并为一次付款；管理员只能整笔确认或整笔拒绝，不能拆分到账。"
+        title="批量付款审核"
       />
 
       <MetricStrip
         items={[
-          { label: "批次数", value: `${batches.length}` },
+          { label: "付款记录", value: `${batches.length}` },
           { label: "待审核", value: `${batches.filter((batch) => batch.statusLabel.includes("核款")).length}` },
           { label: "待付款", value: `${batches.filter((batch) => batch.statusLabel.includes("待付款")).length}` },
         ]}
@@ -148,13 +148,14 @@ export default async function AdminSettlementBatchesPage({
         <SettlementRegion
           description={`当前条件共 ${batches.length} 条。`}
           kind="batches"
+          title="批量付款记录"
         >
         <div className="hidden md:block">
           <ResponsiveDataTable>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>批次 / 客户</TableHead>
+                  <TableHead>付款编号 / 客户</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>金额分摊</TableHead>
                   <TableHead>申报 / 截止</TableHead>
@@ -192,7 +193,7 @@ export default async function AdminSettlementBatchesPage({
                 ) : (
                   <TableRow>
                     <TableCell className="h-28 text-center text-muted" colSpan={6}>
-                      没有符合条件的结算批次。
+                      没有符合条件的批量付款记录。
                     </TableCell>
                   </TableRow>
                 )}
@@ -219,7 +220,7 @@ export default async function AdminSettlementBatchesPage({
               </article>
             ))
           ) : (
-            <div className="p-10 text-center text-sm text-muted">没有符合条件的结算批次。</div>
+            <div className="p-10 text-center text-sm text-muted">没有符合条件的批量付款记录。</div>
           )}
         </div>
         </SettlementRegion>

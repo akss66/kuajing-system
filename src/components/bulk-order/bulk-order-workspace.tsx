@@ -648,7 +648,7 @@ export function BulkOrderWorkspace({
           { href: "/portal/bulk-orders", label: "批量拿货" },
           { label: "多店铺批量拿货" },
         ]}
-        description="按店铺上传 TEMU 原始 Excel。系统会跨文件去重、识别跨店冲突，并把可提交分组统一汇总到结算。"
+        description="按店铺上传 TEMU 原始 Excel。系统会跨文件去重、识别跨店冲突，并把所选拿货单合并成一次批量付款。"
         title="多店铺批量拿货"
       />
 

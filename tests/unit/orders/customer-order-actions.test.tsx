@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/modules/orders/lifecycle-actions", () => ({
@@ -60,7 +60,11 @@ describe("CustomerOrderActions", () => {
       render(<CustomerOrderActions order={orderWithSettlement(status)} />);
 
       expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
-      expect(screen.getByText("请在统一结算批次中申报付款")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "完成批量付款" })).toBeVisible();
+      expect(
+        screen.getByText("本单已包含在一次批量付款中，请在批量付款页面完成支付。"),
+      ).toBeVisible();
+      expect(screen.getByRole("link", { name: "查看本次批量付款" })).toBeVisible();
     },
   );
 
@@ -68,6 +72,23 @@ describe("CustomerOrderActions", () => {
     render(<CustomerOrderActions order={orderWithSettlement("CANCELLED")} />);
 
     expect(screen.getByRole("button", { name: "我已微信付款" })).toBeInTheDocument();
-    expect(screen.queryByText("请在统一结算批次中申报付款")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "完成批量付款" })).not.toBeInTheDocument();
+  });
+
+  test("keeps payment primary and protects cancellation behind secondary actions", () => {
+    render(<CustomerOrderActions order={orderWithSettlement(null)} />);
+
+    expect(screen.getByRole("region", { name: "订单下一步" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "完成付款" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "我已微信付款" })).toBeVisible();
+
+    const secondaryActions = screen.getByRole("group", { name: "其他操作" });
+    expect(secondaryActions).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "确认取消" })).not.toBeVisible();
+
+    fireEvent.click(screen.getByText("其他操作"));
+
+    expect(secondaryActions).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "确认取消" })).toBeVisible();
   });
 });

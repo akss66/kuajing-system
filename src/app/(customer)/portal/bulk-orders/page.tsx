@@ -65,7 +65,16 @@ export default async function CustomerBulkOrdersPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        description="按店铺分组上传多个 TEMU 原始 Excel，系统会跨文件去重并合并成每店一张拿货单后统一付款。"
+        action={
+          <Link
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary transition-colors hover:bg-surface"
+            href="/portal/settlements"
+          >
+            查看批量付款
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        }
+        description="按店铺分组上传多个 TEMU 原始 Excel，系统会跨文件去重；提交后把所选拿货单合并为一次批量付款。"
         title="多店铺批量拿货"
       />
 
@@ -109,7 +118,7 @@ export default async function CustomerBulkOrdersPage() {
           { hint: "当前客户可提交的店铺", label: "可用店铺", value: String(stores.length) },
           { hint: "最近创建或更新的批量草稿", label: "最近草稿", value: String(drafts.length) },
           { hint: "仍可继续编辑或提交", label: "可继续提交", tone: writableDrafts.length ? "warning" : "default", value: String(writableDrafts.length) },
-          { hint: "统一结算的高频入口", label: "多店流程", value: "已开启" },
+          { hint: "所选拿货单只需支付一次", label: "付款方式", value: "一次合并" },
         ]}
       />
 

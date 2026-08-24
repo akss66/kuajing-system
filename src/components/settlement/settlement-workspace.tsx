@@ -6,7 +6,7 @@ type SettlementRegionKind = "balances" | "batches" | "refunds" | "review" | "tra
 
 const defaultRegionTitles: Record<SettlementRegionKind, string> = {
   balances: "客户余额",
-  batches: "结算批次",
+  batches: "批量付款记录",
   refunds: "待线下退款",
   review: "待核款队列",
   transactions: "资金流水",

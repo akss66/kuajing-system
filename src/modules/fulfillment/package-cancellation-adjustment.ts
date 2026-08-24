@@ -46,7 +46,7 @@ export async function assertPackageCancellationFinanciallyAllowed(
   ) {
     throw new PackageCancellationAdjustmentError(
       "ACTIVE_SETTLEMENT_REPRICING_REQUIRED",
-      "该包裹属于未完成的统一结算批次，请先撤回或关闭该结算批次后再取消包裹",
+      "该包裹属于未完成的批量付款，请先撤回或关闭本次批量付款后再取消包裹",
     );
   }
 }
@@ -266,19 +266,19 @@ export async function recordPackageCancellationAdjustment(
           paidSettlementAllocation.offlineAmountFen !==
           row.totalAmountFen
       ) {
-        throw new Error("统一结算订单分摊与拿货单金额不一致");
+        throw new Error("批量付款分摊与拿货单金额不一致");
       }
       if (
         paidSettlementAllocation.walletAmountFen > 0 &&
         debitRows[0]?.deltaFen !== -paidSettlementAllocation.walletAmountFen
       ) {
-        throw new Error("已付款统一结算拿货单缺少匹配的钱包扣款");
+        throw new Error("已付款的批量拿货单缺少匹配的钱包扣款");
       }
       if (
         paidSettlementAllocation.walletAmountFen === 0 &&
         debitRows[0] !== undefined
       ) {
-        throw new Error("统一结算零钱包分摊存在异常钱包扣款");
+        throw new Error("批量付款的钱包分摊存在异常扣款");
       }
     } else if (row.paymentMode !== "DIRECT_OFFLINE" && walletPaidFen <= 0) {
       throw new Error("已付款拿货单缺少原始钱包扣款");

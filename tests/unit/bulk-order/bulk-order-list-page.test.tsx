@@ -69,6 +69,10 @@ describe("CustomerBulkOrdersPage", () => {
     expect(within(actions).getByRole("button", { name: "新建批量草稿" })).toBeEnabled();
     expect(actions).toHaveTextContent("2 个店铺");
     expect(actions).toHaveTextContent("3 个文件");
+    expect(screen.getByRole("link", { name: "查看批量付款" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
     expect(screen.getByText("可继续提交").closest("article")).toHaveTextContent("1");
   });
 

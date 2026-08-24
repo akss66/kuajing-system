@@ -51,6 +51,18 @@ export default async function CustomerOrderDetailPage({
   return (
     <div className="space-y-5">
       <PageHeading
+        action={
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <Badge className={paid ? "bg-success/10 text-success" : "bg-warning/10 text-warning"} variant="secondary">
+              {labels[order.status]}
+            </Badge>
+            {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
+            <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/orders">
+              <ArrowLeft className="size-4" />
+              返回我的订单
+            </Link>
+          </div>
+        }
         breadcrumbs={[
           { href: "/portal/orders", label: "我的订单" },
           { label: order.orderNumber },
@@ -59,24 +71,14 @@ export default async function CustomerOrderDetailPage({
         title={order.orderNumber}
       />
 
-      <div className="flex items-center gap-3">
-        <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/orders">
-          <ArrowLeft className="size-4" />
-          返回我的订单
-        </Link>
-        <Badge className={paid ? "bg-success/10 text-success" : "bg-warning/10 text-warning"} variant="secondary">
-          {labels[order.status]}
-        </Badge>
-        {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
-      </div>
-
       <MetricStrip
         items={[
           { hint: (order.adjustedAmountFen ?? 0) > 0 ? `原始金额 ${money(order.totalAmountFen)}` : undefined, label: "当前净额", value: money(order.netAmountFen ?? order.totalAmountFen) },
-          { hint: "被取消包裹的商品额与每包 13 元物流费", label: "取消调整", value: `-${money(order.adjustedAmountFen ?? 0)}` },
           { label: "包裹数", value: String(order.totalPackageCount) },
           { label: "商品件数", value: String(order.totalQuantity) },
-          { hint: "履约与付款状态见下方", label: "订单状态", tone: paid ? "success" : "warning", value: labels[order.status] },
+          ...((order.adjustedAmountFen ?? 0) > 0
+            ? [{ hint: "被取消包裹的商品额与每包 13 元物流费", label: "取消调整", value: `-${money(order.adjustedAmountFen ?? 0)}` }]
+            : []),
         ]}
       />
 

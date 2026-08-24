@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, ClipboardList, Clock3, LayoutDashboard, PackageSearch, Store, Upload } from "lucide-react";
+import { Banknote, ClipboardList, Clock3, LayoutDashboard, PackageSearch, ReceiptText, Store, Upload } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { AuthenticatedIdentity } from "@/modules/identity/principal";
@@ -38,6 +38,7 @@ const customerNavigation: Array<{
         label: "待付款",
         exact: true,
       },
+      { href: "/portal/settlements", icon: ReceiptText, label: "批量付款" },
       { href: "/portal/wallet", icon: Banknote, label: "余额与流水" },
     ],
   },

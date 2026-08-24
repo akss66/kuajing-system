@@ -626,7 +626,7 @@ describe("dashboard queries", () => {
     expect(settlementOnly.primaryContinuationTarget).toEqual({
       href: `/portal/settlements/${settlement.id}`,
       kind: "PAYMENT_REPORTED",
-      label: `查看结算批次 ${settlement.batchNumber} 的付款确认`,
+      label: `查看批量付款 ${settlement.batchNumber} 的核款进度`,
     });
 
     const [directOrder] = await db

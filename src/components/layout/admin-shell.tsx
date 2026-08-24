@@ -64,7 +64,7 @@ function navigationForRole(principalKind: AdminPrincipalKind): AdminNavigationGr
       label: "资金与数据",
       items: [
         { href: "/admin/settlement", icon: Banknote, label: "收款与余额" },
-        { href: "/admin/settlement-batches", icon: WalletCards, label: "统一结算批次" },
+        { href: "/admin/settlement-batches", icon: WalletCards, label: "批量付款审核" },
         { href: "/admin/reports", icon: BarChart3, label: "报表分析" },
       ],
     },

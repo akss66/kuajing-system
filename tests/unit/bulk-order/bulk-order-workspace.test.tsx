@@ -356,7 +356,7 @@ describe("BulkOrderWorkspace", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "选择深圳店" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "选择杭州店" }));
     fireEvent.click(
-      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+      screen.getAllByRole("button", { name: "提交拿货单" })[0],
     );
 
     await waitFor(() => {
@@ -557,7 +557,7 @@ describe("BulkOrderWorkspace", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "选择深圳店" }));
     fireEvent.click(
-      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+      screen.getAllByRole("button", { name: "提交拿货单" })[0],
     );
 
     await waitFor(() => {
@@ -592,22 +592,22 @@ describe("BulkOrderWorkspace", () => {
     );
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+      screen.getAllByRole("button", { name: "提交拿货单" })[0],
     );
     await waitFor(() => expect(actionMocks.submitBulkDraftAction).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(
-        screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+          screen.getAllByRole("button", { name: "提交拿货单" })[0],
       ).toBeEnabled(),
     );
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+      screen.getAllByRole("button", { name: "提交拿货单" })[0],
     );
     await waitFor(() => expect(actionMocks.submitBulkDraftAction).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(
-        screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+          screen.getAllByRole("button", { name: "提交拿货单" })[0],
       ).toBeEnabled(),
     );
 
@@ -615,7 +615,7 @@ describe("BulkOrderWorkspace", () => {
       target: { value: "18" },
     });
     fireEvent.click(
-      screen.getAllByRole("button", { name: "提交拿货单并进入结算" })[0],
+      screen.getAllByRole("button", { name: "提交拿货单" })[0],
     );
     await waitFor(() => expect(actionMocks.submitBulkDraftAction).toHaveBeenCalledTimes(3));
 

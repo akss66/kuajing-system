@@ -227,7 +227,7 @@ export async function getCustomerTaskDashboard(
       ? {
           href: `/portal/settlements/${latestPaymentReport.referenceId}`,
           kind: "PAYMENT_REPORTED",
-          label: `查看结算批次 ${latestPaymentReport.referenceNumber} 的付款确认`,
+          label: `查看批量付款 ${latestPaymentReport.referenceNumber} 的核款进度`,
         }
       : {
           href: `/portal/orders/${latestPaymentReport.referenceId}`,

@@ -33,19 +33,18 @@ export default async function CustomerWalletPage() {
 
       <SettlementWorkspace>
         <SettlementRegion
-          contentClassName="grid grid-cols-2 divide-x divide-y divide-border md:grid-cols-4 md:divide-y-0"
+          contentClassName="grid divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0"
           description="先确认可用余额，再查看冻结批次与每一笔资金变化。"
           kind="balances"
         >
           {[
+            { featured: true, hint: "当前可直接用于下单", label: "可用余额", value: money(wallet.availableFen) },
             { hint: "客户账户账面余额", label: "账面余额", value: money(wallet.balanceFen) },
-            { hint: "统一结算暂时冻结的金额", label: "已冻结", value: money(wallet.activeHoldFen) },
-            { hint: "当前可直接用于下单", label: "可用余额", value: money(wallet.availableFen) },
-            { hint: "最近冻结批次与流水都在下方", label: "流水条数", value: String(wallet.transactions.length) },
+            { hint: "批量付款时暂时冻结的金额", label: "已冻结", value: money(wallet.activeHoldFen) },
           ].map((item) => (
-            <div className="min-w-0 px-4 py-4 sm:px-5" key={item.label}>
+            <div className={item.featured ? "min-w-0 bg-primary/5 px-4 py-4 sm:px-5" : "min-w-0 px-4 py-4 sm:px-5"} key={item.label}>
               <p className="text-xs font-medium text-muted">{item.label}</p>
-              <p className="mt-1 truncate text-lg font-semibold tabular-nums text-ink">{item.value}</p>
+              <p className={item.featured ? "mt-1 truncate text-2xl font-semibold tabular-nums text-primary" : "mt-1 truncate text-lg font-semibold tabular-nums text-ink"}>{item.value}</p>
               <p className="mt-1 text-xs leading-5 text-muted">{item.hint}</p>
             </div>
           ))}
@@ -53,9 +52,9 @@ export default async function CustomerWalletPage() {
 
         <SettlementRegion
           action={<LockKeyhole aria-hidden="true" className="size-5 text-primary" />}
-          description="统一付款时会先冻结钱包抵扣金额，结算完成或关闭后自动释放或消耗。"
+          description="批量付款时会先冻结钱包抵扣金额，付款完成或关闭后自动释放或扣除。"
           kind="batches"
-          title="冻结批次"
+          title="批量付款冻结"
         >
 
         {wallet.holds.length ? (
@@ -65,7 +64,7 @@ export default async function CustomerWalletPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-ink">批次 {hold.batchNumber}</p>
+                      <p className="font-medium text-ink">付款编号 {hold.batchNumber}</p>
                       <Badge variant="secondary">{hold.status}</Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted">冻结于 {dateTime(hold.createdAt)}（渥太华）</p>
@@ -75,7 +74,7 @@ export default async function CustomerWalletPage() {
                   <div className="flex items-center gap-3">
                     <p className="font-semibold tabular-nums text-ink">{money(hold.amountFen)}</p>
                     <Link className="text-sm font-medium text-primary-hover" href={`/portal/settlements/${hold.settlementBatchId}`}>
-                      查看结算
+                      查看付款
                     </Link>
                   </div>
                 </div>
@@ -85,7 +84,7 @@ export default async function CustomerWalletPage() {
         ) : (
           <div className="px-5 py-14 text-center">
             <p className="font-medium text-ink">暂无冻结记录</p>
-            <p className="mt-1 text-sm text-muted">提交统一付款后会在这里记录冻结历史。</p>
+            <p className="mt-1 text-sm text-muted">提交批量付款后会在这里记录冻结历史。</p>
           </div>
         )}
         </SettlementRegion>

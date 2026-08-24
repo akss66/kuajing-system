@@ -190,7 +190,7 @@ test("customer declares an exact WeChat payment and admin confirms it without us
   await page.goto("/admin/settlement");
   await expect(page.getByRole("region", { name: "待核款队列" })).toBeVisible();
   await expect(page.getByRole("region", { name: "客户余额" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "结算批次" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "批量付款记录" })).toBeVisible();
   await expect(page.getByRole("region", { name: "资金流水" })).toBeVisible();
   const claimCard = page.locator("article").filter({
     hasText: fixture.order.orderNumber,
@@ -243,6 +243,7 @@ test("customer order payment controls remain usable at approved mobile widths @m
       page.getByRole("button", { name: "我已微信付款" }),
     ).toBeVisible();
     if (width === 360) {
+      await page.getByText("其他操作", { exact: true }).click();
       await page.getByLabel("取消原因").fill("仅验证取消确认，不提交");
       await page.getByRole("button", { name: "确认取消" }).click();
       await expect(

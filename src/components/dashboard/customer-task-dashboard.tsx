@@ -69,7 +69,7 @@ export function CustomerTaskDashboard({
   const quickPurchase = [
     { description: "查看自己的价格与可售库存", href: "/portal/catalog", icon: PackageSearch, label: "货盘选品" },
     { description: "上传单店 TEMU 原始订单", href: "/portal/imports/new", icon: Upload, label: "上传订单" },
-    { description: "多店文件合并后统一结算", href: "/portal/bulk-orders", icon: Store, label: "批量拿货" },
+    { description: "多店文件合并为一次付款", href: "/portal/bulk-orders", icon: Store, label: "批量拿货" },
   ];
 
   return (
@@ -107,7 +107,7 @@ export function CustomerTaskDashboard({
       </section>
 
       <section aria-labelledby="quick-purchase-title" className="space-y-3">
-        <SectionHeading description="从选品到多店统一结算，直接进入对应流程。" id="quick-purchase-title" title="快捷拿货" />
+        <SectionHeading description="从选品到多店批量付款，直接进入对应流程。" id="quick-purchase-title" title="快捷拿货" />
         <WorkspacePanel className="overflow-hidden">
           <nav aria-label="快捷拿货" className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
             {quickPurchase.map((item) => (

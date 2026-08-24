@@ -20,7 +20,7 @@ function paidPaymentDescription(order: CustomerOrderDetail) {
     if (order.walletAmountFen !== null && order.offlineAmountFen !== null) {
       return `余额扣除 ${money(order.walletAmountFen)}，微信确认 ${money(order.offlineAmountFen)}。`;
     }
-    return "本单通过余额与微信组合结算，具体分摊请查看统一结算记录。";
+    return "本单通过余额与微信组合付款，具体分摊请查看本次批量付款记录。";
   }
   return order.paymentMode === "WALLET"
     ? "客户余额已自动扣除，无需管理员再次确认。"

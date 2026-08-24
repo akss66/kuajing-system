@@ -54,7 +54,7 @@ async function assertOrderPaymentIsNotManagedBySettlement(
   if (rows[0]?.active) {
     throw new OrderLifecycleError(
       "ORDER_PAYMENT_MANAGED_BY_SETTLEMENT",
-      "该拿货单正在统一结算中，请在结算批次内处理付款",
+      "该拿货单已包含在一次批量付款中，请前往批量付款页面处理",
     );
   }
 }

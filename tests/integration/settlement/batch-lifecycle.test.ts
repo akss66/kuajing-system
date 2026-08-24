@@ -1873,7 +1873,7 @@ describe("unified offline settlement lifecycle", () => {
         orderId: positiveWalletAllocation.orderId,
         reason: "must not refund a missing positive wallet debit",
       }),
-    ).rejects.toThrow("已付款统一结算拿货单缺少匹配的钱包扣款");
+    ).rejects.toThrow("已付款的批量拿货单缺少匹配的钱包扣款");
     await expect(
       db
         .select()
@@ -2252,7 +2252,7 @@ describe("unified offline settlement lifecycle", () => {
     await expectTerminalRecovery(unreported.settlementBatchId!, {
       batchStatus: "EXPIRED",
       orderStatus: "EXPIRED",
-      reason: "结算批次超过 2 小时未申报付款",
+      reason: "批量付款超过 2 小时未申报",
     });
     await expectTerminalRecovery(reported.settlementBatchId!, {
       batchStatus: "EXPIRED",

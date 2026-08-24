@@ -67,14 +67,27 @@ describe("settlement workspace hierarchy", () => {
         status: "ACTIVE",
       },
     ]);
-    walletQueryMocks.listAdminWalletTransactions.mockResolvedValue([]);
+    walletQueryMocks.listAdminWalletTransactions.mockResolvedValue([
+      {
+        afterBalanceFen: 168800,
+        beforeBalanceFen: 158800,
+        createdAt: new Date("2026-08-10T05:00:00.000Z"),
+        customerCode: "C-001",
+        customerName: "客户一",
+        deltaFen: 10000,
+        id: "transaction-1",
+        orderNumber: null,
+        reason: "线下充值",
+        transactionType: "ADMIN_CREDIT",
+      },
+    ]);
 
     render(await SettlementPage());
 
     expect(screen.getByRole("region", { name: "待核款队列" })).toBeVisible();
     expect(screen.getByRole("region", { name: "待线下退款" })).toBeVisible();
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "结算批次" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "批量付款记录" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
     expect(screen.getByText("PO-10001")).toBeVisible();
     expect(screen.getByText("¥13.00")).toBeVisible();
@@ -82,11 +95,28 @@ describe("settlement workspace hierarchy", () => {
       "href",
       "/admin/orders/order-1",
     );
+    const adjustment = screen.getByRole("group", { name: "调整客户余额（超级管理员）" });
+    expect(adjustment).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "核对并调整余额" })).not.toBeVisible();
+
+    fireEvent.click(screen.getByText("调整客户余额（超级管理员）"));
+
+    expect(adjustment).toHaveAttribute("open");
     expect(screen.getByRole("combobox", { name: "操作" })).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: "核对并调整余额" }));
     expect(screen.getByRole("alertdialog")).toBeVisible();
     expect(screen.getByText("确认执行余额调整？")).toBeVisible();
     expect(screen.getByRole("button", { name: "返回检查" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "返回检查" }));
+
+    const transactions = screen.getByRole("group", { name: "查看资金流水" });
+    expect(transactions).not.toHaveAttribute("open");
+    expect(screen.getByText("线下充值")).not.toBeVisible();
+
+    fireEvent.click(screen.getByText("查看最近资金流水（1）"));
+
+    expect(transactions).toHaveAttribute("open");
+    expect(screen.getByText("线下充值")).toBeVisible();
   });
 
   it("keeps balance mutation controls unavailable to an ordinary administrator", async () => {

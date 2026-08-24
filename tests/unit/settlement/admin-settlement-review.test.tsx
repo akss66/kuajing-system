@@ -60,8 +60,9 @@ describe("AdminSettlementReview", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "统一款项审核 · 8 张拿货单" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "结算批次明细" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "本次批量付款审核" })).toBeVisible();
+    expect(screen.getByText(/8 张拿货单合并为一次付款/)).toBeVisible();
+    expect(screen.getByRole("region", { name: "本次批量付款明细" })).toBeVisible();
     expect(screen.getByRole("region", { name: "付款审核" })).toBeVisible();
     expect(screen.getByText("逐店分摊")).toBeVisible();
     expect(screen.getByText("客户提交付款声明")).toBeVisible();
@@ -99,7 +100,7 @@ describe("AdminSettlementReview", () => {
       />,
     );
 
-    expect(screen.getByText("该结算批次当前为 已收款，审核操作已结束。")).toBeVisible();
+    expect(screen.getByText("本次批量付款当前为 已收款，审核操作已结束。")).toBeVisible();
     expect(screen.queryByRole("button", { name: "确认已收款" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "拒绝付款声明" })).not.toBeInTheDocument();
   });

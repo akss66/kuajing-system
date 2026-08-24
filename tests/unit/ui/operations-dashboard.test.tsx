@@ -86,7 +86,7 @@ describe("operations dashboards", () => {
           primaryContinuationTarget: {
             href: "/portal/settlements/settlement-1",
             kind: "PAYMENT_REPORTED",
-            label: "查看结算批次 SETTLEMENT-1 的付款确认",
+            label: "查看批量付款 SETTLEMENT-1 的核款进度",
           },
           recentStoreSummaries: [
             {
@@ -120,7 +120,7 @@ describe("operations dashboards", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /查看结算批次 SETTLEMENT-1 的付款确认/ }),
+      screen.getByRole("link", { name: /查看批量付款 SETTLEMENT-1 的核款进度/ }),
     ).toHaveAttribute("href", "/portal/settlements/settlement-1");
     expect(screen.getByText("北美主店")).toBeVisible();
     expect(document.body).not.toHaveTextContent("390 px");

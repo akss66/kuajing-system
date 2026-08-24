@@ -121,7 +121,7 @@ async function lockBatch(
   `);
   const batch = rows[0];
   if (!batch) {
-    throw new SettlementBatchError("SETTLEMENT_NOT_FOUND", "未找到该结算批次");
+    throw new SettlementBatchError("SETTLEMENT_NOT_FOUND", "未找到该笔批量付款");
   }
   return batch;
 }
@@ -135,7 +135,7 @@ async function getBatchView(
     .from(settlementBatches)
     .where(eq(settlementBatches.id, settlementBatchId))
     .limit(1);
-  if (!batch) throw new SettlementBatchError("SETTLEMENT_NOT_FOUND", "未找到该结算批次");
+  if (!batch) throw new SettlementBatchError("SETTLEMENT_NOT_FOUND", "未找到该笔批量付款");
   const [claim] = await tx
     .select({
       amountFen: settlementPaymentClaims.amountFen,
@@ -169,7 +169,7 @@ async function batchOrderIds(tx: DbTransaction, settlementBatchId: string) {
     .where(eq(settlementBatchOrders.settlementBatchId, settlementBatchId))
     .orderBy(asc(settlementBatchOrders.orderId));
   if (rows.length === 0) {
-    throw new SettlementBatchError("SETTLEMENT_ORDERS_MISSING", "结算批次没有关联拿货单");
+    throw new SettlementBatchError("SETTLEMENT_ORDERS_MISSING", "该笔批量付款没有关联拿货单");
   }
   return rows.map((row) => row.orderId);
 }
@@ -220,7 +220,7 @@ async function assertAllOrdersPending(
   ) {
     throw new SettlementBatchError(
       "SETTLEMENT_ORDERS_NOT_PENDING",
-      "结算批次中的拿货单当前不能申报或审核付款",
+      "批量付款中的拿货单当前不能申报或审核付款",
     );
   }
 }
@@ -241,7 +241,7 @@ async function assertNoOrderPaymentClaims(
   if (rows.length > 0) {
     throw new SettlementBatchError(
       "SETTLEMENT_ORDER_PAYMENT_CLAIM_EXISTS",
-      "结算批次中存在未驳回的单订单付款声明，请先驳回后再申报整批付款",
+      "批量付款中存在未驳回的单张拿货单付款声明，请先驳回后再申报整笔付款",
     );
   }
 }
@@ -350,7 +350,7 @@ export async function prepareSettlementForPackageCancellation(
   if (batch.status === "PAYMENT_REPORTED") {
     throw new SettlementBatchError(
       "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
-      "该包裹所属统一结算已申报付款，请先撤回整笔付款声明再取消包裹",
+      "该包裹所属批量付款已申报，请先撤回整笔付款声明再取消包裹",
     );
   }
   if (batch.status === "PAID") {
@@ -376,10 +376,10 @@ export async function prepareSettlementForPackageCancellation(
   if (claim) {
     throw new SettlementBatchError(
       "SETTLEMENT_STATE_INVALID",
-      "统一结算付款状态异常，取消包裹前需要人工核对",
+      "批量付款状态异常，取消包裹前需要人工核对",
     );
   }
-  const invalidationReason = `包裹取消导致统一结算报价失效：${reason}`;
+  const invalidationReason = `包裹取消导致批量付款金额失效：${reason}`;
   if (batch.walletAmountFen > 0) {
     await releaseWalletHold(tx, {
       actorType: input.actorType,
@@ -423,11 +423,11 @@ export async function prepareSettlementForPackageCancellation(
   });
   await notifySettlement(tx, {
     event: "package-cancellation-invalidated",
-    message: "包裹取消使原统一结算金额失效，钱包冻结已释放；其余拿货单请按当前应付金额重新付款。",
+    message: "包裹取消使原批量付款金额失效，钱包冻结已释放；其余拿货单请按当前应付金额重新付款。",
     now: input.now,
     settlementBatchId: reference.settlementBatchId,
     severity: "WARNING",
-    title: "统一结算已失效",
+    title: "批量付款已失效",
   });
   return {
     outcome: "INVALIDATED",
@@ -470,11 +470,11 @@ export async function prepareSettlementForConfirmedRemoteCancellation(
   await notifySettlement(tx, {
     event: "remote-cancellation-reconciliation-required",
     message:
-      "极风已取消统一结算中的包裹，但整批付款正在审核。系统已停止批准该旧金额，请人工撤回或驳回整批付款并重新结算。",
+      "极风已取消批量付款中的包裹，但整笔付款正在审核。系统已停止批准旧金额，请人工撤回或驳回并重新付款。",
     now: input.now,
     settlementBatchId: reference.settlementBatchId,
     severity: "ERROR",
-    title: "统一结算需要人工对账",
+    title: "批量付款需要人工对账",
   });
   return {
     outcome: "PAYMENT_RECONCILIATION_REQUIRED",
@@ -501,7 +501,7 @@ export async function assertSettlementAllowsPackageCancellation(
   if (batch.status === "PAYMENT_REPORTED") {
     throw new SettlementBatchError(
       "SETTLEMENT_PAYMENT_REPORTED_CANCELLATION_BLOCKED",
-      "该包裹所属统一结算已申报付款，请先撤回整笔付款声明再取消包裹",
+      "该包裹所属批量付款已申报，请先撤回整笔付款声明再取消包裹",
     );
   }
 }
@@ -530,32 +530,32 @@ export async function reportSettlementPayment(input: {
   return db.transaction(async (tx) => {
     const batch = await lockBatch(tx, input.settlementBatchId, input.customerId);
     if (batch.status === "PAID" || batch.offlineAmountFen === 0) {
-      throw new SettlementBatchError("SETTLEMENT_ALREADY_PAID", "该结算批次无需申报线下付款");
+      throw new SettlementBatchError("SETTLEMENT_ALREADY_PAID", "该笔批量付款无需申报线下付款");
     }
     if (batch.status === "PAYMENT_REPORTED") {
       const claim = await pendingClaim(tx, input.settlementBatchId);
       if (!claim) {
-        throw new SettlementBatchError("SETTLEMENT_STATE_INVALID", "结算批次付款状态异常");
+        throw new SettlementBatchError("SETTLEMENT_STATE_INVALID", "批量付款状态异常");
       }
       if (claim.amountFen !== input.amountFen) {
         throw new SettlementBatchError(
           "PAYMENT_AMOUNT_MISMATCH",
-          "申报金额必须与结算批次线下待付金额一致",
+          "申报金额必须与该笔批量付款的微信待付金额一致",
         );
       }
       return getBatchView(tx, input.settlementBatchId);
     }
     if (batch.status !== "PENDING_PAYMENT") {
-      throw new SettlementBatchError("SETTLEMENT_NOT_REPORTABLE", "该结算批次当前不能申报付款");
+      throw new SettlementBatchError("SETTLEMENT_NOT_REPORTABLE", "该笔批量付款当前不能申报");
     }
     const paymentDueAt = asDate(batch.paymentDueAt)!;
     if (paymentDueAt <= now) {
-      throw new SettlementBatchError("SETTLEMENT_PAYMENT_EXPIRED", "结算批次付款期限已过");
+      throw new SettlementBatchError("SETTLEMENT_PAYMENT_EXPIRED", "该笔批量付款期限已过");
     }
     if (batch.offlineAmountFen !== input.amountFen) {
       throw new SettlementBatchError(
         "PAYMENT_AMOUNT_MISMATCH",
-        "申报金额必须与结算批次线下待付金额一致",
+        "申报金额必须与该笔批量付款的微信待付金额一致",
       );
     }
     await assertAllOrdersPending(tx, input.settlementBatchId);
@@ -596,16 +596,16 @@ export async function reportSettlementPayment(input: {
         status: "PAYMENT_REPORTED",
       },
       beforeJson: { status: "PENDING_PAYMENT" },
-      reason: "客户声明结算批次微信线下款已支付",
+      reason: "客户声明批量付款的微信线下款已支付",
       settlementBatchId: input.settlementBatchId,
     });
     await notifySettlement(tx, {
       event: "payment-reported",
-      message: "客户已提交一笔结算批次付款声明，请登录系统核款。",
+      message: "客户已提交一笔批量付款声明，请登录系统核款。",
       now,
       settlementBatchId: input.settlementBatchId,
       severity: "INFO",
-      title: "结算批次等待核款",
+      title: "批量付款等待核款",
     });
     return getBatchView(tx, input.settlementBatchId);
   });
@@ -694,11 +694,11 @@ async function releaseTerminalBatch(
   });
   await notifySettlement(tx, {
     event: input.status.toLowerCase(),
-    message: `结算批次已${input.status === "EXPIRED" ? "超时关闭" : "关闭"}，请登录系统查看原因。`,
+    message: `批量付款已${input.status === "EXPIRED" ? "超时关闭" : "关闭"}，请登录系统查看原因。`,
     now: input.now,
     settlementBatchId: input.settlementBatchId,
     severity: input.status === "EXPIRED" ? "WARNING" : "INFO",
-    title: "结算批次状态已更新",
+    title: "批量付款状态已更新",
   });
 }
 
@@ -721,7 +721,7 @@ async function expireLockedReportedBatch(
 ) {
   const claim = await pendingClaim(tx, settlementBatchId);
   if (!claim) {
-    throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "超时结算批次缺少待审核付款声明");
+    throw new SettlementBatchError("PAYMENT_CLAIM_NOT_FOUND", "超时的批量付款缺少待审核付款声明");
   }
   await tx
     .update(settlementPaymentClaims)
@@ -770,12 +770,12 @@ export async function withdrawSettlementPayment(input: {
     const batch = await lockBatch(tx, input.settlementBatchId, input.customerId);
     if (batch.status === "WITHDRAWN") {
       if (batch.statusReason !== reason) {
-        throw new SettlementBatchError("SETTLEMENT_ALREADY_CLOSED", "结算批次已按其他原因关闭");
+        throw new SettlementBatchError("SETTLEMENT_ALREADY_CLOSED", "该笔批量付款已按其他原因关闭");
       }
       return getBatchView(tx, input.settlementBatchId);
     }
     if (batch.status !== "PAYMENT_REPORTED") {
-      throw new SettlementBatchError("SETTLEMENT_NOT_WITHDRAWABLE", "该结算批次当前不能撤回付款声明");
+      throw new SettlementBatchError("SETTLEMENT_NOT_WITHDRAWABLE", "该笔批量付款当前不能撤回付款声明");
     }
     if (reportedPaymentDeadlineReached(batch, now)) {
       await expireLockedReportedBatch(tx, batch, input.settlementBatchId, now);
@@ -849,7 +849,7 @@ export async function reviewSettlementPayment(input: {
       return;
     }
     if (batch.status !== "PAYMENT_REPORTED") {
-      throw new SettlementBatchError("SETTLEMENT_NOT_REVIEWABLE", "该结算批次当前不能核款");
+      throw new SettlementBatchError("SETTLEMENT_NOT_REVIEWABLE", "该笔批量付款当前不能核款");
     }
     if (reportedPaymentDeadlineReached(batch, now)) {
       await expireLockedReportedBatch(tx, batch, input.settlementBatchId, now);
@@ -896,7 +896,7 @@ export async function reviewSettlementPayment(input: {
         });
       } catch (error) {
         if (error instanceof WalletValidationError) {
-          throw new SettlementBatchError("WALLET_HOLD_INVALID", "结算批次余额冻结无法核销");
+          throw new SettlementBatchError("WALLET_HOLD_INVALID", "该笔批量付款的余额冻结无法核销");
         }
         throw error;
       }
@@ -943,16 +943,16 @@ export async function reviewSettlementPayment(input: {
       actorType: "ADMIN",
       afterJson: { orderStatus: "PAID_PENDING_FULFILLMENT", status: "PAID" },
       beforeJson: { status: "PAYMENT_REPORTED" },
-      reason: "管理员确认结算批次微信线下付款到账",
+      reason: "管理员确认批量付款的微信线下款到账",
       settlementBatchId: input.settlementBatchId,
     });
     await notifySettlement(tx, {
       event: "payment-approved",
-      message: "结算批次已确认收款，相关拿货单已进入待发货。",
+      message: "批量付款已确认收款，相关拿货单已进入待发货。",
       now,
       settlementBatchId: input.settlementBatchId,
       severity: "INFO",
-      title: "结算批次已付款",
+      title: "批量付款已完成",
     });
   });
   if (outcome === "DEADLINE_EXPIRED") throwReviewDeadlineExpired();
@@ -978,7 +978,7 @@ async function expireLockedSettlementBatch(
       await expireLockedReportedBatch(tx, batch, settlementBatchId, now);
       return true;
     }
-    const reason = "结算批次超过 2 小时未申报付款";
+    const reason = "批量付款超过 2 小时未申报";
     await releaseTerminalBatch(tx, {
       actorId: "settlement-timeout-worker",
       actorType: "SYSTEM",
