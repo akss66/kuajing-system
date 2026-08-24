@@ -17,6 +17,7 @@ import { reserveInventory } from "@/modules/inventory/service";
 import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { tryDebitWalletForOrder } from "@/modules/wallet/service";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
+import { revalidateBatchInventory } from "@/modules/order-import/service";
 
 import { lockActiveOrderUniqueKeys } from "./import-conflict-lock";
 import { calculateOrderPricing, PACKAGE_SHIPPING_FEE_FEN } from "./pricing";
@@ -30,6 +31,7 @@ type OrderSubmissionErrorCode =
   | "NO_READY_ROWS"
   | "INVALID_IMPORT_ROW"
   | "SKU_NOT_SELLABLE"
+  | "INSUFFICIENT_INVENTORY"
   | "AMOUNT_OVERFLOW";
 
 export class OrderSubmissionError extends Error {
@@ -172,7 +174,18 @@ export async function submitTemuImportBatch(input: {
     if (batch.status !== "PREVIEW") {
       throw new OrderSubmissionError("IMPORT_NOT_READY", "导入预览当前不能提交");
     }
-    if (batch.unknownSkuRows > 0 || batch.invalidRows > 0) {
+    const inventoryValidation = await revalidateBatchInventory(tx, batch.id, now);
+    if (inventoryValidation.insufficientSkuIds.size > 0) {
+      return {
+        code: "INSUFFICIENT_INVENTORY",
+        kind: "ERROR",
+        message: "订单库存不足，预览已更新，请更换 SKU 或减少数量",
+      };
+    }
+    if (
+      inventoryValidation.summary.unknownSku > 0 ||
+      inventoryValidation.summary.invalid > 0
+    ) {
       throw new OrderSubmissionError(
         "IMPORT_NOT_READY",
         "请先处理未映射 SKU 和格式错误",
@@ -184,6 +197,8 @@ export async function submitTemuImportBatch(input: {
         externalOrderNo: orderImportRows.externalOrderNo,
         externalSku: orderImportRows.externalSku,
         externalSubOrderNo: orderImportRows.externalSubOrderNo,
+        effectiveQuantity: orderImportRows.effectiveQuantity,
+        fulfillmentMode: orderImportRows.fulfillmentMode,
         productName: orderImportRows.productName,
         quantity: orderImportRows.quantity,
         recipientPayloadEncrypted: orderImportRows.recipientPayloadEncrypted,
@@ -265,8 +280,9 @@ export async function submitTemuImportBatch(input: {
         await tx
           .update(orderImportBatches)
           .set({
-            duplicateRows: batch.duplicateRows + newlyDuplicate.size,
-            readyRows: batch.readyRows - newlyDuplicate.size,
+            duplicateRows:
+              inventoryValidation.summary.duplicate + newlyDuplicate.size,
+            readyRows: inventoryValidation.summary.ready - newlyDuplicate.size,
             updatedAt: now,
           })
           .where(eq(orderImportBatches.id, batch.id));
@@ -290,10 +306,13 @@ export async function submitTemuImportBatch(input: {
         !row.externalOrderNo ||
         !row.externalSubOrderNo ||
         !row.externalSku ||
-        !row.resolvedSkuId ||
         !row.recipientPayloadEncrypted ||
         !row.quantity ||
-        row.quantity <= 0
+        row.quantity <= 0 ||
+        !row.effectiveQuantity ||
+        row.effectiveQuantity <= 0 ||
+        (row.fulfillmentMode === "SYSTEM_SKU" && !row.resolvedSkuId) ||
+        (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && row.resolvedSkuId)
       ) {
         throw new OrderSubmissionError(
           "INVALID_IMPORT_ROW",
@@ -302,7 +321,12 @@ export async function submitTemuImportBatch(input: {
       }
     }
 
-    const skuIds = [...new Set(readyRows.map((row) => row.resolvedSkuId!))].sort();
+    const systemRows = readyRows.filter(
+      (row) => row.fulfillmentMode === "SYSTEM_SKU",
+    );
+    const skuIds = [
+      ...new Set(systemRows.map((row) => row.resolvedSkuId!)),
+    ].sort();
     const skuRows = await tx
       .select({
         archivedAt: skus.archivedAt,
@@ -388,14 +412,15 @@ export async function submitTemuImportBatch(input: {
     let merchandiseAmountFen = 0;
     let totalQuantity = 0;
     for (const row of readyRows) {
+      const quantity = row.effectiveQuantity!;
+      totalQuantity = safeAdd(totalQuantity, quantity);
+      if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") continue;
       const skuId = row.resolvedSkuId!;
-      const quantity = row.quantity!;
       const price = priceBySkuId.get(skuId)!;
       quantityBySkuId.set(
         skuId,
         safeAdd(quantityBySkuId.get(skuId) ?? 0, quantity),
       );
-      totalQuantity = safeAdd(totalQuantity, quantity);
       merchandiseAmountFen = safeAdd(
         merchandiseAmountFen,
         calculateLineAmountFen(quantity, price.unitPriceMilliYuan),
@@ -507,17 +532,35 @@ export async function submitTemuImportBatch(input: {
 
     await tx.insert(orderLines).values(
       readyRows.map((row) => {
+        if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+          return {
+            externalSku: row.externalSku!,
+            externalSubOrderNo: row.externalSubOrderNo!,
+            lineAmountFen: 0,
+            lineKind: "CUSTOMER_SUPPLIED" as const,
+            orderId,
+            quantity: row.effectiveQuantity!,
+            shipmentId: shipmentIdByExternalOrder.get(row.externalOrderNo!)!,
+            skuCodeSnapshot: row.externalSku!,
+            skuId: null,
+            skuNameSnapshot: row.productName || "客户自有货",
+            storeId: batch.storeId,
+            unitPriceFen: 0,
+            unitPriceMilliYuan: 0,
+          };
+        }
         const sku = skuById.get(row.resolvedSkuId!)!;
         const price = priceBySkuId.get(sku.id)!;
         return {
           externalSku: row.externalSku!,
           externalSubOrderNo: row.externalSubOrderNo!,
           lineAmountFen: calculateLineAmountFen(
-            row.quantity!,
+            row.effectiveQuantity!,
             price.unitPriceMilliYuan,
           ),
           orderId,
-          quantity: row.quantity!,
+          lineKind: "SYSTEM_SKU" as const,
+          quantity: row.effectiveQuantity!,
           shipmentId: shipmentIdByExternalOrder.get(row.externalOrderNo!)!,
           skuCodeSnapshot: sku.skuCode,
           skuId: sku.id,

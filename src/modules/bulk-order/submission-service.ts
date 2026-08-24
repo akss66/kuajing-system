@@ -123,10 +123,13 @@ type LoadedBatch = {
 
 type LoadedRow = {
   batchId: string;
+  effectiveQuantity: number | null;
   externalOrderNo: string | null;
   externalSku: string | null;
   externalSubOrderNo: string | null;
   id: string;
+  fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+  productName: string | null;
   quantity: number | null;
   recipientPayloadEncrypted: string | null;
   resolvedSkuId: string | null;
@@ -135,12 +138,12 @@ type LoadedRow = {
 };
 
 type ReadyRow = LoadedRow & {
+  effectiveQuantity: number;
   externalOrderNo: string;
   externalSku: string;
   externalSubOrderNo: string;
   quantity: number;
   recipientPayloadEncrypted: string;
-  resolvedSkuId: string;
 };
 
 type PreparedGroup = {
@@ -329,9 +332,10 @@ function isReadyRow(row: LoadedRow): row is ReadyRow {
     Boolean(row.externalSku) &&
     Boolean(row.externalSubOrderNo) &&
     Boolean(row.recipientPayloadEncrypted) &&
-    Boolean(row.resolvedSkuId) &&
-    Number.isSafeInteger(row.quantity) &&
-    (row.quantity ?? 0) > 0
+    Number.isSafeInteger(row.effectiveQuantity) &&
+    (row.effectiveQuantity ?? 0) > 0 &&
+    ((row.fulfillmentMode === "SYSTEM_SKU" && Boolean(row.resolvedSkuId)) ||
+      (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && !row.resolvedSkuId))
   );
 }
 
@@ -686,10 +690,13 @@ export async function submitBulkDraft(
         : await tx
             .select({
               batchId: orderImportRows.batchId,
+              effectiveQuantity: orderImportRows.effectiveQuantity,
               externalOrderNo: orderImportRows.externalOrderNo,
               externalSku: orderImportRows.externalSku,
               externalSubOrderNo: orderImportRows.externalSubOrderNo,
               id: orderImportRows.id,
+              fulfillmentMode: orderImportRows.fulfillmentMode,
+              productName: orderImportRows.productName,
               quantity: orderImportRows.quantity,
               recipientPayloadEncrypted:
                 orderImportRows.recipientPayloadEncrypted,
@@ -972,7 +979,11 @@ export async function submitBulkDraft(
     const skuIds = [
       ...new Set(
         [...candidateByGroup.values()].flatMap((work) =>
-          work.rows.map((row) => row.resolvedSkuId),
+          work.rows.flatMap((row) =>
+            row.fulfillmentMode === "SYSTEM_SKU" && row.resolvedSkuId
+              ? [row.resolvedSkuId]
+              : [],
+          ),
         ),
       ),
     ].sort();
@@ -1019,13 +1030,17 @@ export async function submitBulkDraft(
       const work = candidateByGroup.get(group.id);
       if (!work) continue;
       if (
-        work.rows.some(
-          (row) =>
-            !skuById.has(row.resolvedSkuId) ||
-            skuById.get(row.resolvedSkuId)!.lifecycleStatus !== "ACTIVE" ||
-            skuById.get(row.resolvedSkuId)!.saleStatus !== "SELLABLE" ||
-            !priceBySku.has(row.resolvedSkuId),
-        )
+        work.rows.some((row) => {
+          if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") return false;
+          if (!row.resolvedSkuId) return true;
+          const sku = skuById.get(row.resolvedSkuId);
+          return (
+            !sku ||
+            sku.lifecycleStatus !== "ACTIVE" ||
+            sku.saleStatus !== "SELLABLE" ||
+            !priceBySku.has(row.resolvedSkuId)
+          );
+        })
       ) {
         failedByGroup.set(group.id, "INVALID");
         continue;
@@ -1034,23 +1049,20 @@ export async function submitBulkDraft(
       let merchandiseAmountFen = 0;
       let totalQuantity = 0;
       for (const row of work.rows) {
+        totalQuantity = safeAdd(totalQuantity, row.effectiveQuantity);
+        if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") continue;
         const quantity = safeAdd(
-          quantityBySku.get(row.resolvedSkuId) ?? 0,
-          row.quantity,
+          quantityBySku.get(row.resolvedSkuId!) ?? 0,
+          row.effectiveQuantity,
         );
-        quantityBySku.set(row.resolvedSkuId, quantity);
-        totalQuantity = safeAdd(totalQuantity, row.quantity);
+        quantityBySku.set(row.resolvedSkuId!, quantity);
         merchandiseAmountFen = safeAdd(
           merchandiseAmountFen,
           calculateLineAmountFen(
-            row.quantity,
-            priceBySku.get(row.resolvedSkuId)!.unitPriceMilliYuan,
+            row.effectiveQuantity,
+            priceBySku.get(row.resolvedSkuId!)!.unitPriceMilliYuan,
           ),
         );
-      }
-      if (merchandiseAmountFen <= 0) {
-        failedByGroup.set(group.id, "INVALID");
-        continue;
       }
       const totalPackageCount = new Set(
         work.rows.map((row) => row.externalOrderNo),
@@ -1155,17 +1167,35 @@ export async function submitBulkDraft(
       );
       await tx.insert(orderLines).values(
         prepared.rows.map((row) => {
-          const sku = skuById.get(row.resolvedSkuId)!;
-          const price = priceBySku.get(row.resolvedSkuId)!;
+          if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+            return {
+              externalSku: row.externalSku,
+              externalSubOrderNo: row.externalSubOrderNo,
+              lineAmountFen: 0,
+              lineKind: "CUSTOMER_SUPPLIED" as const,
+              orderId: prepared.orderId,
+              quantity: row.effectiveQuantity,
+              shipmentId: shipmentIdByOrder.get(row.externalOrderNo)!,
+              skuCodeSnapshot: row.externalSku,
+              skuId: null,
+              skuNameSnapshot: row.productName || "客户自有货",
+              storeId: prepared.group.storeId,
+              unitPriceFen: 0,
+              unitPriceMilliYuan: 0,
+            };
+          }
+          const sku = skuById.get(row.resolvedSkuId!)!;
+          const price = priceBySku.get(row.resolvedSkuId!)!;
           return {
             externalSku: row.externalSku,
             externalSubOrderNo: row.externalSubOrderNo,
             lineAmountFen: calculateLineAmountFen(
-              row.quantity,
+              row.effectiveQuantity,
               price.unitPriceMilliYuan,
             ),
             orderId: prepared.orderId,
-            quantity: row.quantity,
+            lineKind: "SYSTEM_SKU" as const,
+            quantity: row.effectiveQuantity,
             shipmentId: shipmentIdByOrder.get(row.externalOrderNo)!,
             skuCodeSnapshot: sku.skuCode,
             skuId: sku.id,

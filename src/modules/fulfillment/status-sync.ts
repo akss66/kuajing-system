@@ -352,14 +352,11 @@ export async function applyJifengOrderStatus(input: {
           sum(quantity)::int as quantity
         from order_lines
         where shipment_id = ${current.shipmentId}
+          and line_kind = 'SYSTEM_SKU'
+          and sku_id is not null
         group by sku_id
         order by sku_id
       `);
-      if (lineQuantities.length === 0) {
-        throw new RemoteShippedInventoryInvariantError(
-          "本地取消后极风仍发货，但包裹没有对应商品明细",
-        );
-      }
       for (const line of lineQuantities) {
         const balanceRows = await tx.execute<{ totalQuantity: number }>(sql`
           select total_quantity as "totalQuantity"
@@ -613,15 +610,11 @@ export async function applyJifengOrderStatus(input: {
           sum(quantity)::int as quantity
         from order_lines
         where shipment_id = ${current.shipmentId}
+          and line_kind = 'SYSTEM_SKU'
+          and sku_id is not null
         group by sku_id
         order by sku_id
       `);
-      if (lineQuantities.length === 0) {
-        throw new RemoteShippedInventoryInvariantError(
-          "极风已发货包裹没有对应的商品明细",
-        );
-      }
-
       for (const line of lineQuantities) {
         const balanceRows = await tx.execute<{ totalQuantity: number }>(sql`
           select total_quantity as "totalQuantity"
@@ -895,6 +888,8 @@ export async function applyJifengOrderStatus(input: {
         select sku_id as "skuId", sum(quantity)::int as quantity
         from order_lines
         where shipment_id = ${current.shipmentId}
+          and line_kind = 'SYSTEM_SKU'
+          and sku_id is not null
         group by sku_id
         order by sku_id
       `);

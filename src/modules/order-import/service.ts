@@ -6,6 +6,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   or,
   sql,
@@ -14,6 +15,8 @@ import {
 import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
+  inventoryBalances,
+  inventoryReservations,
   orderImportBatches,
   orderImportRows,
   orderLines,
@@ -23,6 +26,7 @@ import {
   stores,
 } from "@/db/schema";
 import { assertStoreOwnership } from "@/modules/identity/guards";
+import { resolveUnitPrice } from "@/modules/catalog/pricing";
 import { encryptPii, parsePiiEncryptionKey } from "@/shared/pii-crypto";
 
 import {
@@ -30,6 +34,7 @@ import {
   parseTemuOrderWorkbook,
   type ClassifiedTemuResult,
 } from "./temu-parser";
+import { deriveImportSkuResolution } from "./sku-resolution";
 
 const PREVIEW_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const INSERT_CHUNK_SIZE = 400;
@@ -39,6 +44,12 @@ export class ImportPreviewError extends Error {
     public readonly code:
       | "STORE_DISABLED"
       | "PREVIEW_NOT_FOUND"
+      | "PREVIEW_EXPIRED"
+      | "IMPORT_ROW_NOT_FOUND"
+      | "IMPORT_ROW_CONFLICT"
+      | "INVALID_ROW_OVERRIDE"
+      | "SKU_NOT_AVAILABLE"
+      | "INSUFFICIENT_STOCK"
       | "EMPTY_DATA"
       | "INVALID_FILE_NAME",
     message: string,
@@ -51,12 +62,32 @@ export class ImportPreviewError extends Error {
 export type ImportPreviewSummary = ClassifiedTemuResult["summary"];
 
 export type ImportPreviewRowView = {
+  id: string;
   rowNumber: number;
   status: "READY" | "DUPLICATE" | "UNKNOWN_SKU" | "INVALID";
   externalOrderNo: string | null;
   externalSubOrderNo: string | null;
   externalSku: string | null;
   quantity: number | null;
+  effectiveQuantity: number | null;
+  quantityMultiplier: number;
+  fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+  resolutionMethod:
+    | "EXACT"
+    | "STORE_ALIAS"
+    | "GLOBAL_ALIAS"
+    | "NORMALIZED_SUFFIX"
+    | "MANUAL_OVERRIDE"
+    | "CUSTOMER_SUPPLIED"
+    | "LEGACY";
+  revision: number;
+  resolvedSku: { id: string; skuCode: string; name: string } | null;
+  siblingCandidates: Array<{
+    id: string;
+    skuCode: string;
+    name: string;
+    availableQuantity: number;
+  }>;
   errorCode: string | null;
   errorMessage: string | null;
 };
@@ -81,38 +112,73 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
 
 function isSkuAvailable(input: {
   archivedAt: Date | null;
+  cargoUnitPriceMilliYuan: number | null;
   lifecycleStatus: string;
   saleStatus: string;
 }) {
   return (
     input.lifecycleStatus === "ACTIVE" &&
     input.saleStatus === "SELLABLE" &&
+    input.cargoUnitPriceMilliYuan !== null &&
     input.archivedAt === null
   );
 }
+
+type ExactSkuResolution = {
+  resolutionMethod:
+    | "EXACT"
+    | "STORE_ALIAS"
+    | "GLOBAL_ALIAS"
+    | "NORMALIZED_SUFFIX";
+  skuId: string;
+};
 
 async function exactSkuResolutionMap(
   tx: DbTransaction,
   storeId: string,
   externalSkus: readonly string[],
-) {
-  if (externalSkus.length === 0) return new Map<string, string>();
+): Promise<Map<string, ExactSkuResolution>> {
+  if (externalSkus.length === 0) return new Map();
 
   const uniqueExternalSkus = [...new Set(externalSkus)];
+  const derivationByExternalSku = new Map<
+    string,
+    ReturnType<typeof deriveImportSkuResolution>
+  >();
+  for (const externalSku of uniqueExternalSkus) {
+    try {
+      derivationByExternalSku.set(
+        externalSku,
+        deriveImportSkuResolution(externalSku),
+      );
+    } catch {
+      // Classification records this row as INVALID with a safe message.
+    }
+  }
+  const lookupSkus = [
+    ...new Set(
+      [...derivationByExternalSku.values()].flatMap(
+        (derivation) => derivation.lookupCandidates,
+      ),
+    ),
+  ];
+  if (lookupSkus.length === 0) return new Map();
   const [standardSkus, aliases] = await Promise.all([
     tx
       .select({
         archivedAt: skus.archivedAt,
+        cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
         lifecycleStatus: skus.lifecycleStatus,
         saleStatus: skus.saleStatus,
         skuCode: skus.skuCode,
         skuId: skus.id,
       })
       .from(skus)
-      .where(inArray(skus.skuCode, uniqueExternalSkus)),
+      .where(inArray(skus.skuCode, lookupSkus)),
     tx
       .select({
         archivedAt: skus.archivedAt,
+        cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
         externalSku: skuAliases.externalSku,
         lifecycleStatus: skus.lifecycleStatus,
         saleStatus: skus.saleStatus,
@@ -124,7 +190,7 @@ async function exactSkuResolutionMap(
       .where(
         and(
           eq(skuAliases.active, true),
-          inArray(skuAliases.externalSku, uniqueExternalSkus),
+          inArray(skuAliases.externalSku, lookupSkus),
           or(eq(skuAliases.storeId, storeId), isNull(skuAliases.storeId)),
         ),
       ),
@@ -134,32 +200,46 @@ async function exactSkuResolutionMap(
     string,
     {
       eligible: boolean;
+      method: "EXACT" | "STORE_ALIAS" | "GLOBAL_ALIAS";
       skuId: string;
     }
   >();
   for (const standardSku of standardSkus) {
     candidates.set(standardSku.skuCode, {
       eligible: isSkuAvailable(standardSku),
+      method: "EXACT",
       skuId: standardSku.skuId,
     });
   }
   for (const alias of aliases.filter((row) => row.storeId === null)) {
     candidates.set(alias.externalSku, {
       eligible: isSkuAvailable(alias),
+      method: "GLOBAL_ALIAS",
       skuId: alias.skuId,
     });
   }
   for (const alias of aliases.filter((row) => row.storeId === storeId)) {
     candidates.set(alias.externalSku, {
       eligible: isSkuAvailable(alias),
+      method: "STORE_ALIAS",
       skuId: alias.skuId,
     });
   }
 
-  const resolved = new Map<string, string>();
-  for (const [externalSku, candidate] of candidates) {
-    if (candidate.eligible) {
-      resolved.set(externalSku, candidate.skuId);
+  const resolved = new Map<string, ExactSkuResolution>();
+  for (const [externalSku, derivation] of derivationByExternalSku) {
+    for (const [candidateIndex, lookupSku] of derivation.lookupCandidates.entries()) {
+      const candidate = candidates.get(lookupSku);
+      if (!candidate) continue;
+      // A higher-priority explicit candidate that is unavailable is a hard
+      // block. Falling through could silently substitute a different SKU.
+      if (!candidate.eligible) break;
+      resolved.set(externalSku, {
+        resolutionMethod:
+          candidateIndex === 0 ? candidate.method : "NORMALIZED_SUFFIX",
+        skuId: candidate.skuId,
+      });
+      break;
     }
   }
   return resolved;
@@ -249,6 +329,11 @@ function classifiedRowsForStorage(
       productAttributes: row.productAttributes,
       productName: row.productName,
       quantity: row.quantity,
+      effectiveQuantity: row.effectiveQuantity,
+      fulfillmentMode: row.fulfillmentMode,
+      quantityMultiplier: row.quantityMultiplier,
+      resolutionMethod: row.resolutionMethod,
+      revision: 0,
       recipientPayloadEncrypted,
       resolvedSkuId: row.resolvedSkuId,
       rowNumber: row.rowNumber,
@@ -265,6 +350,11 @@ function classifiedRowsForStorage(
     productAttributes: null,
     productName: null,
     quantity: null,
+    effectiveQuantity: null,
+    fulfillmentMode: "SYSTEM_SKU" as const,
+    quantityMultiplier: 1,
+    resolutionMethod: "LEGACY" as const,
+    revision: 0,
     recipientPayloadEncrypted: null,
     resolvedSkuId: null,
     rowNumber: issue.rowNumber,
@@ -274,31 +364,6 @@ function classifiedRowsForStorage(
   return [...parsedRows, ...invalidRows].sort(
     (first, second) => first.rowNumber - second.rowNumber,
   );
-}
-
-function previewRows(classified: ClassifiedTemuResult): ImportPreviewRowView[] {
-  return [
-    ...classified.rows.map((row) => ({
-      errorCode: null,
-      errorMessage: null,
-      externalOrderNo: row.externalOrderNo,
-      externalSku: row.externalSku,
-      externalSubOrderNo: row.externalSubOrderNo,
-      quantity: row.quantity,
-      rowNumber: row.rowNumber,
-      status: row.status,
-    })),
-    ...classified.issues.map((issue) => ({
-      errorCode: issue.code,
-      errorMessage: issue.message,
-      externalOrderNo: null,
-      externalSku: null,
-      externalSubOrderNo: null,
-      quantity: null,
-      rowNumber: issue.rowNumber,
-      status: "INVALID" as const,
-    })),
-  ].sort((first, second) => first.rowNumber - second.rowNumber);
 }
 
 export async function createTemuImportPreview(input: {
@@ -412,6 +477,23 @@ export async function createTemuImportPreviewInTransaction(
     );
   }
 
+  await revalidateBatchInventory(tx, batch.id);
+  const [validatedBatch] = await tx
+    .select({
+      duplicate: orderImportBatches.duplicateRows,
+      invalid: orderImportBatches.invalidRows,
+      ready: orderImportBatches.readyRows,
+      total: orderImportBatches.totalRows,
+      unknownSku: orderImportBatches.unknownSkuRows,
+    })
+    .from(orderImportBatches)
+    .where(eq(orderImportBatches.id, batch.id));
+  const finalSummary = validatedBatch ?? classified.summary;
+  const finalRows = await enrichPreviewRows(
+    tx,
+    await loadStoredPreviewRows(tx, batch.id),
+  );
+
   await tx.insert(auditLogs).values({
     action: "TEMU_IMPORT_PREVIEW_CREATED",
     actorId: input.actorUserId,
@@ -420,7 +502,7 @@ export async function createTemuImportPreviewInTransaction(
       fileSha256,
       storeGroupId: input.storeGroupId ?? null,
       storeId: input.storeId,
-      summary: classified.summary,
+      summary: finalSummary,
     },
     beforeJson: {},
     entityId: batch.id,
@@ -432,10 +514,10 @@ export async function createTemuImportPreviewInTransaction(
     batchId: batch.id,
     expiresAt,
     fileName: input.fileName,
-    rows: previewRows(classified),
+    rows: finalRows,
     storeId: input.storeId,
     storeName: input.storeName,
-    summary: classified.summary,
+    summary: finalSummary,
   };
 }
 
@@ -469,26 +551,13 @@ export async function getCustomerImportPreview(
     throw new ImportPreviewError("PREVIEW_NOT_FOUND", "找不到该导入预览");
   }
 
-  const rows = await db
-    .select({
-      errorCode: orderImportRows.errorCode,
-      errorMessage: orderImportRows.errorMessage,
-      externalOrderNo: orderImportRows.externalOrderNo,
-      externalSku: orderImportRows.externalSku,
-      externalSubOrderNo: orderImportRows.externalSubOrderNo,
-      quantity: orderImportRows.quantity,
-      rowNumber: orderImportRows.rowNumber,
-      status: orderImportRows.status,
-    })
-    .from(orderImportRows)
-    .where(eq(orderImportRows.batchId, batchId))
-    .orderBy(asc(orderImportRows.rowNumber));
+  const rows = await loadStoredPreviewRows(db, batchId);
 
   return {
     batchId: batch.batchId,
     expiresAt: batch.expiresAt,
     fileName: batch.fileName,
-    rows,
+    rows: await enrichPreviewRows(db, rows),
     storeId: batch.storeId,
     storeName: batch.storeName,
     summary: {
@@ -526,6 +595,7 @@ export async function refreshActiveImportPreviewsForAlias(
         eq(skus.id, input.skuId),
         eq(skus.lifecycleStatus, "ACTIVE"),
         eq(skus.saleStatus, "SELLABLE"),
+        isNotNull(skus.cargoUnitPriceMilliYuan),
         isNull(skus.archivedAt),
       ),
     )
@@ -600,4 +670,496 @@ export async function refreshActiveImportPreviewsForAlias(
   }
 
   return updatedRows.length;
+}
+
+async function loadStoredPreviewRows(
+  tx: Pick<DbTransaction, "select">,
+  batchId: string,
+): Promise<StoredPreviewRow[]> {
+  return tx
+    .select({
+      effectiveQuantity: orderImportRows.effectiveQuantity,
+      errorCode: orderImportRows.errorCode,
+      errorMessage: orderImportRows.errorMessage,
+      externalOrderNo: orderImportRows.externalOrderNo,
+      externalSku: orderImportRows.externalSku,
+      externalSubOrderNo: orderImportRows.externalSubOrderNo,
+      fulfillmentMode: orderImportRows.fulfillmentMode,
+      id: orderImportRows.id,
+      quantity: orderImportRows.quantity,
+      quantityMultiplier: orderImportRows.quantityMultiplier,
+      resolutionMethod: orderImportRows.resolutionMethod,
+      resolvedSkuId: orderImportRows.resolvedSkuId,
+      revision: orderImportRows.revision,
+      rowNumber: orderImportRows.rowNumber,
+      status: orderImportRows.status,
+    })
+    .from(orderImportRows)
+    .where(eq(orderImportRows.batchId, batchId))
+    .orderBy(asc(orderImportRows.rowNumber));
+}
+
+export async function revalidateBatchInventory(
+  tx: DbTransaction,
+  batchId: string,
+  now = new Date(),
+) {
+  const candidateRows = await tx
+    .select({
+      effectiveQuantity: orderImportRows.effectiveQuantity,
+      errorCode: orderImportRows.errorCode,
+      fulfillmentMode: orderImportRows.fulfillmentMode,
+      id: orderImportRows.id,
+      resolvedSkuId: orderImportRows.resolvedSkuId,
+      status: orderImportRows.status,
+    })
+    .from(orderImportRows)
+    .where(eq(orderImportRows.batchId, batchId))
+    .for("update");
+  const demandBySku = new Map<string, number>();
+  for (const row of candidateRows) {
+    if (
+      row.fulfillmentMode !== "SYSTEM_SKU" ||
+      !row.resolvedSkuId ||
+      !row.effectiveQuantity ||
+      row.status === "DUPLICATE" ||
+      row.status === "INVALID"
+    ) {
+      continue;
+    }
+    const demand =
+      (demandBySku.get(row.resolvedSkuId) ?? 0) + row.effectiveQuantity;
+    if (!Number.isSafeInteger(demand) || demand > 2_147_483_647) {
+      throw new ImportPreviewError(
+        "INVALID_ROW_OVERRIDE",
+        "同一 SKU 的合计发货数量超出系统范围",
+      );
+    }
+    demandBySku.set(row.resolvedSkuId, demand);
+  }
+  const insufficientSkuIds = new Set<string>();
+  for (const skuId of [...demandBySku.keys()].sort()) {
+    const [balance] = await tx
+      .select({ totalQuantity: inventoryBalances.totalQuantity })
+      .from(inventoryBalances)
+      .where(eq(inventoryBalances.skuId, skuId))
+      .for("update")
+      .limit(1);
+    const [reserved] = await tx
+      .select({
+        quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)::int`.mapWith(Number),
+      })
+      .from(inventoryReservations)
+      .where(
+        and(
+          eq(inventoryReservations.skuId, skuId),
+          eq(inventoryReservations.status, "ACTIVE"),
+        ),
+      );
+    const available =
+      (balance?.totalQuantity ?? 0) - (reserved?.quantity ?? 0);
+    const required = demandBySku.get(skuId)!;
+    if (available < required) {
+      insufficientSkuIds.add(skuId);
+      await tx
+        .update(orderImportRows)
+        .set({
+          errorCode: "INSUFFICIENT_STOCK",
+          errorMessage: `对应 SKU 库存不足：需 ${required} 件，可用 ${Math.max(available, 0)} 件，请更换 SKU 或减少数量`,
+          status: "UNKNOWN_SKU",
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(orderImportRows.batchId, batchId),
+            eq(orderImportRows.fulfillmentMode, "SYSTEM_SKU"),
+            eq(orderImportRows.resolvedSkuId, skuId),
+            sql`${orderImportRows.status} not in ('DUPLICATE', 'INVALID')`,
+          ),
+        );
+    } else {
+      await tx
+        .update(orderImportRows)
+        .set({
+          errorCode: null,
+          errorMessage: null,
+          status: "READY",
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(orderImportRows.batchId, batchId),
+            eq(orderImportRows.resolvedSkuId, skuId),
+            eq(orderImportRows.errorCode, "INSUFFICIENT_STOCK"),
+          ),
+        );
+    }
+  }
+
+  const statuses = await tx
+    .select({ status: orderImportRows.status })
+    .from(orderImportRows)
+    .where(eq(orderImportRows.batchId, batchId));
+  const count = (status: (typeof statuses)[number]["status"]) =>
+    statuses.filter((row) => row.status === status).length;
+  await tx
+    .update(orderImportBatches)
+    .set({
+      duplicateRows: count("DUPLICATE"),
+      invalidRows: count("INVALID"),
+      readyRows: count("READY"),
+      unknownSkuRows: count("UNKNOWN_SKU"),
+      updatedAt: now,
+    })
+    .where(eq(orderImportBatches.id, batchId));
+
+  return {
+    insufficientSkuIds,
+    summary: {
+      duplicate: count("DUPLICATE"),
+      invalid: count("INVALID"),
+      ready: count("READY"),
+      total: statuses.length,
+      unknownSku: count("UNKNOWN_SKU"),
+    },
+  };
+}
+
+export async function updateCustomerImportRowOverride(input: {
+  actorUserId: string;
+  customerId: string;
+  batchId: string;
+  rowId: string;
+  expectedRevision: number;
+  skuCode?: string;
+  effectiveQuantity: number;
+}): Promise<ImportPreviewRowView> {
+  if (
+    !Number.isSafeInteger(input.effectiveQuantity) ||
+    input.effectiveQuantity <= 0 ||
+    input.effectiveQuantity > 2_147_483_647
+  ) {
+    throw new ImportPreviewError(
+      "INVALID_ROW_OVERRIDE",
+      "实际发货数量必须是有效正整数",
+    );
+  }
+  const normalizedSkuCode = input.skuCode?.trim();
+  const transactionOutcome = await db.transaction(async (tx) => {
+    const [batch] = await tx
+      .select({
+        expiresAt: orderImportBatches.expiresAt,
+        id: orderImportBatches.id,
+        status: orderImportBatches.status,
+      })
+      .from(orderImportBatches)
+      .where(
+        and(
+          eq(orderImportBatches.id, input.batchId),
+          eq(orderImportBatches.customerId, input.customerId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!batch) {
+      throw new ImportPreviewError("PREVIEW_NOT_FOUND", "找不到该导入预览");
+    }
+    const now = new Date();
+    if (batch.status !== "PREVIEW") {
+      throw new ImportPreviewError(
+        "INVALID_ROW_OVERRIDE",
+        "该导入预览当前不能修改",
+      );
+    }
+    if (batch.expiresAt <= now) {
+      await tx
+        .update(orderImportBatches)
+        .set({ status: "EXPIRED", updatedAt: now })
+        .where(eq(orderImportBatches.id, batch.id));
+      return { kind: "EXPIRED" as const };
+    }
+
+    const [row] = await tx
+      .select({
+        effectiveQuantity: orderImportRows.effectiveQuantity,
+        fulfillmentMode: orderImportRows.fulfillmentMode,
+        id: orderImportRows.id,
+        resolvedSkuId: orderImportRows.resolvedSkuId,
+        revision: orderImportRows.revision,
+        status: orderImportRows.status,
+      })
+      .from(orderImportRows)
+      .where(
+        and(
+          eq(orderImportRows.id, input.rowId),
+          eq(orderImportRows.batchId, batch.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!row) {
+      throw new ImportPreviewError(
+        "IMPORT_ROW_NOT_FOUND",
+        "找不到该导入明细行",
+      );
+    }
+    if (row.revision !== input.expectedRevision) {
+      throw new ImportPreviewError(
+        "IMPORT_ROW_CONFLICT",
+        "该行已被其他操作更新，请刷新后重试",
+      );
+    }
+    if (row.status === "DUPLICATE" || row.status === "INVALID") {
+      throw new ImportPreviewError(
+        "INVALID_ROW_OVERRIDE",
+        "重复或格式错误的行不能手动修改",
+      );
+    }
+
+    let resolvedSkuId = row.resolvedSkuId;
+    if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+      if (normalizedSkuCode) {
+        throw new ImportPreviewError(
+          "INVALID_ROW_OVERRIDE",
+          "客户自有货不能绑定系统 SKU",
+        );
+      }
+      resolvedSkuId = null;
+    } else if (normalizedSkuCode) {
+      const [sku] = await tx
+        .select({ id: skus.id })
+        .from(skus)
+        .where(
+          and(
+            eq(skus.skuCode, normalizedSkuCode),
+            eq(skus.lifecycleStatus, "ACTIVE"),
+            eq(skus.saleStatus, "SELLABLE"),
+            isNull(skus.archivedAt),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!sku) {
+        throw new ImportPreviewError(
+          "SKU_NOT_AVAILABLE",
+          "SKU 不存在、已下架或不可售",
+        );
+      }
+      try {
+        await resolveUnitPrice(tx, { skuId: sku.id });
+      } catch {
+        throw new ImportPreviewError(
+          "SKU_NOT_AVAILABLE",
+          "SKU 暂无有效拿货价，不能用于本次订单",
+        );
+      }
+      resolvedSkuId = sku.id;
+    }
+    if (row.fulfillmentMode === "SYSTEM_SKU" && !resolvedSkuId) {
+      throw new ImportPreviewError(
+        "SKU_NOT_AVAILABLE",
+        "请精确填写一个可售系统 SKU",
+      );
+    }
+
+    if (
+      row.effectiveQuantity === input.effectiveQuantity &&
+      row.resolvedSkuId === resolvedSkuId
+    ) {
+      await revalidateBatchInventory(tx, batch.id, now);
+      return;
+    }
+
+    const [updated] = await tx
+      .update(orderImportRows)
+      .set({
+        effectiveQuantity: input.effectiveQuantity,
+        errorCode: null,
+        errorMessage: null,
+        resolutionMethod:
+          row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+            ? "CUSTOMER_SUPPLIED"
+            : "MANUAL_OVERRIDE",
+        resolvedSkuId,
+        revision: row.revision + 1,
+        status: "READY",
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(orderImportRows.id, row.id),
+          eq(orderImportRows.revision, input.expectedRevision),
+        ),
+      )
+      .returning({ id: orderImportRows.id });
+    if (!updated) {
+      throw new ImportPreviewError(
+        "IMPORT_ROW_CONFLICT",
+        "该行已被其他操作更新，请刷新后重试",
+      );
+    }
+
+    await revalidateBatchInventory(tx, batch.id, now);
+    await tx.insert(auditLogs).values({
+      action: "TEMU_IMPORT_ROW_OVERRIDDEN",
+      actorId: input.actorUserId,
+      actorType: "CUSTOMER",
+      afterJson: {
+        effectiveQuantity: input.effectiveQuantity,
+        fulfillmentMode: row.fulfillmentMode,
+        resolvedSkuId,
+        revision: row.revision + 1,
+      },
+      beforeJson: {
+        effectiveQuantity: row.effectiveQuantity,
+        resolvedSkuId: row.resolvedSkuId,
+        revision: row.revision,
+      },
+      entityId: row.id,
+      entityType: "ORDER_IMPORT_ROW",
+      reason: "客户在提交前修正最终 SKU 或实际发货数量",
+    });
+  });
+
+  if (transactionOutcome?.kind === "EXPIRED") {
+    throw new ImportPreviewError("PREVIEW_EXPIRED", "导入预览已过期，请重新上传");
+  }
+
+  const preview = await getCustomerImportPreview(input.customerId, input.batchId);
+  const result = preview.rows.find((row) => row.id === input.rowId);
+  if (!result) {
+    throw new ImportPreviewError(
+      "IMPORT_ROW_NOT_FOUND",
+      "找不到更新后的导入明细行",
+    );
+  }
+  return result;
+}
+
+type StoredPreviewRow = Omit<
+  ImportPreviewRowView,
+  "resolvedSku" | "siblingCandidates"
+> & { resolvedSkuId: string | null };
+
+async function enrichPreviewRows(
+  tx: Pick<DbTransaction, "select">,
+  rows: StoredPreviewRow[],
+): Promise<ImportPreviewRowView[]> {
+  const lookupCodes = [
+    ...new Set(
+      rows.flatMap((row) => {
+        if (row.fulfillmentMode !== "SYSTEM_SKU" || !row.externalSku) return [];
+        try {
+          return deriveImportSkuResolution(row.externalSku).lookupCandidates;
+        } catch {
+          return [];
+        }
+      }),
+    ),
+  ];
+  const resolvedIds = [
+    ...new Set(rows.flatMap((row) => (row.resolvedSkuId ? [row.resolvedSkuId] : []))),
+  ];
+  const anchorConditions = [
+    ...(resolvedIds.length > 0 ? [inArray(skus.id, resolvedIds)] : []),
+    ...(lookupCodes.length > 0 ? [inArray(skus.skuCode, lookupCodes)] : []),
+  ];
+  const anchors =
+    anchorConditions.length === 0
+      ? []
+      : await tx
+          .select({
+            id: skus.id,
+            name: skus.name,
+            productId: skus.productId,
+            skuCode: skus.skuCode,
+          })
+          .from(skus)
+          .where(or(...anchorConditions));
+  const anchorById = new Map(anchors.map((sku) => [sku.id, sku]));
+  const anchorByCode = new Map(anchors.map((sku) => [sku.skuCode, sku]));
+  const productIds = [...new Set(anchors.map((sku) => sku.productId))];
+  const siblings =
+    productIds.length === 0
+      ? []
+      : await tx
+          .select({ id: skus.id, name: skus.name, productId: skus.productId, skuCode: skus.skuCode })
+          .from(skus)
+          .where(
+            and(
+              inArray(skus.productId, productIds),
+              eq(skus.lifecycleStatus, "ACTIVE"),
+              eq(skus.saleStatus, "SELLABLE"),
+              isNull(skus.archivedAt),
+            ),
+          )
+          .orderBy(asc(skus.skuCode));
+  const siblingIds = siblings.map((sku) => sku.id);
+  const [balances, reservations] = await Promise.all([
+    siblingIds.length === 0
+      ? []
+      : tx
+          .select({ skuId: inventoryBalances.skuId, total: inventoryBalances.totalQuantity })
+          .from(inventoryBalances)
+          .where(inArray(inventoryBalances.skuId, siblingIds)),
+    siblingIds.length === 0
+      ? []
+      : tx
+          .select({
+            quantity: sql<number>`coalesce(sum(${inventoryReservations.quantity}), 0)::int`.mapWith(Number),
+            skuId: inventoryReservations.skuId,
+          })
+          .from(inventoryReservations)
+          .where(
+            and(
+              inArray(inventoryReservations.skuId, siblingIds),
+              eq(inventoryReservations.status, "ACTIVE"),
+            ),
+          )
+          .groupBy(inventoryReservations.skuId),
+  ]);
+  const totalBySku = new Map(balances.map((row) => [row.skuId, row.total]));
+  const reservedBySku = new Map(
+    reservations.map((row) => [row.skuId, row.quantity]),
+  );
+  const siblingsByProduct = new Map<
+    string,
+    ImportPreviewRowView["siblingCandidates"]
+  >();
+  for (const sibling of siblings) {
+    const candidates = siblingsByProduct.get(sibling.productId) ?? [];
+    candidates.push({
+      availableQuantity: Math.max(
+        (totalBySku.get(sibling.id) ?? 0) - (reservedBySku.get(sibling.id) ?? 0),
+        0,
+      ),
+      id: sibling.id,
+      name: sibling.name,
+      skuCode: sibling.skuCode,
+    });
+    siblingsByProduct.set(sibling.productId, candidates);
+  }
+
+  return rows.map(({ resolvedSkuId, ...row }) => {
+    const resolvedSku = resolvedSkuId ? (anchorById.get(resolvedSkuId) ?? null) : null;
+    let anchor = resolvedSku;
+    if (!anchor && row.externalSku) {
+      try {
+        anchor = deriveImportSkuResolution(row.externalSku).lookupCandidates
+          .map((code) => anchorByCode.get(code))
+          .find((candidate) => candidate !== undefined) ?? null;
+      } catch {
+        anchor = null;
+      }
+    }
+    return {
+      ...row,
+      resolvedSku: resolvedSku
+        ? { id: resolvedSku.id, name: resolvedSku.name, skuCode: resolvedSku.skuCode }
+        : null,
+      siblingCandidates: anchor
+        ? (siblingsByProduct.get(anchor.productId) ?? [])
+        : [],
+    };
+  });
 }

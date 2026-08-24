@@ -342,6 +342,127 @@ describe("Jifeng order status convergence", () => {
     });
   });
 
+  test("ships customer-supplied-only and mixed packages without touching customer-supplied inventory", async () => {
+    const customerOnly = await createTwoPackageFixture();
+    await db
+      .update(orderLines)
+      .set({
+        lineAmountFen: 0,
+        lineKind: "CUSTOMER_SUPPLIED",
+        skuCodeSnapshot: "SELLER-OWN-1",
+        skuId: null,
+        skuNameSnapshot: "客户自有货",
+        unitPriceFen: 0,
+        unitPriceMilliYuan: 0,
+      })
+      .where(eq(orderLines.shipmentId, customerOnly.shipments[0].id));
+    await db
+      .update(inventoryReservations)
+      .set({ quantity: 2 })
+      .where(eq(inventoryReservations.referenceId, customerOnly.order.id));
+
+    await expect(
+      applyJifengOrderStatus({
+        detail: {
+          erpNo: customerOnly.fulfillments[0].erpNo,
+          status: 7,
+          trackingNo: "CP-CUSTOMER-ONLY",
+        },
+        now: new Date("2026-08-12T04:00:00.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toEqual({ orderStatus: "FULFILLING", status: "SHIPPED" });
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(20);
+    expect(await db.select().from(inventoryMovements)).toEqual([]);
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+
+    await db.execute(sql.raw(`
+      truncate table
+        system_notifications,
+        audit_logs,
+        integration_attempts,
+        integration_outbox,
+        shipment_fulfillments,
+        inventory_movements,
+        order_lines,
+        order_shipments,
+        fulfillment_orders,
+        inventory_reservations,
+        inventory_balances,
+        skus,
+        products,
+        stores,
+        customers
+      restart identity cascade
+    `));
+
+    const mixed = await createTwoPackageFixture();
+    await db.insert(orderLines).values({
+      externalSku: "SELLER-GIFT",
+      externalSubOrderNo: "SUB-SELLER-GIFT",
+      lineAmountFen: 0,
+      lineKind: "CUSTOMER_SUPPLIED",
+      orderId: mixed.order.id,
+      quantity: 4,
+      shipmentId: mixed.shipments[0].id,
+      skuCodeSnapshot: "SELLER-GIFT",
+      skuId: null,
+      skuNameSnapshot: "赠品",
+      storeId: mixed.order.storeId,
+      unitPriceFen: 0,
+      unitPriceMilliYuan: 0,
+    });
+    await expect(
+      applyJifengOrderStatus({
+        detail: { erpNo: mixed.fulfillments[0].erpNo, status: 7 },
+        now: new Date("2026-08-12T04:05:00.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toEqual({ orderStatus: "FULFILLING", status: "SHIPPED" });
+    expect((await db.select().from(inventoryBalances))[0].totalQuantity).toBe(19);
+    expect(await db.select().from(inventoryMovements)).toHaveLength(1);
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+  });
+
+  test("cancels a customer-supplied-only package without releasing system inventory", async () => {
+    const fixture = await createTwoPackageFixture();
+    await db
+      .update(orderLines)
+      .set({
+        lineAmountFen: 0,
+        lineKind: "CUSTOMER_SUPPLIED",
+        skuCodeSnapshot: "SELLER-CANCEL",
+        skuId: null,
+        skuNameSnapshot: "客户自有货",
+        unitPriceFen: 0,
+        unitPriceMilliYuan: 0,
+      })
+      .where(eq(orderLines.shipmentId, fixture.shipments[0].id));
+    await db
+      .update(inventoryReservations)
+      .set({ quantity: 2 })
+      .where(eq(inventoryReservations.referenceId, fixture.order.id));
+
+    await expect(
+      applyJifengOrderStatus({
+        detail: { erpNo: fixture.fulfillments[0].erpNo, status: 9 },
+        now: new Date("2026-08-19T02:30:00.000Z"),
+        source: "POLL",
+      }),
+    ).resolves.toEqual({ orderStatus: "FULFILLING", status: "CANCELLED" });
+    expect(await db.select().from(inventoryMovements)).toEqual([]);
+    expect((await db.select().from(inventoryReservations))[0]).toMatchObject({
+      quantity: 2,
+      status: "ACTIVE",
+    });
+  });
+
   test("emits one alert for an exception incident, resolves it on recovery, and reopens it on recurrence", async () => {
     const fixture = await createTwoPackageFixture();
     const fulfillment = fixture.fulfillments[0];

@@ -116,6 +116,8 @@ export async function createReplacementRequest(input: {
         sum(quantity)::int as quantity
       from order_lines
       where shipment_id = ${input.originalShipmentId}
+        and line_kind = 'SYSTEM_SKU'
+        and sku_id is not null
       group by sku_id
     `);
     const originalBySku = new Map(originalLines.map((line) => [line.skuId, line]));
@@ -251,6 +253,8 @@ async function finalizeShipmentCancellation(
     select sku_id as "skuId", sum(quantity)::int as quantity
     from order_lines
     where shipment_id = ${input.shipmentId}
+      and line_kind = 'SYSTEM_SKU'
+      and sku_id is not null
     group by sku_id
     order by sku_id
   `);

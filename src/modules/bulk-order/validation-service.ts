@@ -65,7 +65,9 @@ export type BulkDraftValidationView = {
 };
 
 type LoadedRow = {
+  effectiveQuantity: number | null;
   externalSubOrderNo: string | null;
+  fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
   quantity: number | null;
   resolvedSkuId: string | null;
   rowNumber: number;
@@ -205,8 +207,10 @@ export async function validateBulkDraft(input: {
             batchExpiresAt: orderImportBatches.expiresAt,
             batchId: orderImportBatches.id,
             externalSubOrderNo: orderImportRows.externalSubOrderNo,
+            effectiveQuantity: orderImportRows.effectiveQuantity,
             fileSha256: orderImportBatches.fileSha256,
             groupId: orderImportBatches.storeGroupId,
+            fulfillmentMode: orderImportRows.fulfillmentMode,
             quantity: orderImportRows.quantity,
             resolvedSkuId: orderImportRows.resolvedSkuId,
             rowId: orderImportRows.id,
@@ -242,6 +246,8 @@ export async function validateBulkDraft(input: {
     ) {
       batch.rows.push({
         externalSubOrderNo: row.externalSubOrderNo,
+        effectiveQuantity: row.effectiveQuantity,
+        fulfillmentMode: row.fulfillmentMode!,
         quantity: row.quantity,
         resolvedSkuId: row.resolvedSkuId,
         rowNumber: row.rowNumber,
@@ -332,19 +338,23 @@ export async function validateBulkDraft(input: {
       }
       if (row.status !== "READY") continue;
       if (
-        !row.resolvedSkuId ||
-        !row.quantity ||
-        !Number.isSafeInteger(row.quantity) ||
-        row.quantity <= 0
+        !row.effectiveQuantity ||
+        !Number.isSafeInteger(row.effectiveQuantity) ||
+        row.effectiveQuantity <= 0 ||
+        (row.fulfillmentMode === "SYSTEM_SKU" && !row.resolvedSkuId) ||
+        (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && row.resolvedSkuId)
       ) {
         work.invalidRowCount += 1;
         continue;
       }
       work.candidates.push(row);
-      work.quantityBySku.set(
-        row.resolvedSkuId,
-        (work.quantityBySku.get(row.resolvedSkuId) ?? 0) + row.quantity,
-      );
+      if (row.fulfillmentMode === "SYSTEM_SKU") {
+        work.quantityBySku.set(
+          row.resolvedSkuId!,
+          (work.quantityBySku.get(row.resolvedSkuId!) ?? 0) +
+            row.effectiveQuantity,
+        );
+      }
     }
   }
 
@@ -424,8 +434,8 @@ export async function validateBulkDraft(input: {
         groupStatus: group.status,
       }),
       storeId: group.storeId,
-      totalQuantity: [...work.quantityBySku.values()].reduce(
-        (total, quantity) => total + quantity,
+      totalQuantity: work.candidates.reduce(
+        (total, row) => total + (row.effectiveQuantity ?? 0),
         0,
       ),
       totalRowCount: work.batches.reduce(

@@ -40,6 +40,8 @@ export async function getStockCoverageReport(input?: {
       from order_lines ol
       join order_shipments os on os.id = ol.shipment_id
       where os.kind = 'NORMAL'
+        and ol.line_kind = 'SYSTEM_SKU'
+        and ol.sku_id is not null
         and os.shipped_at >= ${fromUtc}::timestamptz
         and os.shipped_at < ${toUtc}::timestamptz
       group by ol.sku_id

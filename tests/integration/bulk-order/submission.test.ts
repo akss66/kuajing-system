@@ -27,9 +27,12 @@ import { submitBulkDraft } from "@/modules/bulk-order/submission-service";
 import { submitTemuImportBatch } from "@/modules/orders/submission";
 
 type SeedRow = {
+  effectiveQuantity?: number | null;
   externalOrderNo?: string | null;
   externalSku?: string | null;
   externalSubOrderNo?: string | null;
+  fulfillmentMode?: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+  productName?: string | null;
   quantity?: number | null;
   recipientPayloadEncrypted?: string | null;
   resolvedSkuId?: string | null;
@@ -163,11 +166,23 @@ async function seedBatch(input: {
           row.externalSubOrderNo === undefined
             ? `SUB-${input.groupId}-${row.rowNumber}`
             : row.externalSubOrderNo,
+        effectiveQuantity:
+          row.effectiveQuantity === undefined
+            ? row.quantity === undefined
+              ? 1
+              : row.quantity
+            : row.effectiveQuantity,
+        fulfillmentMode: row.fulfillmentMode ?? "SYSTEM_SKU",
+        productName: row.productName ?? null,
         quantity: row.quantity === undefined ? 1 : row.quantity,
         recipientPayloadEncrypted:
           row.recipientPayloadEncrypted === undefined
             ? "Sensitive Recipient +1 416 555 0100 sensitive@example.test"
             : row.recipientPayloadEncrypted,
+        resolutionMethod:
+          row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+            ? ("CUSTOMER_SUPPLIED" as const)
+            : ("LEGACY" as const),
         resolvedSkuId: row.resolvedSkuId ?? null,
         rowNumber: row.rowNumber,
         status: row.status ?? "READY",
@@ -529,6 +544,103 @@ describe("atomic partial bulk submission", () => {
       unitPriceFen: 33,
       unitPriceMilliYuan: 325,
     });
+  });
+
+  test("submits customer-supplied and mixed packages with shipping fees but reserves only system stock", async () => {
+    const fixture = await createDraftFixture(["customer-only", "mixed"]);
+    const systemSku = await createSku({ code: "MIXED", stock: 10 });
+    const customerOnly = fixture.groups.get("customer-only")!;
+    const mixed = fixture.groups.get("mixed")!;
+
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: customerOnly.id,
+      rows: [
+        {
+          effectiveQuantity: 3,
+          externalOrderNo: "PO-CUSTOMER-ONLY",
+          externalSku: "VENDOR-ABC",
+          externalSubOrderNo: "SUB-CUSTOMER-ONLY",
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          productName: "客户原始商品名",
+          quantity: 3,
+          resolvedSkuId: null,
+          rowNumber: 2,
+        },
+      ],
+      storeId: customerOnly.storeId,
+    });
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: mixed.id,
+      rows: [
+        {
+          effectiveQuantity: 2,
+          externalOrderNo: "PO-MIXED",
+          externalSku: "TZX-MIXED-2PCS",
+          externalSubOrderNo: "SUB-MIXED-SYSTEM",
+          quantity: 1,
+          resolvedSkuId: systemSku.id,
+          rowNumber: 2,
+        },
+        {
+          effectiveQuantity: 4,
+          externalOrderNo: "PO-MIXED",
+          externalSku: "SELLER-GIFT",
+          externalSubOrderNo: "SUB-MIXED-CUSTOMER",
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          productName: "赠品",
+          quantity: 4,
+          resolvedSkuId: null,
+          rowNumber: 3,
+        },
+      ],
+      storeId: mixed.storeId,
+    });
+
+    const result = await submitBulkDraft({
+      actorUserId: "customer-supplied-bulk-user",
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: "customer-supplied-and-mixed",
+      requestedWalletFen: 0,
+      selectedGroupIds: [customerOnly.id, mixed.id],
+    });
+
+    expect(result.failedGroups).toEqual([]);
+    expect(result.createdOrders).toHaveLength(2);
+    const orders = await db.select().from(fulfillmentOrders);
+    expect(orders.map((order) => order.totalAmountFen).sort((a, b) => a - b)).toEqual([
+      1_300,
+      1_500,
+    ]);
+    const lines = await db.select().from(orderLines);
+    expect(lines).toHaveLength(3);
+    expect(lines.find((line) => line.externalSku === "VENDOR-ABC")).toMatchObject({
+      lineAmountFen: 0,
+      lineKind: "CUSTOMER_SUPPLIED",
+      quantity: 3,
+      skuId: null,
+      skuNameSnapshot: "客户原始商品名",
+      unitPriceFen: 0,
+      unitPriceMilliYuan: 0,
+    });
+    expect(lines.find((line) => line.externalSku === "SELLER-GIFT")).toMatchObject({
+      lineAmountFen: 0,
+      lineKind: "CUSTOMER_SUPPLIED",
+      quantity: 4,
+      skuId: null,
+      skuNameSnapshot: "赠品",
+    });
+    expect(lines.find((line) => line.externalSku === "TZX-MIXED-2PCS")).toMatchObject({
+      lineAmountFen: 200,
+      lineKind: "SYSTEM_SKU",
+      quantity: 2,
+      skuId: systemSku.id,
+    });
+    expect(await db.select().from(inventoryReservations)).toEqual([
+      expect.objectContaining({ quantity: 2, skuId: systemSku.id }),
+    ]);
   });
 
   test("rejects reuse of a customer idempotency key with a different payload", async () => {

@@ -332,8 +332,23 @@ describe("paid order Jifeng dispatch", () => {
     expect(JSON.stringify(outboxRows[0].payload)).not.toContain(recipient.addressLine1);
   });
 
-  test("matches by the package order number and binds a different remote ERP number without create", async () => {
+  test("matches a customer-supplied package by order number and binds a different remote ERP number without create", async () => {
     const { order, shipment } = await createShipmentFixture();
+    await db
+      .update(orderLines)
+      .set({
+        lineAmountFen: 0,
+        lineKind: "CUSTOMER_SUPPLIED",
+        skuCodeSnapshot: "SELLER-OWN-DISPATCH",
+        skuId: null,
+        skuNameSnapshot: "客户自有货",
+        unitPriceFen: 0,
+        unitPriceMilliYuan: 0,
+      })
+      .where(eq(orderLines.shipmentId, shipment.id));
+    await db
+      .delete(inventoryReservations)
+      .where(eq(inventoryReservations.referenceId, order.id));
     await enqueuePaidOrdersForFulfillment();
     const [event] = await db.select().from(integrationOutbox);
     const localErpNo = `TZX-${shipment.id.replaceAll("-", "")}`;

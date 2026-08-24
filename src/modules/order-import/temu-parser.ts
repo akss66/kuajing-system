@@ -1,5 +1,11 @@
 import ExcelJS from "exceljs";
 
+import {
+  deriveImportSkuResolution,
+  multiplyImportQuantity,
+  type ImportFulfillmentMode,
+} from "./sku-resolution";
+
 export const TEMU_EXPORT_HEADERS = [
   "订单号",
   "站点",
@@ -95,6 +101,15 @@ export type TemuParseResult = {
 export type ClassifiedTemuRow = ParsedTemuRow & {
   status: ImportRowStatus;
   resolvedSkuId: string | null;
+  effectiveQuantity: number;
+  fulfillmentMode: ImportFulfillmentMode;
+  quantityMultiplier: number;
+  resolutionMethod:
+    | "EXACT"
+    | "STORE_ALIAS"
+    | "GLOBAL_ALIAS"
+    | "NORMALIZED_SUFFIX"
+    | "CUSTOMER_SUPPLIED";
 };
 
 export type ClassifiedTemuResult = {
@@ -376,36 +391,102 @@ export function classifyTemuRows(
   input: {
     duplicateExternalOrderNumbers: ReadonlySet<string>;
     duplicateSubOrderNumbers: ReadonlySet<string>;
-    skuIdByExactAlias: ReadonlyMap<string, string>;
+    skuIdByExactAlias: ReadonlyMap<
+      string,
+      | string
+      | {
+          resolutionMethod:
+            | "EXACT"
+            | "STORE_ALIAS"
+            | "GLOBAL_ALIAS"
+            | "NORMALIZED_SUFFIX";
+          skuId: string;
+        }
+    >;
   },
 ): ClassifiedTemuResult {
   const seenSubOrderNumbers = new Set(input.duplicateSubOrderNumbers);
-  const rows = parsed.rows.map<ClassifiedTemuRow>((row) => {
+  const rows: ClassifiedTemuRow[] = [];
+  const issues = [...parsed.issues];
+  for (const row of parsed.rows) {
+    let derivation;
+    let effectiveQuantity: number;
+    try {
+      derivation = deriveImportSkuResolution(row.externalSku);
+      effectiveQuantity = multiplyImportQuantity(
+        row.quantity,
+        derivation.quantityMultiplier,
+      );
+    } catch {
+      issues.push(
+        invalid(
+          row.rowNumber,
+          "INVALID_QUANTITY",
+          `第 ${row.rowNumber} 行 SKU 件数后缀或实际发货数量超出系统范围`,
+        ),
+      );
+      continue;
+    }
     if (
       input.duplicateExternalOrderNumbers.has(row.externalOrderNo) ||
       seenSubOrderNumbers.has(row.externalSubOrderNo)
     ) {
-      return { ...row, status: "DUPLICATE", resolvedSkuId: null };
+      rows.push({
+        ...row,
+        effectiveQuantity,
+        fulfillmentMode: derivation.fulfillmentMode,
+        quantityMultiplier: derivation.quantityMultiplier,
+        resolutionMethod:
+          derivation.fulfillmentMode === "CUSTOMER_SUPPLIED"
+            ? "CUSTOMER_SUPPLIED"
+            : "EXACT",
+        status: "DUPLICATE",
+        resolvedSkuId: null,
+      });
+      continue;
     }
     seenSubOrderNumbers.add(row.externalSubOrderNo);
 
-    const resolvedSkuId = input.skuIdByExactAlias.get(row.externalSku) ?? null;
-    return {
+    if (derivation.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+      rows.push({
+        ...row,
+        effectiveQuantity,
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        quantityMultiplier: 1,
+        resolutionMethod: "CUSTOMER_SUPPLIED",
+        status: "READY",
+        resolvedSkuId: null,
+      });
+      continue;
+    }
+
+    const resolved = input.skuIdByExactAlias.get(row.externalSku) ?? null;
+    const resolvedSkuId =
+      typeof resolved === "string" ? resolved : (resolved?.skuId ?? null);
+    rows.push({
       ...row,
+      effectiveQuantity,
+      fulfillmentMode: "SYSTEM_SKU",
+      quantityMultiplier: derivation.quantityMultiplier,
+      resolutionMethod:
+        typeof resolved === "string"
+          ? "EXACT"
+          : (resolved?.resolutionMethod ?? "EXACT"),
       status: resolvedSkuId ? "READY" : "UNKNOWN_SKU",
       resolvedSkuId,
-    };
-  });
+    });
+  }
+  issues.sort((first, second) => first.rowNumber - second.rowNumber);
 
   return {
     rows,
-    issues: parsed.issues,
+    issues,
     summary: {
-      total: rows.length + parsed.issues.length,
+      total: rows.length + issues.length,
       ready: rows.filter((row) => row.status === "READY").length,
       duplicate: rows.filter((row) => row.status === "DUPLICATE").length,
       unknownSku: rows.filter((row) => row.status === "UNKNOWN_SKU").length,
-      invalid: parsed.issues.length,
+      invalid: issues.length,
     },
   };
 }

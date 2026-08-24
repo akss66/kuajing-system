@@ -108,9 +108,9 @@ describe("TEMU order workbook parser", () => {
   it("classifies ready, duplicate and unknown SKU rows without guessing aliases", async () => {
     const parsed = await parseTemuOrderWorkbook({
       buffer: await buildWorkbook([
-        {},
-        { 子订单号: "SUB-10001-2", SKU货号: "STORE-SKU-DUPLICATE" },
-        { 子订单号: "SUB-10001-3", SKU货号: "STORE-SKU-UNKNOWN" },
+        { SKU货号: "TZX-STORE-SKU-BLACK" },
+        { 子订单号: "SUB-10001-2", SKU货号: "TZX-STORE-SKU-DUPLICATE" },
+        { 子订单号: "SUB-10001-3", SKU货号: "TZX-STORE-SKU-UNKNOWN" },
       ]),
       fileName: "temu-orders.xlsx",
     });
@@ -118,7 +118,7 @@ describe("TEMU order workbook parser", () => {
     const classified = classifyTemuRows(parsed, {
       duplicateExternalOrderNumbers: new Set(),
       duplicateSubOrderNumbers: new Set(["SUB-10001-2"]),
-      skuIdByExactAlias: new Map([["STORE-SKU-BLACK", "sku-internal-1"]]),
+      skuIdByExactAlias: new Map([["TZX-STORE-SKU-BLACK", "sku-internal-1"]]),
     });
 
     expect(classified.summary).toEqual({
@@ -134,6 +134,28 @@ describe("TEMU order workbook parser", () => {
       "UNKNOWN_SKU",
     ]);
     expect(classified.rows[2].resolvedSkuId).toBeNull();
+  });
+
+  it("accepts a non-TZX row as customer supplied without local SKU resolution", async () => {
+    const parsed = await parseTemuOrderWorkbook({
+      buffer: await buildWorkbook([{ SKU货号: "QS-014-1-LK" }]),
+      fileName: "temu-orders.xlsx",
+    });
+
+    const classified = classifyTemuRows(parsed, {
+      duplicateExternalOrderNumbers: new Set(),
+      duplicateSubOrderNumbers: new Set(),
+      skuIdByExactAlias: new Map(),
+    });
+
+    expect(classified.summary).toMatchObject({ ready: 1, unknownSku: 0 });
+    expect(classified.rows[0]).toMatchObject({
+      effectiveQuantity: 1,
+      fulfillmentMode: "CUSTOMER_SUPPLIED",
+      resolvedSkuId: null,
+      resolutionMethod: "CUSTOMER_SUPPLIED",
+      status: "READY",
+    });
   });
 
   it("rejects changed headers, non-xlsx files and oversized input", async () => {

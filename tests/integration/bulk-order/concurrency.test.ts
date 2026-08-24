@@ -96,6 +96,7 @@ async function createDraft(input: {
         externalOrderNo: `PO-${draft.id}-${groupIndex}-${rowIndex}`,
         externalSku: `EXT-${row.skuId}`,
         externalSubOrderNo: `SUB-${draft.id}-${groupIndex}-${rowIndex}`,
+        effectiveQuantity: row.quantity ?? 1,
         quantity: row.quantity ?? 1,
         recipientPayloadEncrypted: `encrypted-${draft.id}-${groupIndex}`,
         resolvedSkuId: row.skuId,

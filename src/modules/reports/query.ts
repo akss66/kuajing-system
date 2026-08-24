@@ -37,6 +37,8 @@ export async function getOperationsReport(window: ReportWindow): Promise<Operati
         from order_lines ol
         join order_shipments os on os.id = ol.shipment_id
         where os.kind = 'NORMAL'
+          and ol.line_kind = 'SYSTEM_SKU'
+          and ol.sku_id is not null
           and os.shipped_at >= ${window.fromUtc.toISOString()}::timestamptz
           and os.shipped_at < ${window.toExclusiveUtc.toISOString()}::timestamptz
         group by ol.sku_id

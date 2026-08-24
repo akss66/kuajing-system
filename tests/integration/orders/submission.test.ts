@@ -24,7 +24,6 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { getAvailableQuantity } from "@/modules/inventory/queries";
-import { InsufficientInventoryError } from "@/modules/inventory/service";
 import { createTemuImportPreview } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 import { submitTemuImportBatch } from "@/modules/orders/submission";
@@ -42,7 +41,7 @@ const baseRow: Record<(typeof TEMU_EXPORT_HEADERS)[number], string | number> = {
   SKUID: "SKUID-1",
   SKCID: "SKCID-1",
   SPUID: "SPUID-1",
-  SKU货号: "EXT-SKU-A",
+  SKU货号: "TZX-EXT-SKU-A",
   商品属性: "测试规格",
   收货人姓名: "Submission Recipient",
   收货人联系方式: "+1 613 555 0120",
@@ -191,14 +190,14 @@ describe("atomic TEMU take-order submission", () => {
       cargoPriceMilliYuan: 5_500,
       customerPriceFen: 450,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
     const skuB = await createSku({
       customerId: customer.id,
       defaultPriceFen: 300,
-      externalSku: "EXT-SKU-B",
+      externalSku: "TZX-EXT-SKU-B",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -207,7 +206,7 @@ describe("atomic TEMU take-order submission", () => {
       storeId: store.id,
       rows: [
         { 应履约件数: 2 },
-        { 子订单号: "SUB-SUBMIT-2", SKU货号: "EXT-SKU-B" },
+        { 子订单号: "SUB-SUBMIT-2", SKU货号: "TZX-EXT-SKU-B" },
       ],
     });
 
@@ -274,7 +273,7 @@ describe("atomic TEMU take-order submission", () => {
     const sku = await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -321,7 +320,7 @@ describe("atomic TEMU take-order submission", () => {
     const sku = await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -375,7 +374,7 @@ describe("atomic TEMU take-order submission", () => {
     const sku = await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -418,7 +417,7 @@ describe("atomic TEMU take-order submission", () => {
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -501,21 +500,21 @@ describe("atomic TEMU take-order submission", () => {
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 5,
     });
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 300,
-      externalSku: "EXT-SKU-B",
+      externalSku: "TZX-EXT-SKU-B",
       storeId: store.id,
       totalQuantity: 0,
     });
     const preview = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{}, { 子订单号: "SUB-NO-STOCK", SKU货号: "EXT-SKU-B" }],
+      rows: [{}, { 子订单号: "SUB-NO-STOCK", SKU货号: "TZX-EXT-SKU-B" }],
     });
 
     await expect(
@@ -524,7 +523,7 @@ describe("atomic TEMU take-order submission", () => {
         batchId: preview.batchId,
         customerId: customer.id,
       }),
-    ).rejects.toBeInstanceOf(InsufficientInventoryError);
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_INVENTORY" });
 
     expect(await db.select().from(fulfillmentOrders)).toEqual([]);
     expect(await db.select().from(inventoryReservations)).toEqual([]);
@@ -541,7 +540,7 @@ describe("atomic TEMU take-order submission", () => {
       customerId: customer.id,
       defaultPriceFen: 33,
       defaultPriceMilliYuan: 325,
-      externalSku: "EXT-SKU-A",
+      externalSku: "TZX-EXT-SKU-A",
       storeId: store.id,
       totalQuantity: 10,
     });
@@ -583,14 +582,14 @@ describe("atomic TEMU take-order submission", () => {
     const sku = await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-BLOCKED",
+      externalSku: "TZX-EXT-BLOCKED",
       storeId: store.id,
       totalQuantity: 5,
     });
     const preview = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ SKU货号: "EXT-BLOCKED" }],
+      rows: [{ SKU货号: "TZX-EXT-BLOCKED" }],
     });
     expect(preview.summary).toMatchObject({ ready: 1, unknownSku: 0 });
     await db
@@ -635,24 +634,106 @@ describe("atomic TEMU take-order submission", () => {
     expect(await db.select().from(inventoryReservations)).toEqual([]);
   });
 
+  test("submits a customer-supplied-only package with shipping fee and no inventory", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [{ SKU货号: "QS-OWN-1", 应履约件数: 2 }],
+    });
+
+    const submitted = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+    });
+
+    expect(submitted).toMatchObject({
+      totalAmountFen: 1_300,
+      totalPackageCount: 1,
+      totalQuantity: 2,
+    });
+    expect(await db.select().from(inventoryReservations)).toEqual([]);
+    expect(await db.select().from(orderLines)).toEqual([
+      expect.objectContaining({
+        externalSku: "QS-OWN-1",
+        lineAmountFen: 0,
+        lineKind: "CUSTOMER_SUPPLIED",
+        quantity: 2,
+        skuId: null,
+        unitPriceFen: 0,
+        unitPriceMilliYuan: 0,
+      }),
+    ]);
+    expect(await db.select().from(orderShipments)).toEqual([
+      expect.objectContaining({ shippingFeeFen: 1_300 }),
+    ]);
+  });
+
+  test("prices and reserves only the system portion of a mixed package", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const sku = await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "TZX-024",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [
+        { SKU货号: "TZX-024-2PCS" },
+        { SKU货号: "QS-OWN-2", 子订单号: "SUB-OWN-2" },
+      ],
+    });
+
+    const submitted = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+    });
+
+    expect(submitted).toMatchObject({
+      totalAmountFen: 2_300,
+      totalPackageCount: 1,
+      totalQuantity: 3,
+    });
+    expect(await db.select().from(inventoryReservations)).toEqual([
+      expect.objectContaining({ quantity: 2, skuId: sku.id }),
+    ]);
+    expect(
+      (await db.select().from(orderLines)).map((line) => ({
+        amount: line.lineAmountFen,
+        kind: line.lineKind,
+        quantity: line.quantity,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { amount: 1_000, kind: "SYSTEM_SKU", quantity: 2 },
+        { amount: 0, kind: "CUSTOMER_SUPPLIED", quantity: 1 },
+      ]),
+    );
+  });
+
   test("two batches cannot reserve the same final unit", async () => {
     const { customer, store } = await createCustomerAndStore();
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-LAST-ONE",
+      externalSku: "TZX-EXT-LAST-ONE",
       storeId: store.id,
       totalQuantity: 1,
     });
     const first = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ 订单号: "PO-FIRST", 子订单号: "SUB-FIRST", SKU货号: "EXT-LAST-ONE" }],
+      rows: [{ 订单号: "PO-FIRST", 子订单号: "SUB-FIRST", SKU货号: "TZX-EXT-LAST-ONE" }],
     });
     const second = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ 订单号: "PO-SECOND", 子订单号: "SUB-SECOND", SKU货号: "EXT-LAST-ONE" }],
+      rows: [{ 订单号: "PO-SECOND", 子订单号: "SUB-SECOND", SKU货号: "TZX-EXT-LAST-ONE" }],
     });
 
     const results = await Promise.allSettled([
@@ -671,7 +752,7 @@ describe("atomic TEMU take-order submission", () => {
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 500,
-      externalSku: "EXT-WALLET",
+      externalSku: "TZX-EXT-WALLET",
       storeId: store.id,
       totalQuantity: 2,
     });
@@ -684,12 +765,12 @@ describe("atomic TEMU take-order submission", () => {
     const first = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ 订单号: "PO-WALLET-1", 子订单号: "SUB-WALLET-1", SKU货号: "EXT-WALLET" }],
+      rows: [{ 订单号: "PO-WALLET-1", 子订单号: "SUB-WALLET-1", SKU货号: "TZX-EXT-WALLET" }],
     });
     const second = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ 订单号: "PO-WALLET-2", 子订单号: "SUB-WALLET-2", SKU货号: "EXT-WALLET" }],
+      rows: [{ 订单号: "PO-WALLET-2", 子订单号: "SUB-WALLET-2", SKU货号: "TZX-EXT-WALLET" }],
     });
 
     const submitted = await Promise.all([
@@ -732,7 +813,7 @@ describe("atomic TEMU take-order submission", () => {
     await createSku({
       customerId: customer.id,
       defaultPriceFen: 50,
-      externalSku: "EXT-HELD-WALLET",
+      externalSku: "TZX-EXT-HELD-WALLET",
       storeId: store.id,
       totalQuantity: 1,
     });
@@ -766,7 +847,7 @@ describe("atomic TEMU take-order submission", () => {
         {
           订单号: "PO-HELD-WALLET",
           子订单号: "SUB-HELD-WALLET",
-          SKU货号: "EXT-HELD-WALLET",
+          SKU货号: "TZX-EXT-HELD-WALLET",
         },
       ],
     });
@@ -799,7 +880,7 @@ describe("atomic TEMU take-order submission", () => {
     const preview = await createPreview({
       customerId: customer.id,
       storeId: store.id,
-      rows: [{ SKU货号: "UNKNOWN" }],
+      rows: [{ SKU货号: "TZX-UNKNOWN" }],
     });
 
     await expect(

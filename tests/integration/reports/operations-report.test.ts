@@ -154,6 +154,7 @@ describe("operations reports", () => {
       .returning();
     await db.insert(orderLines).values([
       { lineAmountFen: 900, orderId: directOrder.id, quantity: 2, shipmentId: directShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 450 },
+      { externalSku: "SELLER-REPORT", lineAmountFen: 0, lineKind: "CUSTOMER_SUPPLIED", orderId: directOrder.id, quantity: 5, shipmentId: directShipment.id, skuCodeSnapshot: "SELLER-REPORT", skuId: null, skuNameSnapshot: "客户自有货", storeId: storeA.id, unitPriceFen: 0, unitPriceMilliYuan: 0 },
       { lineAmountFen: 700, orderId: walletOrder.id, quantity: 1, shipmentId: walletShipment.id, skuCodeSnapshot: skuB.skuCode, skuId: skuB.id, skuNameSnapshot: "报表商品 · 黑色", storeId: storeB.id, unitPriceFen: 700 },
       { lineAmountFen: 0, orderId: directOrder.id, quantity: 1, shipmentId: replacementShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 0 },
       { lineAmountFen: 4_500, orderId: unshippedOrder.id, quantity: 5, shipmentId: unshippedShipment.id, skuCodeSnapshot: skuA.skuCode, skuId: skuA.id, skuNameSnapshot: "报表商品 · 蓝色", storeId: storeA.id, unitPriceFen: 900 },
@@ -258,7 +259,7 @@ describe("operations reports", () => {
       expect.objectContaining({ quantity: 1, revenueFen: 700, skuCode: skuB.skuCode }),
     ]);
     expect(report.stores).toEqual([
-      expect.objectContaining({ orderCount: 1, packageCount: 1, quantity: 2, revenueFen: 900, storeName: storeA.name }),
+      expect.objectContaining({ orderCount: 1, packageCount: 1, quantity: 7, revenueFen: 900, storeName: storeA.name }),
       expect.objectContaining({ orderCount: 1, packageCount: 1, quantity: 1, revenueFen: 700, storeName: storeB.name }),
     ]);
     expect(report.replacements).toEqual([{ quantity: 1, reason: "运输破损", requestCount: 1 }]);

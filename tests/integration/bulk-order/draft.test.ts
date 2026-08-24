@@ -7,6 +7,7 @@ import {
   auditLogs,
   bulkImportDrafts,
   customers,
+  inventoryBalances,
   orderImportBatches,
   orderImportRows,
   products,
@@ -38,7 +39,7 @@ const baseRow: Record<(typeof TEMU_EXPORT_HEADERS)[number], string | number> = {
   SKUID: "SKUID-1",
   SKCID: "SKCID-1",
   SPUID: "SPUID-1",
-  SKU货号: "BULK-KNOWN",
+  SKU货号: "TZX-BULK-KNOWN",
   商品属性: "蓝色",
   收货人姓名: "Bulk Recipient",
   收货人联系方式: "+1 416 555 0100",
@@ -127,6 +128,7 @@ async function createFixture() {
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 6_000,
       defaultUnitPriceFen: 600,
       name: "蓝色",
       productId: product.id,
@@ -134,10 +136,11 @@ async function createFixture() {
     })
     .returning();
   await db.insert(skuAliases).values({
-    externalSku: "BULK-KNOWN",
+    externalSku: "TZX-BULK-KNOWN",
     skuId: sku.id,
     storeId: store.id,
   });
+  await db.insert(inventoryBalances).values({ skuId: sku.id, totalQuantity: 10 });
 
   return { customer, disabledStore, otherCustomer, otherStore, sku, store };
 }

@@ -16,7 +16,9 @@ import { validateBulkDraft } from "./validation-service";
 type WorkspaceRow = {
   batchId: string;
   createdAt: Date;
+  effectiveQuantity: number | null;
   externalSubOrderNo: string | null;
+  fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
   quantity: number | null;
   resolvedSkuId: string | null;
   rowNumber: number;
@@ -60,7 +62,9 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           .select({
             batchId: orderImportRows.batchId,
             createdAt: orderImportBatches.createdAt,
+            effectiveQuantity: orderImportRows.effectiveQuantity,
             externalSubOrderNo: orderImportRows.externalSubOrderNo,
+            fulfillmentMode: orderImportRows.fulfillmentMode,
             quantity: orderImportRows.quantity,
             resolvedSkuId: orderImportRows.resolvedSkuId,
             rowNumber: orderImportRows.rowNumber,
@@ -138,16 +142,17 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         if (
           row.status !== "READY" ||
           existingOrderKeys.has(key) ||
-          !row.resolvedSkuId ||
-          !row.quantity ||
-          row.quantity <= 0
+          !row.effectiveQuantity ||
+          row.effectiveQuantity <= 0
         ) {
           continue;
         }
-        totalAmountFen += calculateLineAmountFen(
-          row.quantity,
-          priceBySku.get(row.resolvedSkuId) ?? 0,
-        );
+        if (row.fulfillmentMode === "SYSTEM_SKU" && row.resolvedSkuId) {
+          totalAmountFen += calculateLineAmountFen(
+            row.effectiveQuantity,
+            priceBySku.get(row.resolvedSkuId) ?? 0,
+          );
+        }
       }
 
       return {

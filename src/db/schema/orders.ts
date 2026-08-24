@@ -35,6 +35,24 @@ export const orderImportRowStatus = pgEnum("order_import_row_status", [
   "INVALID",
 ]);
 
+export const orderLineKind = pgEnum("order_line_kind", [
+  "SYSTEM_SKU",
+  "CUSTOMER_SUPPLIED",
+]);
+
+export const importSkuResolutionMethod = pgEnum(
+  "import_sku_resolution_method",
+  [
+    "EXACT",
+    "STORE_ALIAS",
+    "GLOBAL_ALIAS",
+    "NORMALIZED_SUFFIX",
+    "MANUAL_OVERRIDE",
+    "CUSTOMER_SUPPLIED",
+    "LEGACY",
+  ],
+);
+
 export const fulfillmentOrderSource = pgEnum("fulfillment_order_source", [
   "TEMU_EXCEL",
   "MANUAL",
@@ -279,13 +297,25 @@ export const orderImportRows = pgTable(
     productName: text("product_name"),
     productAttributes: text("product_attributes"),
     quantity: integer("quantity"),
+    effectiveQuantity: integer("effective_quantity"),
+    quantityMultiplier: integer("quantity_multiplier").default(1).notNull(),
+    fulfillmentMode: orderLineKind("fulfillment_mode")
+      .default("SYSTEM_SKU")
+      .notNull(),
+    resolutionMethod: importSkuResolutionMethod("resolution_method")
+      .default("LEGACY")
+      .notNull(),
     resolvedSkuId: uuid("resolved_sku_id").references(() => skus.id, {
       onDelete: "restrict",
     }),
     recipientPayloadEncrypted: text("recipient_payload_encrypted"),
     errorCode: varchar("error_code", { length: 80 }),
     errorMessage: text("error_message"),
+    revision: integer("revision").default(0).notNull(),
     createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true })
       .defaultNow()
       .notNull(),
   },
@@ -301,6 +331,23 @@ export const orderImportRows = pgTable(
     check(
       "order_import_rows_quantity_positive_when_present",
       sql`${table.quantity} is null or ${table.quantity} > 0`,
+    ),
+    check(
+      "order_import_rows_effective_quantity_positive_when_present",
+      sql`${table.effectiveQuantity} is null or ${table.effectiveQuantity} > 0`,
+    ),
+    check(
+      "order_import_rows_quantity_multiplier_positive",
+      sql`${table.quantityMultiplier} > 0`,
+    ),
+    check("order_import_rows_revision_non_negative", sql`${table.revision} >= 0`),
+    check(
+      "order_import_rows_mode_resolution_consistent",
+      sql`(${table.fulfillmentMode} = 'SYSTEM_SKU' and ${table.resolutionMethod} <> 'CUSTOMER_SUPPLIED') or (${table.fulfillmentMode} = 'CUSTOMER_SUPPLIED' and ${table.resolutionMethod} = 'CUSTOMER_SUPPLIED' and ${table.resolvedSkuId} is null)`,
+    ),
+    check(
+      "order_import_rows_ready_fields_consistent",
+      sql`${table.status} <> 'READY' or (${table.effectiveQuantity} is not null and ((${table.fulfillmentMode} = 'SYSTEM_SKU' and ${table.resolvedSkuId} is not null) or (${table.fulfillmentMode} = 'CUSTOMER_SUPPLIED' and ${table.resolvedSkuId} is null)))`,
     ),
     index("order_import_rows_batch_status_index").on(
       table.batchId,
@@ -778,9 +825,8 @@ export const orderLines = pgTable(
     storeId: uuid("store_id")
       .notNull()
       .references(() => stores.id, { onDelete: "restrict" }),
-    skuId: uuid("sku_id")
-      .notNull()
-      .references(() => skus.id, { onDelete: "restrict" }),
+    lineKind: orderLineKind("line_kind").default("SYSTEM_SKU").notNull(),
+    skuId: uuid("sku_id").references(() => skus.id, { onDelete: "restrict" }),
     deduplicationActive: boolean("deduplication_active").default(true).notNull(),
     externalSubOrderNo: varchar("external_sub_order_no", { length: 160 }),
     externalSku: varchar("external_sku", { length: 160 }),
@@ -826,6 +872,10 @@ export const orderLines = pgTable(
     check(
       "order_lines_amount_matches_exact_price",
       sql`${table.lineAmountFen} = ((((${table.quantity})::bigint * (${table.unitPriceMilliYuan})::bigint) + 5) / 10)`,
+    ),
+    check(
+      "order_lines_kind_fields_consistent",
+      sql`(${table.lineKind} = 'SYSTEM_SKU' and ${table.skuId} is not null) or (${table.lineKind} = 'CUSTOMER_SUPPLIED' and ${table.skuId} is null and ${table.unitPriceMilliYuan} = 0 and ${table.unitPriceFen} = 0 and ${table.lineAmountFen} = 0)`,
     ),
     index("order_lines_order_index").on(table.orderId),
     index("order_lines_sku_index").on(table.skuId),
