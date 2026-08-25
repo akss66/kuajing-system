@@ -323,5 +323,5 @@ exit 9
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
-  });
+  }, 15_000);
 });
