@@ -60,7 +60,7 @@ describe("ImportReviewTable", () => {
       />,
     );
 
-    expect(screen.getByRole("list", { name: "逐行校验结果" })).toBeVisible();
+    expect(screen.getByRole("list", { name: "订单逐行核对结果" })).toBeVisible();
     expect(screen.getByRole("button", { name: "修改 Excel 第 2 行" })).toHaveAttribute(
       "aria-expanded",
       "false",

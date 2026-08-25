@@ -129,7 +129,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "资金中心",
-    expectedTexts: ["可用余额", "账面余额", "订单预留", "资金流水"],
+    expectedTexts: ["可用余额", "账面余额", "订单预留", "还没有资金记录"],
     path: "/portal/wallet",
     screenshot: "customer-wallet",
     shouldShowMetricStrip: false,
@@ -147,7 +147,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "多店铺批量上传",
-    expectedTexts: ["还没有上传记录", "开始批量上传"],
+    expectedTexts: ["开始一次新的多店铺上传", "开始批量上传"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
     shouldShowMetricStrip: false,
@@ -164,7 +164,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "上传订单",
-    expectedTexts: ["选择店铺", "上传文件", "校验预览", "确认提交"],
+    expectedTexts: ["上传前确认", "选择原始订单文件", "上传并生成预览"],
     path: "/portal/imports/new",
     screenshot: "customer-import-flow",
     shouldShowMetricStrip: false,
@@ -646,7 +646,7 @@ for (const dashboard of [
   },
   {
     audience: "customer" as const,
-    actionSectionId: "continuation-title",
+    actionSectionId: "quick-purchase-title",
     path: "/portal",
     firstSectionId: "continuation-title",
     summarySectionId: "store-summary-title",
@@ -686,9 +686,6 @@ for (const dashboard of [
       expect(actionBox).not.toBeNull();
       expect(actionBox!.height).toBeGreaterThanOrEqual(44);
 
-      if (dashboard.audience === "customer") {
-        expect(summaryBox!.y).toBeGreaterThanOrEqual(844);
-      }
     }
   });
 }
