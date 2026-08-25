@@ -179,7 +179,7 @@ describe("operational health", () => {
       },
       status: "DEGRADED",
       worker: {
-        code: "INVALID_HEARTBEAT",
+        code: "HEARTBEAT_MISSING",
         healthy: false,
       },
     });
@@ -194,6 +194,6 @@ describe("operational health", () => {
       checkDatabaseHealth({
         workerHealth: { filePath, required: true },
       }),
-    ).rejects.toThrow("WORKER_HEALTH_INVALID_HEARTBEAT");
+    ).rejects.toThrow("WORKER_HEALTH_HEARTBEAT_MISSING");
   });
 });
