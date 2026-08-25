@@ -17,6 +17,18 @@ describe("production worker watchdog", () => {
     "utf8",
   );
 
+  it("forces shell scripts to LF in repository exports", () => {
+    const result = spawnSync(
+      "git",
+      ["check-attr", "text", "eol", "--", "scripts/worker-watchdog.sh"],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("scripts/worker-watchdog.sh: text: set");
+    expect(result.stdout).toContain("scripts/worker-watchdog.sh: eol: lf");
+  });
+
   it("only recreates the unhealthy worker without touching web or postgres", () => {
     expect(script).toContain("unhealthy)");
     expect(script).toContain("--no-build --no-deps --force-recreate worker");
