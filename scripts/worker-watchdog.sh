@@ -3,6 +3,7 @@ set -eu
 
 compose_file=${1:?usage: worker-watchdog.sh COMPOSE_FILE COMPOSE_ENV_FILE APP_VERSION RELEASE_SHA}
 compose_env_file=${2:?usage: worker-watchdog.sh COMPOSE_FILE COMPOSE_ENV_FILE APP_VERSION RELEASE_SHA}
+APP_ENV_FILE="$compose_env_file"
 APP_VERSION=${3:?usage: worker-watchdog.sh COMPOSE_FILE COMPOSE_ENV_FILE APP_VERSION RELEASE_SHA}
 RELEASE_SHA=${4:?usage: worker-watchdog.sh COMPOSE_FILE COMPOSE_ENV_FILE APP_VERSION RELEASE_SHA}
 
@@ -33,7 +34,7 @@ case "$RELEASE_SHA" in
     exit 2
     ;;
 esac
-export APP_VERSION RELEASE_SHA
+export APP_VERSION RELEASE_SHA APP_ENV_FILE
 
 if [ ! -f "$compose_file" ] || [ ! -f "$compose_env_file" ]; then
   echo "worker-watchdog: compose file or environment file is missing" >&2

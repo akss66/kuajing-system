@@ -52,6 +52,11 @@ describe("production worker watchdog", () => {
     expect(script).toContain("APP_VERSION and RELEASE_SHA identify different commits");
   });
 
+  it("exports the compose application env file for every compose invocation", () => {
+    expect(script).toContain('APP_ENV_FILE="$compose_env_file"');
+    expect(script).toContain("export APP_VERSION RELEASE_SHA APP_ENV_FILE");
+  });
+
   it(
     "recovers a missing worker and waits for health without targeting other services",
     () => {
@@ -74,6 +79,10 @@ describe("production worker watchdog", () => {
           `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 if [ "$1" = "compose" ]; then
+  if [ "$APP_ENV_FILE" != "$EXPECTED_APP_ENV_FILE" ]; then
+    printf '%s\\n' "missing APP_ENV_FILE for compose invocation: $*" >&2
+    exit 9
+  fi
   case " $* " in
     *" ps -q worker "*)
       if [ -f "$FAKE_WORKER_STARTED" ]; then printf '%s\\n' 'worker-new'; fi
@@ -114,6 +123,7 @@ fi
               FAKE_DOCKER_LOG: toShellPath(logFile),
               FAKE_INSPECT_COUNT: toShellPath(inspectCountFile),
               FAKE_WORKER_STARTED: toShellPath(startedFile),
+              EXPECTED_APP_ENV_FILE: toShellPath(composeEnvFile),
               PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
             },
           },
