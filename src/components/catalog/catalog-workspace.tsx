@@ -120,22 +120,6 @@ export function CatalogWorkspace({
         description="按商品分组维护标准 SKU、价格、可售状态、库存与店铺映射。这个页面是系统货盘的主工作台，不再把信息堆成一张大表。"
         title="商品与 SKU"
       />
-      <WorkspacePanel className="overflow-hidden border-border bg-background">
-        <div className="grid gap-4 px-4 py-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center sm:px-5">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-primary-hover">货盘维护路径</p>
-            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">先定位商品，再判断可售、库存和映射，最后批量处理</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              客户看到的实时货盘、下单校验结果和库存占用都依赖这里的标准 SKU。货盘维护不再和历史恢复、批量映射混在同一层，先筛选当前范围，再执行动作。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground xl:max-w-xl xl:justify-end">
-            <span>标准 SKU 保持商品与规格一致</span>
-            <span>可售状态直接影响客户下单</span>
-            <span>批量动作只作用于勾选项</span>
-          </div>
-        </div>
-      </WorkspacePanel>
       <MetricStrip
         items={[
           { hint: hasQuery || hasStatusFilter ? "按当前筛选计算" : "货盘中的可见商品组", label: "商品组", value: String(filteredGroups.length) },

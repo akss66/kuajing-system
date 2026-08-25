@@ -199,6 +199,11 @@ describe("catalog workspaces", () => {
       />,
     );
 
+    expect(screen.queryByText("货盘维护路径")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("先定位商品，再判断可售、库存和映射，最后批量处理"),
+    ).not.toBeInTheDocument();
+
     const desktopTable = screen.getByRole("table", { name: "商品与 SKU 列表" });
     expect(within(desktopTable).getByText("序号 1", { exact: true })).toBeVisible();
     for (const price of ["¥1.00", "¥2.00", "¥3.00"]) {

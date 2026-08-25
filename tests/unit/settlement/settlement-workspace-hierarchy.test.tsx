@@ -116,6 +116,10 @@ describe("settlement workspace hierarchy", () => {
     render(await AdminWalletsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("heading", { level: 1, name: "客户余额" })).toBeVisible();
+    expect(screen.queryByText("高频操作")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("先定位客户，再执行人工入账或扣减"),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "调整客户余额" })).toBeVisible();
     expect(screen.getByRole("button", { name: "核对并调整" })).toBeVisible();
     expect(screen.getByRole("table", { name: "客户余额账户" })).toBeVisible();

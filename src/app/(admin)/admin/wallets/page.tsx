@@ -82,26 +82,6 @@ export default async function AdminWalletsPage({
         ]}
       />
 
-      <WorkspacePanel className="overflow-hidden border-border bg-background">
-        <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1.2fr)_auto] lg:items-center">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-primary-hover">高频操作</p>
-            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">先定位客户，再执行人工入账或扣减</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              这里处理线下收款补录、人工退款修正和历史余额纠偏。每次调整都会即时写入资金流水与审计日志，后续无法静默修改。
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:w-[21rem]">
-            <Button asChild className="min-h-11" variant="outline">
-              <Link href="#account-balances">查看余额账户</Link>
-            </Button>
-            <Button asChild className="min-h-11">
-              <Link href="#adjust-balance">开始调整</Link>
-            </Button>
-          </div>
-        </div>
-      </WorkspacePanel>
-
       <WorkspacePanel aria-label="调整客户余额" id="adjust-balance">
         <WorkspacePanelHeader
           compact
