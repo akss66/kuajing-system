@@ -1,15 +1,90 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
   customerUsers,
   customers,
+  authUsers,
   fulfillmentOrders,
   shipmentCancellationAdjustments,
   stores,
   walletAccounts,
   walletTransactions,
 } from "@/db/schema";
+
+export type CustomerSelfProfile = {
+  account: {
+    createdAt: Date;
+    displayName: string;
+    email: string;
+    emailVerified: boolean;
+  };
+  customer: {
+    code: string;
+    name: string;
+    status: "ACTIVE" | "DISABLED";
+  };
+  stores: Array<{
+    externalStoreCode: string | null;
+    id: string;
+    name: string;
+    platform: string;
+    status: "ACTIVE" | "DISABLED";
+  }>;
+};
+
+export async function getCustomerSelfProfile(input: {
+  customerId: string;
+  userId: string;
+}): Promise<CustomerSelfProfile> {
+  const [[account], [customer], customerStores] = await Promise.all([
+    db
+      .select({
+        createdAt: authUsers.createdAt,
+        displayName: authUsers.name,
+        email: authUsers.email,
+        emailVerified: authUsers.emailVerified,
+      })
+      .from(authUsers)
+      .where(
+        and(
+          eq(authUsers.id, input.userId),
+          eq(authUsers.customerId, input.customerId),
+        ),
+      )
+      .limit(1),
+    db
+      .select({
+        code: customers.code,
+        name: customers.name,
+        status: customers.status,
+      })
+      .from(customers)
+      .where(eq(customers.id, input.customerId))
+      .limit(1),
+    db
+      .select({
+        externalStoreCode: stores.externalStoreCode,
+        id: stores.id,
+        name: stores.name,
+        platform: stores.platform,
+        status: stores.status,
+      })
+      .from(stores)
+      .where(eq(stores.customerId, input.customerId))
+      .orderBy(stores.status, stores.name, stores.id),
+  ]);
+
+  if (!account || !customer) {
+    throw new Error("CUSTOMER_ACCOUNT_NOT_FOUND");
+  }
+
+  return {
+    account,
+    customer,
+    stores: customerStores,
+  };
+}
 
 export type CustomerManagementListRow = {
   accountDisplayName: string | null;

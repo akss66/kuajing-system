@@ -525,7 +525,8 @@ describe("catalog workspaces", () => {
     );
 
     expect(screen.getByRole("heading", { name: "实时货盘" })).toBeVisible();
-    expect(screen.getByText("库存实时更新")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "货盘说明" })).not.toBeInTheDocument();
+    expect(screen.queryByText("库存实时更新")).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox")).toBeVisible();
     const results = within(screen.getByTestId("customer-catalog-results"));
     expect(results.getAllByText("¥7.60")).toHaveLength(1);
@@ -558,7 +559,7 @@ describe("catalog workspaces", () => {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
 
-    const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
+    const cards = screen.getByRole("list", { name: "客户货盘长条列表" });
     expect(
       within(cards)
         .getAllByRole("heading", { level: 3 })
@@ -574,6 +575,8 @@ describe("catalog workspaces", () => {
         (section) => section.getAttribute("data-customer-catalog-section"),
       ),
     ).toEqual(["identity", "attributes", "price", "inventory", "status", "link"]);
+    expect(firstVariant).toHaveAttribute("data-customer-catalog-row");
+    expect(firstVariant).toHaveClass("lg:grid-cols-[minmax(13rem,1.15fr)_minmax(16rem,1.35fr)_minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)]");
 
     const manualUnavailableSurfaces = screen.getAllByTestId(
       "catalog-customer-sku-manual",
@@ -596,7 +599,8 @@ describe("catalog workspaces", () => {
     expect(
       screen.queryByRole("button", { name: /下单|加入拿货单/ }),
     ).not.toBeInTheDocument();
-    expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
+    expect(document.querySelector("[data-customer-catalog-list]")).not.toBeNull();
+    expect(document.querySelector("[data-customer-catalog-cards]")).toBeNull();
     expect(document.querySelector("[data-customer-catalog-table]")).toBeNull();
     expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toBeVisible();
   });
@@ -632,6 +636,35 @@ describe("catalog workspaces", () => {
     expect(productGroup.textContent).not.toContain("采购价");
     expect(productGroup.textContent).not.toContain("总库存");
     expect(productGroup.textContent).not.toContain("货品价格");
+  });
+
+  it("keeps each SKU product link when variants in one product point to different URLs", () => {
+    render(
+      <CustomerCatalogWorkspace
+        items={[
+          {
+            ...groupedCustomerRows[0]!,
+            linkText: "规格一商品",
+            productUrl: "https://example.test/products/grouped-1",
+          },
+          {
+            ...groupedCustomerRows[1]!,
+            linkText: "规格二商品",
+            productUrl: "https://example.test/products/grouped-2",
+          },
+        ]}
+        query=""
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "规格一商品" })).toHaveAttribute(
+      "href",
+      "https://example.test/products/grouped-1",
+    );
+    expect(screen.getByRole("link", { name: "规格二商品" })).toHaveAttribute(
+      "href",
+      "https://example.test/products/grouped-2",
+    );
   });
 
   it("opens an accessible large preview when a customer selects a SKU image", () => {
@@ -708,7 +741,7 @@ describe("catalog workspaces", () => {
       Array.from(
         screen
           .getByTestId("customer-catalog-results")
-          .querySelectorAll("[data-customer-catalog-cards] > li h3"),
+          .querySelectorAll("[data-customer-catalog-list] > li h3"),
       ).map((heading) => heading.textContent);
 
     expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toHaveTextContent(
@@ -820,7 +853,7 @@ describe("catalog workspaces", () => {
     );
 
     const variantListNames = Array.from(
-      document.querySelectorAll("[data-customer-catalog-cards] > li > ul"),
+      document.querySelectorAll("[data-customer-catalog-list] > li > ul"),
     ).map((list) => list.getAttribute("aria-label"));
     expect(variantListNames).toHaveLength(2);
     expect(new Set(variantListNames).size).toBe(2);
@@ -840,7 +873,7 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
+    const cards = screen.getByRole("list", { name: "客户货盘长条列表" });
     expect(within(cards).queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getAllByText("链接不可用")).toHaveLength(1);
   });

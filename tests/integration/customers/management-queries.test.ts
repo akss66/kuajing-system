@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import {
   getCustomerManagementDetail,
+  getCustomerSelfProfile,
   listCustomerManagementRows,
 } from "@/modules/customers/queries";
 
@@ -27,6 +28,86 @@ afterEach(async () => {
   await db.delete(stores);
   await db.delete(walletAccounts);
   await db.delete(customers);
+});
+
+test("returns only the signed-in customer's account and stores", async () => {
+  const [customer, otherCustomer] = await db
+    .insert(customers)
+    .values([
+      { code: "PROFILE-OWNER", name: "个人中心客户" },
+      { code: "PROFILE-OTHER", name: "其他客户" },
+    ])
+    .returning({ id: customers.id });
+  const [account] = await db
+    .insert(authUsers)
+    .values([
+      {
+        customerId: customer.id,
+        email: "profile-owner@test.local",
+        emailVerified: true,
+        id: "profile-owner-user",
+        name: "个人中心负责人",
+        role: "user",
+      },
+      {
+        customerId: otherCustomer.id,
+        email: "profile-other@test.local",
+        id: "profile-other-user",
+        name: "其他客户负责人",
+        role: "user",
+      },
+    ])
+    .returning({ id: authUsers.id });
+  await db.insert(stores).values([
+    { customerId: customer.id, name: "个人中心一店" },
+    { customerId: customer.id, name: "个人中心二店", status: "DISABLED" },
+    { customerId: otherCustomer.id, name: "其他客户店铺" },
+  ]);
+
+  const profile = await getCustomerSelfProfile({
+    customerId: customer.id,
+    userId: account.id,
+  });
+
+  expect(profile.account).toMatchObject({
+    displayName: "个人中心负责人",
+    email: "profile-owner@test.local",
+    emailVerified: true,
+  });
+  expect(profile.customer).toMatchObject({
+    code: "PROFILE-OWNER",
+    name: "个人中心客户",
+  });
+  expect(profile.stores.map((store) => store.name)).toEqual([
+    "个人中心一店",
+    "个人中心二店",
+  ]);
+  expect(JSON.stringify(profile)).not.toContain("其他客户");
+  expect(JSON.stringify(profile)).not.toContain("profile-other@test.local");
+});
+
+test("rejects a user id that is not bound to the requested customer", async () => {
+  const [customer, otherCustomer] = await db
+    .insert(customers)
+    .values([
+      { code: "PROFILE-MISMATCH", name: "目标客户" },
+      { code: "PROFILE-INTRUDER", name: "越权客户" },
+    ])
+    .returning({ id: customers.id });
+  await db.insert(authUsers).values({
+    customerId: otherCustomer.id,
+    email: "profile-intruder@test.local",
+    id: "profile-intruder-user",
+    name: "越权账号",
+    role: "user",
+  });
+
+  await expect(
+    getCustomerSelfProfile({
+      customerId: customer.id,
+      userId: "profile-intruder-user",
+    }),
+  ).rejects.toThrow("CUSTOMER_ACCOUNT_NOT_FOUND");
 });
 
 test("uses current net amounts after a pending order package is cancelled", async () => {

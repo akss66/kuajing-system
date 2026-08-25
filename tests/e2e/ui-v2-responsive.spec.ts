@@ -447,7 +447,7 @@ async function runApprovedViewportAcceptance(
             }
           }
           if (route.path === "/portal/catalog") {
-            await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+            await expect(page.getByRole("list", { name: "客户货盘长条列表" })).toBeVisible();
             await expect(page.locator("[data-customer-catalog-table]")).toHaveCount(0);
           }
 

@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -29,11 +29,6 @@ export default async function CustomerWalletPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        action={
-          <Link aria-label="合并付款记录" className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface" href="/portal/settlements">
-            查看付款历史 <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
-        }
         description="查看可用余额、当前订单占用和最近 100 笔资金变化；充值仍通过线下微信联系管理员。"
         title="资金中心"
       />
@@ -52,7 +47,7 @@ export default async function CustomerWalletPage() {
               查看待付款订单
             </Link>
             <Link className="portal-page-primary inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-white" href="/portal/settlements">
-              打开付款历史
+              打开合并付款记录
             </Link>
           </div>
         </div>

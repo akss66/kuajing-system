@@ -490,7 +490,9 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
     await expect(page.getByText("2 个商品 / 4 个 SKU")).toBeVisible();
     await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(2);
     await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
-    await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+    await expect(page.getByRole("list", { name: "客户货盘长条列表" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "货盘说明" })).toHaveCount(0);
+    await expect(page.locator("[data-customer-catalog-row]")).toHaveCount(4);
     await expect(page.locator("[data-customer-catalog-table]")).toHaveCount(0);
 
     const searchInput = page.locator('input[name="q"]');

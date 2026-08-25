@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -87,6 +88,14 @@ export function MerchantTopbar({
           <span>{roleLabel}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {audience === "customer" ? (
+          <DropdownMenuItem asChild className="mx-0.5 my-0.5 min-h-11 cursor-pointer px-2 text-sm sm:mx-1 sm:my-1 sm:min-h-9 sm:px-2.5">
+            <Link href="/portal/profile">
+              <UserCircle2 aria-hidden="true" />
+              个人中心
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <SignOutMenuItem className="mx-0.5 my-0.5 min-h-11 cursor-pointer justify-start px-2 text-sm sm:mx-1 sm:my-1 sm:min-h-9 sm:px-2.5" />
       </DropdownMenuContent>
     </DropdownMenu>

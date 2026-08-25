@@ -11,12 +11,12 @@ export default async function CustomerPortalPage() {
   const dashboard = await getCustomerTaskDashboard(principal.customerId);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8" data-portal-home>
+    <div className="space-y-8" data-portal-home>
       <PageHeading
         action={
           <Link className="portal-page-primary inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[0.7rem] bg-primary px-5 text-sm font-semibold text-white outline-none sm:w-auto" href="/portal/imports/new">
             <Upload aria-hidden="true" className="size-4" />
-            上传新订单
+            开始上传
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         }

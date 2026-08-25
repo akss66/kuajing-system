@@ -50,7 +50,7 @@ const audiences = [
     account: accounts.customer,
     ...navigation.customer,
     genericAccountLabel: "客户账号",
-    sectionCount: 4,
+    sectionCount: 5,
     identity: {
       displayName: "渥太华演示客户",
       email: accounts.customer.email,
@@ -136,6 +136,12 @@ for (const audience of audiences) {
     await expect(accountMenu.getByText(audience.identity.email, { exact: true })).toBeVisible();
     await expect(accountMenu.getByText(audience.identity.role, { exact: true })).toBeVisible();
     await expect(accountMenu.getByText(audience.genericAccountLabel, { exact: true })).toHaveCount(0);
+    const profileMenuItem = accountMenu.getByRole("menuitem", { name: "个人中心" });
+    if (audience.path === "/portal") {
+      await expect(profileMenuItem).toHaveAttribute("href", "/portal/profile");
+    } else {
+      await expect(profileMenuItem).toHaveCount(0);
+    }
     const signOutButton = accountMenu.getByRole("menuitem", { name: "退出登录" });
     await expect(signOutButton).toBeVisible();
     if ((page.viewportSize()?.width ?? 1440) < 640) {
@@ -232,3 +238,36 @@ for (const audience of audiences) {
     expect(browserErrors, "unexpected browser console/page errors").toEqual([]);
   });
 }
+
+test("customer personal center keeps account and store information usable on desktop and mobile", async ({
+  page,
+}) => {
+  const browserErrors = observeBrowserErrors(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await resetE2EDatabaseToSeedState({
+    context: "customer personal center",
+    database: db,
+    reseed: seed,
+  });
+  await loginThroughUi(page, accounts.customer);
+  const accountTrigger =
+    (page.viewportSize()?.width ?? 1440) >= 1024 ? "打开侧栏账号菜单" : "打开账号菜单";
+  await page.getByRole("button", { name: accountTrigger }).click();
+  await page.getByRole("menuitem", { name: "个人中心" }).click();
+
+  await expect(page).toHaveURL(/\/portal\/profile$/);
+  await expect(page.getByRole("heading", { level: 1, name: "个人中心" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "绑定店铺" })).toBeVisible();
+  await expect(page.getByText(accounts.customer.email)).toBeVisible();
+  await expect(page.getByText("TEMU 渥太华演示店")).toBeVisible();
+  await expectNoPageOverflow(page);
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await waitForResponsiveLayout(page);
+  await expect(page.getByRole("heading", { level: 1, name: "个人中心" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "客户快捷导航" })).toBeVisible();
+  await expectNoPageOverflow(page);
+  await expectNoSeriousAccessibilityViolations(page);
+  expect(browserErrors, "unexpected browser console/page errors").toEqual([]);
+});

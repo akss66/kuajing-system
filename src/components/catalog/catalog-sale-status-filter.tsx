@@ -29,8 +29,8 @@ export function CatalogSaleStatusFilterControl({
               aria-label={option.accessibleName}
               aria-pressed={selected}
               className={selected
-                ? "min-h-11 flex-1 border-primary/15 bg-background px-4 text-primary-hover shadow-[0_1px_2px_rgb(24_64_54/0.10)] hover:bg-background sm:flex-none"
-                : "min-h-11 flex-1 border-transparent bg-transparent px-4 font-medium text-muted-foreground shadow-none hover:border-transparent hover:bg-background/70 hover:text-foreground sm:flex-none"}
+                ? "min-h-[45px] flex-1 border-primary/15 bg-background px-4 text-primary-hover shadow-[0_1px_2px_rgb(24_64_54/0.10)] hover:bg-background sm:flex-none"
+                : "min-h-[45px] flex-1 border-transparent bg-transparent px-4 font-medium text-muted-foreground shadow-none hover:border-transparent hover:bg-background/70 hover:text-foreground sm:flex-none"}
               key={option.value}
               onClick={() => onValueChange(option.value)}
               type="button"

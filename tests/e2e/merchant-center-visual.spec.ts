@@ -128,6 +128,23 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
+    heading: "资金中心",
+    expectedTexts: ["可用余额", "账面余额", "订单占用", "资金流水"],
+    path: "/portal/wallet",
+    screenshot: "customer-wallet",
+    shouldShowMetricStrip: false,
+  },
+  {
+    audience: "customer" as const,
+    heading: "个人中心",
+    expectedTexts: ["资金概览", "绑定店铺", "账号安全", "1 家店铺"],
+    path: "/portal/profile",
+    screenshot: "customer-profile",
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-customer-profile]",
+  },
+  {
+    audience: "customer" as const,
     heading: "多店铺批量上传",
     expectedTexts: ["还没有上传记录", "开始批量上传"],
     path: "/portal/bulk-orders",

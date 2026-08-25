@@ -8,7 +8,7 @@ export type MerchantAudience = "admin" | "customer";
 
 export type MerchantShellFrameProps = {
   audience: MerchantAudience;
-  customerContentWidth?: "focused" | "wide";
+  customerContentWidth?: "focused" | "standard" | "wide";
   navigation: ReactNode;
   topbar: ReactNode;
   desktopSidebarFooter?: ReactNode;
@@ -140,6 +140,8 @@ export function MerchantShellFrame({
                 "customer-surface-enter mx-auto w-full px-4 pt-5 sm:px-6",
               audience === "customer" && customerContentWidth === "focused" &&
                 "max-w-5xl lg:px-12 lg:py-12",
+              audience === "customer" && customerContentWidth === "standard" &&
+                "max-w-[1360px] lg:px-8 lg:py-10",
               audience === "customer" && customerContentWidth === "wide" &&
                 "max-w-[1560px] lg:px-8 lg:py-8",
             )}

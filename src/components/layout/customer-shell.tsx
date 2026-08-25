@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, ClipboardList, LayoutDashboard, PackageSearch, Upload } from "lucide-react";
+import { Banknote, ClipboardList, LayoutDashboard, PackageSearch, Upload, UserRound } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { AuthenticatedIdentity } from "@/modules/identity/principal";
@@ -37,6 +37,11 @@ const customerNavigation: Array<{
     label: "资金",
     items: [{ href: "/portal/wallet", icon: Banknote, label: "资金中心" }],
   },
+  {
+    id: "customer-account",
+    label: "账户",
+    items: [{ href: "/portal/profile", icon: UserRound, label: "个人中心" }],
+  },
 ];
 
 function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
@@ -72,7 +77,12 @@ export function CustomerShell({
   const customerContentWidth =
     pathname === "/portal/catalog" || pathname.startsWith("/portal/catalog/")
       ? "wide"
-      : "focused";
+      : pathname === "/portal" ||
+          pathname === "/portal/wallet" ||
+          pathname.startsWith("/portal/wallet/") ||
+          pathname === "/portal/profile"
+        ? "standard"
+        : "focused";
 
   return (
     <MerchantShellFrame

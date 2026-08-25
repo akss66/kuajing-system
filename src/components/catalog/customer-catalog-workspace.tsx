@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ExternalLink, ImageIcon, Search, Upload } from "lucide-react";
+import { ExternalLink, ImageIcon, Search, Upload } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -150,7 +150,13 @@ function safeAbsoluteHttpUrl(value: string) {
   }
 }
 
-function CatalogProductLink({ item }: { item: CustomerCatalogItem }) {
+function CatalogProductLink({
+  item,
+  visibleLabel,
+}: {
+  item: CustomerCatalogItem;
+  visibleLabel?: string;
+}) {
   if (!item.productUrl) {
     return <span className="text-sm text-muted-foreground">暂无链接</span>;
   }
@@ -162,12 +168,13 @@ function CatalogProductLink({ item }: { item: CustomerCatalogItem }) {
 
   return (
     <a
-      className="inline-flex min-h-11 min-w-0 items-center gap-1.5 whitespace-normal break-words text-sm font-medium text-primary underline-offset-4 hover:underline xl:min-h-0"
+      aria-label={visibleLabel ? item.linkText?.trim() || "查看商品详情" : undefined}
+      className="inline-flex min-h-11 min-w-0 items-center gap-1.5 whitespace-normal break-words text-sm font-medium text-primary underline-offset-4 hover:underline"
       href={safeUrl}
       rel="noopener noreferrer"
       target="_blank"
     >
-      <span className="line-clamp-2">{item.linkText?.trim() || "查看商品详情"}</span>
+      <span className="line-clamp-2">{visibleLabel ?? (item.linkText?.trim() || "查看商品详情")}</span>
       <ExternalLink aria-hidden="true" className="size-3.5 shrink-0" />
     </a>
   );
@@ -179,14 +186,14 @@ function ProductGroupHeader({
   group: CatalogProductGroup<CustomerCatalogGroupableItem>;
 }) {
   return (
-    <header className="min-w-0 bg-white px-4 py-4 sm:px-5">
+    <header className="min-w-0 bg-white px-4 py-3 sm:px-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
             {group.productName}
           </h3>
-          <p className="mt-1 whitespace-normal break-words text-xs text-muted-foreground">
-            商品链接：{group.linkText?.trim() || "未提供"}
+          <p className="mt-0.5 line-clamp-1 whitespace-normal break-words text-xs text-muted-foreground">
+            {group.linkText?.trim() || "暂无商品链接"}
           </p>
         </div>
         <Badge className="bg-white/80 text-primary-hover ring-1 ring-primary/10" variant="secondary">
@@ -197,7 +204,7 @@ function ProductGroupHeader({
   );
 }
 
-function CustomerCatalogCards({
+function CustomerCatalogList({
   groups,
 }: {
   groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
@@ -212,13 +219,13 @@ function CustomerCatalogCards({
 
   return (
     <ul
-      aria-label="客户货盘卡片列表"
-      className="space-y-4"
-      data-customer-catalog-cards
+      aria-label="客户货盘长条列表"
+      className="space-y-3"
+      data-customer-catalog-list
     >
       {groups.map((group) => (
         <li
-          className="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] transition-shadow hover:shadow-lg"
+          className="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)]"
           data-testid={`catalog-product-${group.productId}`}
           key={group.productId}
         >
@@ -229,48 +236,43 @@ function CustomerCatalogCards({
                 ? `${group.productName} SKU 变体`
                 : `${group.productName}（${group.variants[0]!.skuCode} 至 ${group.variants.at(-1)!.skuCode}）SKU 变体`
             }
-            className="grid gap-3 bg-slate-50/50 p-3 lg:grid-cols-2"
+            className="divide-y divide-slate-100 border-t border-slate-100"
           >
             {group.variants.map((item) => (
               <li
-                className="min-w-0 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] transition-[box-shadow,transform] hover:-translate-y-0.5 hover:shadow-md"
+                className="grid min-w-0 grid-cols-2 gap-3 px-4 py-3 transition-colors hover:bg-slate-50/70 sm:px-5 lg:grid-cols-[minmax(13rem,1.15fr)_minmax(16rem,1.35fr)_minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)] lg:items-center"
+                data-customer-catalog-row
                 data-testid={`catalog-${item.id}`}
                 key={item.id}
               >
-                <div className="flex min-w-0 items-start justify-between gap-3" data-customer-catalog-section="identity">
+                <div className="col-span-2 min-w-0 lg:col-span-1" data-customer-catalog-section="identity">
                   <VariantIdentity item={item} />
-                  <CatalogStatus item={item} />
                 </div>
                 <div
-                  className="mt-3 pl-[3.75rem]"
+                  className="col-span-2 min-w-0 pl-[3.75rem] lg:col-span-1 lg:pl-0"
                   data-customer-catalog-section="attributes"
                 >
                   <CatalogAttributes item={item} />
                 </div>
-                <div
-                  className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3"
-                >
-                  <dl data-customer-catalog-section="price">
-                    <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
-                    <dd className="mt-1 text-base font-semibold tabular-nums text-foreground">
-                      <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
-                    </dd>
-                  </dl>
-                  <dl className="text-right" data-customer-catalog-section="inventory">
-                    <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
-                    <dd className="mt-1 font-semibold tabular-nums text-foreground">
-                      {item.availableQuantity}
-                    </dd>
-                  </dl>
-                </div>
-                <span className="sr-only" data-customer-catalog-section="status">
-                  状态：{availabilityLabel(item.availabilityReason)}
-                </span>
-                <div
-                  className="mt-2 flex min-h-11 items-center justify-end"
-                  data-customer-catalog-section="link"
-                >
-                  <CatalogProductLink item={item} />
+                <dl data-customer-catalog-section="price">
+                  <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
+                  <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
+                  </dd>
+                </dl>
+                <dl data-customer-catalog-section="inventory">
+                  <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
+                  <dd className="mt-0.5 font-semibold tabular-nums text-foreground">
+                    {item.availableQuantity}
+                  </dd>
+                </dl>
+                <div className="col-span-2 flex flex-wrap items-center gap-2 lg:col-span-1 lg:justify-end">
+                  <span data-customer-catalog-section="status">
+                    <CatalogStatus item={item} />
+                  </span>
+                  <span data-customer-catalog-section="link">
+                    <CatalogProductLink item={item} visibleLabel="查看" />
+                  </span>
                 </div>
               </li>
             ))}
@@ -288,7 +290,7 @@ function CustomerCatalogResults({
 }) {
   return (
     <div data-testid="customer-catalog-results">
-      <CustomerCatalogCards groups={groups} />
+      <CustomerCatalogList groups={groups} />
     </div>
   );
 }
@@ -350,14 +352,6 @@ export function CustomerCatalogWorkspace({
         description="查看你的拿货价和扣除有效锁定后的可售库存；最终库存会在提交订单时再次校验。"
         title="实时货盘"
       />
-      <section aria-label="货盘说明" className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border py-3 text-sm text-muted-foreground">
-        {["库存实时更新", "仅显示你的拿货价", "提交前再次校验"].map((label) => (
-          <span className="inline-flex items-center gap-2" key={label}>
-            <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-            {label}
-          </span>
-        ))}
-      </section>
       <section aria-label="货盘搜索" className="rounded-[var(--portal-surface-radius)] border border-border bg-background p-3 sm:p-4" data-portal-toolbar>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -403,7 +397,7 @@ export function CustomerCatalogWorkspace({
             >
               <SelectTrigger
                 aria-label="货盘排序方式"
-                className="min-h-11 w-full sm:w-48"
+                className="min-h-[45px] w-full sm:w-48"
               >
                 <SelectValue />
               </SelectTrigger>
