@@ -102,15 +102,15 @@ describe("fulfillment actions", () => {
     const client = { getOrder: vi.fn() };
     mocks.getJifengReadClient.mockResolvedValueOnce({ client });
     mocks.refreshAllJifengShipmentStatuses.mockResolvedValueOnce({
-      failedCount: 2,
+      failedCount: 6,
       items: [
         {
-          externalOrderNo: "PO-037-SUCCEEDED",
+          externalOrderNo: "PO-037-14525583616631453",
           outcome: "REFRESHED",
           shipmentId: "00000000-0000-4000-8000-000000000001",
         },
         {
-          externalOrderNo: "PO-037-FAILED",
+          externalOrderNo: "PO-037-03856712873593669",
           outcome: "FAILED",
           shipmentId: "00000000-0000-4000-8000-000000000002",
         },
@@ -118,6 +118,26 @@ describe("fulfillment actions", () => {
           externalOrderNo: "customer@example.com\nprivate detail",
           outcome: "FAILED",
           shipmentId: "00000000-0000-4000-8000-000000000003",
+        },
+        {
+          externalOrderNo: "4165551212",
+          outcome: "FAILED",
+          shipmentId: "00000000-0000-4000-8000-000000000004",
+        },
+        {
+          externalOrderNo: "0123456789abcdef0123456789abcdef",
+          outcome: "FAILED",
+          shipmentId: "00000000-0000-4000-8000-000000000005",
+        },
+        {
+          externalOrderNo: "A".repeat(80),
+          outcome: "FAILED",
+          shipmentId: "00000000-0000-4000-8000-000000000006",
+        },
+        {
+          externalOrderNo: "AKSSINA20260825",
+          outcome: "FAILED",
+          shipmentId: "00000000-0000-4000-8000-000000000007",
         },
       ],
       refreshedCount: 1,
@@ -133,11 +153,14 @@ describe("fulfillment actions", () => {
 
     expect(result).toEqual({
       message:
-        "整单状态查询完成：已更新 1 个，跳过 0 个，失败 2 个。失败包裹：PO-037-FAILED、包裹序号 3。",
+        "整单状态查询完成：已更新 1 个，跳过 0 个，失败 6 个。失败包裹：PO-037-03856712873593669、包裹序号 3、包裹序号 4、包裹序号 5、包裹序号 6，另有 1 个请在包裹明细中查看。",
       status: "error",
     });
     expect(result.message).not.toContain("00000000-0000-4000-8000-000000000002");
     expect(result.message).not.toContain("customer@example.com");
+    expect(result.message).not.toContain("4165551212");
+    expect(result.message).not.toContain("0123456789abcdef0123456789abcdef");
+    expect(result.message).not.toContain("AKSSINA20260825");
     expect(mocks.requireAdmin).toHaveBeenCalledOnce();
     expect(mocks.refreshAllJifengShipmentStatuses).toHaveBeenCalledWith({
       client,
@@ -183,22 +206,22 @@ describe("fulfillment actions", () => {
       failedCount: 1,
       items: [
         {
-          externalOrderNo: "PO-037-CANCELLED",
+          externalOrderNo: "PO-037-14525583616631453",
           outcome: "CANCELLED",
           shipmentId: "00000000-0000-4000-8000-000000000001",
         },
         {
-          externalOrderNo: "PO-037-PENDING",
+          externalOrderNo: "PO-037-03856712873593669",
           outcome: "PENDING",
           shipmentId: "00000000-0000-4000-8000-000000000002",
         },
         {
-          externalOrderNo: "PO-037-SKIPPED",
+          externalOrderNo: "PO-037-03978483466872879",
           outcome: "SKIPPED",
           shipmentId: "00000000-0000-4000-8000-000000000003",
         },
         {
-          externalOrderNo: "PO-037-FAILED",
+          externalOrderNo: "PO-037-040800095488632401",
           outcome: "FAILED",
           shipmentId: "00000000-0000-4000-8000-000000000004",
         },
@@ -215,7 +238,7 @@ describe("fulfillment actions", () => {
       cancelAllCancellableOrderShipmentsAction({ status: "idle" }, formData),
     ).resolves.toEqual({
       message:
-        "整单取消处理完成：已取消 1 个，等待极风确认 1 个，跳过 1 个，失败 1 个。失败包裹：PO-037-FAILED。",
+        "整单取消处理完成：已取消 1 个，等待极风确认 1 个，跳过 1 个，失败 1 个。失败包裹：PO-037-040800095488632401。",
       status: "error",
     });
     expect(mocks.cancelAllCancellableOrderShipments).toHaveBeenCalledWith({

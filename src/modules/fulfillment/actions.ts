@@ -56,9 +56,7 @@ const completeOrderRefundsSchema = orderOperationSchema.extend({
   note: z.string().trim().min(2, "请填写至少 2 个字的退款凭证或备注").max(1000),
 });
 
-const SAFE_PLATFORM_ORDER_NO = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
-const UUID_REFERENCE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SAFE_TEMU_PLATFORM_ORDER_NO = /^PO-\d{3}-\d{10,32}$/i;
 const MAX_FAILED_REFERENCES = 5;
 
 function failedShipmentSummary(
@@ -71,8 +69,7 @@ function failedShipmentSummary(
     if (item.outcome !== "FAILED") return [];
     const externalOrderNo = item.externalOrderNo.trim();
     return [
-      SAFE_PLATFORM_ORDER_NO.test(externalOrderNo) &&
-      !UUID_REFERENCE.test(externalOrderNo)
+      SAFE_TEMU_PLATFORM_ORDER_NO.test(externalOrderNo)
         ? externalOrderNo
         : `包裹序号 ${index + 1}`,
     ];
