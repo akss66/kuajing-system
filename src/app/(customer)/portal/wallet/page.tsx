@@ -64,7 +64,7 @@ export default async function CustomerWalletPage() {
         >
           <header className="px-5 pb-4 pt-5 sm:px-6">
             <h2 className="text-base font-semibold text-foreground" id="wallet-activity-title">资金记录</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">集中查看订单资金占用与最近 100 笔余额变化。</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">集中查看订单资金预留与最近 100 笔余额变化。</p>
           </header>
 
           {hasActivity ? (

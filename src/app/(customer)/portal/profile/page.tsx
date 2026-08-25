@@ -151,7 +151,7 @@ export default async function CustomerProfilePage() {
           <div className="border-t border-slate-100 px-5 py-5 sm:border-l sm:border-t-0 sm:px-6">
             <p className="text-xs font-medium text-muted-foreground">账面余额</p>
             <p className="mt-1 text-lg font-bold tabular-nums text-foreground">{money(wallet.balanceFen)}</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">包含正在占用的金额</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">包含订单正在预留的金额</p>
           </div>
           <div className="border-t border-slate-100 px-5 py-5 sm:border-l sm:border-t-0 sm:px-6">
             <p className="text-xs font-medium text-muted-foreground">订单预留</p>
