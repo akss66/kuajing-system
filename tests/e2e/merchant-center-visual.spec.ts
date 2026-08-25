@@ -133,6 +133,7 @@ const workspaceRoutes = [
     path: "/portal/wallet",
     screenshot: "customer-wallet",
     shouldShowMetricStrip: false,
+    workspaceSelector: "[data-settlement-workspace]",
   },
   {
     audience: "customer" as const,

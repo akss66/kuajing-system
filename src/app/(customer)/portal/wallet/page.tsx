@@ -2,7 +2,6 @@ import { ArrowDownLeft, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-re
 import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel } from "@/components/layout/workspace-panel";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
@@ -32,26 +31,6 @@ export default async function CustomerWalletPage() {
         description="查看可用余额、当前订单占用和最近 100 笔资金变化；充值仍通过线下微信联系管理员。"
         title="资金中心"
       />
-
-      <WorkspacePanel className="overflow-hidden border-[var(--portal-border-strong)] bg-background">
-        <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center sm:px-5">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-primary-hover">付款说明</p>
-            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">先看可用余额，再处理需要补付的订单</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              余额足够时，系统会自动抵扣；余额不足时，再去订单或合并付款记录里补交微信付款。这里所有数字都直接来自系统账本，不是手工备注。
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:w-[22rem]">
-            <Link className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-surface" href="/portal/orders?status=PENDING_PAYMENT">
-              查看待付款订单
-            </Link>
-            <Link className="portal-page-primary inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-white" href="/portal/settlements">
-              打开合并付款记录
-            </Link>
-          </div>
-        </div>
-      </WorkspacePanel>
 
       <SettlementWorkspace>
         <SettlementRegion

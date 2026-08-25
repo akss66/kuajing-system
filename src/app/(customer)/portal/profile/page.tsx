@@ -213,16 +213,16 @@ export default async function CustomerProfilePage() {
 
         <section
           aria-labelledby="profile-security-title"
-          className="rounded-2xl bg-[var(--portal-focus-surface)] px-5 py-5 text-[var(--portal-focus-foreground)] shadow-[0_2px_12px_rgb(0_0_0/0.03)] sm:px-6 sm:py-6"
+          className="rounded-2xl bg-white px-5 py-5 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:px-6 sm:py-6"
         >
-          <span className="flex size-11 items-center justify-center rounded-xl bg-white/10 text-white">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-[var(--portal-icon-surface)] text-primary">
             <LockKeyhole aria-hidden="true" className="size-5" />
           </span>
-          <h2 className="mt-5 text-base font-bold text-white" id="profile-security-title">账号安全</h2>
-          <p className="mt-2 text-sm leading-6 text-[var(--portal-focus-muted)]">
+          <h2 className="mt-5 text-base font-bold text-foreground" id="profile-security-title">账号安全</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             当前使用邮箱和密码登录。系统不会在个人中心展示或保存可读取的密码。
           </p>
-          <div className="mt-5 rounded-xl bg-black/10 px-4 py-3 text-sm leading-6 text-[var(--portal-focus-foreground)]">
+          <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-muted-foreground">
             如需修改登录邮箱、姓名或密码，请联系同舟行管理员核验身份后处理。
           </div>
         </section>

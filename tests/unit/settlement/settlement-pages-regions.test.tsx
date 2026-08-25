@@ -52,10 +52,10 @@ describe("settlement page regions", () => {
     expect(screen.queryByText("流水条数")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "订单资金占用" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
-    expect(screen.getByRole("link", { name: /合并付款记录/ })).toHaveAttribute(
-      "href",
-      "/portal/settlements",
-    );
+    expect(screen.queryByText("付款说明")).not.toBeInTheDocument();
+    expect(screen.queryByText("先看可用余额，再处理需要补付的订单")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "查看待付款订单" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "打开合并付款记录" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("批量付款冻结");
   });
 });

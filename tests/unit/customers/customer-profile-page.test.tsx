@@ -92,6 +92,9 @@ describe("CustomerProfilePage", () => {
       "href",
       "/portal/wallet",
     );
+    const securityPanel = screen.getByRole("heading", { level: 2, name: "账号安全" }).closest("section");
+    expect(securityPanel).toHaveClass("bg-white");
+    expect(securityPanel).not.toHaveClass("bg-[var(--portal-focus-surface)]");
     expect(screen.getByText("已停用")).toBeVisible();
     expect(screen.getByText("账号正常")).toBeVisible();
     expect(screen.queryByText("CUSTOMER")).not.toBeInTheDocument();
