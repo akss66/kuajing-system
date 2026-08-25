@@ -151,6 +151,7 @@ export default async function CustomerOrdersPage({
       />
 
       <OrderFilterBar
+        audience="customer"
         statusOptions={Object.entries(labels).map(([status, label]) => ({ label, value: status }))}
         values={filters}
       />

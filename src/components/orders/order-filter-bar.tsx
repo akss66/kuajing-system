@@ -14,6 +14,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 type FilterOption = {
   label: string;
@@ -30,6 +31,7 @@ type OrderFilterValues = {
 };
 
 type OrderFilterBarProps = {
+  audience?: "admin" | "customer";
   customerOptions?: FilterOption[];
   statusOptions: FilterOption[];
   storeOptions?: FilterOption[];
@@ -44,6 +46,7 @@ function optionLabel(options: FilterOption[] | undefined, value: string | undefi
 }
 
 export function OrderFilterBar({
+  audience = "admin",
   customerOptions = [],
   statusOptions,
   storeOptions = [],
@@ -53,6 +56,7 @@ export function OrderFilterBar({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isCustomer = audience === "customer";
 
   function replaceParams(update: (params: URLSearchParams) => void) {
     const params = new URLSearchParams(searchParams.toString());
@@ -102,10 +106,20 @@ export function OrderFilterBar({
   return (
     <section
       aria-label="订单筛选"
-      className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5"
+      className={cn(
+        "rounded-[var(--radius-surface)] bg-background p-4 sm:p-5",
+        isCustomer ? "border border-transparent" : "border border-border",
+      )}
+      data-filter-audience={audience}
+      data-portal-toolbar={isCustomer ? "" : undefined}
     >
       <form
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(150px,0.8fr))_minmax(16rem,auto)] xl:items-end"
+        className={cn(
+          "grid gap-3 sm:grid-cols-2",
+          isCustomer
+            ? "lg:grid-cols-[minmax(0,1.4fr)_minmax(11rem,0.75fr)_minmax(20rem,1.2fr)] lg:items-end"
+            : "xl:grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(150px,0.8fr))_minmax(16rem,auto)] xl:items-end",
+        )}
         onSubmit={(event) => applyFields(event, commonFields)}
       >
         <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
@@ -170,15 +184,29 @@ export function OrderFilterBar({
             </select>
           </label>
         ) : null}
-        <div className="space-y-2" data-filter-action-wrapper>
-          <div className="grid grid-cols-2 gap-2 rounded-[calc(var(--radius-control)+0.1rem)] border border-border bg-surface/65 p-1.5" data-filter-action-group>
-            <Button className="min-h-11" size="lg" type="submit">
+        <div
+          className={cn(
+            "space-y-2",
+            isCustomer && "sm:col-span-2 lg:col-span-1",
+          )}
+          data-filter-action-wrapper
+        >
+          <div
+            className={cn(
+              "grid grid-cols-2 gap-2 rounded-[calc(var(--radius-control)+0.1rem)]",
+              isCustomer
+                ? "min-w-0"
+                : "border border-border bg-surface/65 p-1.5",
+            )}
+            data-filter-action-group
+          >
+            <Button className="min-h-11 w-full" size="lg" type="submit">
               <Search aria-hidden="true" />
               筛选
             </Button>
             <Sheet onOpenChange={setDrawerOpen} open={drawerOpen}>
               <SheetTrigger asChild>
-                <Button className="min-h-11 border-transparent bg-background" size="lg" type="button" variant="outline">
+                <Button className="min-h-11 w-full bg-background" size="lg" type="button" variant="outline">
                   <Filter aria-hidden="true" />
                   更多筛选
                 </Button>
@@ -222,9 +250,11 @@ export function OrderFilterBar({
               </SheetContent>
             </Sheet>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            常用条件先筛一轮，日期等扩展条件放在右侧抽屉，避免主工作区过宽过散。
-          </p>
+          {isCustomer ? null : (
+            <p className="text-xs leading-5 text-muted-foreground">
+              常用条件先筛一轮，日期等扩展条件放在右侧抽屉，避免主工作区过宽过散。
+            </p>
+          )}
         </div>
       </form>
 

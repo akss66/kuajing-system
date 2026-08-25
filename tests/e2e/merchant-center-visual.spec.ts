@@ -510,6 +510,75 @@ for (const route of workspaceRoutes) {
   });
 }
 
+test("customer upload, order filters and catalog width keep the client interaction quality", async ({
+  page,
+}) => {
+  await loginAsAudience("customer", page);
+
+  await page.goto("/portal/imports/new");
+  const storePicker = page.getByRole("combobox", { name: "选择店铺" });
+  await expect(storePicker).toHaveAttribute("data-slot", "select-trigger");
+  await expect(storePicker).toHaveCSS("min-height", "44px");
+  await storePicker.click();
+  const storeOptions = page.getByRole("listbox");
+  await expect(storeOptions).toBeVisible();
+  await expect(storeOptions.getByRole("option")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  const dropzone = page.getByTestId("temu-workbook-dropzone");
+  await expect(dropzone).toContainText("将 Excel 文件拖到这里");
+  const dropzoneBox = await dropzone.boundingBox();
+  expect(dropzoneBox).not.toBeNull();
+  expect(dropzoneBox!.height).toBeGreaterThanOrEqual(176);
+  const droppedWorkbook = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File(["xlsx"], "拖入订单.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    return transfer;
+  });
+  await dropzone.dispatchEvent("drop", { dataTransfer: droppedWorkbook });
+  await expect(dropzone).toContainText("拖入订单.xlsx");
+  expect(
+    await page.getByLabel("TEMU 订单 Excel").evaluate((input: HTMLInputElement) =>
+      input.files?.item(0)?.name,
+    ),
+  ).toBe("拖入订单.xlsx");
+  await droppedWorkbook.dispose();
+
+  await page.goto("/portal/orders");
+  const filters = page.getByRole("region", { name: "订单筛选" });
+  await expect(filters).toHaveAttribute("data-filter-audience", "customer");
+  await expect(filters.getByText(/常用条件先筛一轮/)).toHaveCount(0);
+
+  const searchButton = filters.getByRole("button", { exact: true, name: "筛选" });
+  const moreButton = filters.getByRole("button", { name: "更多筛选" });
+  const [searchBox, moreBox] = await Promise.all([
+    searchButton.boundingBox(),
+    moreButton.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(moreBox).not.toBeNull();
+  expect(searchBox!.height).toBeGreaterThanOrEqual(44);
+  expect(moreBox!.height).toBeGreaterThanOrEqual(44);
+  expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(moreBox!.x);
+
+  const overflow = await filters.evaluate(
+    (element) => element.scrollWidth - element.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  await page.goto("/portal/catalog");
+  const catalogSurface = page.locator('[data-portal-content-width="wide"]');
+  await expect(catalogSurface).toBeVisible();
+  if ((page.viewportSize()?.width ?? 0) >= 1024) {
+    const catalogBox = await catalogSurface.boundingBox();
+    expect(catalogBox).not.toBeNull();
+    expect(catalogBox!.width).toBeGreaterThan(1050);
+  }
+});
+
 test("admin business-detail visual uses the read-only customer workspace", async ({
   page,
 }, testInfo) => {

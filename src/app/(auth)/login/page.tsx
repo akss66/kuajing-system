@@ -50,9 +50,11 @@ export default function LoginPage() {
         <p className="relative hidden shrink-0 text-xs text-login-hero-muted lg:block">业务时区 · 加拿大渥太华</p>
       </section>
 
-      <section className="flex items-center justify-center bg-login-canvas px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
+      <section className="relative flex items-center justify-center overflow-hidden bg-login-canvas px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-28 top-20 size-96 rounded-full bg-primary/8 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-36 left-10 size-80 rounded-full bg-primary-soft/60 blur-3xl" />
         <div
-          className="w-full max-w-[29rem] sm:rounded-xl sm:border sm:border-border sm:bg-background sm:p-9 lg:p-10"
+          className="relative w-full max-w-[31rem] rounded-[1.75rem] border border-white/70 bg-background/80 p-7 shadow-[0_28px_90px_rgb(15_55_47/0.12)] backdrop-blur-xl sm:p-10 lg:p-11"
           data-login-panel
         >
           <div className="mb-8">

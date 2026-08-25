@@ -68,9 +68,16 @@ export function CustomerShell({
   children: ReactNode;
   identity: AuthenticatedIdentity;
 }) {
+  const pathname = usePathname();
+  const customerContentWidth =
+    pathname === "/portal/catalog" || pathname.startsWith("/portal/catalog/")
+      ? "wide"
+      : "focused";
+
   return (
     <MerchantShellFrame
       audience="customer"
+      customerContentWidth={customerContentWidth}
       desktopSidebarFooter={
         <MerchantTopbar
           audience="customer"

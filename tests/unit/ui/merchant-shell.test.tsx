@@ -334,4 +334,29 @@ describe("merchant shells", () => {
       "page",
     );
   });
+
+  it("gives the real-time catalog a wider browsing workspace without widening focused tasks", () => {
+    navigationState.pathname = "/portal/catalog";
+
+    const { rerender } = render(
+      <CustomerShell identity={customerIdentity}>
+        <div>实时货盘内容</div>
+      </CustomerShell>,
+    );
+
+    const catalogSurface = document.querySelector<HTMLElement>("[data-portal-content-width]");
+    expect(catalogSurface).toHaveAttribute("data-portal-content-width", "wide");
+    expect(catalogSurface).toHaveClass("max-w-[1560px]");
+
+    navigationState.pathname = "/portal/orders";
+    rerender(
+      <CustomerShell identity={customerIdentity}>
+        <div>订单内容</div>
+      </CustomerShell>,
+    );
+
+    const focusedSurface = document.querySelector<HTMLElement>("[data-portal-content-width]");
+    expect(focusedSurface).toHaveAttribute("data-portal-content-width", "focused");
+    expect(focusedSurface).toHaveClass("max-w-5xl");
+  });
 });

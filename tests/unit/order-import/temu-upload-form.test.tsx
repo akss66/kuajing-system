@@ -23,15 +23,26 @@ describe("TEMU upload form", () => {
     );
 
     expect(screen.getByLabelText("选择店铺")).toBeRequired();
+    expect(screen.getByRole("combobox", { name: "选择店铺" })).toHaveAttribute(
+      "data-slot",
+      "select-trigger",
+    );
+    expect(document.querySelector("select[name='storeId']")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     expect(screen.getByLabelText("TEMU 订单 Excel")).toBeRequired();
     expect(screen.getByLabelText("TEMU 订单 Excel")).toHaveAttribute(
       "accept",
       ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    expect(screen.getByRole("button", { name: "上传并生成预览" })).toHaveClass(
-      "min-h-11",
+    expect(screen.getByTestId("temu-workbook-dropzone")).toHaveTextContent(
+      "将 Excel 文件拖到这里",
     );
-    expect(screen.getByText("尚未选择文件")).toBeVisible();
+    expect(screen.getByRole("button", { name: "上传并生成预览" })).toHaveClass(
+      "min-h-12",
+    );
+    expect(screen.getByText("将 Excel 文件拖到这里")).toBeVisible();
     fireEvent.change(screen.getByLabelText("TEMU 订单 Excel"), {
       target: {
         files: [
@@ -42,6 +53,17 @@ describe("TEMU upload form", () => {
       },
     });
     expect(screen.getByText("订单导出.xlsx")).toBeVisible();
+
+    fireEvent.drop(screen.getByTestId("temu-workbook-dropzone"), {
+      dataTransfer: {
+        files: [
+          new File(["replacement"], "拖入订单.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          }),
+        ],
+      },
+    });
+    expect(screen.getByText("拖入订单.xlsx")).toBeVisible();
     expect(screen.getByText(/系统不会保存原始 Excel 文件/)).toBeVisible();
   });
 });

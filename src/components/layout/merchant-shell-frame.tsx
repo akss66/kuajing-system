@@ -8,6 +8,7 @@ export type MerchantAudience = "admin" | "customer";
 
 export type MerchantShellFrameProps = {
   audience: MerchantAudience;
+  customerContentWidth?: "focused" | "wide";
   navigation: ReactNode;
   topbar: ReactNode;
   desktopSidebarFooter?: ReactNode;
@@ -55,6 +56,7 @@ export function MerchantBrand({
 
 export function MerchantShellFrame({
   audience,
+  customerContentWidth = "focused",
   navigation,
   topbar,
   desktopSidebarFooter,
@@ -133,11 +135,15 @@ export function MerchantShellFrame({
           tabIndex={-1}
         >
           <div
-            className={
-              audience === "customer"
-                ? "customer-surface-enter mx-auto w-full max-w-5xl px-4 pt-5 sm:px-6 lg:px-12 lg:py-12"
-                : undefined
-            }
+            className={cn(
+              audience === "customer" &&
+                "customer-surface-enter mx-auto w-full px-4 pt-5 sm:px-6",
+              audience === "customer" && customerContentWidth === "focused" &&
+                "max-w-5xl lg:px-12 lg:py-12",
+              audience === "customer" && customerContentWidth === "wide" &&
+                "max-w-[1560px] lg:px-8 lg:py-8",
+            )}
+            data-portal-content-width={audience === "customer" ? customerContentWidth : undefined}
           >
             {children}
           </div>

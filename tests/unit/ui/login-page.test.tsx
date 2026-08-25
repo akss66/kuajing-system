@@ -31,6 +31,10 @@ describe("login page", () => {
     expect(screen.getByLabelText("登录密码")).toHaveAttribute("type", "password");
     expect(screen.getByLabelText("登录密码")).not.toHaveAttribute("placeholder");
     expect(screen.getByRole("button", { name: "登录系统" })).toBeEnabled();
+    expect(document.querySelector("[data-login-panel]")).toHaveClass(
+      "rounded-[1.75rem]",
+      "backdrop-blur-xl",
+    );
     expect(screen.getByRole("img", { name: "同舟行跨境" })).toHaveAttribute(
       "src",
       expect.stringContaining("tongzhouxing-logo.png"),

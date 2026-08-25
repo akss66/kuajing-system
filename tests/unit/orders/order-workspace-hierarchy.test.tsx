@@ -200,6 +200,14 @@ describe("order workspace hierarchy", () => {
   it("renders mobile order cards with store, amount, status and a visible next action", async () => {
     render(await CustomerOrdersPage({ searchParams: Promise.resolve({}) }));
 
+    const filters = screen.getByRole("region", { name: "订单筛选" });
+    expect(filters).toHaveAttribute("data-filter-audience", "customer");
+    expect(
+      within(filters).queryByText(/常用条件先筛一轮/),
+    ).not.toBeInTheDocument();
+    expect(within(filters).getByRole("button", { name: "筛选" })).toBeVisible();
+    expect(within(filters).getByRole("button", { name: "更多筛选" })).toBeVisible();
+
     const card = screen.getByRole("article", { name: "订单 FH-20260812-01" });
     expect(card).toHaveAttribute("data-mobile-order-card");
     expect(within(card).getByText("多伦多一店")).toBeVisible();
