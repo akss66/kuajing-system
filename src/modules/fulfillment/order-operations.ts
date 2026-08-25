@@ -5,6 +5,7 @@ import {
   auditLogs,
   fulfillmentOrders,
   shipmentCancellationAdjustments,
+  shipmentFulfillments,
 } from "@/db/schema";
 import { cancelFulfillmentOrder, OrderLifecycleError } from "@/modules/orders/lifecycle";
 
@@ -203,7 +204,7 @@ export async function cancelAllCancellableOrderShipments(input: {
     shipmentId: string;
   }> = [];
   for (const shipment of snapshot.shipments) {
-    if (!shipment.status || NON_CANCELLABLE_STATUSES.has(shipment.status)) {
+    if (shipment.status && NON_CANCELLABLE_STATUSES.has(shipment.status)) {
       items.push({
         externalOrderNo: shipment.externalOrderNo,
         outcome: "SKIPPED",
@@ -212,6 +213,19 @@ export async function cancelAllCancellableOrderShipments(input: {
       continue;
     }
     try {
+      if (!shipment.status) {
+        // The parent cancellation can lose a race after only some child
+        // fulfillments were enqueued. Materialize the untouched child so it
+        // goes through the canonical package cancellation transaction instead
+        // of leaking its reservation, financial adjustment and duplicate keys.
+        await db
+          .insert(shipmentFulfillments)
+          .values({
+            erpNo: `TZX-${shipment.shipmentId.replaceAll("-", "")}`,
+            shipmentId: shipment.shipmentId,
+          })
+          .onConflictDoNothing();
+      }
       let result: Awaited<ReturnType<typeof cancelJifengShipment>>;
       try {
         result = await cancelJifengShipment({

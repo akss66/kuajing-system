@@ -1004,6 +1004,137 @@ describe("paid package cancellation refunds", () => {
     ]);
   });
 
+  test("locally cancels an unqueued sibling when parent cancellation races with Jifeng fulfillment", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: "DIRECT_OFFLINE",
+      walletAmountFen: 0,
+    });
+    await db
+      .delete(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[1].id));
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        externalOrderNo: "JF-BOUND-BEFORE-SIBLING-QUEUE",
+        jifengStatus: 2,
+        status: "FULFILLING",
+        submittedAt: new Date("2026-08-20T01:05:00.000Z"),
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    let signalRemoteStarted!: () => void;
+    let releaseRemote!: () => void;
+    const remoteStarted = new Promise<void>((resolve) => {
+      signalRemoteStarted = resolve;
+    });
+    const remoteReleased = new Promise<void>((resolve) => {
+      releaseRemote = resolve;
+    });
+    const cancelOrder = vi.fn(async () => {
+      signalRemoteStarted();
+      await remoteReleased;
+      return { data: null };
+    });
+
+    const firstCancellation = cancelAllCancellableOrderShipments({
+      actorUserId: fixture.admin.id,
+      getClient: async () => ({ cancelOrder }),
+      now: new Date("2026-08-20T01:06:00.000Z"),
+      orderId: fixture.order.id,
+      reason: "履约入队竞态下取消全部可取消包裹",
+    });
+    await remoteStarted;
+    const concurrentCancellation = await cancelAllCancellableOrderShipments({
+      actorUserId: fixture.admin.id,
+      getClient: async () => ({ cancelOrder }),
+      now: new Date("2026-08-20T01:06:30.000Z"),
+      orderId: fixture.order.id,
+      reason: "重复点击整单取消",
+    });
+    releaseRemote();
+    const firstResult = await firstCancellation;
+
+    const combined = [firstResult, concurrentCancellation].reduce(
+      (totals, result) => ({
+        cancelledCount: totals.cancelledCount + result.cancelledCount,
+        failedCount: totals.failedCount + result.failedCount,
+        pendingCount: totals.pendingCount + result.pendingCount,
+        skippedCount: totals.skippedCount + result.skippedCount,
+      }),
+      { cancelledCount: 0, failedCount: 0, pendingCount: 0, skippedCount: 0 },
+    );
+    expect(combined).toEqual({
+      cancelledCount: 1,
+      failedCount: 0,
+      pendingCount: 1,
+      skippedCount: 2,
+    });
+    expect(cancelOrder).toHaveBeenCalledTimes(1);
+
+    const packageStates = await db.execute<{
+      deduplicationActive: boolean;
+      externalOrderNo: string;
+      fulfillmentStatus: string;
+    }>(sql`
+      select
+        s.external_order_no as "externalOrderNo",
+        s.deduplication_active as "deduplicationActive",
+        f.status as "fulfillmentStatus"
+      from order_shipments s
+      inner join shipment_fulfillments f on f.shipment_id = s.id
+      where s.order_id = ${fixture.order.id}
+      order by s.external_order_no
+    `);
+    expect(packageStates).toEqual([
+      {
+        deduplicationActive: true,
+        externalOrderNo: fixture.shipments[0].externalOrderNo,
+        fulfillmentStatus: "CANCEL_PENDING",
+      },
+      {
+        deduplicationActive: false,
+        externalOrderNo: fixture.shipments[1].externalOrderNo,
+        fulfillmentStatus: "CANCELLED",
+      },
+    ]);
+    await expect(
+      db
+        .select({ quantity: inventoryReservations.quantity })
+        .from(inventoryReservations)
+        .where(eq(inventoryReservations.status, "ACTIVE")),
+    ).resolves.toEqual([{ quantity: 1 }]);
+    await expect(refundRows(fixture.order.id)).resolves.toEqual([
+      expect.objectContaining({
+        merchandiseAmountFen: 700,
+        offlineAmountFen: 2_000,
+        shipmentId: fixture.shipments[1].id,
+        shippingFeeFen: 1_300,
+        status: "PENDING_OFFLINE",
+        totalAmountFen: 2_000,
+        walletAmountFen: 0,
+      }),
+    ]);
+    await expect(getAdminOrderDetail(fixture.order.id)).resolves.toMatchObject({
+      adjustedAmountFen: 2_000,
+      cancellationState: "PARTIAL",
+      netAmountFen: 1_800,
+    });
+    const localCancellationAudits = await db.execute<{ action: string }>(sql`
+      select action
+      from audit_logs
+      where entity_id = ${fixture.shipments[1].id}
+        and action in (
+          'SHIPMENT_CANCELLATION_ADJUSTMENT_CREATED',
+          'SHIPMENT_CANCELLED_BEFORE_SUBMISSION'
+        )
+      order by action
+    `);
+    expect(localCancellationAudits.map((row) => row.action)).toEqual([
+      "SHIPMENT_CANCELLATION_ADJUSTMENT_CREATED",
+      "SHIPMENT_CANCELLED_BEFORE_SUBMISSION",
+    ]);
+    await expect(refundRows(fixture.order.id)).resolves.toHaveLength(1);
+  });
+
   test("completes all offline refunds atomically and stays idempotent under concurrency", async () => {
     const fixture = await createPaidTwoPackageOrder({
       paymentMode: "DIRECT_OFFLINE",
