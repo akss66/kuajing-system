@@ -137,7 +137,7 @@ export function MerchantShellFrame({
           <div
             className={cn(
               audience === "customer" &&
-                "customer-surface-enter mx-auto w-full px-4 pt-5 sm:px-6",
+                "mx-auto w-full px-4 pt-5 sm:px-6",
               audience === "customer" && customerContentWidth === "focused" &&
                 "max-w-5xl lg:px-12 lg:py-12",
               audience === "customer" && customerContentWidth === "standard" &&

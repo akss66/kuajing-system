@@ -219,20 +219,6 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes portal-content-focus {
-  from {
-    opacity: 0.94;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-.customer-surface-enter {
-  animation: portal-content-focus var(--motion-enter) var(--ease-portal-out) both;
-}
-
 [data-merchant-shell="customer"] {
   --merchant-sidebar-width: 16rem;
   --merchant-topbar: rgb(249 250 251);

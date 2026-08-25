@@ -300,10 +300,73 @@ describe("catalog asset route", () => {
         );
 
         expect(response.status).toBe(200);
-        expect(response.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
+        expect(response.headers.get("cache-control")).toBe(
+          "private, max-age=3600, must-revalidate",
+        );
+        expect(response.headers.get("etag")).toMatch(/^"catalog-[0-9a-f]{64}-original"$/);
         expect(response.headers.get("content-type")).toBe("image/png");
         expect(response.headers.get("x-content-type-options")).toBe("nosniff");
         expect(Buffer.compare(Buffer.from(await response.arrayBuffer()), seeded.bytes)).toBe(0);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("serves a compact WebP thumbnail and honors conditional requests", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route, storage }) => {
+        const seeded = await seedCatalogAsset(storage);
+        const cookie = await createSessionCookie(auth, { role: "admin", scope: "admin" });
+        const url = `http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}?variant=thumbnail`;
+        const response = await route.GET(
+          new Request(url, { headers: { cookie } }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe("image/webp");
+        expect(response.headers.get("cache-control")).toBe(
+          "private, max-age=3600, must-revalidate",
+        );
+        const etag = response.headers.get("etag");
+        expect(etag).toMatch(/^"catalog-[0-9a-f]{64}-thumbnail"$/);
+        const metadata = await sharp(Buffer.from(await response.arrayBuffer())).metadata();
+        expect(metadata.format).toBe("webp");
+        expect(metadata.width).toBeLessThanOrEqual(96);
+        expect(metadata.height).toBeLessThanOrEqual(96);
+
+        const notModified = await route.GET(
+          new Request(url, { headers: { cookie, "if-none-match": etag! } }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+        expect(notModified.status).toBe(304);
+        expect((await notModified.arrayBuffer()).byteLength).toBe(0);
+      });
+    } finally {
+      await rm(assetDir, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects unsupported asset variants", async () => {
+    const assetDir = await mkdtemp(join(tmpdir(), "catalog-assets-route-"));
+
+    try {
+      await withModules(assetDir, async ({ auth, route, storage }) => {
+        const seeded = await seedCatalogAsset(storage);
+        const cookie = await createSessionCookie(auth, { role: "admin", scope: "admin" });
+        const response = await route.GET(
+          new Request(
+            `http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}?variant=unsupported`,
+            { headers: { cookie } },
+          ),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({ code: "INVALID_VARIANT" });
       });
     } finally {
       await rm(assetDir, { force: true, recursive: true });
@@ -344,6 +407,27 @@ describe("catalog asset route", () => {
         expect(otherResponse.status).toBe(200);
         expect(Buffer.compare(Buffer.from(await ownerResponse.arrayBuffer()), seeded.bytes)).toBe(0);
         expect(Buffer.compare(Buffer.from(await otherResponse.arrayBuffer()), seeded.bytes)).toBe(0);
+
+        const thumbnailUrl =
+          `http://127.0.0.1:3000/api/catalog-assets/${seeded.assetId}?variant=thumbnail`;
+        const thumbnailResponse = await route.GET(
+          new Request(thumbnailUrl, { headers: { cookie: ownerCookie } }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+        expect(thumbnailResponse.status).toBe(200);
+        expect(thumbnailResponse.headers.get("content-type")).toBe("image/webp");
+        expect(thumbnailResponse.headers.get("vary")).toBe("Cookie");
+        const thumbnailEtag = thumbnailResponse.headers.get("etag");
+        expect(thumbnailEtag).toMatch(/^"catalog-[0-9a-f]{64}-thumbnail"$/);
+
+        const notModified = await route.GET(
+          new Request(thumbnailUrl, {
+            headers: { cookie: ownerCookie, "if-none-match": thumbnailEtag! },
+          }),
+          { params: Promise.resolve({ assetId: seeded.assetId }) },
+        );
+        expect(notModified.status).toBe(304);
+        expect(notModified.headers.get("vary")).toBe("Cookie");
       });
     } finally {
       await rm(assetDir, { force: true, recursive: true });

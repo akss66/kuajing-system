@@ -452,6 +452,10 @@ describe("catalog workspaces", () => {
     for (const image of productImages) {
       expect(image).toHaveAttribute("width", "48");
       expect(image).toHaveAttribute("height", "48");
+      expect(image).toHaveAttribute(
+        "src",
+        "/api/catalog-assets/asset-34-2?variant=thumbnail",
+      );
     }
     expect(
       screen.getAllByRole("img", { name: "日常发圈 图片缺失" }),
@@ -883,7 +887,7 @@ describe("catalog workspaces", () => {
     expect(screen.getAllByText("链接不可用")).toHaveLength(1);
   });
 
-  it("renders protected catalog asset URLs through the image component", () => {
+  it("loads a protected thumbnail first and fetches the original only for preview", () => {
     render(
       <CustomerCatalogWorkspace
         items={[
@@ -916,7 +920,16 @@ describe("catalog workspaces", () => {
     const images = screen.getAllByRole("img", { name: "Demo Cable 商品图片" });
     expect(images).toHaveLength(1);
     for (const image of images) {
-      expect(image).toHaveAttribute("src", "/api/catalog-assets/asset-1");
+      expect(image).toHaveAttribute(
+        "src",
+        "/api/catalog-assets/asset-1?variant=thumbnail",
+      );
     }
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 Demo Cable 大图" }));
+    expect(screen.getByRole("img", { name: "Demo Cable 大图" })).toHaveAttribute(
+      "src",
+      "/api/catalog-assets/asset-1",
+    );
   });
 });

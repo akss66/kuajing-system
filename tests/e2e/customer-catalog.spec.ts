@@ -383,17 +383,27 @@ test("customer sees only its own price and real available inventory", async ({ p
 
   await expect(protectedImage).toBeVisible();
   const protectedImageUrl = await protectedImage.getAttribute("src");
-  expect(protectedImageUrl).toMatch(/^\/api\/catalog-assets\//);
+  expect(protectedImageUrl).toMatch(
+    /^\/api\/catalog-assets\/[0-9a-f-]+\?variant=thumbnail$/,
+  );
   const protectedImageResponse = await page.context().request.get(
     new URL(protectedImageUrl ?? "", page.url()).toString(),
   );
   expect(protectedImageResponse.status()).toBe(200);
+  expect(protectedImageResponse.headers()["content-type"]).toBe("image/webp");
+  expect(protectedImageResponse.headers()["cache-control"]).toBe(
+    "private, max-age=3600, must-revalidate",
+  );
   await expect
     .poll(() => protectedImage.evaluate((element) => (element as HTMLImageElement).naturalWidth))
     .toBeGreaterThan(0);
   await availableRow.getByRole("button", { name: `查看 ${fixture.productName} 大图` }).click();
   const imagePreview = page.getByRole("dialog", { name: `${fixture.productName} 图片预览` });
-  await expect(imagePreview.getByRole("img", { name: `${fixture.productName} 大图` })).toBeVisible();
+  const originalImage = imagePreview.getByRole("img", { name: `${fixture.productName} 大图` });
+  await expect(originalImage).toBeVisible();
+  expect(await originalImage.getAttribute("src")).toMatch(
+    /^\/api\/catalog-assets\/[0-9a-f-]+$/,
+  );
   await imagePreview.getByRole("button", { name: "关闭图片预览" }).click();
   await expect(imagePreview).toHaveCount(0);
 

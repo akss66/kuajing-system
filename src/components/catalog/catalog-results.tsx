@@ -15,6 +15,7 @@ import { formatMilliYuan } from "@/modules/catalog/unit-price";
 
 import type { CatalogRow } from "./catalog-workspace";
 import type { CatalogWorkspaceProps } from "./catalog-workspace";
+import { catalogThumbnailUrl } from "./catalog-asset-url";
 import { ManageSkuDrawer } from "./catalog-mutation-drawers";
 
 type CatalogGroup = CatalogProductGroup<CatalogRow>;
@@ -35,9 +36,12 @@ function CatalogImage({ row }: { row: CatalogRow }) {
       <Image
         alt={`${row.productName} 商品图片`}
         className="size-12 shrink-0 rounded-[var(--radius-control)] border border-border object-cover"
+        decoding="async"
+        fetchPriority="low"
         height={48}
+        loading="lazy"
         sizes="48px"
-        src={row.imageUrl}
+        src={catalogThumbnailUrl(row.imageUrl)}
         unoptimized
         width={48}
       />

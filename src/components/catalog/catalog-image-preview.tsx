@@ -6,6 +6,8 @@ import { Dialog } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
 
+import { catalogThumbnailUrl } from "./catalog-asset-url";
+
 type CatalogImagePreviewProps = {
   imageUrl: string;
   productName: string;
@@ -20,15 +22,18 @@ export function CatalogImagePreview({
       <Dialog.Trigger asChild>
         <button
           aria-label={`查看 ${productName} 大图`}
-          className="group relative size-12 shrink-0 overflow-hidden rounded-[var(--radius-control)] border border-border bg-background outline-none transition-[border-color] hover:border-primary focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/22"
+          className="group relative size-12 shrink-0 overflow-hidden rounded-[var(--radius-control)] border border-border bg-surface outline-none transition-[border-color] hover:border-primary focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/22"
           type="button"
         >
           <Image
             alt={`${productName} 商品图片`}
             className="size-full object-cover transition-transform duration-150 group-hover:scale-105 motion-reduce:transition-none"
+            decoding="async"
+            fetchPriority="low"
             height={48}
+            loading="lazy"
             sizes="48px"
-            src={imageUrl}
+            src={catalogThumbnailUrl(imageUrl)}
             unoptimized
             width={48}
           />
@@ -50,6 +55,7 @@ export function CatalogImagePreview({
               alt={`${productName} 大图`}
               className="max-h-[calc(100dvh-10rem)] h-auto w-auto max-w-full object-contain"
               height={1200}
+              loading="eager"
               sizes="(max-width: 768px) calc(100vw - 4rem), 800px"
               src={imageUrl}
               unoptimized
