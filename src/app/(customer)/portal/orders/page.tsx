@@ -161,7 +161,7 @@ export default async function CustomerOrdersPage({
           <h2 className="text-base font-semibold text-foreground" id="customer-order-list-title">
             {pendingOnly ? "待付款清单" : isHistoricalView ? `已${historyLabel}拿货单` : "订单列表"}
           </h2>
-          <p className="mt-1 text-sm text-slate-500">点击任一订单可查看付款记录、库存锁定与明细状态。</p>
+          <p className="mt-1 text-sm text-slate-600">点击任一订单可查看付款记录、库存锁定与明细状态。</p>
         </div>
         {orders.length ? (
           <div className="grid gap-3">
@@ -188,7 +188,7 @@ export default async function CustomerOrdersPage({
                         <span>{order.storeName}</span>
                         <span> · {order.totalPackageCount} 包 · {order.totalQuantity} 件</span>
                       </span>
-                      <span className="mt-2 block text-xs font-medium text-slate-400">下一步：{action}</span>
+                      <span className="mt-2 block text-xs font-medium text-slate-600">下一步：{action}</span>
                     </span>
                     <span className="flex shrink-0 items-center justify-between gap-4 sm:flex-col sm:items-end sm:text-right">
                       <strong className="block text-lg font-semibold tabular-nums text-ink">{money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}</strong>

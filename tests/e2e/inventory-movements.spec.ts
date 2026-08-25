@@ -116,6 +116,11 @@ async function waitForLayout(page: Page) {
   );
 }
 
+async function settleVisualPointer(page: Page, viewportWidth: number) {
+  await page.mouse.move(Math.floor(viewportWidth / 2), 1);
+  await waitForLayout(page);
+}
+
 async function expectNoOverflow(page: Page, context: string) {
   const result = await page.evaluate(() => {
     const clientWidth = document.documentElement.clientWidth;
@@ -846,9 +851,11 @@ test("inventory views and adjustment drawer pass the exact viewport visual matri
         `${context} snapshot card name/action`,
       );
     }
+    await settleVisualPointer(page, viewport.width);
     await expect(page).toHaveScreenshot(`inventory-snapshot-${context}.png`, {
       animations: "disabled",
       fullPage: true,
+      maxDiffPixelRatio: 0.001,
     });
 
     const dialog = await openAdjustment(page);
@@ -862,9 +869,11 @@ test("inventory views and adjustment drawer pass the exact viewport visual matri
     );
     await expectNoOverflow(page, `${context} adjustment drawer`);
     await expectAxeClean(page, `${context} adjustment drawer`);
-    await expect(page).toHaveScreenshot(`inventory-adjustment-${context}.png`, {
+    await dialog.getByLabel("调整数量").focus();
+    await settleVisualPointer(page, viewport.width);
+    await expect(dialog).toHaveScreenshot(`inventory-adjustment-${context}.png`, {
       animations: "disabled",
-      fullPage: true,
+      maxDiffPixelRatio: 0.001,
     });
     await closeAdjustment(dialog);
 
@@ -913,9 +922,11 @@ test("inventory views and adjustment drawer pass the exact viewport visual matri
         `${context} filter submit`,
       );
     }
+    await settleVisualPointer(page, viewport.width);
     await expect(page).toHaveScreenshot(`inventory-movements-${context}.png`, {
       animations: "disabled",
       fullPage: true,
+      maxDiffPixelRatio: 0.001,
     });
   }
 

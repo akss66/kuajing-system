@@ -57,17 +57,14 @@ const navigation = {
     drawerTitle: "管理员导航",
     groups: ["客户与货品", "订单履约", "资金与数据", "系统管理"],
     label: "管理员主导航",
+    links: ["运营总览", "客户与店铺", "订单管理", "收款审核", "系统健康"],
   },
   customer: {
     drawerTitle: "客户导航",
-    groups: ["拿货", "履约", "资金"],
+    groups: ["拿货", "履约", "资金", "账户"],
     label: "客户主导航",
+    links: ["客户首页", "实时货盘", "上传订单", "我的订单", "资金中心", "个人中心"],
   },
-} as const;
-
-const navigationSectionCounts = {
-  admin: 5,
-  customer: 4,
 } as const;
 
 function observeBrowserErrors(page: Page) {
@@ -173,12 +170,12 @@ async function expectShellAndNavigation(
 
     const desktopNavigation = page.getByRole("navigation", { name: nav.label });
     await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-    await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
-      navigationSectionCounts[audience],
-    );
     for (const group of nav.groups) {
       await expect(desktopNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
       await expect(desktopNavigation.getByRole("button", { name: group })).toHaveCount(0);
+    }
+    for (const link of nav.links) {
+      await expect(desktopNavigation.getByRole("link", { exact: true, name: link })).toBeVisible();
     }
     await expect(desktopNavigation.locator("[aria-expanded]")).toHaveCount(0);
     return;
@@ -195,12 +192,12 @@ async function expectShellAndNavigation(
   await expect(drawer).toBeVisible();
   const mobileNavigation = drawer.getByRole("navigation", { name: nav.label });
   await expect(mobileNavigation.locator('[aria-current="page"]')).toHaveCount(1);
-  await expect(mobileNavigation.locator("[data-navigation-section]")).toHaveCount(
-    navigationSectionCounts[audience],
-  );
   for (const group of nav.groups) {
     await expect(mobileNavigation.getByRole("heading", { level: 2, name: group })).toBeVisible();
     await expect(mobileNavigation.getByRole("button", { name: group })).toHaveCount(0);
+  }
+  for (const link of nav.links) {
+    await expect(mobileNavigation.getByRole("link", { exact: true, name: link })).toBeVisible();
   }
   await expect(mobileNavigation.locator("[aria-expanded]")).toHaveCount(0);
   const mobileLinks = mobileNavigation.getByRole("link");
@@ -348,6 +345,13 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
       keyTarget: { name: "搜索 SKU、商品、规格或链接文字", role: "searchbox" },
       pageType: "resource-list",
       path: "/portal/catalog",
+    },
+    {
+      audience: "customer",
+      heading: "我的订单",
+      keyTarget: { name: "去付款", role: "link" },
+      pageType: "resource-list",
+      path: "/portal/orders",
     },
     {
       audience: "customer",
