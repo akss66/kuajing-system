@@ -28,9 +28,21 @@ $checksumFile = "$resolvedBackup.sha256"
 if (-not (Test-Path -LiteralPath $checksumFile -PathType Leaf)) {
   throw "Backup checksum is required before restore: $checksumFile"
 }
-$expectedChecksum = (Get-Content -LiteralPath $checksumFile -Encoding ascii -Raw).Trim().ToLowerInvariant()
-if ($expectedChecksum -notmatch '^[0-9a-f]{64}$') {
+$checksumRecord = (Get-Content -LiteralPath $checksumFile -Encoding ascii -Raw).Trim()
+$checksumMatch = [System.Text.RegularExpressions.Regex]::Match(
+  $checksumRecord,
+  '^(?<hash>[0-9a-fA-F]{64})(?:\s+\*?(?<file>.+))?$'
+)
+if (-not $checksumMatch.Success) {
   throw "Backup checksum file is invalid: $checksumFile"
+}
+$expectedChecksum = $checksumMatch.Groups["hash"].Value.ToLowerInvariant()
+$recordedFile = $checksumMatch.Groups["file"].Value.Trim()
+if ($recordedFile) {
+  $recordedFileName = [System.IO.Path]::GetFileName($recordedFile)
+  if ($recordedFileName -ne [System.IO.Path]::GetFileName($resolvedBackup)) {
+    throw "Backup checksum file does not match backup file name: $checksumFile"
+  }
 }
 $actualChecksum = (Get-FileHash -LiteralPath $resolvedBackup -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualChecksum -ne $expectedChecksum) {
@@ -41,12 +53,16 @@ $containerId = (docker compose ps -q postgres).Trim()
 if (-not $containerId) {
   throw "The docker compose postgres service is not running."
 }
+$postgresUser = (docker compose exec -T postgres printenv POSTGRES_USER).Trim()
+if (-not $postgresUser) {
+  throw "The postgres service does not expose POSTGRES_USER."
+}
 
-$databaseExists = (docker compose exec -T postgres psql -U tongzhouxing -d postgres -Atqc "select 1 from pg_database where datname = '$TargetDatabaseName'").Trim()
+$databaseExists = (docker compose exec -T postgres psql -U $postgresUser -d postgres -Atqc "select 1 from pg_database where datname = '$TargetDatabaseName'").Trim()
 if ($databaseExists -ne "1") {
   throw "Target database does not exist: $TargetDatabaseName. Create an empty database explicitly before restoring."
 }
-$tableCountText = (docker compose exec -T postgres psql -U tongzhouxing -d $TargetDatabaseName -Atqc "select count(*) from pg_tables where schemaname = 'public'").Trim()
+$tableCountText = (docker compose exec -T postgres psql -U $postgresUser -d $TargetDatabaseName -Atqc "select count(*) from pg_tables where schemaname = 'public'").Trim()
 $tableCount = [int]$tableCountText
 if ($tableCount -ne 0) {
   throw "Refusing to overwrite target database '$TargetDatabaseName': it already contains $tableCount public table(s)."
@@ -56,7 +72,7 @@ $containerFile = "/tmp/tzx-restore-$([Guid]::NewGuid().ToString('N')).dump"
 try {
   docker cp $resolvedBackup "${containerId}:$containerFile"
   if ($LASTEXITCODE -ne 0) { throw "docker cp failed with exit code $LASTEXITCODE" }
-  docker compose exec -T postgres pg_restore -U tongzhouxing -d $TargetDatabaseName --exit-on-error --no-owner --no-privileges $containerFile
+  docker compose exec -T postgres pg_restore -U $postgresUser -d $TargetDatabaseName --exit-on-error --no-owner --no-privileges $containerFile
   if ($LASTEXITCODE -ne 0) { throw "pg_restore failed with exit code $LASTEXITCODE" }
 } finally {
   docker compose exec -T postgres rm -f $containerFile | Out-Null

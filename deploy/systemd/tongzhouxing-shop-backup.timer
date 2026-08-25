@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Tongzhouxing backup service every day
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Asia/Shanghai
+RandomizedDelaySec=10m
+Persistent=true
+Unit=tongzhouxing-shop-backup.service
+
+[Install]
+WantedBy=timers.target

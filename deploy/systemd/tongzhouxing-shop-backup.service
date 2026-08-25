@@ -1,0 +1,16 @@
+[Unit]
+Description=Create Tongzhouxing PostgreSQL and catalog-assets backups
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/tongzhouxing-shop/backup.env
+ExecStart=/usr/local/lib/tongzhouxing-shop/backup-production.sh ${COMPOSE_FILE} ${COMPOSE_ENV_FILE} ${BACKUP_DIR} ${RETENTION_DAYS} ${CATALOG_ASSETS_VOLUME}
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/backups/tongzhouxing-shop
+TimeoutStartSec=15min

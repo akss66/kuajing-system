@@ -20,6 +20,10 @@ $containerId = (docker compose ps -q postgres).Trim()
 if (-not $containerId) {
   throw "The docker compose postgres service is not running."
 }
+$postgresUser = (docker compose exec -T postgres printenv POSTGRES_USER).Trim()
+if (-not $postgresUser) {
+  throw "The postgres service does not expose POSTGRES_USER."
+}
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $fileName = "tongzhouxing-$DatabaseName-$timestamp.dump"
@@ -30,7 +34,7 @@ if (Test-Path -LiteralPath $hostFile) {
 }
 
 try {
-  docker compose exec -T postgres pg_dump -U tongzhouxing -d $DatabaseName --format=custom --no-owner --no-privileges --file=$containerFile
+  docker compose exec -T postgres pg_dump -U $postgresUser -d $DatabaseName --format=custom --no-owner --no-privileges --file=$containerFile
   if ($LASTEXITCODE -ne 0) { throw "pg_dump failed with exit code $LASTEXITCODE" }
   docker cp "${containerId}:$containerFile" $hostFile
   if ($LASTEXITCODE -ne 0) { throw "docker cp failed with exit code $LASTEXITCODE" }
@@ -42,6 +46,6 @@ $backup = Get-Item -LiteralPath $hostFile
 if ($backup.Length -le 0) { throw "Backup file is empty: $hostFile" }
 $checksumFile = "$hostFile.sha256"
 $checksum = (Get-FileHash -LiteralPath $hostFile -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath $checksumFile -Value $checksum -Encoding ascii -NoNewline
+Set-Content -LiteralPath $checksumFile -Value "$checksum  $fileName" -Encoding ascii -NoNewline
 Write-Output $backup.FullName
 Write-Output $checksumFile

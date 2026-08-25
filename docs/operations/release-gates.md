@@ -63,7 +63,7 @@ watchdog 会校验并导出 `APP_VERSION`/`RELEASE_SHA`，覆盖 `COMPOSE_ENV_FI
 
 1. 外部 HTTP 监控每 30 秒检查 Web；连续 3 次失败告警。
 2. Worker `unhealthy` 自动替换演练；证明只重建 Worker，不重启 PostgreSQL/Web/其他项目。
-3. 每日备份任务的最近 7 次结果、失败告警、SHA-256、加密方式和离机对象版本/对象锁。
+3. 每日备份任务的最近 7 次结果、失败告警、SHA-256、加密方式和离机对象版本/对象锁。仓库现在提供 `scripts/backup-production.sh` 和 `deploy/systemd/tongzhouxing-shop-backup.*`，可自动生成 PostgreSQL `.dump` 与商品图卷 `.tar.gz`，但它们本身不能证明定时器、离机复制、告警和对象锁已经在正式设施启用。
 4. 最近 30 天内的隔离恢复演练；逐表核对关键行数、最近订单，并验证当期 PII 密钥可解密测试记录。
 5. 发布前回滚演练或已验证的上一镜像 SHA；禁止使用可移动标签回滚。
 6. 日志采集能按 `RELEASE_SHA` 查询 Web/Worker，且不采集 Cookie、Authorization、请求体、收件信息或环境变量。

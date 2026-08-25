@@ -97,6 +97,29 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-postgr
 
 恢复脚本会在写入数据库前强制验证同名 `.sha256`，且不会清空或覆盖已有表。生产必须每天一份自定义格式备份，至少保留 30 天；备份离机、加密并限制读取权限。每月至少在隔离库恢复一次并核对关键表行数、最近订单和加密收件信息。仓库脚本不能证明云对象锁、加密密钥、告警或恢复演练已经配置，所需证据见 [发布门禁](release-gates.md)。
 
+正式 Linux 服务器可安装 systemd 定时任务：
+
+```bash
+sudo install -m 0755 scripts/backup-production.sh /usr/local/lib/tongzhouxing-shop/backup-production.sh
+sudo install -m 0644 deploy/systemd/tongzhouxing-shop-backup.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/tongzhouxing-shop-backup.timer /etc/systemd/system/
+sudo install -d -m 0750 /var/backups/tongzhouxing-shop
+# /etc/tongzhouxing-shop/backup.env 至少固定以下四项：
+# COMPOSE_FILE=/absolute/release/compose.production.yaml
+# COMPOSE_ENV_FILE=/absolute/secrets/.env.production
+# BACKUP_DIR=/var/backups/tongzhouxing-shop
+# RETENTION_DAYS=30
+# CATALOG_ASSETS_VOLUME=tongzhouxing_shop_catalog_assets
+# APP_VERSION=<当前发布 Git SHA 前 7 位>
+# RELEASE_SHA=<当前发布完整 40 位 Git SHA>
+sudo systemctl daemon-reload
+sudo systemctl enable --now tongzhouxing-shop-backup.timer
+systemctl status tongzhouxing-shop-backup.timer --no-pager
+journalctl -u tongzhouxing-shop-backup.service -n 50 --no-pager
+```
+
+每次成功会在备份目录原子发布一个 `backup-set-<UTC 时间>` 子目录；只有数据库备份、商品图归档及两份 SHA-256 都成功后才会出现 `.complete` 标记。失败的暂存目录会自动清理，不得把缺少 `.complete` 的目录当作可恢复备份。
+
 ## 密钥轮换与事件处理
 
 - 极风/飞书 token 或 secret 泄露：先在第三方平台吊销，再更新 secret 管理并重启 Web/Worker；检查集成尝试和审计日志。
