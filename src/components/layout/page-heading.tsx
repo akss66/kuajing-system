@@ -18,29 +18,42 @@ export function PageHeading({ action, breadcrumbs = [], description, title }: Pa
       className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between"
       data-page-heading
     >
-      <div className="min-w-0 space-y-2">
+      <div className="min-w-0 space-y-2 overflow-hidden" data-page-heading-copy>
         {breadcrumbs.length ? (
-          <nav aria-label="页面路径" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <nav
+            aria-label="页面路径"
+            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+            data-page-heading-breadcrumbs
+          >
             {breadcrumbs.map((item, index) => (
-              <span className="flex items-center gap-2" key={`${item.label}-${index}`}>
+              <span className="flex min-w-0 items-center gap-2" key={`${item.label}-${index}`}>
                 {item.href ? (
                   <a className="transition-colors hover:text-foreground" href={item.href}>
                     {item.label}
                   </a>
                 ) : (
-                  <span>{item.label}</span>
+                  <span className="break-all">{item.label}</span>
                 )}
                 {index < breadcrumbs.length - 1 ? <span aria-hidden="true">/</span> : null}
               </span>
             ))}
           </nav>
         ) : null}
-        <div className="space-y-1.5">
-          <h1 className="text-[1.55rem] font-semibold tracking-[-0.025em] text-foreground sm:text-[1.8rem]">{title}</h1>
+        <div className="space-y-1.5" data-page-heading-body>
+          <h1
+            className="break-words text-[1.55rem] font-semibold tracking-[-0.025em] text-foreground [overflow-wrap:anywhere] sm:text-[1.8rem]"
+            data-page-heading-title
+          >
+            {title}
+          </h1>
           {description ? <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p> : null}
         </div>
       </div>
-      {action ? <div className="w-full shrink-0 sm:w-auto" data-page-heading-action>{action}</div> : null}
+      {action ? (
+        <div className="w-full shrink-0 sm:w-auto" data-page-heading-action>
+          {action}
+        </div>
+      ) : null}
     </section>
   );
 }

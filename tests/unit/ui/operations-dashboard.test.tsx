@@ -115,6 +115,10 @@ describe("operations dashboards", () => {
     expect(quickPurchase).toBeVisible();
     expect(storeSummary).toBeVisible();
     expect(fundsSummary).toBeVisible();
+    expect(document.querySelector("[data-portal-continuation]")).toBeInTheDocument();
+    expect(document.querySelector("[data-portal-task-overview]")).toBeInTheDocument();
+    expect(document.querySelector("[data-portal-quick-actions]")).toBeInTheDocument();
+    expect(document.querySelector("[data-portal-summary-grid]")).toBeInTheDocument();
     expect(
       continuation.compareDocumentPosition(storeSummary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -140,5 +144,32 @@ describe("operations dashboards", () => {
     expect(document.body).not.toHaveTextContent("390 px");
     expect(document.body).not.toHaveTextContent("2 种");
     expect(document.body).not.toHaveTextContent("快捷入口");
+  });
+
+  it("renders a calm ready state when the customer has no unfinished work", () => {
+    render(
+      <CustomerTaskDashboard
+        dashboard={{
+          activeStoreCount: 1,
+          fulfillmentExceptionCount: 0,
+          pendingPaymentCount: 0,
+          pendingPaymentFen: 0,
+          paymentReportedCount: 0,
+          primaryContinuationTarget: null,
+          recentStoreSummaries: [],
+          unfinishedDraftCount: 0,
+          walletAvailableFen: 0,
+          walletBalanceFen: 0,
+          walletHoldFen: 0,
+        }}
+      />,
+    );
+
+    const readyState = screen.getByRole("status", { name: "当前没有未完成任务" });
+    expect(readyState).toHaveAttribute("data-portal-ready");
+    expect(screen.getByRole("link", { name: /开始上传订单/ })).toHaveAttribute(
+      "href",
+      "/portal/imports/new",
+    );
   });
 });

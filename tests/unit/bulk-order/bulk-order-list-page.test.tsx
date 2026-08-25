@@ -63,10 +63,10 @@ describe("CustomerBulkOrdersPage", () => {
     render(await CustomerBulkOrdersPage());
 
     const actions = screen.getByRole("region", { name: "多店铺上传下一步" });
-    const continuation = within(actions).getByRole("link", { name: "继续上次草稿" });
+    const continuation = within(actions).getByRole("link", { name: "继续上次上传" });
 
     expect(continuation).toHaveAttribute("href", "/portal/bulk-orders/draft-latest");
-    expect(within(actions).getByRole("button", { name: "新建批量草稿" })).toBeEnabled();
+    expect(within(actions).getByRole("button", { name: "开始批量上传" })).toBeEnabled();
     expect(actions).toHaveTextContent("2 个店铺");
     expect(actions).toHaveTextContent("3 个文件");
     expect(screen.getByRole("link", { name: "查看合并付款记录" })).toHaveAttribute(
@@ -93,8 +93,8 @@ describe("CustomerBulkOrdersPage", () => {
     render(await CustomerBulkOrdersPage());
 
     expect(screen.getAllByText("已过期")).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: "查看草稿" })).toHaveLength(2);
-    expect(screen.queryByRole("link", { name: "继续草稿" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "继续上次草稿" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "查看记录" })).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: "继续上传" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "继续上次上传" })).not.toBeInTheDocument();
   });
 });

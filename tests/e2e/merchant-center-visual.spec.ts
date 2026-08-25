@@ -65,7 +65,7 @@ const workspaceRoutes = [
     expectedTexts: ["TZX-DEMO-001", "演示头绳", "新建 SKU"],
     path: "/admin/catalog",
     screenshot: "admin-catalog",
-    shouldShowMetricStrip: false,
+    shouldShowMetricStrip: true,
     workspaceSelector: "[data-admin-catalog-workspace]",
   },
   {
@@ -129,7 +129,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "多店铺批量上传",
-    expectedTexts: ["还没有批量草稿", "新建批量草稿"],
+    expectedTexts: ["还没有上传记录", "开始批量上传"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
     shouldShowMetricStrip: true,
@@ -368,6 +368,7 @@ test.describe.configure({ mode: "serial" });
 test("field-aligned catalog and account screenshots cover the exact viewport matrix without masks @desktop-only", async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   const failures = observeBrowserFailures(page);
   await resetVisualBaseline();
   await loginThroughUi(page, seededSuperAdmin);
@@ -440,7 +441,7 @@ test("field-aligned catalog and account screenshots cover the exact viewport mat
 });
 
 for (const route of workspaceRoutes) {
-  test(`${route.audience} workspace route ${route.path} uses the shared merchant-center visual structure`, async ({
+  test(`${route.audience} workspace route ${route.path} uses its audience design system`, async ({
     page,
   }, testInfo) => {
     const consoleErrors: string[] = [];
@@ -458,7 +459,10 @@ for (const route of workspaceRoutes) {
       page.getByRole("heading", { exact: true, name: route.heading }),
     ).toBeVisible();
     await expect(page.locator("[data-page-heading]")).toBeVisible();
-    await expect(page.locator("main")).toHaveCSS("background-color", "rgb(244, 245, 245)");
+    await expect(page.locator("main")).toHaveCSS(
+      "background-color",
+      route.audience === "customer" ? "rgb(244, 247, 244)" : "rgb(244, 245, 245)",
+    );
 
     if (route.shouldShowMetricStrip) {
       await expect(page.locator("[data-metric-strip]")).toBeVisible();

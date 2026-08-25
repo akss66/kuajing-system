@@ -1,7 +1,8 @@
-import { ArrowRight, Clock3, Plus, Store } from "lucide-react";
+import { ArrowRight, Clock3, Store } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { CreateBulkDraftSubmit } from "@/components/bulk-order/create-bulk-draft-submit";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
@@ -10,12 +11,13 @@ import { createBulkDraftAction } from "@/modules/bulk-order/actions";
 import { listBulkDrafts } from "@/modules/bulk-order/draft-service";
 import { requireCustomer } from "@/modules/identity/guards";
 import { listActiveCustomerStores } from "@/modules/order-import/service";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 function dateTime(value: Date) {
   return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Asia/Shanghai",
+    timeZone: BUSINESS_TIME_ZONE,
   }).format(value);
 }
 
@@ -66,57 +68,76 @@ export default async function CustomerBulkOrdersPage() {
     <div className="space-y-5">
       <PageHeading
         action={
-          <Link
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-primary-hover transition-colors hover:bg-surface"
-            href="/portal/settlements"
-          >
-            查看合并付款记录
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
+          <Button asChild className="min-h-11 w-full sm:w-auto" variant="outline">
+            <Link href="/portal/settlements">
+              查看合并付款记录
+              <ArrowRight aria-hidden="true" className="size-4 group-hover/button:translate-x-0.5" />
+            </Link>
+          </Button>
         }
         description="按店铺上传多个 TEMU 原始 Excel，系统会跨文件去重；提交后可把所选拿货单合并为一次付款。"
         title="多店铺批量上传"
       />
 
+      <WorkspacePanel className="overflow-hidden border-[var(--portal-border-strong)] bg-background">
+        <ol className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
+          {[
+            { step: "01", title: "按店铺上传", body: "每个店铺放自己的 TEMU 原始 Excel，系统自动去重并保留草稿。" },
+            { step: "02", title: "逐店校验", body: "未映射 SKU、库存变化和格式问题会按店铺拆开提示，不会互相污染。" },
+            { step: "03", title: "一次付款", body: "确认提交后，所选拿货单会汇总成一次付款记录，再进入履约流程。" },
+          ].map((item) => (
+            <li className="px-4 py-4 sm:px-5" key={item.step}>
+              <div className="flex items-center gap-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary-soft text-xs font-semibold tabular-nums text-primary-hover">
+                  {item.step}
+                </span>
+                <h2 className="text-base font-semibold text-foreground">{item.title}</h2>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.body}</p>
+            </li>
+          ))}
+        </ol>
+      </WorkspacePanel>
+
       <section
         aria-label="多店铺上传下一步"
-        className="grid gap-3 border-y border-border bg-background px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+        className="grid gap-4 rounded-[var(--portal-surface-radius)] border border-[var(--portal-border-strong)] bg-background px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5"
+        data-portal-bulk-start
       >
         {latestDraft ? (
           <div className="flex min-w-0 items-start gap-3">
-            <Clock3 aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+            <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[0.8rem] bg-[var(--portal-icon-surface)] text-primary">
+              <Clock3 aria-hidden="true" className="size-5" />
+            </span>
             <div className="min-w-0">
-              <p className="font-semibold text-ink">继续最近一次多店铺上传</p>
+              <p className="text-sm font-semibold tracking-[-0.01em] text-primary-hover">继续最近一次多店铺上传</p>
               <p className="mt-1 text-sm text-muted">
-                {latestDraft.groupCount} 个店铺 · {latestDraft.fileCount} 个文件 · 更新于 {dateTime(latestDraft.updatedAt)}
+                {latestDraft.groupCount} 个店铺 · {latestDraft.fileCount} 个文件 · 更新于 {dateTime(latestDraft.updatedAt)}（渥太华）
               </p>
               <Link
-                className="mt-3 inline-flex min-h-11 items-center gap-2 font-medium text-primary-hover"
+                className="portal-inline-action mt-3 inline-flex min-h-11 items-center gap-2 font-semibold text-primary-hover"
                 href={`/portal/bulk-orders/${latestDraft.id}`}
               >
-                继续上次草稿
+                继续上次上传
                 <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </div>
           </div>
         ) : (
-          <div>
-            <p className="font-semibold text-ink">开始一次新的多店铺上传</p>
-            <p className="mt-1 text-sm text-muted">暂无可继续的草稿，新建后即可按店铺上传文件。</p>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold tracking-[-0.01em] text-primary-hover">开始一次新的多店铺上传</p>
+            <p className="mt-1 text-sm leading-6 text-muted">暂无可继续的上传记录，开始后即可按店铺添加文件。</p>
           </div>
         )}
-        <form action={createDraft}>
-          <Button className="min-h-11 w-full px-4 sm:w-auto" disabled={!stores.length} type="submit" variant={latestDraft ? "outline" : "default"}>
-            <Plus aria-hidden="true" />
-            新建批量草稿
-          </Button>
+        <form action={createDraft} className="w-full sm:w-auto">
+          <CreateBulkDraftSubmit disabled={!stores.length} secondary={Boolean(latestDraft)} />
         </form>
       </section>
 
       <MetricStrip
         items={[
           { hint: "当前客户可提交的店铺", label: "可用店铺", value: String(stores.length) },
-          { hint: "最近创建或更新的批量草稿", label: "最近草稿", value: String(drafts.length) },
+          { hint: "最近创建或更新的上传记录", label: "上传记录", value: String(drafts.length) },
           { hint: "仍可继续编辑或提交", label: "可继续提交", tone: writableDrafts.length ? "warning" : "default", value: String(writableDrafts.length) },
           { hint: "所选拿货单只需支付一次", label: "付款方式", value: "一次合并" },
         ]}
@@ -134,7 +155,7 @@ export default async function CustomerBulkOrdersPage() {
           title={
             <span className="inline-flex items-center gap-2">
               <Store className="size-4 text-primary" />
-              草稿列表
+              上传记录
             </span>
           }
         />
@@ -149,17 +170,17 @@ export default async function CustomerBulkOrdersPage() {
                 <div className="space-y-1">
                   <p className="font-medium text-ink">{draftStatusLabel(status)}</p>
                   <p className="text-sm text-muted">
-                    {draft.groupCount} 个店铺 · {draft.fileCount} 个文件 · 更新于 {dateTime(draft.updatedAt)}
+                    {draft.groupCount} 个店铺 · {draft.fileCount} 个文件 · 更新于 {dateTime(draft.updatedAt)}（渥太华）
                   </p>
                   <p className="text-xs text-muted">
-                    创建于 {dateTime(draft.createdAt)}，过期于 {dateTime(draft.expiresAt)}
+                    创建于 {dateTime(draft.createdAt)}，过期于 {dateTime(draft.expiresAt)}（渥太华）
                   </p>
                 </div>
                 <Link
-                  className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover"
+                  className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover"
                   href={`/portal/bulk-orders/${draft.id}`}
                 >
-                  {isWritableDraftStatus(status) ? "继续草稿" : "查看草稿"}
+                  {isWritableDraftStatus(status) ? "继续上传" : "查看记录"}
                   <ArrowRight className="size-4" />
                 </Link>
               </article>
@@ -167,8 +188,8 @@ export default async function CustomerBulkOrdersPage() {
           </div>
         ) : (
           <div className="px-5 py-16 text-center">
-            <p className="font-medium text-ink">还没有批量草稿</p>
-            <p className="mt-1 text-sm text-muted">新建后即可按店铺分组上传多个 TEMU 原始 Excel。</p>
+            <p className="font-medium text-ink">还没有上传记录</p>
+            <p className="mt-1 text-sm text-muted">开始后即可按店铺分组上传多个 TEMU 原始 Excel。</p>
           </div>
         )}
       </WorkspacePanel>

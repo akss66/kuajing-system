@@ -58,11 +58,21 @@ export function MerchantShellFrame({
 }: MerchantShellFrameProps) {
   return (
     <div
-      className="min-h-svh min-w-0 bg-[var(--merchant-canvas)]"
+      className={cn(
+        "min-h-svh min-w-0 bg-[var(--merchant-canvas)]",
+        audience === "customer" && "portal-design",
+      )}
+      data-design-audience={audience === "customer" ? "portal" : "admin"}
       data-merchant-shell={audience}
       data-shell-version="v2"
       data-testid="merchant-shell"
     >
+      <a
+        className="fixed left-3 top-3 z-[60] -translate-y-24 rounded-md bg-background px-4 py-3 text-sm font-semibold text-foreground shadow-lg transition-transform focus:translate-y-0"
+        href="#merchant-main-content"
+      >
+        跳到主要内容
+      </a>
       <header
         className="fixed inset-x-0 top-0 z-40 flex h-[var(--merchant-header-height)] border-b border-[color-mix(in_oklch,var(--merchant-topbar),white_14%)] bg-[var(--merchant-topbar)] text-[var(--merchant-topbar-foreground)]"
         data-merchant-topbar={audience}
@@ -85,7 +95,15 @@ export function MerchantShellFrame({
         className="min-w-0 pt-[var(--merchant-header-height)] lg:pl-[var(--merchant-sidebar-width)]"
         data-merchant-content
       >
-        <main className="mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full max-w-[1600px] min-w-0 bg-[var(--merchant-canvas)] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8 lg:py-6">
+        <main
+          className={cn(
+            "mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full min-w-0 bg-[var(--merchant-canvas)] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:py-6",
+            audience === "customer" ? "max-w-[1480px] lg:px-10" : "max-w-[1600px] lg:px-8",
+          )}
+          data-portal-main={audience === "customer" ? true : undefined}
+          id="merchant-main-content"
+          tabIndex={-1}
+        >
           <div className={audience === "customer" ? "customer-surface-enter" : undefined}>
             {children}
           </div>

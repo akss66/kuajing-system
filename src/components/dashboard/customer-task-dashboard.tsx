@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Banknote,
   Boxes,
+  CheckCircle2,
   Clock3,
   PackageSearch,
   ReceiptText,
@@ -15,28 +16,18 @@ import Link from "next/link";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import type { CustomerTaskDashboard as CustomerDashboardData } from "@/modules/dashboard/customer-queries";
 
-const money = new Intl.NumberFormat("zh-CN", {
-  currency: "CNY",
-  style: "currency",
-});
+const money = new Intl.NumberFormat("zh-CN", { currency: "CNY", style: "currency" });
 
 function SectionHeading({ description, id, title }: { description: string; id: string; title: string }) {
   return (
-    <div>
-      <h2 className="text-base font-semibold text-foreground" id={id}>{title}</h2>
+    <div className="portal-section-heading">
+      <h2 className="text-lg font-semibold tracking-[-0.015em] text-foreground" id={id}>{title}</h2>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
     </div>
   );
 }
 
-function TaskLink({
-  count,
-  description,
-  href,
-  icon: Icon,
-  label,
-  tone = "default",
-}: {
+function TaskLink({ count, description, href, icon: Icon, label, tone = "default" }: {
   count: number;
   description: string;
   href: string;
@@ -47,16 +38,19 @@ function TaskLink({
   const iconTone = tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-primary";
   return (
     <Link
-      className="group flex min-h-[4.5rem] items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:px-5"
+      className="group flex min-h-[5rem] items-center gap-2.5 px-3 py-3 outline-none transition-colors hover:bg-[var(--portal-hover)] focus-visible:bg-[var(--portal-hover)] sm:gap-3 sm:px-5"
+      data-task-tone={tone}
       href={href}
     >
-      <Icon aria-hidden="true" className={`size-4 shrink-0 ${iconTone}`} />
-      <span className="min-w-0 flex-1">
-        <strong className="block text-sm font-medium text-foreground">{label}</strong>
-        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{description}</span>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.65rem] bg-[var(--portal-icon-surface)]">
+        <Icon aria-hidden="true" className={`size-[18px] ${iconTone}`} />
       </span>
-      <span className="tabular-nums text-lg font-semibold text-foreground">{count}</span>
-      <ArrowRight aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      <span className="min-w-0 flex-1">
+        <strong className="block text-sm font-semibold text-foreground">{label}</strong>
+        <span className="mt-0.5 hidden text-xs leading-5 text-muted-foreground sm:block">{description}</span>
+      </span>
+      <span className="tabular-nums text-xl font-semibold tracking-tight text-foreground">{count}</span>
+      <ArrowRight aria-hidden="true" className="hidden size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:block" />
     </Link>
   );
 }
@@ -65,150 +59,134 @@ const continuationCopy: Record<
   NonNullable<CustomerDashboardData["primaryContinuationTarget"]>["kind"],
   { description: string; label: string }
 > = {
-  BULK_DRAFT: {
-    description: "继续完成多个店铺的订单上传。",
-    label: "继续未完成的上传",
-  },
-  FULFILLMENT_EXCEPTION: {
-    description: "有订单需要确认处理方式。",
-    label: "查看需要协助的订单",
-  },
-  PAYMENT_REPORTED: {
-    description: "付款资料已提交，正在等待运营确认。",
-    label: "查看付款确认进度",
-  },
-  PENDING_PAYMENT: {
-    description: "完成付款后，订单才会进入仓库处理。",
-    label: "完成待付款订单",
-  },
+  BULK_DRAFT: { description: "继续完成多个店铺的订单上传。", label: "继续未完成的上传" },
+  FULFILLMENT_EXCEPTION: { description: "有订单需要确认处理方式。", label: "查看需要协助的订单" },
+  PAYMENT_REPORTED: { description: "付款资料已提交，正在等待运营确认。", label: "查看付款确认进度" },
+  PENDING_PAYMENT: { description: "完成付款后，订单才会进入仓库处理。", label: "完成待付款订单" },
 };
 
-export function CustomerTaskDashboard({
-  dashboard,
-}: {
-  dashboard: CustomerDashboardData;
-}) {
-  const quickPurchase = [
-    { description: "浏览自己的价格和实时可售库存", href: "/portal/catalog", icon: PackageSearch, label: "实时货盘" },
-    { description: "上传一个店铺的 TEMU 原始订单", href: "/portal/imports/new", icon: Upload, label: "上传订单" },
-  ];
+export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashboardData }) {
   const continuation = dashboard.primaryContinuationTarget
     ? continuationCopy[dashboard.primaryContinuationTarget.kind]
     : null;
 
   return (
-    <div className="space-y-7">
-      <section aria-labelledby="continuation-title" className="space-y-3">
-        <SectionHeading description="优先处理会影响付款或发货的事项。" id="continuation-title" title="继续处理" />
-        <WorkspacePanel className="overflow-hidden">
+    <div className="space-y-8" data-portal-dashboard>
+      <section aria-labelledby="continuation-title" className="space-y-3" data-portal-continuation>
+        <SectionHeading description="把影响付款和发货的事项放在最前面。" id="continuation-title" title="继续处理" />
+        <div className="grid overflow-hidden rounded-[var(--portal-surface-radius)] border border-[var(--portal-border-strong)] bg-background lg:grid-cols-[minmax(0,1.08fr)_minmax(24rem,0.92fr)]">
           {dashboard.primaryContinuationTarget && continuation ? (
-            <div className="flex flex-col gap-4 border-b border-primary/15 bg-primary-soft px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-              <div className="min-w-0">
-                <p className="font-semibold text-primary-hover">{continuation.label}</p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">{continuation.description}</p>
+            <div className="flex min-h-48 flex-col justify-between bg-[var(--portal-focus-surface)] px-5 py-5 text-[var(--portal-focus-foreground)] sm:min-h-56 sm:px-7 sm:py-7" data-portal-focus>
+              <div>
+                <span className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--portal-focus-muted)]">
+                  <Clock3 aria-hidden="true" className="size-4" /> 建议先完成
+                </span>
+                <h3 className="mt-5 max-w-xl text-2xl font-semibold tracking-[-0.03em] sm:text-[1.75rem]">{continuation.label}</h3>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--portal-focus-muted)]">{continuation.description}</p>
               </div>
-              <Link aria-label={`${continuation.label}，继续处理`} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-4 text-sm font-medium text-white outline-none transition-colors hover:bg-primary-hover" href={dashboard.primaryContinuationTarget.href}>
+              <Link
+                aria-label={`${continuation.label}，继续处理`}
+                className="portal-focus-action mt-6 inline-flex min-h-12 w-fit items-center justify-center gap-2 rounded-[0.7rem] bg-white px-5 text-sm font-semibold text-[var(--portal-focus-surface)] outline-none transition-[transform,background-color] hover:bg-[var(--portal-focus-button-hover)] focus-visible:ring-3 focus-visible:ring-white/35"
+                href={dashboard.primaryContinuationTarget.href}
+              >
                 继续处理 <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </div>
           ) : (
-            <div className="border-b border-border px-4 py-5 sm:px-5" role="status">
-              <p className="font-medium text-foreground">当前没有未完成任务</p>
-              <p className="mt-1 text-sm text-muted-foreground">可以先查看实时货盘，再上传新的订单。</p>
+            <div
+              aria-label="当前没有未完成任务"
+              className="flex min-h-48 flex-col justify-between bg-[var(--portal-ready-surface)] px-5 py-5 sm:min-h-56 sm:px-7 sm:py-7"
+              data-portal-ready
+              role="status"
+            >
+              <div>
+                <span className="portal-ready-mark flex size-11 items-center justify-center rounded-full bg-success text-white">
+                  <CheckCircle2 aria-hidden="true" className="size-5" />
+                </span>
+                <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-foreground">当前没有未完成任务</h3>
+                <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">订单、付款和异常都已处理完成，可以开始新的拿货流程。</p>
+              </div>
+              <Link className="portal-inline-action mt-6 inline-flex min-h-12 w-fit items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/imports/new">
+                开始上传订单 <ArrowRight aria-hidden="true" className="size-4" />
+              </Link>
             </div>
           )}
-          <div className="divide-y divide-border md:grid md:grid-cols-2 md:divide-x md:divide-y-0">
-            <div className="divide-y divide-border">
-              <TaskLink count={dashboard.unfinishedDraftCount} description="多个店铺尚未完成的上传记录" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
+
+          <div className="min-w-0" data-portal-task-overview>
+            <div className="border-b border-border px-4 py-4 sm:px-5">
+              <h3 className="font-semibold text-foreground">待办概览</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">点击数字可直接进入对应清单。</p>
+            </div>
+            <div className="grid grid-cols-2 [&>a]:border-b [&>a:nth-child(odd)]:border-r lg:block lg:[&>a]:border-b lg:[&>a]:border-r-0">
+              <TaskLink count={dashboard.unfinishedDraftCount} description="未完成的多店铺上传" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
               <TaskLink count={dashboard.pendingPaymentCount} description={`${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`} href="/portal/orders?status=PENDING_PAYMENT" icon={ReceiptText} label="待付款" tone="warning" />
-            </div>
-            <div className="divide-y divide-border">
               <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
-              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认订单进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
+              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
             </div>
           </div>
-        </WorkspacePanel>
+        </div>
       </section>
 
-      <section aria-labelledby="quick-purchase-title" className="space-y-3">
-        <SectionHeading description="查看库存，或上传新的 TEMU 订单。" id="quick-purchase-title" title="快捷拿货" />
-        <WorkspacePanel className="overflow-hidden">
-          <nav aria-label="快捷拿货" className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
-            {quickPurchase.map((item) => (
-              <Link className="group flex min-h-[5.5rem] items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-surface focus-visible:bg-surface sm:px-5" href={item.href} key={item.href}>
-                <item.icon aria-hidden="true" className="size-5 shrink-0 text-primary" />
-                <span className="min-w-0 flex-1">
-                  <strong className="block text-sm font-medium text-foreground">{item.label}</strong>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.description}</span>
-                </span>
-                <ArrowRight aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-              </Link>
-            ))}
-          </nav>
-          <div className="flex flex-col gap-2 border-t border-border bg-surface/55 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <section aria-labelledby="quick-purchase-title" className="space-y-3" data-portal-quick-actions>
+        <SectionHeading description="先确认货盘，再上传 TEMU 原始订单。" id="quick-purchase-title" title="快捷拿货" />
+        <nav aria-label="快捷拿货" className="grid overflow-hidden rounded-[var(--portal-surface-radius)] border border-border bg-background md:grid-cols-2">
+          <Link className="portal-primary-route group flex min-h-28 items-center gap-4 px-5 py-5 outline-none md:border-r md:border-border sm:px-6" href="/portal/catalog">
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-[0.8rem] bg-primary text-white"><PackageSearch aria-hidden="true" className="size-5" /></span>
+            <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">实时货盘</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">查看你的价格、规格和实时可售库存</span></span>
+            <ArrowRight aria-hidden="true" className="size-5 text-primary transition-transform group-hover:translate-x-1" />
+          </Link>
+          <Link className="portal-primary-route group flex min-h-28 items-center gap-4 border-t border-border px-5 py-5 outline-none md:border-t-0 sm:px-6" href="/portal/imports/new">
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-[0.8rem] bg-[var(--portal-accent-surface)] text-[var(--portal-accent-foreground)]"><Upload aria-hidden="true" className="size-5" /></span>
+            <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">上传订单</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">上传一个店铺的 TEMU 原始订单</span></span>
+            <ArrowRight aria-hidden="true" className="size-5 text-primary transition-transform group-hover:translate-x-1" />
+          </Link>
+          <div className="flex flex-col gap-2 border-t border-border bg-[var(--portal-subtle-surface)] px-5 py-3 text-sm md:col-span-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <span className="text-muted-foreground">多个店铺都有订单文件？</span>
-            <Link className="inline-flex min-h-11 items-center gap-2 font-medium text-primary-hover" href="/portal/bulk-orders">
-              使用多店铺批量上传 <Store aria-hidden="true" className="size-4" />
-            </Link>
+            <Link className="inline-flex min-h-11 items-center gap-2 font-semibold text-primary-hover" href="/portal/bulk-orders">使用多店铺批量上传 <Store aria-hidden="true" className="size-4" /></Link>
           </div>
-        </WorkspacePanel>
+        </nav>
       </section>
 
-      <section aria-labelledby="store-summary-title" className="space-y-3">
-        <SectionHeading description={`当前 ${dashboard.activeStoreCount} 家启用店铺，按近 30 天订单量排序。`} id="store-summary-title" title="店铺摘要" />
-        <WorkspacePanel className="overflow-hidden">
-          <WorkspacePanelHeader description="待付款金额不含已申报付款的订单。" title="近期订单与异常" />
-          {dashboard.recentStoreSummaries.length ? (
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]" data-portal-summary-grid>
+        <section aria-labelledby="store-summary-title" className="space-y-3">
+          <SectionHeading description={`当前 ${dashboard.activeStoreCount} 家启用店铺，按近 30 天订单量排序。`} id="store-summary-title" title="店铺摘要" />
+          <WorkspacePanel className="overflow-hidden">
+            <WorkspacePanelHeader description="待付款金额不含已申报付款的订单。" title="近期订单与异常" />
+            {dashboard.recentStoreSummaries.length ? (
+              <div className="divide-y divide-border">
+                {dashboard.recentStoreSummaries.map((store) => (
+                  <article className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:px-5" key={store.storeId}>
+                    <div className="min-w-0"><h3 className="break-words text-sm font-semibold text-foreground">{store.storeName}</h3><p className="mt-1 text-xs text-muted-foreground">近 30 天 {store.recentOrderCount} 单</p></div>
+                    <p className="text-sm text-muted-foreground">待付款 <strong className="ml-1 font-semibold tabular-nums text-foreground">{store.pendingPaymentCount} 单 · {money.format(store.pendingPaymentFen / 100)}</strong></p>
+                    <p className={store.fulfillmentExceptionCount ? "text-sm text-danger" : "text-sm text-muted-foreground"}>异常 <strong className="ml-1 font-semibold tabular-nums">{store.fulfillmentExceptionCount}</strong></p>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="px-5 py-10" role="status"><p className="font-medium text-foreground">还没有启用店铺</p><p className="mt-1 text-sm text-muted-foreground">请联系运营人员开通店铺后再开始拿货。</p></div>
+            )}
+          </WorkspacePanel>
+        </section>
+
+        <section aria-labelledby="funds-summary-title" className="space-y-3">
+          <SectionHeading description="账户余额和订单占用。" id="funds-summary-title" title="资金摘要" />
+          <WorkspacePanel className="overflow-hidden">
             <div className="divide-y divide-border">
-              {dashboard.recentStoreSummaries.map((store) => (
-                <article className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:px-5" key={store.storeId}>
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-medium text-foreground">{store.storeName}</h3>
-                    <p className="mt-1 text-xs text-muted-foreground">近 30 天 {store.recentOrderCount} 单</p>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    待付款 <strong className="ml-1 font-medium tabular-nums text-foreground">{store.pendingPaymentCount} 单 · {money.format(store.pendingPaymentFen / 100)}</strong>
-                  </p>
-                  <p className={store.fulfillmentExceptionCount ? "text-sm text-danger" : "text-sm text-muted-foreground"}>
-                    异常 <strong className="ml-1 font-medium tabular-nums">{store.fulfillmentExceptionCount}</strong>
-                  </p>
-                </article>
+              {[
+                { featured: true, icon: WalletCards, label: "可用余额", value: dashboard.walletAvailableFen },
+                { icon: Banknote, label: "账户余额", value: dashboard.walletBalanceFen },
+                { icon: Boxes, label: "订单占用", value: dashboard.walletHoldFen },
+              ].map((item) => (
+                <div className={item.featured ? "flex items-center gap-3 bg-primary/5 px-4 py-4 sm:px-5" : "flex items-center gap-3 px-4 py-4 sm:px-5"} key={item.label}>
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.65rem] bg-[var(--portal-icon-surface)] text-primary"><item.icon aria-hidden="true" className="size-4" /></span>
+                  <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">{item.label}</p><p className={item.featured ? "mt-1 truncate text-xl font-semibold tabular-nums text-primary-hover" : "mt-1 truncate text-lg font-semibold tabular-nums text-foreground"}>{money.format(item.value / 100)}</p></div>
+                </div>
               ))}
             </div>
-          ) : (
-            <div className="px-5 py-10" role="status">
-              <p className="font-medium text-foreground">还没有启用店铺</p>
-              <p className="mt-1 text-sm text-muted-foreground">请联系运营人员开通店铺后再开始拿货。</p>
-            </div>
-          )}
-        </WorkspacePanel>
-      </section>
-
-      <section aria-labelledby="funds-summary-title" className="space-y-3">
-        <SectionHeading description="查看账户余额与订单占用，不含其他客户资金。" id="funds-summary-title" title="资金摘要" />
-        <WorkspacePanel className="overflow-hidden">
-          <div className="grid divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            {[
-              { icon: WalletCards, label: "可用余额", value: dashboard.walletAvailableFen },
-              { icon: Banknote, label: "账户余额", value: dashboard.walletBalanceFen },
-              { icon: Boxes, label: "订单占用", value: dashboard.walletHoldFen },
-            ].map((item) => (
-              <div className="flex items-center gap-3 px-4 py-4 sm:px-5" key={item.label}>
-                <item.icon aria-hidden="true" className="size-4 text-primary" />
-                <div>
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{money.format(item.value / 100)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="border-t border-border px-4 py-2.5 text-right sm:px-5">
-            <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary-hover" href="/portal/wallet">
-              进入资金中心 <ArrowRight aria-hidden="true" className="size-4" />
-            </Link>
-          </div>
-        </WorkspacePanel>
-      </section>
+            <div className="border-t border-border px-4 py-2.5 text-right sm:px-5"><Link className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/wallet">进入资金中心 <ArrowRight aria-hidden="true" className="size-4" /></Link></div>
+          </WorkspacePanel>
+        </section>
+      </div>
     </div>
   );
 }

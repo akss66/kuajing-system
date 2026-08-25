@@ -251,11 +251,11 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   await page.goto("/portal/bulk-orders");
   const nextStep = page.getByRole("region", { name: "多店铺上传下一步" });
-  await expect(nextStep.getByRole("link", { name: "继续上次草稿" })).toHaveAttribute(
+  await expect(nextStep.getByRole("link", { name: "继续上次上传" })).toHaveAttribute(
     "href",
     `/portal/bulk-orders/${fixture.draftId}`,
   );
-  await expect(nextStep.getByRole("button", { name: "新建批量草稿" })).toBeVisible();
+  await expect(nextStep.getByRole("button", { name: "开始批量上传" })).toBeVisible();
 
   await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
   await expect(

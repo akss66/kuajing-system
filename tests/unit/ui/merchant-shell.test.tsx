@@ -239,6 +239,10 @@ describe("merchant shells", () => {
       </CustomerShell>,
     );
 
+    expect(screen.getByTestId("merchant-shell")).toHaveAttribute(
+      "data-design-audience",
+      "portal",
+    );
     expect(screen.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
     const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
     expect(navigation).toBeVisible();

@@ -357,7 +357,7 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     {
       audience: "customer",
       heading: "多店铺批量上传",
-      keyTarget: { name: "新建批量草稿", role: "button" },
+      keyTarget: { name: "开始批量上传", role: "button" },
       pageType: "task-flow",
       path: "/portal/bulk-orders",
     },

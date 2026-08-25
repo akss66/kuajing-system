@@ -105,7 +105,7 @@ export function OrderFilterBar({
       className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5"
     >
       <form
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(150px,0.8fr))_auto_auto] xl:items-end"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(150px,0.8fr))_minmax(16rem,auto)] xl:items-end"
         onSubmit={(event) => applyFields(event, commonFields)}
       >
         <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
@@ -170,55 +170,62 @@ export function OrderFilterBar({
             </select>
           </label>
         ) : null}
-        <Button className="min-h-11" type="submit">
-          <Search aria-hidden="true" />
-          筛选
-        </Button>
-        <Sheet onOpenChange={setDrawerOpen} open={drawerOpen}>
-          <SheetTrigger asChild>
-            <Button className="min-h-11" type="button" variant="outline">
-              <Filter aria-hidden="true" />
-              更多筛选
+        <div className="space-y-2" data-filter-action-wrapper>
+          <div className="grid grid-cols-2 gap-2 rounded-[calc(var(--radius-control)+0.1rem)] border border-border bg-surface/65 p-1.5" data-filter-action-group>
+            <Button className="min-h-11" size="lg" type="submit">
+              <Search aria-hidden="true" />
+              筛选
             </Button>
-          </SheetTrigger>
-          <SheetContent className="w-full data-[side=right]:!w-full sm:data-[side=right]:!max-w-[480px]" side="right">
-            <SheetHeader className="border-b border-border px-5 py-4 pr-14">
-              <SheetTitle>更多订单筛选</SheetTitle>
-              <SheetDescription>按创建日期缩小结果范围；应用后条件会保留在当前网址。</SheetDescription>
-            </SheetHeader>
-            <form
-              className="grid gap-5 px-5 py-6"
-              onSubmit={(event) => {
-                applyFields(event, ["dateFrom", "dateTo"]);
-                setDrawerOpen(false);
-              }}
-            >
-              <label className="space-y-2 text-sm font-medium text-ink">
-                开始日期
-                <Input
-                  className="min-h-11"
-                  defaultValue={values.dateFrom}
-                  key={`date-from-${values.dateFrom ?? ""}`}
-                  name="dateFrom"
-                  type="date"
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-ink">
-                结束日期
-                <Input
-                  className="min-h-11"
-                  defaultValue={values.dateTo}
-                  key={`date-to-${values.dateTo ?? ""}`}
-                  name="dateTo"
-                  type="date"
-                />
-              </label>
-              <Button className="min-h-11" type="submit">
-                应用更多筛选
-              </Button>
-            </form>
-          </SheetContent>
-        </Sheet>
+            <Sheet onOpenChange={setDrawerOpen} open={drawerOpen}>
+              <SheetTrigger asChild>
+                <Button className="min-h-11 border-transparent bg-background" size="lg" type="button" variant="outline">
+                  <Filter aria-hidden="true" />
+                  更多筛选
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="w-full data-[side=right]:!w-full sm:data-[side=right]:!max-w-[480px]" side="right">
+                <SheetHeader className="border-b border-border px-5 py-4 pr-14">
+                  <SheetTitle>更多订单筛选</SheetTitle>
+                  <SheetDescription>按创建日期缩小结果范围；应用后条件会保留在当前网址。</SheetDescription>
+                </SheetHeader>
+                <form
+                  className="grid gap-5 px-5 py-6"
+                  onSubmit={(event) => {
+                    applyFields(event, ["dateFrom", "dateTo"]);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <label className="space-y-2 text-sm font-medium text-ink">
+                    开始日期
+                    <Input
+                      className="min-h-11"
+                      defaultValue={values.dateFrom}
+                      key={`date-from-${values.dateFrom ?? ""}`}
+                      name="dateFrom"
+                      type="date"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-ink">
+                    结束日期
+                    <Input
+                      className="min-h-11"
+                      defaultValue={values.dateTo}
+                      key={`date-to-${values.dateTo ?? ""}`}
+                      name="dateTo"
+                      type="date"
+                    />
+                  </label>
+                  <Button className="min-h-11" type="submit">
+                    应用更多筛选
+                  </Button>
+                </form>
+              </SheetContent>
+            </Sheet>
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            常用条件先筛一轮，日期等扩展条件放在右侧抽屉，避免主工作区过宽过散。
+          </p>
+        </div>
       </form>
 
       {activeFilters.length ? (

@@ -65,6 +65,21 @@ export default async function AdminBulkOrdersPage({
         title="多店铺上传记录"
       />
 
+      <WorkspacePanel className="overflow-hidden border-border bg-background px-4 py-4 sm:px-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-primary-hover">管理员使用场景</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">这页只用于协助客户续传、排错和查看草稿，不是正式订单列表</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              草稿阶段不会扣款、不会占用库存，也不会进入极风履约。只有客户确认提交后，才会生成正式拿货单并进入付款与发货流程。
+            </p>
+          </div>
+          <Button asChild className="min-h-11 px-4" variant="outline">
+            <Link href="/admin/orders">查看正式拿货单</Link>
+          </Button>
+        </div>
+      </WorkspacePanel>
+
       <MetricStrip
         items={[
           { label: "上传草稿", value: `${drafts.length}` },
@@ -181,7 +196,7 @@ export default async function AdminBulkOrdersPage({
                 ) : (
                   <TableRow>
                     <TableCell className="h-28 text-center text-muted" colSpan={5}>
-                      没有符合条件的批量草稿。
+                      没有符合条件的上传草稿。
                     </TableCell>
                   </TableRow>
                 )}
@@ -208,7 +223,7 @@ export default async function AdminBulkOrdersPage({
               </article>
             ))
           ) : (
-            <div className="p-10 text-center text-sm text-muted">没有符合条件的批量草稿。</div>
+            <div className="p-10 text-center text-sm text-muted">没有符合条件的上传草稿。</div>
           )}
         </div>
       </WorkspacePanel>

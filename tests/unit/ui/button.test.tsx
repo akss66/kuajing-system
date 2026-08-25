@@ -7,11 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Button, buttonVariants } from "@/components/ui/button";
 
 describe("Button", () => {
-  it("uses a stable shadowless primary action with a 40px default height", () => {
+  it("uses the primary action contract with a 40px default height", () => {
     render(<Button>新建客户</Button>);
     const button = screen.getByRole("button", { name: "新建客户" });
     expect(button).toHaveClass("h-10", "bg-primary", "hover:bg-primary-hover");
-    expect(button.className).not.toMatch(/shadow|translate-y/);
+    expect(button).toHaveAttribute("data-size", "default");
+    expect(button).toHaveAttribute("data-variant", "default");
+    expect(button.className).toMatch(/shadow-\[/);
   });
 
   it("keeps secondary and destructive page actions quiet", () => {

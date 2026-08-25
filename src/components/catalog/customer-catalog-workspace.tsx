@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckCircle2, ExternalLink, ImageIcon, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, ImageIcon, Search, Upload } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { PageHeading } from "@/components/layout/page-heading";
@@ -186,13 +187,20 @@ function ProductGroupHeader({
   group: CatalogProductGroup<CustomerCatalogGroupableItem>;
 }) {
   return (
-    <header className="min-w-0 border-b border-border px-4 py-3 sm:px-5">
-      <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
-        {group.productName}
-      </h3>
-      <p className="mt-1 whitespace-normal break-words text-xs text-muted-foreground">
-        商品链接：{group.linkText?.trim() || "未提供"}
-      </p>
+    <header className="min-w-0 border-b border-border bg-surface/35 px-4 py-3 sm:px-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
+            {group.productName}
+          </h3>
+          <p className="mt-1 whitespace-normal break-words text-xs text-muted-foreground">
+            商品链接：{group.linkText?.trim() || "未提供"}
+          </p>
+        </div>
+        <Badge className="bg-white/80 text-primary-hover ring-1 ring-primary/10" variant="secondary">
+          {group.variants.length} 个 SKU
+        </Badge>
+      </div>
     </header>
   );
 }
@@ -407,24 +415,30 @@ export function CustomerCatalogWorkspace({
   return (
     <div className="min-w-0 space-y-5" data-customer-catalog-workspace>
       <PageHeading
+        action={
+          <Button asChild className="min-h-12 px-5">
+            <Link href="/portal/imports/new"><Upload aria-hidden="true" />上传订单</Link>
+          </Button>
+        }
         description="查看你的拿货价和扣除有效锁定后的可售库存；最终库存会在提交订单时再次校验。"
         title="实时货盘"
       />
-      <div className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border py-3 text-sm text-muted-foreground" aria-label="货盘说明">
-        <span className="inline-flex items-center gap-2">
-          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-          库存实时更新
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-          仅显示你的拿货价
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-          提交前再次校验
-        </span>
-      </div>
-      <section aria-label="货盘搜索" className="py-1">
+      <section aria-label="货盘说明" className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border py-3 text-sm text-muted-foreground">
+        {["库存实时更新", "仅显示你的拿货价", "提交前再次校验"].map((label) => (
+          <span className="inline-flex items-center gap-2" key={label}>
+            <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+            {label}
+          </span>
+        ))}
+      </section>
+      <section aria-label="货盘搜索" className="rounded-[var(--portal-surface-radius)] border border-border bg-background p-3 sm:p-4" data-portal-toolbar>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">查找实时货盘</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">支持 SKU、商品、规格、颜色和商品链接文字。</p>
+          </div>
+          <span className="text-xs tabular-nums text-muted-foreground">{groupedItems.length} 个商品可搜索</span>
+        </div>
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
           <form
             className="grid min-w-0 gap-3 sm:flex-1 sm:grid-cols-[minmax(0,36rem)_auto] sm:justify-start"
@@ -450,7 +464,8 @@ export function CustomerCatalogWorkspace({
                 value={draftQuery}
               />
             </label>
-            <Button className="min-h-11" type="submit">
+            <Button className="min-h-11 px-5" data-portal-action="search-catalog" size="lg" type="submit">
+              <Search aria-hidden="true" />
               搜索货盘
             </Button>
           </form>
@@ -478,7 +493,7 @@ export function CustomerCatalogWorkspace({
       <section aria-label="客户货盘结果" className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">可选货盘</h2>
-          <p className="text-sm tabular-nums text-muted-foreground">
+          <p aria-live="polite" className="text-sm tabular-nums text-muted-foreground" role="status">
             {sortedGroups.length} 个商品 / {skuCount} 个 SKU
           </p>
         </div>

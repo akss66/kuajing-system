@@ -62,8 +62,13 @@ export default async function AdminWalletsPage({
   return (
     <div className="space-y-5">
       <PageHeading
+        action={
+          <Button asChild className="min-h-11 w-full sm:w-auto">
+            <Link href="#adjust-balance">人工调整余额</Link>
+          </Button>
+        }
         breadcrumbs={[{ href: "/admin", label: "管理工作台" }, { label: "客户余额" }]}
-        description="查询客户余额、执行人工入账或扣减，并在同一处核对不可修改的资金流水。"
+        description="业务管理员和超级管理员都可在这里查看客户余额、执行人工入账或扣减，并核对不可修改的资金流水。系统运维权限仍由超级管理员独占。"
         title="客户余额"
       />
       <AdminFinanceNavigation active="wallets" />
@@ -77,10 +82,30 @@ export default async function AdminWalletsPage({
         ]}
       />
 
+      <WorkspacePanel className="overflow-hidden border-border bg-background">
+        <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1.2fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-primary-hover">高频操作</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">先定位客户，再执行人工入账或扣减</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              这里处理线下收款补录、人工退款修正和历史余额纠偏。每次调整都会即时写入资金流水与审计日志，后续无法静默修改。
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:w-[21rem]">
+            <Button asChild className="min-h-11" variant="outline">
+              <Link href="#account-balances">查看余额账户</Link>
+            </Button>
+            <Button asChild className="min-h-11">
+              <Link href="#adjust-balance">开始调整</Link>
+            </Button>
+          </div>
+        </div>
+      </WorkspacePanel>
+
       <WorkspacePanel aria-label="调整客户余额" id="adjust-balance">
         <WorkspacePanelHeader
           compact
-          description="系统管理员可执行。提交前必须二次确认客户、方向、金额和原因；操作会立即生效并写入审计与资金流水。"
+          description="业务管理员和超级管理员都可执行。提交前必须二次确认客户、方向、金额和原因；操作会立即生效并写入审计与资金流水。"
           title="调整客户余额"
         />
         <div className="grid gap-5 p-4 lg:grid-cols-[16rem_minmax(0,1fr)] sm:p-5">
@@ -129,7 +154,7 @@ export default async function AdminWalletsPage({
         </div>
       </WorkspacePanel>
 
-      <WorkspacePanel aria-label="客户余额账户" className="overflow-hidden">
+      <WorkspacePanel aria-label="客户余额账户" className="overflow-hidden" id="account-balances">
         <WorkspacePanelHeader
           action={
             <form className="flex gap-2">
