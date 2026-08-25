@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { db } from "@/db/client";
 import {
@@ -24,6 +24,10 @@ import {
   completeOfflinePackageRefund,
   recordPackageCancellationAdjustment,
 } from "@/modules/fulfillment/package-cancellation-adjustment";
+import {
+  cancelAllCancellableOrderShipments,
+  completeAllOfflineOrderRefunds,
+} from "@/modules/fulfillment/order-operations";
 import { cancelJifengShipment } from "@/modules/fulfillment/replacement";
 import { applyJifengOrderStatus } from "@/modules/fulfillment/status-sync";
 import { cancelFulfillmentOrder, declareOfflinePayment } from "@/modules/orders/lifecycle";
@@ -918,6 +922,137 @@ describe("paid package cancellation refunds", () => {
     await expect(refundRows(fixture.order.id)).resolves.toEqual([
       expect.objectContaining({ status: "PENDING_OFFLINE", totalAmountFen: 1_800 }),
     ]);
+  });
+
+  test("cancels every cancellable child while preserving a shipped sibling", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: "DIRECT_OFFLINE",
+      walletAmountFen: 0,
+    });
+    await db
+      .update(fulfillmentOrders)
+      .set({ status: "FULFILLING" })
+      .where(eq(fulfillmentOrders.id, fixture.order.id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ jifengStatus: 7, shippedAt: new Date(), status: "SHIPPED" })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+
+    await expect(
+      cancelAllCancellableOrderShipments({
+        actorUserId: fixture.admin.id,
+        orderId: fixture.order.id,
+        reason: "客户要求取消整张拿货单中仍可取消的包裹",
+      }),
+    ).resolves.toMatchObject({
+      cancelledCount: 1,
+      failedCount: 0,
+      pendingCount: 0,
+      skippedCount: 1,
+    });
+
+    const statuses = await db.execute<{ status: string }>(sql`
+      select f.status
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      where s.order_id = ${fixture.order.id}
+      order by s.external_order_no
+    `);
+    expect(statuses.map((row) => row.status)).toEqual(["SHIPPED", "CANCELLED"]);
+  });
+
+  test("falls back from parent cancellation to fresh package states after fulfillment starts", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: "DIRECT_OFFLINE",
+      walletAmountFen: 0,
+    });
+    await db
+      .update(shipmentFulfillments)
+      .set({
+        externalOrderNo: "JF-BOUND-DURING-PARENT-CANCEL",
+        jifengStatus: 2,
+        status: "FULFILLING",
+        submittedAt: new Date("2026-08-20T01:05:00.000Z"),
+      })
+      .where(eq(shipmentFulfillments.id, fixture.fulfillments[0].id));
+    const cancelOrder = vi.fn().mockResolvedValue({ data: null });
+
+    await expect(
+      cancelAllCancellableOrderShipments({
+        actorUserId: fixture.admin.id,
+        getClient: async () => ({ cancelOrder }),
+        orderId: fixture.order.id,
+        reason: "履约启动竞态下取消全部可取消包裹",
+      }),
+    ).resolves.toMatchObject({
+      cancelledCount: 1,
+      failedCount: 0,
+      pendingCount: 1,
+      skippedCount: 0,
+    });
+    expect(cancelOrder).toHaveBeenCalledTimes(1);
+    const statuses = await db.execute<{ status: string }>(sql`
+      select f.status
+      from shipment_fulfillments f
+      inner join order_shipments s on s.id = f.shipment_id
+      where s.order_id = ${fixture.order.id}
+      order by s.external_order_no
+    `);
+    expect(statuses.map((row) => row.status)).toEqual([
+      "CANCEL_PENDING",
+      "CANCELLED",
+    ]);
+  });
+
+  test("completes all offline refunds atomically and stays idempotent under concurrency", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: "DIRECT_OFFLINE",
+      walletAmountFen: 0,
+    });
+    await cancelJifengShipment({
+      actorUserId: fixture.admin.id,
+      reason: "批量退款测试取消一",
+      shipmentId: fixture.shipments[0].id,
+    });
+    await cancelJifengShipment({
+      actorUserId: fixture.admin.id,
+      reason: "批量退款测试取消二",
+      shipmentId: fixture.shipments[1].id,
+    });
+
+    const results = await Promise.all([
+      completeAllOfflineOrderRefunds({
+        actorUserId: fixture.admin.id,
+        adminUserId: fixture.admin.id,
+        note: "微信退款批次 RF-20260825",
+        orderId: fixture.order.id,
+      }),
+      completeAllOfflineOrderRefunds({
+        actorUserId: fixture.admin.id,
+        adminUserId: fixture.admin.id,
+        note: "微信退款批次 RF-20260825",
+        orderId: fixture.order.id,
+      }),
+    ]);
+
+    expect(results.reduce((sum, result) => sum + result.completedCount, 0)).toBe(2);
+    expect(results.reduce((sum, result) => sum + result.completedAmountFen, 0)).toBe(3_800);
+    await expect(refundRows(fixture.order.id)).resolves.toEqual([
+      expect.objectContaining({ status: "COMPLETED" }),
+      expect.objectContaining({ status: "COMPLETED" }),
+    ]);
+    await expect(
+      completeAllOfflineOrderRefunds({
+        actorUserId: fixture.admin.id,
+        adminUserId: fixture.admin.id,
+        note: "微信退款批次 RF-20260825",
+        orderId: fixture.order.id,
+      }),
+    ).resolves.toMatchObject({
+      completedAmountFen: 0,
+      completedCount: 0,
+      status: "ALREADY_COMPLETED",
+    });
   });
 
   test("records offline refund obligations even before fulfillment rows are enqueued", async () => {

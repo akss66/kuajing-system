@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ActionForm } from "@/components/forms/action-form";
+import { ConfirmedActionForm } from "@/components/forms/confirmed-action-form";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
@@ -10,9 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  cancelAllCancellableOrderShipmentsAction,
   cancelJifengShipmentAction,
+  completeAllOfflineOrderRefundsAction,
   completeOfflinePackageRefundAction,
   createReplacementAction,
+  refreshAllJifengShipmentStatusesAction,
   refreshJifengShipmentStatusAction,
   retryJifengShipmentAction,
 } from "@/modules/fulfillment/actions";
@@ -77,6 +81,32 @@ export default async function AdminOrderDetailPage({
   const { orderId } = await params;
   const order = await getAdminOrderDetail(orderId);
   if (!order) notFound();
+  const refreshableShipmentCount = order.shipments.filter((shipment) =>
+    [
+      "SUBMITTED",
+      "FULFILLING",
+      "EXCEPTION",
+      "CANCEL_PENDING",
+      "CANCELLED",
+      "SHIPPED",
+    ].includes(shipment.fulfillmentStatus ?? ""),
+  ).length;
+  const pendingOfflineRefunds = order.shipments.flatMap((shipment) =>
+    shipment.cancellationAdjustment?.status === "PENDING_OFFLINE"
+      ? [shipment.cancellationAdjustment]
+      : [],
+  );
+  const pendingOfflineRefundAmountFen = pendingOfflineRefunds.reduce(
+    (sum, adjustment) => sum + adjustment.offlineAmountFen,
+    0,
+  );
+  const canCancelOrder = !["CANCELLED", "EXPIRED", "SHIPPED"].includes(
+    order.status,
+  );
+  const isPreFulfillmentCancellation = [
+    "PENDING_PAYMENT",
+    "PAID_PENDING_FULFILLMENT",
+  ].includes(order.status);
 
   return (
     <div className="space-y-6">
@@ -123,6 +153,107 @@ export default async function AdminOrderDetailPage({
         replacementStatuses={order.shipments.map((shipment) => shipment.replacementStatus)}
         shipmentStatuses={order.shipments.map((shipment) => shipment.fulfillmentStatus)}
       />
+
+      <section
+        aria-labelledby="order-operations-heading"
+        className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 sm:px-5">
+          <div>
+            <h2 className="text-sm font-semibold text-ink" id="order-operations-heading">
+              整单操作
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              状态查询与取消按包裹独立处理；整单退款确认则在一个事务中全部成功或全部回滚。
+            </p>
+          </div>
+          <Badge variant="secondary">{order.shipments.length} 个包裹</Badge>
+        </div>
+        <div className="grid divide-y divide-border lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          <ActionForm
+            action={refreshAllJifengShipmentStatusesAction}
+            className="flex flex-col gap-3 p-4 sm:p-5"
+            submitDisabled={refreshableShipmentCount === 0}
+            submitLabel="一键查询整单状态"
+          >
+            <input name="orderId" type="hidden" value={order.id} />
+            <div className="min-h-14">
+              <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <RefreshCcw aria-hidden="true" className="size-4 text-primary" />
+                查询全部极风状态
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                当前有 {refreshableShipmentCount} 个包裹可查询；尚未进入极风的包裹会自动跳过。
+              </p>
+            </div>
+          </ActionForm>
+
+          <ConfirmedActionForm
+            action={cancelAllCancellableOrderShipmentsAction}
+            className="flex flex-col gap-3 p-4 sm:p-5"
+            confirmDescription={
+              isPreFulfillmentCancellation
+                ? "系统会再次校验全部包裹。未进入极风的包裹会直接取消；若已有远端履约，将改为逐包裹安全取消。"
+                : "已发货和已取消包裹会跳过，正在取消的包裹会计入等待确认。已绑定极风的包裹必须等远端确认状态 9 后，才会释放库存并生成退款记录。"
+            }
+            confirmLabel="确认执行整单取消"
+            confirmTitle={
+              isPreFulfillmentCancellation
+                ? "确认取消整个拿货单？"
+                : "确认取消全部可取消包裹？"
+            }
+            disabled={!canCancelOrder}
+            submitLabel={
+              isPreFulfillmentCancellation
+                ? "取消整个拿货单"
+                : "取消全部可取消包裹"
+            }
+          >
+            <input name="orderId" type="hidden" value={order.id} />
+            <div className="min-h-14">
+              <p className="text-sm font-semibold text-ink">
+                {isPreFulfillmentCancellation ? "整单取消" : "批量取消包裹"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                不会取消已发货包裹，也不会提前释放远端取消中的库存。
+              </p>
+            </div>
+            <Input
+              maxLength={1000}
+              name="reason"
+              placeholder="填写本次整单取消原因"
+              required
+            />
+          </ConfirmedActionForm>
+
+          <ConfirmedActionForm
+            action={completeAllOfflineOrderRefundsAction}
+            className="flex flex-col gap-3 p-4 sm:p-5"
+            confirmDescription={`将一次确认 ${pendingOfflineRefunds.length} 笔待线下退款，共 ${money(
+              pendingOfflineRefundAmountFen,
+            )}。完成后不可修改，只能通过审计记录追溯。`}
+            confirmLabel="确认全部退款已完成"
+            confirmTitle="确认整单线下退款全部完成？"
+            disabled={pendingOfflineRefunds.length === 0}
+            submitLabel="确认全部退款完成"
+            variant="default"
+          >
+            <input name="orderId" type="hidden" value={order.id} />
+            <div className="min-h-14">
+              <p className="text-sm font-semibold text-ink">整单退款确认</p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                待处理 {pendingOfflineRefunds.length} 笔，共 {money(pendingOfflineRefundAmountFen)}。
+              </p>
+            </div>
+            <Input
+              maxLength={1000}
+              name="note"
+              placeholder="填写退款流水号、时间或批次备注"
+              required
+            />
+          </ConfirmedActionForm>
+        </div>
+      </section>
 
       <div className="space-y-5">
         {order.shipments.map((shipment, shipmentIndex) => {

@@ -23,6 +23,7 @@ import {
   systemNotifications,
 } from "@/db/schema";
 import { JifengApiError } from "@/integrations/jifeng/client";
+import { refreshAllJifengShipmentStatuses } from "@/modules/fulfillment/order-operations";
 import {
   applyJifengOrderStatus,
   pollActiveJifengFulfillments,
@@ -181,6 +182,38 @@ describe("Jifeng order status convergence", () => {
         customers
       restart identity cascade
     `));
+  });
+
+  test("refreshes all eligible children and reports a failed sibling without aborting", async () => {
+    const fixture = await createTwoPackageFixture();
+    const result = await refreshAllJifengShipmentStatuses({
+      client: {
+        async getOrder({ erpNo }) {
+          if (erpNo === fixture.fulfillments[1].erpNo) {
+            throw new JifengApiError({
+              code: "TEMPORARY_FAILURE",
+              message: "temporary test failure",
+              retryable: true,
+            });
+          }
+          return { erpNo, status: 2 };
+        },
+      },
+      now: new Date("2026-08-20T06:00:00.000Z"),
+      orderId: fixture.order.id,
+    });
+
+    expect(result).toMatchObject({
+      failedCount: 1,
+      refreshedCount: 1,
+      skippedCount: 0,
+    });
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ outcome: "REFRESHED" }),
+        expect.objectContaining({ outcome: "FAILED" }),
+      ]),
+    );
   });
 
   test("does not deduct before shipped, deducts each package exactly once, and ships the order only when all packages ship", async () => {

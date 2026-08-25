@@ -15,6 +15,12 @@ import type { ActionState } from "@/shared/action-state";
 
 import { JifengDispatchError, retryJifengShipment } from "./dispatch";
 import {
+  cancelAllCancellableOrderShipments,
+  completeAllOfflineOrderRefunds,
+  OrderOperationsError,
+  refreshAllJifengShipmentStatuses,
+} from "./order-operations";
+import {
   cancelJifengShipment,
   createReplacementRequest,
   ReplacementError,
@@ -38,6 +44,18 @@ const refreshShipmentSchema = z.object({
   shipmentId: z.string().uuid(),
 });
 
+const orderOperationSchema = z.object({
+  orderId: z.string().uuid(),
+});
+
+const cancelOrderShipmentsSchema = orderOperationSchema.extend({
+  reason: z.string().trim().min(2, "请填写至少 2 个字的取消原因").max(1000),
+});
+
+const completeOrderRefundsSchema = orderOperationSchema.extend({
+  note: z.string().trim().min(2, "请填写至少 2 个字的退款凭证或备注").max(1000),
+});
+
 function safeStatusRefreshMessage(error: JifengStatusRefreshError) {
   switch (error.code) {
     case "FULFILLMENT_NOT_FOUND":
@@ -57,6 +75,8 @@ function failure(error: unknown, fallback: string): ActionState {
   return {
     message:
       error instanceof ReplacementError ||
+      error instanceof OrderOperationsError ||
+      (error instanceof Error && error.name === "OrderLifecycleError") ||
       error instanceof JifengDispatchError ||
       error instanceof SettlementBatchError ||
       (error instanceof Error && error.name === "PackageCancellationAdjustmentError")
@@ -71,6 +91,101 @@ function refreshOrder(orderId: string) {
   revalidatePath("/admin/orders");
   revalidatePath("/admin/inventory");
   revalidatePath("/admin");
+}
+
+function refreshOrderFinancials(orderId: string) {
+  refreshOrder(orderId);
+  revalidatePath(`/portal/orders/${orderId}`);
+  revalidatePath("/admin/payments");
+  revalidatePath("/portal/wallet");
+}
+
+export async function refreshAllJifengShipmentStatusesAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await requireAdmin();
+  const parsed = orderOperationSchema.safeParse({ orderId: formData.get("orderId") });
+  if (!parsed.success) return { message: "拿货单信息无效。", status: "error" };
+  try {
+    const { client } = await getJifengReadClient();
+    const result = await refreshAllJifengShipmentStatuses({
+      client,
+      orderId: parsed.data.orderId,
+    });
+    refreshOrder(parsed.data.orderId);
+    const message = `整单状态查询完成：已更新 ${result.refreshedCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。`;
+    return {
+      message,
+      status: result.failedCount > 0 ? "error" : "success",
+    };
+  } catch (error) {
+    return failure(error, "整单极风状态查询失败，请稍后重试。");
+  }
+}
+
+export async function cancelAllCancellableOrderShipmentsAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const principal = await requireAdmin();
+  const parsed = cancelOrderShipmentsSchema.safeParse({
+    orderId: formData.get("orderId"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) {
+    return { fieldErrors: z.flattenError(parsed.error).fieldErrors, status: "error" };
+  }
+  try {
+    const result = await cancelAllCancellableOrderShipments({
+      actorUserId: principal.userId,
+      getClient: async () => (await getEnabledJifengCancellationClient()).client,
+      orderId: parsed.data.orderId,
+      reason: parsed.data.reason,
+    });
+    refreshOrderFinancials(parsed.data.orderId);
+    const message = `整单取消处理完成：已取消 ${result.cancelledCount} 个，等待极风确认 ${result.pendingCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。`;
+    return {
+      message,
+      status: result.failedCount > 0 ? "error" : "success",
+    };
+  } catch (error) {
+    return failure(error, "整单取消失败，未确认取消的包裹不会释放库存。");
+  }
+}
+
+export async function completeAllOfflineOrderRefundsAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const principal = await requireAdmin();
+  const parsed = completeOrderRefundsSchema.safeParse({
+    note: formData.get("note"),
+    orderId: formData.get("orderId"),
+  });
+  if (!parsed.success) {
+    return { fieldErrors: z.flattenError(parsed.error).fieldErrors, status: "error" };
+  }
+  try {
+    const result = await completeAllOfflineOrderRefunds({
+      actorUserId: principal.userId,
+      adminUserId: await resolveAdminUserId(principal.userId),
+      note: parsed.data.note,
+      orderId: parsed.data.orderId,
+    });
+    refreshOrderFinancials(parsed.data.orderId);
+    return {
+      message:
+        result.status === "ALREADY_COMPLETED"
+          ? "该拿货单的线下退款已全部确认，无需重复处理。"
+          : `已确认 ${result.completedCount} 笔线下退款，共 ${(
+              result.completedAmountFen / 100
+            ).toFixed(2)} 元，并写入审计记录。`,
+      status: "success",
+    };
+  } catch (error) {
+    return failure(error, "整单线下退款确认失败，请稍后重试。");
+  }
 }
 
 export async function createReplacementAction(

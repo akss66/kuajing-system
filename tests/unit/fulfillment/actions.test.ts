@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  cancelAllCancellableOrderShipments: vi.fn(),
+  completeAllOfflineOrderRefunds: vi.fn(),
   completeOfflinePackageRefund: vi.fn(),
   getJifengReadClient: vi.fn(),
+  refreshAllJifengShipmentStatuses: vi.fn(),
   refreshJifengShipmentStatus: vi.fn(),
   revalidatePath: vi.fn(),
   retryJifengShipment: vi.fn(),
@@ -39,6 +42,16 @@ vi.mock("@/modules/fulfillment/replacement", () => ({
 vi.mock("@/modules/fulfillment/package-cancellation-adjustment", () => ({
   completeOfflinePackageRefund: mocks.completeOfflinePackageRefund,
 }));
+vi.mock("@/modules/fulfillment/order-operations", () => ({
+  OrderOperationsError: class OrderOperationsError extends Error {
+    constructor(public readonly code: string, message: string) {
+      super(message);
+    }
+  },
+  cancelAllCancellableOrderShipments: mocks.cancelAllCancellableOrderShipments,
+  completeAllOfflineOrderRefunds: mocks.completeAllOfflineOrderRefunds,
+  refreshAllJifengShipmentStatuses: mocks.refreshAllJifengShipmentStatuses,
+}));
 vi.mock("@/modules/fulfillment/status-sync", () => ({
   JifengStatusRefreshError: class JifengStatusRefreshError extends Error {
     constructor(public readonly code: string, message: string) {
@@ -64,8 +77,11 @@ import { JifengStatusRefreshError } from "@/modules/fulfillment/status-sync";
 
 describe("fulfillment actions", () => {
   beforeEach(() => {
+    mocks.cancelAllCancellableOrderShipments.mockReset();
+    mocks.completeAllOfflineOrderRefunds.mockReset();
     mocks.completeOfflinePackageRefund.mockReset();
     mocks.getJifengReadClient.mockReset();
+    mocks.refreshAllJifengShipmentStatuses.mockReset();
     mocks.refreshJifengShipmentStatus.mockReset();
     mocks.revalidatePath.mockReset();
     mocks.retryJifengShipment.mockReset();

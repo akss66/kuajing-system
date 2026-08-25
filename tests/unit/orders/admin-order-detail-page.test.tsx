@@ -31,8 +31,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/modules/fulfillment/actions", () => ({
+  cancelAllCancellableOrderShipmentsAction: vi.fn(),
   cancelJifengShipmentAction: vi.fn(),
+  completeAllOfflineOrderRefundsAction: vi.fn(),
+  completeOfflinePackageRefundAction: vi.fn(),
   createReplacementAction: vi.fn(),
+  refreshAllJifengShipmentStatusesAction: vi.fn(),
   refreshJifengShipmentStatusAction: vi.fn(),
   retryJifengShipmentAction: vi.fn(),
 }));
