@@ -23,6 +23,7 @@ function dateTime(value: Date) {
 export default async function CustomerWalletPage() {
   const principal = await requireCustomer();
   const wallet = await getCustomerWalletView(principal.customerId);
+  const hasActivity = wallet.holds.length > 0 || wallet.transactions.length > 0;
 
   return (
     <div className="space-y-5">
@@ -66,6 +67,7 @@ export default async function CustomerWalletPage() {
             <p className="mt-1 text-sm leading-6 text-muted-foreground">集中查看订单资金占用与最近 100 笔余额变化。</p>
           </header>
 
+          {hasActivity ? (
           <div className="grid md:grid-cols-2" data-wallet-activity-groups>
           <section aria-labelledby="wallet-holds-title" className="border-t border-slate-100">
             <div className="flex items-start gap-3 px-5 pb-3 pt-4 sm:px-6">
@@ -74,10 +76,10 @@ export default async function CustomerWalletPage() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-semibold text-foreground" id="wallet-holds-title">订单资金占用</h3>
+                  <h3 className="text-sm font-semibold text-foreground" id="wallet-holds-title">订单预留金额</h3>
                   <Badge variant="secondary">{wallet.holds.length} 笔</Badge>
                 </div>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">付款完成或订单关闭后，系统会自动扣除或释放占用。</p>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">付款完成或订单关闭后，系统会自动扣除或释放预留金额。</p>
               </div>
             </div>
             {wallet.holds.length ? (
@@ -90,7 +92,7 @@ export default async function CustomerWalletPage() {
                           <p className="font-medium text-ink">付款编号 {hold.batchNumber}</p>
                           <Badge variant="secondary">{hold.status}</Badge>
                         </div>
-                        <p className="mt-1 text-xs text-muted">占用于 {dateTime(hold.createdAt)}（渥太华）</p>
+                        <p className="mt-1 text-xs text-muted">预留于 {dateTime(hold.createdAt)}（渥太华）</p>
                         {hold.releasedAt ? <p className="mt-1 text-xs text-muted">处理于 {dateTime(hold.releasedAt)}（渥太华）</p> : null}
                         {hold.releaseReason ? <p className="mt-1 text-xs text-muted">{hold.releaseReason}</p> : null}
                       </div>
@@ -106,7 +108,7 @@ export default async function CustomerWalletPage() {
               </div>
             ) : (
               <div className="px-5 pb-5 sm:px-6" role="status">
-                <p className="text-sm font-medium text-foreground">当前没有占用中的金额</p>
+                <p className="text-sm font-medium text-foreground">当前没有预留中的金额</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">使用余额或提交付款后，这里会显示对应订单。</p>
               </div>
             )}
@@ -163,6 +165,26 @@ export default async function CustomerWalletPage() {
             )}
           </section>
           </div>
+          ) : (
+            <div
+              aria-label="还没有资金记录"
+              className="flex flex-col gap-4 border-t border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              role="status"
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <WalletCards aria-hidden="true" className="size-4" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">还没有资金记录</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">充值、付款、退款或订单结算后，会在这里保留记录。</p>
+                </div>
+              </div>
+              <Link className="inline-flex min-h-11 shrink-0 items-center text-sm font-semibold text-primary-hover" href="/portal/orders">
+                查看我的订单
+              </Link>
+            </div>
+          )}
         </section>
       </SettlementWorkspace>
     </div>

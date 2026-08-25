@@ -113,4 +113,15 @@ describe("CustomerBulkOrdersPage", () => {
     expect(screen.queryByRole("link", { name: "继续上传" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "继续上次上传" })).not.toBeInTheDocument();
   });
+
+  it("keeps the first-use state focused on starting an upload", async () => {
+    draftMocks.listBulkDrafts.mockResolvedValue([]);
+
+    render(await CustomerBulkOrdersPage());
+
+    expect(screen.getByRole("region", { name: "多店铺上传下一步" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "开始批量上传" })).toBeEnabled();
+    expect(screen.queryByRole("region", { name: "上传概况" })).not.toBeInTheDocument();
+    expect(screen.queryByText("还没有上传记录")).not.toBeInTheDocument();
+  });
 });

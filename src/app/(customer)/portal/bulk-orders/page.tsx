@@ -6,7 +6,6 @@ import { CreateBulkDraftSubmit } from "@/components/bulk-order/create-bulk-draft
 import { DiscardBulkDraftForm } from "@/components/bulk-order/discard-bulk-draft-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
-import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { Button } from "@/components/ui/button";
 import { createBulkDraftAction } from "@/modules/bulk-order/actions";
 import { listBulkDrafts } from "@/modules/bulk-order/draft-service";
@@ -158,25 +157,27 @@ export default async function CustomerBulkOrdersPage() {
         ) : null}
       </section>
 
-      <section
-        aria-label="上传概况"
-        className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <p className="text-sm font-medium text-foreground">当前上传概况</p>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
-          {[
-            { label: "可用店铺", value: stores.length },
-            { label: "进行中", value: writableDrafts.length },
-            { label: "已上传文件", value: activeFileCount },
-            { label: "可提交店铺", value: submittableGroupCount },
-          ].map((item) => (
-            <div className="flex items-baseline justify-between gap-3 sm:justify-start" key={item.label}>
-              <dt className="text-muted-foreground">{item.label}</dt>
-              <dd className="font-semibold tabular-nums text-foreground">{item.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      {displayedDrafts.length ? (
+        <section
+          aria-label="上传概况"
+          className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm font-medium text-foreground">当前上传概况</p>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
+            {[
+              { label: "可用店铺", value: stores.length },
+              { label: "进行中", value: writableDrafts.length },
+              { label: "已上传文件", value: activeFileCount },
+              { label: "可提交店铺", value: submittableGroupCount },
+            ].map((item) => (
+              <div className="flex items-baseline justify-between gap-3 sm:justify-start" key={item.label}>
+                <dt className="text-muted-foreground">{item.label}</dt>
+                <dd className="font-semibold tabular-nums text-foreground">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
 
       {!stores.length ? (
         <WorkspacePanel className="border-warning/20 bg-warning/5 px-4 py-5 text-sm text-warning">
@@ -184,6 +185,7 @@ export default async function CustomerBulkOrdersPage() {
         </WorkspacePanel>
       ) : null}
 
+      {otherDrafts.length ? (
       <WorkspacePanel className="overflow-hidden">
         <WorkspacePanelHeader
           description="默认按最近更新时间排序；已提交成功的店铺会从编辑区移除，失败文件会继续保留。"
@@ -195,8 +197,7 @@ export default async function CustomerBulkOrdersPage() {
           }
         />
 
-        {otherDrafts.length ? (
-          <div className="grid gap-3 bg-slate-50/50 p-3">
+        <div className="grid gap-3 bg-slate-50/50 p-3">
             {otherDrafts.map(({ draft, status }) => (
               <article
                 className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:flex-row sm:items-center sm:justify-between sm:px-5"
@@ -229,15 +230,9 @@ export default async function CustomerBulkOrdersPage() {
                 </div>
               </article>
             ))}
-          </div>
-        ) : (
-          <ActionableEmptyState
-            description={latestDraft ? "当前进行中的上传已显示在上方。" : "开始后即可按店铺分组上传多个 TEMU 原始 Excel。"}
-            kind="initial"
-            title={latestDraft ? "没有其他上传记录" : "还没有上传记录"}
-          />
-        )}
+        </div>
       </WorkspacePanel>
+      ) : null}
     </div>
   );
 }

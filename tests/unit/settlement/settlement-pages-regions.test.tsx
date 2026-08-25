@@ -43,20 +43,21 @@ describe("settlement page regions", () => {
     expect(screen.getByRole("region", { name: "合并付款记录" })).toBeVisible();
   });
 
-  it("separates wallet balance, holds and immutable transactions", async () => {
+  it("collapses an empty wallet into one useful activity state", async () => {
     render(await CustomerWalletPage());
 
     expect(screen.getByRole("heading", { level: 1, name: "资金中心" })).toBeVisible();
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
     expect(screen.getByText("可用余额")).toBeVisible();
+    expect(screen.getByText("订单预留")).toBeVisible();
     expect(screen.queryByText("流水条数")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "资金记录" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "订单资金占用" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
-    expect(screen.getByText("当前没有占用中的金额")).toBeVisible();
-    expect(screen.getByText("还没有资金变动")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "订单预留金额" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "资金流水" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "还没有资金记录" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看我的订单" })).toHaveAttribute("href", "/portal/orders");
     expect(document.querySelectorAll("[data-wallet-activity]")).toHaveLength(1);
-    expect(document.querySelector("[data-wallet-activity-groups]")).toHaveClass("md:grid-cols-2");
+    expect(document.querySelector("[data-wallet-activity-groups]")).not.toBeInTheDocument();
     expect(screen.queryByText("付款说明")).not.toBeInTheDocument();
     expect(screen.queryByText("先看可用余额，再处理需要补付的订单")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "查看待付款订单" })).not.toBeInTheDocument();
@@ -93,6 +94,7 @@ describe("settlement page regions", () => {
     render(await CustomerWalletPage());
 
     expect(screen.getByText("付款编号 PAY-001")).toBeVisible();
+    expect(screen.getByRole("region", { name: "订单预留金额" })).toBeVisible();
     expect(screen.getByRole("link", { name: "查看付款" })).toHaveAttribute("href", "/portal/settlements/batch-1");
     expect(screen.getByText("管理员人工入账")).toBeVisible();
     expect(screen.getByText("+¥25.00")).toBeVisible();
