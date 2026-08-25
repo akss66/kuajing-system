@@ -181,6 +181,10 @@ test("public health is minimal and administrator health details are protected @d
   const publicHealth = await request.get("/api/health");
   expect(publicHealth.status()).toBe(200);
   expect(await publicHealth.json()).toEqual({
+    components: {
+      database: "healthy",
+      worker: "not_configured",
+    },
     revision: null,
     status: "ok",
     version: "development",

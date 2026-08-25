@@ -31,11 +31,11 @@ docker compose -f .\compose.production.yaml ps
 Invoke-RestMethod https://shop.tzxai.top/api/health
 ```
 
-健康响应只公开 `status`、`version` 和 `revision`。必须核对响应、镜像 OCI 标签、容器环境三者一致，不能只根据镜像 tag 推断正在运行的版本。
+健康响应只公开 `status`、`version`、`revision` 和固定枚举的 `components.database`/`components.worker`，不返回文件路径、容器 ID、异常文本或环境变量。必须核对响应、镜像 OCI 标签、容器环境三者一致，不能只根据镜像 tag 推断正在运行的版本。`status=degraded` 会保持 HTTP 200 以避免把仍可服务的 Web 一并标成 unhealthy；外部监控必须解析正文并对 `degraded` 告警。
 
 ## Worker 自动替换单元
 
-仓库提供 `scripts/worker-watchdog.sh` 和 `deploy/systemd/tongzhouxing-worker-watchdog.*`。脚本仅在现有 `worker` 容器明确为 `unhealthy` 时，用当前不可变镜像执行 `--no-build --no-deps --force-recreate worker`；`healthy`/`starting` 不操作，缺失或未知状态只报错，绝不重启 Web 或 PostgreSQL。
+仓库提供 `scripts/worker-watchdog.sh` 和 `deploy/systemd/tongzhouxing-worker-watchdog.*`。脚本在 `worker` 容器缺失时用当前不可变镜像执行 `up -d --no-build --no-deps worker`，在现有容器明确为 `unhealthy` 时只对 Worker 执行 `--force-recreate`；两条恢复路径都必须等待新容器进入 `healthy` 才成功。`healthy`/`starting` 不操作，未知状态只报错，绝不启动、重启或停止 Web 与 PostgreSQL。
 
 安装仍是正式服务器状态变更，必须在部署窗口由运维执行并留存输出：
 
@@ -55,7 +55,7 @@ systemctl status tongzhouxing-worker-watchdog.timer --no-pager
 journalctl -u tongzhouxing-worker-watchdog.service -n 50 --no-pager
 ```
 
-watchdog 会校验并导出 `APP_VERSION`/`RELEASE_SHA`，覆盖 `COMPOSE_ENV_FILE` 中可能遗留的可移动旧标签；四项必须由每次部署原子更新。只有完成一次“让测试 Worker 进入 unhealthy，再证明只替换 Worker 容器 ID”的演练后，才算自动恢复门禁通过。
+watchdog 会校验并导出 `APP_VERSION`/`RELEASE_SHA`，覆盖 `COMPOSE_ENV_FILE` 中可能遗留的可移动旧标签；四项必须由每次部署原子更新。只有分别完成“删除测试 Worker 后自动按不可变版本拉起”和“让测试 Worker 进入 unhealthy 后只替换 Worker 容器 ID”两次演练，并证明 Web、PostgreSQL 与其他项目容器 ID 均未变化，才算自动恢复门禁通过。
 
 ## 正式设施阻断项
 

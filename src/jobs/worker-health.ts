@@ -39,6 +39,7 @@ export type WorkerHealthAssessment =
   | {
       healthy: false;
       code:
+        | "HEARTBEAT_MISSING"
         | "INVALID_HEARTBEAT"
         | "HEARTBEAT_STALE"
         | "NOT_READY"
@@ -152,7 +153,10 @@ export function checkWorkerHealth(
         isProcessAlive: options.processProbe ?? isProcessAlive,
       },
     );
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { healthy: false, code: "HEARTBEAT_MISSING" };
+    }
     return { healthy: false, code: "INVALID_HEARTBEAT" };
   }
 }

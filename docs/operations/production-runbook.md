@@ -67,9 +67,9 @@ npm.cmd run worker
 
 ## 监控与告警
 
-> `restart: unless-stopped` 只处理进程退出，不会因为 Docker healthcheck 变成 `unhealthy` 自动替换容器。正式放量前必须提供外部编排/监控的自动替换证据：连续探针失败触发告警并重新创建 `worker`，且演练不能影响 PostgreSQL、Web 或 `dyflow`。没有该证据时只能人工值守试运行，不能宣称无人值守。
+> `restart: unless-stopped` 只处理进程退出，不会因为 Docker healthcheck 变成 `unhealthy` 自动替换容器。systemd watchdog 会在 Worker 缺失时按当前不可变版本单独拉起 Worker，在 Worker 明确 unhealthy 时单独重建，并等待健康后才报告成功。正式放量前必须留存两条恢复演练证据，且 PostgreSQL、Web 与 `dyflow` 容器 ID 必须保持不变。没有该证据时只能人工值守试运行，不能宣称无人值守。
 
-- 每 30 秒请求 `GET /api/health`。连续 3 次非 200 触发紧急告警；响应正文只允许 `status`、`version`、`revision`，不得出现其他环境变量或内部诊断。
+- 每 30 秒请求 `GET /api/health`。连续 3 次非 200 或数据库组件为 `unavailable` 触发紧急告警；Worker 为 `missing`、`stale`、`scheduler_inactive`、`invalid` 或整体 `status=degraded` 时立即创建运维告警并检查 watchdog。响应正文只允许 `status`、`version`、`revision` 和固定枚举组件状态，不得出现文件路径、容器 ID、环境变量或内部异常文本。
 - 采集 Web 与 Worker 标准输出，按进程、环境、版本和时间建立索引；日志不得采集请求体、Cookie、Authorization、收件信息或环境变量。
 - 立即告警：Web/Worker 进程退出、数据库不可用、库存或余额不一致、已发货无运单。
 - 5 分钟内告警：极风/飞书失败任务持续增长、处理中任务超过 10 分钟、Webhook 持续验签失败。
@@ -106,7 +106,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore-postgr
 
 ## 上线后验收
 
-- `/api/health` 返回 200，且 `version`/`revision` 与部署的最终 Git SHA 和镜像 OCI 标签一致。
+- `/api/health` 返回 200、`status=ok`、数据库与 Worker 均为 `healthy`，且 `version`/`revision` 与部署的最终 Git SHA 和镜像 OCI 标签一致。
 - 超级管理员和客户均能登录，客户无法访问 `/admin`。
 - 有余额拿货单自动扣款；余额不足订单等待线下核款；过期订单释放库存。
 - 普通包裹与补发只在极风已发货后扣库存，重复事件不重复扣减。

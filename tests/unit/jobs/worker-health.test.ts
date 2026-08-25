@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assessWorkerHealth,
   areExpectedWorkersActive,
+  checkWorkerHealth,
   createWorkerHealthMonitor,
   type WorkerHealthSnapshot,
 } from "@/jobs/worker-health";
@@ -72,6 +73,29 @@ describe("assessWorkerHealth", () => {
         isProcessAlive: () => false,
       }),
     ).toEqual({ healthy: false, code: "PROCESS_MISSING" });
+  });
+});
+
+describe("checkWorkerHealth", () => {
+  const temporaryDirectories: string[] = [];
+
+  afterEach(() => {
+    for (const directory of temporaryDirectories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("distinguishes a missing heartbeat from malformed heartbeat data", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worker-health-read-"));
+    temporaryDirectories.push(directory);
+
+    expect(
+      checkWorkerHealth({
+        filePath: join(directory, "missing.json"),
+        now,
+        processProbe: () => true,
+      }),
+    ).toEqual({ healthy: false, code: "HEARTBEAT_MISSING" });
   });
 });
 

@@ -40,10 +40,42 @@ if [ ! -f "$compose_file" ] || [ ! -f "$compose_env_file" ]; then
   exit 2
 fi
 
+wait_for_worker_healthy() {
+  worker_id=$1
+  attempts=0
+  while [ "$attempts" -lt 45 ]; do
+    worker_health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$worker_id" 2>/dev/null || true)
+    case "$worker_health" in
+      healthy)
+        return 0
+        ;;
+      starting)
+        ;;
+      *)
+        echo "worker-watchdog: worker health verification failed with '$worker_health'" >&2
+        return 1
+        ;;
+    esac
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  echo "worker-watchdog: worker did not become healthy within the watchdog window" >&2
+  return 1
+}
+
 container_id=$(docker compose --env-file "$compose_env_file" -f "$compose_file" ps -q worker)
 if [ -z "$container_id" ]; then
-  echo "worker-watchdog: worker container is missing; no automatic action taken" >&2
-  exit 2
+  echo "worker-watchdog: worker container is missing; starting immutable release worker" >&2
+  docker compose --env-file "$compose_env_file" -f "$compose_file" up \
+    -d --no-build --no-deps worker
+  replacement_id=$(docker compose --env-file "$compose_env_file" -f "$compose_file" ps -q worker)
+  if [ -z "$replacement_id" ]; then
+    echo "worker-watchdog: missing worker start did not produce a container" >&2
+    exit 2
+  fi
+  wait_for_worker_healthy "$replacement_id"
+  echo "worker-watchdog: started missing worker $replacement_id" >&2
+  exit 0
 fi
 
 health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")
@@ -60,6 +92,7 @@ case "$health" in
       echo "worker-watchdog: worker recreation did not produce a new container" >&2
       exit 2
     fi
+    wait_for_worker_healthy "$replacement_id"
     echo "worker-watchdog: replaced worker $container_id with $replacement_id" >&2
     ;;
   *)

@@ -14,6 +14,16 @@ type WorkerHealthOptions = {
   required?: boolean;
 };
 
+export type PublicWorkerHealth =
+  | "healthy"
+  | "invalid"
+  | "missing"
+  | "not_configured"
+  | "scheduler_inactive"
+  | "stale"
+  | "starting"
+  | "stopping";
+
 function shouldRequireWorkerHealth(options?: WorkerHealthOptions) {
   if (typeof options?.required === "boolean") return options.required;
   return Boolean(options?.filePath ?? process.env.WORKER_HEALTH_FILE);
@@ -32,6 +42,49 @@ function assessSharedWorkerHealth(
     // so PID probing would always fail across isolated container namespaces.
     processProbe: () => true,
   });
+}
+
+function toPublicWorkerHealth(
+  assessment: WorkerHealthAssessment | null,
+): PublicWorkerHealth {
+  if (assessment === null) return "not_configured";
+  switch (assessment.code) {
+    case "HEALTHY":
+      return "healthy";
+    case "HEARTBEAT_MISSING":
+      return "missing";
+    case "HEARTBEAT_STALE":
+      return "stale";
+    case "NOT_READY":
+      return "starting";
+    case "SCHEDULER_INACTIVE":
+      return "scheduler_inactive";
+    case "STOPPING":
+      return "stopping";
+    case "INVALID_HEARTBEAT":
+    case "PROCESS_MISSING":
+      return "invalid";
+  }
+}
+
+export async function getRuntimeHealth(input?: {
+  now?: Date;
+  workerHealth?: WorkerHealthOptions;
+}) {
+  await db.execute(sql`select 1`);
+  const workerAssessment = assessSharedWorkerHealth(
+    input?.now ?? new Date(),
+    input?.workerHealth,
+  );
+  const worker = toPublicWorkerHealth(workerAssessment);
+  return {
+    database: "healthy" as const,
+    status:
+      workerAssessment && !workerAssessment.healthy
+        ? ("degraded" as const)
+        : ("ok" as const),
+    worker,
+  };
 }
 
 export async function getOperationalHealth(input?: {
