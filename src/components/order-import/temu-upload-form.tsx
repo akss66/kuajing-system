@@ -108,7 +108,10 @@ export function TemuUploadForm({
               ? "scale-[1.005] border-primary bg-primary-soft/70 shadow-[0_14px_34px_rgb(15_118_110/0.12)]"
               : "border-primary/30 bg-primary-soft/25 hover:border-primary/60 hover:bg-primary-soft/45",
           )}
+          data-drag-active={dragActive ? "true" : "false"}
+          data-file-ready={selectedFileName ? "true" : "false"}
           data-testid="temu-workbook-dropzone"
+          data-upload-dropzone
           onDragEnter={(event) => {
             event.preventDefault();
             setDragActive(true);
@@ -142,7 +145,10 @@ export function TemuUploadForm({
             required
             type="file"
           />
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl border border-primary/15 bg-background text-primary shadow-[0_8px_24px_rgb(15_55_47/0.08)] transition-transform group-hover:-translate-y-1">
+          <span
+            className="flex size-14 shrink-0 items-center justify-center rounded-2xl border border-primary/15 bg-background text-primary shadow-[0_8px_24px_rgb(15_55_47/0.08)] transition-transform group-hover:-translate-y-1"
+            data-upload-icon
+          >
             {selectedFileName ? (
               <FileCheck2 aria-hidden="true" className="size-6" />
             ) : (
@@ -150,7 +156,10 @@ export function TemuUploadForm({
             )}
           </span>
           <span className="mt-4 min-w-0 max-w-lg sm:ml-5 sm:mt-0 sm:flex-1">
-            <strong className="block truncate text-base font-semibold text-foreground">
+            <strong
+              aria-live="polite"
+              className="block truncate text-base font-semibold text-foreground"
+            >
               {selectedFileName ?? "将 Excel 文件拖到这里"}
             </strong>
             <span className="mt-1.5 block text-sm font-normal leading-6 text-muted-foreground">

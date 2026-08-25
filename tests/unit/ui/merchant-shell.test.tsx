@@ -281,6 +281,13 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("heading", { name: "账户" })).toBeVisible();
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
+    const currentCustomerRoute = within(navigation).getByRole("link", { name: "客户首页" });
+    expect(currentCustomerRoute).toHaveAttribute("data-motion-state", "current");
+    expect(currentCustomerRoute.querySelector("[data-navigation-icon]")).toBeInTheDocument();
+    expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
+      "data-motion-state",
+      "idle",
+    );
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开侧栏账号菜单" }));
 

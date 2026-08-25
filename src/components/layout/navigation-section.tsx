@@ -92,9 +92,15 @@ export function NavigationSection({
                     ? "bg-[var(--merchant-nav-active)] text-[var(--merchant-nav-active-foreground)] before:w-0.5 before:bg-[var(--merchant-nav-active-foreground)]"
                     : "text-muted-foreground before:w-0 hover:bg-[var(--merchant-nav-hover)] hover:text-foreground",
                 )}
+                data-motion-state={active ? "current" : "idle"}
                 href={item.href}
               >
-                <item.icon aria-hidden="true" className="size-[18px] shrink-0" />
+                <span
+                  className="flex size-6 shrink-0 items-center justify-center"
+                  data-navigation-icon
+                >
+                  <item.icon aria-hidden="true" className="size-[18px]" />
+                </span>
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </Link>
             );

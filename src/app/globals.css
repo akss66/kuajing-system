@@ -53,6 +53,9 @@
   --radius-control: 0.5rem;
   --radius-surface: 0.375rem;
   --duration-fast: 160ms;
+  --motion-feedback: 140ms;
+  --motion-enter: 220ms;
+  --ease-portal-out: cubic-bezier(0.16, 1, 0.3, 1);
   --background: var(--tzx-background);
   --foreground: var(--tzx-ink);
   --card: var(--merchant-panel);
@@ -216,18 +219,18 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes customer-surface-in {
+@keyframes portal-content-focus {
   from {
-    transform: translateY(5px);
+    opacity: 0.94;
   }
 
   to {
-    transform: translateY(0);
+    opacity: 1;
   }
 }
 
 .customer-surface-enter {
-  animation: customer-surface-in 200ms ease-out both;
+  animation: portal-content-focus var(--motion-enter) var(--ease-portal-out) both;
 }
 
 [data-merchant-shell="customer"] {
@@ -409,7 +412,9 @@ textarea {
 }
 
 [data-merchant-shell="customer"] .portal-primary-route {
-  transition: background-color var(--duration-fast);
+  transition:
+    background-color var(--motion-feedback) ease-out,
+    transform var(--motion-feedback) ease-out;
 }
 
 [data-merchant-shell="customer"] .portal-primary-route:hover,
@@ -423,6 +428,44 @@ textarea {
 
 [data-merchant-shell="customer"] [data-navigation-section] a::before {
   display: none;
+}
+
+[data-merchant-shell="customer"] [data-navigation-section] a {
+  transition:
+    background-color var(--motion-feedback) ease-out,
+    color var(--motion-feedback) ease-out,
+    box-shadow var(--motion-feedback) ease-out,
+    transform var(--motion-feedback) ease-out;
+}
+
+[data-merchant-shell="customer"] [data-navigation-icon] {
+  transition:
+    color var(--motion-feedback) ease-out,
+    transform var(--motion-feedback) var(--ease-portal-out);
+}
+
+[data-merchant-shell="customer"] [data-navigation-section] a:hover [data-navigation-icon] {
+  transform: translateX(2px);
+}
+
+[data-merchant-shell="customer"] [data-navigation-section] a:active {
+  transform: scale(0.995);
+}
+
+@keyframes portal-navigation-settle {
+  from {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+[data-merchant-shell="customer"] [data-motion-state="current"] [data-navigation-icon] {
+  animation: portal-navigation-settle var(--motion-enter) var(--ease-portal-out) both;
 }
 
 [data-merchant-shell="customer"] [data-navigation-section] h2 {
@@ -441,13 +484,8 @@ textarea {
 
 @keyframes portal-ready-settle {
   0% {
-    opacity: 0;
-    transform: scale(0.82);
-  }
-
-  70% {
-    opacity: 1;
-    transform: scale(1.05);
+    opacity: 0.45;
+    transform: scale(0.9);
   }
 
   100% {
@@ -457,7 +495,7 @@ textarea {
 }
 
 .portal-ready-mark {
-  animation: portal-ready-settle 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: portal-ready-settle var(--motion-enter) var(--ease-portal-out) both;
 }
 
 .portal-inline-action svg,
@@ -465,9 +503,45 @@ textarea {
   transition: transform var(--duration-fast);
 }
 
+.portal-inline-action {
+  transition:
+    color var(--motion-feedback) ease-out,
+    transform var(--motion-feedback) ease-out;
+}
+
 .portal-inline-action:hover svg,
 .portal-focus-action:hover svg {
   transform: translateX(0.2rem);
+}
+
+[data-merchant-shell="customer"] .portal-primary-route:active,
+[data-merchant-shell="customer"] .portal-inline-action:active {
+  transform: scale(0.995);
+}
+
+[data-merchant-shell="customer"] [data-upload-dropzone] {
+  transition-duration: var(--motion-enter);
+  transition-timing-function: var(--ease-portal-out);
+}
+
+[data-merchant-shell="customer"] [data-upload-dropzone][data-drag-active="true"] [data-upload-icon] {
+  transform: translateY(-2px) scale(1.03);
+}
+
+@keyframes portal-file-ready {
+  from {
+    opacity: 0.55;
+    transform: scale(0.88);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+[data-merchant-shell="customer"] [data-upload-dropzone][data-file-ready="true"] [data-upload-icon] > svg {
+  animation: portal-file-ready var(--motion-enter) var(--ease-portal-out) both;
 }
 
 @media (min-width: 40rem) {

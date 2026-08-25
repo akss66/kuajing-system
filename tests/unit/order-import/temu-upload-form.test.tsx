@@ -36,9 +36,13 @@ describe("TEMU upload form", () => {
       "accept",
       ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    expect(screen.getByTestId("temu-workbook-dropzone")).toHaveTextContent(
+    const dropzone = screen.getByTestId("temu-workbook-dropzone");
+    expect(dropzone).toHaveTextContent(
       "将 Excel 文件拖到这里",
     );
+    expect(dropzone).toHaveAttribute("data-upload-dropzone");
+    expect(dropzone).toHaveAttribute("data-drag-active", "false");
+    expect(dropzone).toHaveAttribute("data-file-ready", "false");
     expect(screen.getByRole("button", { name: "上传并生成预览" })).toHaveClass(
       "min-h-12",
     );
@@ -54,7 +58,12 @@ describe("TEMU upload form", () => {
     });
     expect(screen.getByText("订单导出.xlsx")).toBeVisible();
 
-    fireEvent.drop(screen.getByTestId("temu-workbook-dropzone"), {
+    fireEvent.dragEnter(dropzone, {
+      dataTransfer: { files: [] },
+    });
+    expect(dropzone).toHaveAttribute("data-drag-active", "true");
+
+    fireEvent.drop(dropzone, {
       dataTransfer: {
         files: [
           new File(["replacement"], "拖入订单.xlsx", {
@@ -64,6 +73,9 @@ describe("TEMU upload form", () => {
       },
     });
     expect(screen.getByText("拖入订单.xlsx")).toBeVisible();
+    expect(dropzone).toHaveAttribute("data-drag-active", "false");
+    expect(dropzone).toHaveAttribute("data-file-ready", "true");
+    expect(dropzone.querySelector("[data-upload-icon]")).toBeInTheDocument();
     expect(screen.getByText(/系统不会保存原始 Excel 文件/)).toBeVisible();
   });
 });
