@@ -208,7 +208,7 @@ test("fulfillment detail and integration settings fit approved mobile widths @mo
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
 
-test("cancelled accepted package shows its merchandise and ¥13 shipping adjustment and admin can complete the offline refund @desktop-only", async ({
+test("cancelled accepted package shows its merchandise and ¥13 shipping adjustment and admin can complete all order refunds @desktop-only", async ({
   page,
 }) => {
   const fixture = await seedShippedOrder();
@@ -261,9 +261,15 @@ test("cancelled accepted package shows its merchandise and ¥13 shipping adjustm
   await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
   await page.goto(`/admin/orders/${fixture.order.id}`);
   await expect(page.getByText("待确认线下退款")).toBeVisible();
-  await page.getByLabel("退款凭证或备注").fill("E2E 微信退款流水");
-  await page.getByRole("button", { name: "确认线下退款完成" }).click();
-  await expect(page.getByText("退款处理完成")).toBeVisible();
+  await page
+    .getByPlaceholder("填写退款流水号、时间或批次备注")
+    .fill("E2E 整单微信退款流水");
+  await page.getByRole("button", { name: "确认全部退款完成" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "确认全部退款已完成" })
+    .click();
+  await expect(page.getByText("已确认 1 笔线下退款，共 22.00 元，并写入审计记录。")).toBeVisible();
   await expect.poll(async () => {
     const [row] = await db
       .select({ status: shipmentCancellationAdjustments.status })

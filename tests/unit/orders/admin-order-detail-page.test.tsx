@@ -344,4 +344,92 @@ describe("AdminOrderDetailPage", () => {
       screen.getAllByText("直接读取极风当前结果并更新本包裹；不会重复创建订单。"),
     ).toHaveLength(2);
   });
+
+  it("renders whole-order query, cancellation, and offline refund controls together", async () => {
+    queryMocks.getAdminOrderDetail.mockResolvedValue({
+      adjustedAmountFen: 1700,
+      cancelReason: null,
+      cancellationState: "PARTIAL",
+      createdAt: new Date("2026-08-25T01:00:00.000Z"),
+      customerCode: "C-005",
+      customerName: "整单操作客户",
+      id: "order-5",
+      netAmountFen: 2300,
+      orderNumber: "TH-20260825-OPS",
+      paidAt: new Date("2026-08-25T01:01:00.000Z"),
+      paymentMode: "DIRECT_OFFLINE",
+      refundedAt: null,
+      shipments: [
+        {
+          attemptCount: 1,
+          cancellationAdjustment: {
+            id: "adjustment-1",
+            note: null,
+            offlineAmountFen: 1700,
+            refundedAmountFen: 1700,
+            shipmentId: "00000000-0000-4000-8000-000000000006",
+            status: "PENDING_OFFLINE",
+          },
+          cancelledAt: null,
+          erpNo: "ERP-OPS-1",
+          externalOrderNo: "PO-OPS-1",
+          fulfillmentId: "fulfillment-ops-1",
+          fulfillmentStatus: "EXCEPTION",
+          id: "00000000-0000-4000-8000-000000000006",
+          jifengStatus: 8,
+          kind: "NORMAL",
+          lastErrorCode: "50026",
+          lastErrorMessage: "库存不足",
+          lines: [],
+          logisticsCurrency: null,
+          logisticsFeeMinor: null,
+          nextRetryAt: new Date("2026-08-25T01:05:00.000Z"),
+          replacementReason: null,
+          replacementStatus: null,
+          shippedAt: null,
+          trackingNumber: null,
+        },
+        {
+          attemptCount: 0,
+          cancellationAdjustment: null,
+          cancelledAt: null,
+          erpNo: "ERP-OPS-2",
+          externalOrderNo: "PO-OPS-2",
+          fulfillmentId: "fulfillment-ops-2",
+          fulfillmentStatus: "PENDING",
+          id: "00000000-0000-4000-8000-000000000007",
+          jifengStatus: null,
+          kind: "NORMAL",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lines: [],
+          logisticsCurrency: null,
+          logisticsFeeMinor: null,
+          nextRetryAt: null,
+          replacementReason: null,
+          replacementStatus: null,
+          shippedAt: null,
+          trackingNumber: null,
+        },
+      ],
+      status: "FULFILLMENT_EXCEPTION",
+      storeName: "店铺五",
+      totalAmountFen: 4000,
+      totalPackageCount: 2,
+      totalQuantity: 2,
+    });
+
+    render(
+      await AdminOrderDetailPage({
+        params: Promise.resolve({ orderId: "order-5" }),
+      }),
+    );
+
+    expect(screen.getByRole("heading", { name: "整单操作" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "一键查询整单状态" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "取消全部可取消包裹" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "确认全部退款完成" })).toBeVisible();
+    expect(screen.getByPlaceholderText("填写本次整单取消原因")).toBeVisible();
+    expect(screen.getByPlaceholderText("填写退款流水号、时间或批次备注")).toBeVisible();
+  });
 });
