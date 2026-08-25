@@ -40,7 +40,7 @@ export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
         <XCircle className="mt-0.5 size-5 shrink-0" />
         <div>
           <h2 className="font-semibold">付款声明被拒绝</h2>
-          <p className="mt-1 text-sm">
+          <p className="mt-1 break-words text-sm [overflow-wrap:anywhere]">
             {order.latestPaymentClaim?.rejectionReason ?? "管理员未填写拒绝原因"}
           </p>
           <p className="mt-2 text-xs">
@@ -98,7 +98,7 @@ export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
         <h2 className="font-semibold text-ink">
           {order.status === "CANCELLED" ? "已取消" : order.status === "EXPIRED" ? "已超时" : "履约状态已更新"}
         </h2>
-        <p className="mt-1 text-sm">
+        <p className="mt-1 break-words text-sm [overflow-wrap:anywhere]">
           {order.cancelReason ? `原因：${order.cancelReason}` : "该拿货单当前不需要继续操作。"}
         </p>
       </div>

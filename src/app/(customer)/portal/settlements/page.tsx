@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
+import { WorkspacePanel } from "@/components/layout/workspace-panel";
 import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -43,13 +44,34 @@ export default async function CustomerSettlementListPage() {
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         }
-        description="多店铺订单提交后，每次合并付款都会保留在这里。"
+        description="显示最近 20 次合并付款；每次付款都可进入详情核对所包含的拿货单。"
         title="合并付款记录"
       />
 
+      <WorkspacePanel className="overflow-hidden border-[var(--portal-border-strong)] bg-background px-4 py-4 sm:px-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-primary-hover">使用说明</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">多个店铺一起下单时，这里统一看付款进度</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              系统会把多店铺订单合并成一次付款记录，清楚拆开总额、余额抵扣和微信待付。付款后仍可回来看管理员是否已确认。
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              多店铺订单提交后，每次合并付款都会保留在这里。
+            </p>
+          </div>
+          <Link
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-surface"
+            href="/portal/orders"
+          >
+            返回我的订单
+          </Link>
+        </div>
+      </WorkspacePanel>
+
       <MetricStrip
         items={[
-          { label: "最近付款", value: String(batches.length) },
+          { label: "最近记录", value: String(batches.length) },
           {
             label: "待付款",
             tone: pendingCount ? "warning" : "default",
@@ -70,7 +92,7 @@ export default async function CustomerSettlementListPage() {
           action={<WalletCards aria-hidden="true" className="size-5 text-primary" />}
           description="多个店铺的订单可合并为一次付款；进入详情可继续付款、查看确认进度和所包含的拿货单。"
           kind="batches"
-          title="最近合并付款"
+          title="最近 20 次合并付款"
         >
           {batches.length ? (
             <div className="divide-y divide-border">

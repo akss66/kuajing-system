@@ -25,6 +25,7 @@ export default async function CustomerDetailPage(props: {
 
   return (
     <CustomerDetailWorkspace
+      canManageCustomerStatus
       canGovernAccounts={canGovernAccounts}
       detail={detail}
     />

@@ -110,8 +110,8 @@ describe("customer management pages", () => {
     const createCustomer = screen.getByRole("button", { name: "新建客户" });
     expect(createCustomer).toBeVisible();
     expect(createCustomer).toHaveAttribute("data-variant", "default");
+    expect(createCustomer).toHaveAttribute("data-size", "default");
     expect(createCustomer.querySelector("svg")).not.toBeNull();
-    expect(createCustomer.className).not.toMatch(/shadow|translate-y/);
     expect(screen.queryByLabelText("客户编号")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("登录邮箱")).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "搜索客户" })).toBeVisible();
@@ -335,7 +335,7 @@ describe("customer management pages", () => {
       within(ordinaryAdminDrawer).getByRole("button", { name: "保存客户资料" }),
     ).toBeEnabled();
     expect(
-      within(ordinaryAdminDrawer).queryByRole("button", { name: "停用客户" }),
-    ).not.toBeInTheDocument();
+      within(ordinaryAdminDrawer).getByRole("button", { name: "停用客户" }),
+    ).toBeEnabled();
   });
 });

@@ -38,7 +38,6 @@ export class CustomerManagementError extends Error {
     public readonly code:
       | "CUSTOMER_NOT_FOUND"
       | "FORBIDDEN_ADMIN"
-      | "FORBIDDEN_SUPER_ADMIN"
       | "STORE_NOT_FOUND"
       | "INVALID_REASON",
     message: string,
@@ -53,15 +52,6 @@ function assertAdmin(actor: CustomerManagerActor) {
     throw new CustomerManagementError(
       "FORBIDDEN_ADMIN",
       "Only an administrator can create customers",
-    );
-  }
-}
-
-function assertSuperAdmin(actor: CustomerManagerActor) {
-  if (actor.kind !== "SUPER_ADMIN") {
-    throw new CustomerManagementError(
-      "FORBIDDEN_SUPER_ADMIN",
-      "Only the super admin can govern customer login accounts",
     );
   }
 }
@@ -205,7 +195,7 @@ export async function setCustomerStatus(input: {
   reason: string;
   status: ManagedStatus;
 }) {
-  assertSuperAdmin(input.actor);
+  assertAdmin(input.actor);
   const banned = input.status === "DISABLED";
   const reason = assertReason(input.reason);
 

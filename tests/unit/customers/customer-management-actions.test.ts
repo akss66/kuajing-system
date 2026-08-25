@@ -71,8 +71,8 @@ describe("customer management actions", () => {
     expect(serviceMocks.provisionCustomerWithStore).not.toHaveBeenCalled();
   });
 
-  it("requires a super administrator to change customer login status", async () => {
-    guardMocks.requireSuperAdmin.mockRejectedValue(
+  it("requires an administrator to change customer login status", async () => {
+    guardMocks.requireAdmin.mockRejectedValue(
       Object.assign(new Error("FORBIDDEN_ADMIN"), { code: "FORBIDDEN_ADMIN" }),
     );
     const formData = new FormData();
@@ -179,6 +179,27 @@ describe("customer management actions", () => {
     expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
       "/admin/customers/55555555-5555-4555-8555-555555555555",
     );
+  });
+
+  it("allows an ordinary administrator to disable a customer account", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "ADMIN",
+      userId: "ordinary-admin-auth-user",
+    });
+    const formData = new FormData();
+    formData.set("customerId", "55555555-5555-4555-8555-555555555555");
+    formData.set("status", "DISABLED");
+    formData.set("reason", "Pause customer operations");
+
+    const result = await setCustomerStatusAction({ status: "idle" }, formData);
+
+    expect(result).toEqual({ message: "客户已停用。", status: "success" });
+    expect(serviceMocks.setCustomerStatus).toHaveBeenCalledWith({
+      actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
+      customerId: "55555555-5555-4555-8555-555555555555",
+      reason: "Pause customer operations",
+      status: "DISABLED",
+    });
   });
 
   it("updates a store through the service and revalidates the customer detail page", async () => {

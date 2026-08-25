@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { BulkOrderWorkspace } from "@/components/bulk-order/bulk-order-workspace";
+import { BulkDraftError } from "@/modules/bulk-order/draft-service";
 import { getBulkWorkspaceDraft } from "@/modules/bulk-order/workspace-query";
 import { requireCustomer } from "@/modules/identity/guards";
 import { listActiveCustomerStores } from "@/modules/order-import/service";
@@ -14,8 +15,14 @@ export default async function CustomerBulkOrderDraftPage({
   const principal = await requireCustomer();
   const { draftId } = await params;
 
+  const draftPromise = getBulkWorkspaceDraft(principal.customerId, draftId).catch(
+    (error: unknown) => {
+      if (error instanceof BulkDraftError && error.code === "DRAFT_NOT_FOUND") return null;
+      throw error;
+    },
+  );
   const [draft, stores, walletPosition] = await Promise.all([
-    getBulkWorkspaceDraft(principal.customerId, draftId).catch(() => null),
+    draftPromise,
     listActiveCustomerStores(principal.customerId),
     getWalletPosition(principal.customerId),
   ]);

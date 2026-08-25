@@ -69,25 +69,24 @@ test("customer account provisioning rejects a customer service caller", async ()
   expect(await db.select().from(customers)).toEqual([]);
 });
 
-test("customer login status rejects a non-super-admin service caller", async () => {
+test("customer login status accepts an ordinary administrator service caller", async () => {
   const [customer] = await db
     .insert(customers)
     .values({ code: `S-${crypto.randomUUID()}`, name: "Protected status customer" })
     .returning({ id: customers.id });
 
-  await expect(
-    setCustomerStatus({
-      actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
-      customerId: customer.id,
-      reason: "Attempt account suspension",
-      status: "DISABLED",
-    }),
-  ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+  await setCustomerStatus({
+    actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
+    customerId: customer.id,
+    reason: "Pause customer operations",
+    status: "DISABLED",
+  });
+
   const [persisted] = await db
     .select({ status: customers.status })
     .from(customers)
     .where(eq(customers.id, customer.id));
-  expect(persisted.status).toBe("ACTIVE");
+  expect(persisted.status).toBe("DISABLED");
 });
 
 test("provisions a customer, store and sign-in account together", async () => {

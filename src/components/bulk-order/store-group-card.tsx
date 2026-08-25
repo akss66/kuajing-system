@@ -255,7 +255,7 @@ export function StoreGroupCard({
               </label>
               <input
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="mt-2 block min-h-11 w-full cursor-pointer rounded-lg border border-border bg-background px-3 py-2 text-sm text-ink file:mr-3 file:rounded-md file:border-0 file:bg-primary-soft file:px-3 file:py-2 file:font-medium file:text-primary-hover"
+                className="mt-2 block min-h-11 w-full cursor-pointer rounded-lg border border-border bg-background px-3 py-2 text-base text-ink file:mr-3 file:rounded-md file:border-0 file:bg-primary-soft file:px-3 file:py-2 file:font-medium file:text-primary-hover sm:text-sm"
                 disabled={!editable || uploading}
                 id={`group-files-${group.groupId}`}
                 key={fileInputKey}
@@ -265,7 +265,7 @@ export function StoreGroupCard({
                 type="file"
               />
               {fileSelection.length ? (
-                <p className="mt-2 text-sm text-muted">
+                <p className="mt-2 break-words text-sm text-muted [overflow-wrap:anywhere]">
                   {`已选择 ${fileSelection.length} 个文件：${fileSelection.map((file) => file.name).join("、")}`}
                 </p>
               ) : (

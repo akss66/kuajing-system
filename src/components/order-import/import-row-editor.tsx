@@ -141,8 +141,7 @@ export function ImportRowEditor({
               aria-expanded={expanded}
               aria-label={`${expanded ? "收起" : "修改"} Excel 第 ${row.rowNumber} 行`}
               onClick={() => setExpanded((current) => !current)}
-              className="w-full md:w-auto"
-              size="sm"
+              className="min-h-11 w-full md:w-auto"
               type="button"
               variant="outline"
             >

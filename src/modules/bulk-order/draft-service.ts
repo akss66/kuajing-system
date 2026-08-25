@@ -3,7 +3,9 @@ import {
   asc,
   desc,
   eq,
+  gt,
   inArray,
+  isNull,
   sql,
 } from "drizzle-orm";
 
@@ -191,6 +193,28 @@ export async function createBulkDraft(input: {
   const createdAt = new Date();
   const expiresAt = new Date(createdAt.getTime() + DRAFT_LIFETIME_MS);
   const draftId = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${input.customerId}, 0))`,
+    );
+    const [existingEmptyDraft] = await tx
+      .select({ id: bulkImportDrafts.id })
+      .from(bulkImportDrafts)
+      .leftJoin(
+        bulkImportStoreGroups,
+        eq(bulkImportStoreGroups.draftId, bulkImportDrafts.id),
+      )
+      .where(
+        and(
+          eq(bulkImportDrafts.customerId, input.customerId),
+          eq(bulkImportDrafts.status, "DRAFT"),
+          gt(bulkImportDrafts.expiresAt, createdAt),
+          isNull(bulkImportStoreGroups.id),
+        ),
+      )
+      .orderBy(desc(bulkImportDrafts.updatedAt))
+      .limit(1);
+    if (existingEmptyDraft) return existingEmptyDraft.id;
+
     const [draft] = await tx
       .insert(bulkImportDrafts)
       .values({

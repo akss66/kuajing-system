@@ -19,6 +19,7 @@ import {
   addStoreGroup,
   createBulkDraft,
   getBulkDraft,
+  listBulkDrafts,
   removeGroupFile,
   uploadGroupFiles,
   type BulkDraftUploadFile,
@@ -201,6 +202,18 @@ describe("24-hour multi-store bulk import drafts", () => {
     await expect(
       getBulkDraft(fixture.otherCustomer.id, created.id),
     ).rejects.toMatchObject({ code: "DRAFT_NOT_FOUND" });
+  });
+
+  test("reuses the current empty draft when creation is submitted repeatedly", async () => {
+    const fixture = await createFixture();
+
+    const [first, repeated] = await Promise.all([
+      createBulkDraft({ actorUserId: "auth-customer-1", customerId: fixture.customer.id }),
+      createBulkDraft({ actorUserId: "auth-customer-1", customerId: fixture.customer.id }),
+    ]);
+
+    expect(repeated.id).toBe(first.id);
+    await expect(listBulkDrafts(fixture.customer.id)).resolves.toHaveLength(1);
   });
 
   test("requires an active owned store and keeps one group per store in a draft", async () => {

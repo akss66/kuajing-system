@@ -56,7 +56,7 @@ export function ImportRowOverrideForm({
                 同系列替代 SKU
               </label>
               <select
-                className="mt-1 h-10 w-full rounded-[var(--radius-control)] border border-input bg-background px-3 text-sm text-ink outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18 disabled:opacity-50"
+                className="mt-1 min-h-11 w-full rounded-[var(--radius-control)] border border-input bg-background px-3 text-base text-ink outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18 disabled:opacity-50 sm:text-sm"
                 disabled={
                   pending ||
                   !row.siblingCandidates.some(
@@ -88,7 +88,7 @@ export function ImportRowOverrideForm({
               </label>
               <Input
                 autoComplete="off"
-                className="mt-1 h-10"
+                className="mt-1 min-h-11 text-base sm:text-sm"
                 disabled={pending}
                 id={`${inputId}-manual`}
                 maxLength={80}
@@ -107,7 +107,7 @@ export function ImportRowOverrideForm({
             实际发货数量
           </label>
           <Input
-            className="mt-1 h-10 tabular-nums"
+            className="mt-1 min-h-11 text-base tabular-nums sm:text-sm"
             defaultValue={row.effectiveQuantity ?? row.quantity ?? 1}
             disabled={pending}
             id={`${inputId}-quantity`}

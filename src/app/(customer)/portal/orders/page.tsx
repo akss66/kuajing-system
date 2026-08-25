@@ -174,7 +174,7 @@ export default async function CustomerOrdersPage({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
-                    <strong className="text-ink">{order.orderNumber}</strong>
+                    <strong className="break-all text-ink">{order.orderNumber}</strong>
                     <Badge variant="secondary">{labels[order.status]}</Badge>
                     {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
                   </span>
@@ -203,7 +203,7 @@ export default async function CustomerOrdersPage({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-ink">{order.orderNumber}</p>
+                      <p className="break-all font-semibold text-ink">{order.orderNumber}</p>
                       <p className="mt-1 text-sm text-muted">{order.storeName}</p>
                     </div>
                     <Badge variant="secondary">{labels[order.status]}</Badge>

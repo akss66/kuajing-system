@@ -127,7 +127,7 @@ export default async function CustomerSettlementDetailPage({
             {detail.orders.map((order) => (
               <article className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5" key={order.orderId}>
                 <div>
-                  <Link className="font-medium text-primary-hover" href={`/portal/orders/${order.orderId}`}>
+                  <Link className="inline-flex min-h-11 items-center break-all font-medium text-primary-hover" href={`/portal/orders/${order.orderId}`}>
                     {order.orderNumber}
                   </Link>
                   <p className="mt-1 text-sm text-muted">

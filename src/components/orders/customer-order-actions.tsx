@@ -41,10 +41,12 @@ export function CustomerOrderActions({ order }: { order: CustomerOrderDetail }) 
             <label className="space-y-2 text-sm font-medium text-ink">
               付款金额（元）
               <Input
-                className="min-h-11 tabular-nums"
+                aria-readonly="true"
+                className="min-h-11 bg-surface-muted/55 tabular-nums"
                 defaultValue={((order.netAmountFen ?? order.totalAmountFen) / 100).toFixed(2)}
                 inputMode="decimal"
                 name="amountYuan"
+                readOnly
                 required
               />
             </label>

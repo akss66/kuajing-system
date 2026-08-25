@@ -31,6 +31,7 @@ import {
 
 import { BulkOrderSummaryBar } from "./bulk-order-summary-bar";
 import { StoreGroupCard } from "./store-group-card";
+import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
 export type BulkOrderWorkspaceGroupStatus =
   | "SUBMITTABLE"
@@ -101,7 +102,7 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Asia/Shanghai",
+    timeZone: BUSINESS_TIME_ZONE,
   }).format(new Date(value));
 }
 

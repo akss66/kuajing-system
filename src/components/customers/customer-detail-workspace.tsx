@@ -128,10 +128,10 @@ function CustomerStatusForm({ customer }: { customer: ManagedCustomer }) {
 }
 
 function CustomerEditDrawer({
-  canGovernAccounts,
+  canManageCustomerStatus,
   customer,
 }: {
-  canGovernAccounts: boolean;
+  canManageCustomerStatus: boolean;
   customer: ManagedCustomer;
 }) {
   return (
@@ -149,7 +149,7 @@ function CustomerEditDrawer({
       <DrawerSection description="更新客户身份与联系方式，所有变更都需要填写原因。" title="基本资料">
         <CustomerProfileForm customer={customer} />
       </DrawerSection>
-      {canGovernAccounts ? (
+      {canManageCustomerStatus ? (
         <DangerZone
           description={
             customer.status === "ACTIVE"
@@ -340,9 +340,11 @@ function EmptyState({ description, title }: { description: string; title: string
 }
 
 export function CustomerDetailWorkspace({
+  canManageCustomerStatus = true,
   canGovernAccounts = true,
   detail,
 }: {
+  canManageCustomerStatus?: boolean;
   canGovernAccounts?: boolean;
   detail: CustomerDetail;
 }) {
@@ -353,7 +355,7 @@ export function CustomerDetailWorkspace({
           <div className="flex items-center gap-3">
             <StatusBadge status={detail.customer.status} />
             <CustomerEditDrawer
-              canGovernAccounts={canGovernAccounts}
+              canManageCustomerStatus={canManageCustomerStatus}
               customer={detail.customer}
             />
           </div>
