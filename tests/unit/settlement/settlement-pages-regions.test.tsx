@@ -50,12 +50,53 @@ describe("settlement page regions", () => {
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
     expect(screen.getByText("可用余额")).toBeVisible();
     expect(screen.queryByText("流水条数")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "资金记录" })).toBeVisible();
     expect(screen.getByRole("region", { name: "订单资金占用" })).toBeVisible();
     expect(screen.getByRole("region", { name: "资金流水" })).toBeVisible();
+    expect(screen.getByText("当前没有占用中的金额")).toBeVisible();
+    expect(screen.getByText("还没有资金变动")).toBeVisible();
+    expect(document.querySelectorAll("[data-wallet-activity]")).toHaveLength(1);
+    expect(document.querySelector("[data-wallet-activity-groups]")).toHaveClass("md:grid-cols-2");
     expect(screen.queryByText("付款说明")).not.toBeInTheDocument();
     expect(screen.queryByText("先看可用余额，再处理需要补付的订单")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "查看待付款订单" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "打开合并付款记录" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("批量付款冻结");
+  });
+
+  it("keeps payment links and immutable wallet rows available in the compact activity surface", async () => {
+    walletQueryMocks.getCustomerWalletView.mockResolvedValueOnce({
+      activeHoldFen: 2500,
+      availableFen: 97500,
+      balanceFen: 100000,
+      holds: [{
+        amountFen: 2500,
+        batchNumber: "PAY-001",
+        createdAt: new Date("2026-08-25T06:00:00.000Z"),
+        id: "hold-1",
+        releaseReason: null,
+        releasedAt: null,
+        settlementBatchId: "batch-1",
+        status: "ACTIVE",
+      }],
+      transactions: [{
+        afterBalanceFen: 100000,
+        createdAt: new Date("2026-08-25T05:00:00.000Z"),
+        deltaFen: 2500,
+        id: "transaction-1",
+        orderNumber: "TH-20260825-001",
+        reason: "管理员人工入账",
+        transactionType: "MANUAL_CREDIT",
+      }],
+    });
+
+    render(await CustomerWalletPage());
+
+    expect(screen.getByText("付款编号 PAY-001")).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看付款" })).toHaveAttribute("href", "/portal/settlements/batch-1");
+    expect(screen.getByText("管理员人工入账")).toBeVisible();
+    expect(screen.getByText("+¥25.00")).toBeVisible();
+    expect(screen.getByText("TH-20260825-001")).toBeVisible();
+    expect(screen.getAllByText("1 笔")).toHaveLength(2);
   });
 });
