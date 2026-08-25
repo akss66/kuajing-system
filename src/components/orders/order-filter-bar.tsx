@@ -7,6 +7,13 @@ import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -38,8 +45,40 @@ type OrderFilterBarProps = {
   values: OrderFilterValues;
 };
 
-const selectClassName =
-  "min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18";
+const ALL_OPTION_VALUE = "__all__";
+
+function FilterSelect({
+  allLabel,
+  label,
+  name,
+  options,
+  value,
+}: {
+  allLabel: string;
+  label: string;
+  name: string;
+  options: FilterOption[];
+  value?: string;
+}) {
+  return (
+    <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
+      {label}
+      <Select defaultValue={value || ALL_OPTION_VALUE} name={name}>
+        <SelectTrigger aria-label={label} className="min-h-11 w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper">
+          <SelectItem value={ALL_OPTION_VALUE}>{allLabel}</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </label>
+  );
+}
 
 function optionLabel(options: FilterOption[] | undefined, value: string | undefined) {
   return options?.find((option) => option.value === value)?.label ?? value;
@@ -70,7 +109,8 @@ export function OrderFilterBar({
     const formData = new FormData(event.currentTarget);
     replaceParams((params) => {
       for (const field of fields) {
-        const nextValue = String(formData.get(field) ?? "").trim();
+        const rawValue = String(formData.get(field) ?? "").trim();
+        const nextValue = rawValue === ALL_OPTION_VALUE ? "" : rawValue;
         if (nextValue) params.set(field, nextValue);
         else params.delete(field);
       }
@@ -132,57 +172,33 @@ export function OrderFilterBar({
             placeholder="搜索完整或部分单号"
           />
         </label>
-        <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
-          状态
-          <select
-            className={selectClassName}
-            defaultValue={values.status ?? ""}
-            key={`status-${values.status ?? ""}`}
-            name="status"
-          >
-            <option value="">全部状态</option>
-            {statusOptions.map((status) => (
-              <option key={status.value} value={status.value}>
-                {status.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterSelect
+          allLabel="全部状态"
+          key={`status-${values.status ?? ""}`}
+          label="状态"
+          name="status"
+          options={statusOptions}
+          value={values.status}
+        />
         {customerOptions.length ? (
-          <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
-            客户
-            <select
-              className={selectClassName}
-              defaultValue={values.customerId ?? ""}
-              key={`customer-${values.customerId ?? ""}`}
-              name="customerId"
-            >
-              <option value="">全部客户</option>
-              {customerOptions.map((customer) => (
-                <option key={customer.value} value={customer.value}>
-                  {customer.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterSelect
+            allLabel="全部客户"
+            key={`customer-${values.customerId ?? ""}`}
+            label="客户"
+            name="customerId"
+            options={customerOptions}
+            value={values.customerId}
+          />
         ) : null}
         {storeOptions.length ? (
-          <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
-            店铺
-            <select
-              className={selectClassName}
-              defaultValue={values.storeId ?? ""}
-              key={`store-${values.storeId ?? ""}`}
-              name="storeId"
-            >
-              <option value="">全部店铺</option>
-              {storeOptions.map((store) => (
-                <option key={store.value} value={store.value}>
-                  {store.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterSelect
+            allLabel="全部店铺"
+            key={`store-${values.storeId ?? ""}`}
+            label="店铺"
+            name="storeId"
+            options={storeOptions}
+            value={values.storeId}
+          />
         ) : null}
         <div
           className={cn(

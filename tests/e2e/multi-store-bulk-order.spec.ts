@@ -57,7 +57,7 @@ async function expectStickySummaryDoesNotObstructContent(
   const geometry = await page.evaluate(() => {
     const summary = document.querySelector<HTMLElement>("[data-testid='bulk-order-summary']");
     const refresh = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
-      button.textContent?.includes("刷新草稿"),
+      button.textContent?.includes("刷新上传状态"),
     );
     if (!summary || !refresh) return null;
     const summaryBox = summary.getBoundingClientRect();
@@ -314,7 +314,7 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
 
   await expect(page).toHaveURL(/\/portal\/settlements\//, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "本次合并付款" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "付款任务" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "付款记录" })).toBeVisible();
   await expect(page.getByRole("region", { name: "本次包含的拿货单" })).toBeVisible();
   // 只读付款输入展示当前微信待付，不重复展示已由钱包冻结抵扣的部分。
   await expect(page.getByLabel("付款金额（元）")).toHaveValue("104.00");
@@ -414,7 +414,7 @@ test("customer bulk workspace stays usable at approved mobile widths @mobile-onl
     expect((await summary.boundingBox())?.height).toBeLessThanOrEqual(96);
     await expectContinuousSummaryMetrics(page);
     expect((await page.locator("article").first().boundingBox())?.y).toBeLessThan(600);
-    await page.getByRole("button", { name: "刷新草稿" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "刷新上传状态" }).scrollIntoViewIfNeeded();
     await expectStickySummaryDoesNotObstructContent(page);
     const accessibility = await new AxeBuilder({ page }).analyze();
     expect(

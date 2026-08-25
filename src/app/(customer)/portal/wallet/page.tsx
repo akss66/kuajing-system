@@ -27,7 +27,7 @@ export default async function CustomerWalletPage() {
   return (
     <div className="space-y-5">
       <PageHeading
-        description="查看可用余额、当前订单占用和最近 100 笔资金变化；充值仍通过线下微信联系管理员。"
+        description="查看可用余额、当前订单预留和最近 100 笔资金变化；充值仍通过线下微信联系管理员。"
         title="资金中心"
       />
 
@@ -45,7 +45,7 @@ export default async function CustomerWalletPage() {
             {[
               { featured: true, hint: "当前可直接用于下单", label: "可用余额", value: money(wallet.availableFen) },
               { hint: "客户账户账面余额", label: "账面余额", value: money(wallet.balanceFen) },
-              { hint: "等待付款确认的订单暂时占用", label: "订单占用", value: money(wallet.activeHoldFen) },
+              { hint: "等待付款确认时暂时预留", label: "订单预留", value: money(wallet.activeHoldFen) },
             ].map((item) => (
               <div className={item.featured ? "min-w-0 bg-primary/5 px-5 py-4 sm:px-6" : "min-w-0 px-5 py-4 sm:px-6"} key={item.label}>
                 <p className="text-xs font-medium text-muted">{item.label}</p>

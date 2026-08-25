@@ -131,7 +131,7 @@ export default async function CustomerProfilePage() {
             </span>
             <div className="min-w-0">
               <h2 className="text-base font-bold text-foreground" id="profile-wallet-title">资金概览</h2>
-              <p className="mt-0.5 text-sm text-muted-foreground">下单可用余额和当前订单占用。</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">下单可用余额和当前订单预留。</p>
             </div>
           </div>
           <Link
@@ -154,7 +154,7 @@ export default async function CustomerProfilePage() {
             <p className="mt-1 text-xs leading-5 text-muted-foreground">包含正在占用的金额</p>
           </div>
           <div className="border-t border-slate-100 px-5 py-5 sm:border-l sm:border-t-0 sm:px-6">
-            <p className="text-xs font-medium text-muted-foreground">订单占用</p>
+            <p className="text-xs font-medium text-muted-foreground">订单预留</p>
             <p className="mt-1 text-lg font-bold tabular-nums text-foreground">{money(wallet.activeHoldFen)}</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">付款完成或订单关闭后更新</p>
           </div>

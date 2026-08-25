@@ -180,7 +180,7 @@ function draftStatusLabel(status: BulkOrderWorkspaceDraft["status"]) {
     case "EXPIRED":
       return "已过期";
     default:
-      return "草稿中";
+      return "上传中";
   }
 }
 
@@ -199,7 +199,7 @@ function defaultHelperText(group: BulkOrderWorkspaceGroup) {
     case "ALREADY_SUBMITTED":
       return "该店铺已经生成拿货单，成功文件已锁定，不能重复提交。";
     case "EXPIRED":
-      return "草稿或文件已过期，请重新创建草稿并上传新的 TEMU 原始 Excel。";
+      return "本次上传或文件已过期，请重新开始并上传新的 TEMU 原始 Excel。";
     case "EMPTY":
       return "去重后没有可提交订单，请继续上传该店铺文件。";
     default:
@@ -638,7 +638,7 @@ export function BulkOrderWorkspace({
       <PageHeading
         action={
           <div className="rounded-[var(--radius-surface)] border border-border bg-background px-4 py-3 text-sm text-muted">
-            <p>{`草稿状态：${draftStatusLabel(draft.status)}`}</p>
+            <p>{`上传状态：${draftStatusLabel(draft.status)}`}</p>
             <p className="mt-1">
               {`创建于 ${formatDate(draft.createdAt)}，过期于 ${formatDate(draft.expiresAt)}`}
             </p>
@@ -759,7 +759,7 @@ export function BulkOrderWorkspace({
           variant="ghost"
         >
           <RefreshCcw aria-hidden="true" />
-          刷新草稿
+          刷新上传状态
         </Button>
       </div>
 

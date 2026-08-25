@@ -106,7 +106,7 @@ describe("CustomerSettlementDetailPage", () => {
     );
 
     expect(screen.getByRole("heading", { name: "本次合并付款" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "付款任务" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "付款记录" })).toBeVisible();
     expect(screen.getByRole("region", { name: "本次包含的拿货单" })).toBeVisible();
     expect(screen.getByText("1 张拿货单合并为一次付款")).toBeVisible();
     const skipLink = screen.getByRole("link", { name: "跳到付款声明" });

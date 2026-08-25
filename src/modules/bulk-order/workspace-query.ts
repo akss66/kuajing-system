@@ -46,7 +46,7 @@ const helperTextMap = {
   BLOCKED_INVENTORY: "库存已变化，当前分组暂时不能提交；稍后可重新上传或减少数量。",
   BLOCKED_UNKNOWN_SKU: "存在未映射 SKU，请先联系管理员维护映射，再继续上传该店铺文件。",
   EMPTY: "去重后没有可提交订单，请继续上传该店铺文件。",
-  EXPIRED: "草稿或文件已过期，请重新创建草稿并上传新的 TEMU 原始 Excel。",
+  EXPIRED: "本次上传或文件已过期，请重新开始并上传新的 TEMU 原始 Excel。",
   SUBMITTABLE: "继续上传 TEMU 原始 Excel，系统会按店铺跨文件去重并保留失败文件。",
 } as const;
 

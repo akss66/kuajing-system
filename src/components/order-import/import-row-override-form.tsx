@@ -6,6 +6,13 @@ import { useActionState, useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -15,6 +22,7 @@ import type {
 } from "./import-row-model";
 
 const INITIAL_STATE: ImportRowActionState = { status: "idle" };
+const NO_SIBLING_SELECTED = "__none__";
 
 export function ImportRowOverrideForm({
   action,
@@ -55,31 +63,36 @@ export function ImportRowOverrideForm({
               <label className="text-xs font-medium text-ink" htmlFor={`${inputId}-sibling`}>
                 同系列替代 SKU
               </label>
-              <select
-                className="mt-1 min-h-11 w-full rounded-[var(--radius-control)] border border-input bg-background px-3 text-base text-ink outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18 disabled:opacity-50 sm:text-sm"
+              <Select
                 disabled={
                   pending ||
                   !row.siblingCandidates.some(
                     (candidate) => candidate.availableQuantity > 0,
                   )
                 }
-                id={`${inputId}-sibling`}
-                onChange={(event) => {
-                  if (event.target.value) setSkuCode(event.target.value);
+                onValueChange={(value) => {
+                  if (value !== NO_SIBLING_SELECTED) setSkuCode(value);
                 }}
-                value={row.siblingCandidates.some((candidate) => candidate.skuCode === skuCode) ? skuCode : ""}
+                value={row.siblingCandidates.some((candidate) => candidate.skuCode === skuCode) ? skuCode : NO_SIBLING_SELECTED}
               >
-                <option value="">{row.siblingCandidates.length ? "选择同系列 SKU" : "暂无同系列可售 SKU"}</option>
-                {row.siblingCandidates.map((candidate) => (
-                  <option
-                    disabled={candidate.availableQuantity <= 0}
-                    key={candidate.id}
-                    value={candidate.skuCode}
-                  >
-                    {candidate.skuCode} · {candidate.name} · 可用库存 {candidate.availableQuantity}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger aria-label="同系列替代 SKU" className="mt-1 min-h-11 w-full" id={`${inputId}-sibling`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectItem value={NO_SIBLING_SELECTED}>
+                    {row.siblingCandidates.length ? "选择同系列 SKU" : "暂无同系列可售 SKU"}
+                  </SelectItem>
+                  {row.siblingCandidates.map((candidate) => (
+                    <SelectItem
+                      disabled={candidate.availableQuantity <= 0}
+                      key={candidate.id}
+                      value={candidate.skuCode}
+                    >
+                      {candidate.skuCode} · {candidate.name} · 可用库存 {candidate.availableQuantity}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>

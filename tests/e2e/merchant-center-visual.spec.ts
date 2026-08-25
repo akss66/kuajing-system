@@ -129,7 +129,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "资金中心",
-    expectedTexts: ["可用余额", "账面余额", "订单占用", "资金流水"],
+    expectedTexts: ["可用余额", "账面余额", "订单预留", "资金流水"],
     path: "/portal/wallet",
     screenshot: "customer-wallet",
     shouldShowMetricStrip: false,

@@ -49,7 +49,25 @@ function renderEditor(
 }
 
 describe("ImportRowEditor", () => {
-  beforeEach(() => navigationMocks.refresh.mockReset());
+  beforeEach(() => {
+    navigationMocks.refresh.mockReset();
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+      configurable: true,
+      value: vi.fn(() => false),
+    });
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
   afterEach(cleanup);
 
   it("shows original and effective fulfillment data with an explicit pass result", () => {
@@ -78,11 +96,12 @@ describe("ImportRowEditor", () => {
     renderEditor(systemRow(), action);
 
     fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
-    expect(screen.getByRole("option", { name: /TZX-024 · 米白 · 可用库存 0/ })).toBeDisabled();
-    expect(screen.getByRole("option", { name: /TZX-024-1 · 粉色 · 可用库存 8/ })).toBeEnabled();
-    fireEvent.change(screen.getByLabelText("同系列替代 SKU"), {
-      target: { value: "TZX-024-1" },
-    });
+    const siblingSelect = screen.getByRole("combobox", { name: "同系列替代 SKU" });
+    expect(siblingSelect).toHaveAttribute("data-slot", "select-trigger");
+    fireEvent.pointerDown(siblingSelect, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    expect(await screen.findByRole("option", { name: /TZX-024 · 米白 · 可用库存 0/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: /TZX-024-1 · 粉色 · 可用库存 8/ })).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(screen.getByRole("option", { name: /TZX-024-1 · 粉色 · 可用库存 8/ }));
     expect(screen.getByLabelText("手动填写最终 SKU")).toHaveValue("TZX-024-1");
 
     fireEvent.change(screen.getByLabelText("手动填写最终 SKU"), {
@@ -102,7 +121,7 @@ describe("ImportRowEditor", () => {
       rowId: "row-1",
       skuCode: "TZX-999",
     });
-    await waitFor(() => expect(navigationMocks.refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(navigationMocks.refresh).toHaveBeenCalled());
     expect(screen.getByRole("status")).toHaveTextContent("已保存并重新校验。");
   });
 

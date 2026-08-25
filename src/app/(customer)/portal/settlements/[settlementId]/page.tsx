@@ -85,7 +85,7 @@ export default async function CustomerSettlementDetailPage({
           <SettlementRegion
             description="表单金额只读，等于当前微信待付；待审核时可撤回整笔声明。"
             kind="review"
-            title="付款任务"
+            title="付款记录"
           >
             <div className="p-4 sm:p-5">
               <Clock3 aria-hidden="true" className="mb-3 size-4 text-primary" />
