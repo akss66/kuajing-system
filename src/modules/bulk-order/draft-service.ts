@@ -239,6 +239,102 @@ export async function createBulkDraft(input: {
   return getBulkDraft(input.customerId, draftId);
 }
 
+export async function discardBulkDraft(input: {
+  actorUserId: string;
+  customerId: string;
+  draftId: string;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [draft] = await tx
+      .select({ id: bulkImportDrafts.id, status: bulkImportDrafts.status })
+      .from(bulkImportDrafts)
+      .where(
+        and(
+          eq(bulkImportDrafts.id, input.draftId),
+          eq(bulkImportDrafts.customerId, input.customerId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+
+    if (!draft) {
+      throw new BulkDraftError("DRAFT_NOT_FOUND", "找不到该批量上传记录");
+    }
+    if (draft.status !== "DRAFT") {
+      throw new BulkDraftError(
+        "DRAFT_NOT_WRITABLE",
+        "已提交或已结束的上传记录不能删除",
+      );
+    }
+
+    const groups = await tx
+      .select({ id: bulkImportStoreGroups.id })
+      .from(bulkImportStoreGroups)
+      .where(
+        and(
+          eq(bulkImportStoreGroups.draftId, draft.id),
+          eq(bulkImportStoreGroups.customerId, input.customerId),
+        ),
+      );
+    const groupIds = groups.map((group) => group.id);
+    const fileCount =
+      groupIds.length === 0
+        ? 0
+        : (
+            await tx
+              .select({ count: sql<number>`count(*)::int` })
+              .from(orderImportBatches)
+              .where(inArray(orderImportBatches.storeGroupId, groupIds))
+          )[0].count;
+
+    if (groupIds.length > 0) {
+      await tx
+        .delete(orderImportBatches)
+        .where(inArray(orderImportBatches.storeGroupId, groupIds));
+      await tx
+        .delete(bulkImportStoreGroups)
+        .where(
+          and(
+            eq(bulkImportStoreGroups.draftId, draft.id),
+            eq(bulkImportStoreGroups.customerId, input.customerId),
+          ),
+        );
+    }
+
+    const removed = await tx
+      .delete(bulkImportDrafts)
+      .where(
+        and(
+          eq(bulkImportDrafts.id, draft.id),
+          eq(bulkImportDrafts.customerId, input.customerId),
+          eq(bulkImportDrafts.status, "DRAFT"),
+        ),
+      )
+      .returning({ id: bulkImportDrafts.id });
+    if (removed.length === 0) {
+      throw new BulkDraftError(
+        "DRAFT_NOT_WRITABLE",
+        "上传状态已变化，请刷新后重试",
+      );
+    }
+
+    await tx.insert(auditLogs).values({
+      action: "BULK_IMPORT_DRAFT_DISCARDED",
+      actorId: input.actorUserId,
+      actorType: "CUSTOMER",
+      afterJson: {},
+      beforeJson: {
+        customerId: input.customerId,
+        fileCount,
+        groupCount: groupIds.length,
+      },
+      entityId: draft.id,
+      entityType: "BULK_IMPORT_DRAFT",
+      reason: "客户放弃未提交的多店铺批量上传",
+    });
+  });
+}
+
 export async function addStoreGroup(input: {
   draftId: string;
   customerId: string;

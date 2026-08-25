@@ -11,7 +11,9 @@ import {
 
 import {
   addStoreGroup,
+  BulkDraftError,
   createBulkDraft,
+  discardBulkDraft,
   getBulkDraft,
   removeGroupFile,
   uploadGroupFiles,
@@ -21,6 +23,7 @@ import {
   submitBulkDraft,
   type BulkSubmissionResult,
 } from "./submission-service";
+import type { ActionState } from "@/shared/action-state";
 
 const idSchema = z.string().uuid();
 const groupInputSchema = z.object({
@@ -64,6 +67,32 @@ export async function createBulkDraftAction() {
     actorUserId: principal.userId,
     customerId: principal.customerId,
   });
+}
+
+export async function discardBulkDraftAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const principal = await requireCustomer();
+  const parsed = idSchema.safeParse(formData.get("draftId"));
+  if (!parsed.success) {
+    return { message: "上传记录参数无效，请刷新页面后重试。", status: "error" };
+  }
+
+  try {
+    await discardBulkDraft({
+      actorUserId: principal.userId,
+      customerId: principal.customerId,
+      draftId: parsed.data,
+    });
+  } catch (error) {
+    return error instanceof BulkDraftError
+      ? { message: error.message, status: "error" }
+      : { message: "暂时无法放弃本次上传，请稍后重试。", status: "error" };
+  }
+
+  revalidatePath("/portal/bulk-orders");
+  return { message: "未提交的上传内容已删除。", status: "success" };
 }
 
 export async function addStoreGroupAction(input: unknown) {

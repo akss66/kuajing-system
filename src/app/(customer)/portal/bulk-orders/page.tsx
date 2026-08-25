@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CreateBulkDraftSubmit } from "@/components/bulk-order/create-bulk-draft-submit";
-import { MetricStrip } from "@/components/data-workspace/metric-strip";
+import { DiscardBulkDraftForm } from "@/components/bulk-order/discard-bulk-draft-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ function draftStatusLabel(status: string) {
     case "EXPIRED":
       return "已过期";
     default:
-      return "草稿中";
+      return "上传中";
   }
 }
 
@@ -62,10 +62,22 @@ export default async function CustomerBulkOrdersPage() {
     status: effectiveDraftStatus(draft.status, draft.expiresAt, now),
   }));
   const writableDrafts = displayedDrafts.filter(({ status }) => isWritableDraftStatus(status));
-  const latestDraft = writableDrafts[0]?.draft;
+  const latestWritable = writableDrafts[0];
+  const latestDraft = latestWritable?.draft;
+  const otherDrafts = displayedDrafts.filter(
+    ({ draft }) => draft.id !== latestDraft?.id,
+  );
+  const activeFileCount = writableDrafts.reduce(
+    (total, { draft }) => total + draft.fileCount,
+    0,
+  );
+  const submittableGroupCount = displayedDrafts.reduce(
+    (total, { draft }) => total + draft.submittableGroupCount,
+    0,
+  );
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeading
         action={
           <Button asChild className="min-h-11 w-full sm:w-auto" variant="outline">
@@ -82,7 +94,7 @@ export default async function CustomerBulkOrdersPage() {
       <WorkspacePanel className="overflow-hidden border-[var(--portal-border-strong)] bg-background">
         <ol className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
           {[
-            { step: "01", title: "按店铺上传", body: "每个店铺放自己的 TEMU 原始 Excel，系统自动去重并保留草稿。" },
+            { step: "01", title: "按店铺上传", body: "每个店铺放自己的 TEMU 原始 Excel，系统自动去重并保留未提交内容。" },
             { step: "02", title: "逐店校验", body: "未映射 SKU、库存变化和格式问题会按店铺拆开提示，不会互相污染。" },
             { step: "03", title: "一次付款", body: "确认提交后，所选拿货单会汇总成一次付款记录，再进入履约流程。" },
           ].map((item) => (
@@ -114,13 +126,22 @@ export default async function CustomerBulkOrdersPage() {
               <p className="mt-1 text-sm text-muted">
                 {latestDraft.groupCount} 个店铺 · {latestDraft.fileCount} 个文件 · 更新于 {dateTime(latestDraft.updatedAt)}（渥太华）
               </p>
-              <Link
-                className="portal-inline-action mt-3 inline-flex min-h-11 items-center gap-2 font-semibold text-primary-hover"
-                href={`/portal/bulk-orders/${latestDraft.id}`}
-              >
-                继续上次上传
-                <ArrowRight aria-hidden="true" className="size-4" />
-              </Link>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Link
+                  className="portal-inline-action inline-flex min-h-11 items-center gap-2 font-semibold text-primary-hover"
+                  href={`/portal/bulk-orders/${latestDraft.id}`}
+                >
+                  继续上次上传
+                  <ArrowRight aria-hidden="true" className="size-4" />
+                </Link>
+                {latestWritable.status === "DRAFT" ? (
+                  <DiscardBulkDraftForm
+                    compact
+                    draftId={latestDraft.id}
+                    empty={latestDraft.groupCount === 0 && latestDraft.fileCount === 0}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
         ) : (
@@ -129,19 +150,32 @@ export default async function CustomerBulkOrdersPage() {
             <p className="mt-1 text-sm leading-6 text-muted">暂无可继续的上传记录，开始后即可按店铺添加文件。</p>
           </div>
         )}
-        <form action={createDraft} className="w-full sm:w-auto">
-          <CreateBulkDraftSubmit disabled={!stores.length} secondary={Boolean(latestDraft)} />
-        </form>
+        {!latestDraft ? (
+          <form action={createDraft} className="w-full sm:w-auto">
+            <CreateBulkDraftSubmit disabled={!stores.length} />
+          </form>
+        ) : null}
       </section>
 
-      <MetricStrip
-        items={[
-          { hint: "当前客户可提交的店铺", label: "可用店铺", value: String(stores.length) },
-          { hint: "最近创建或更新的上传记录", label: "上传记录", value: String(drafts.length) },
-          { hint: "仍可继续编辑或提交", label: "可继续提交", tone: writableDrafts.length ? "warning" : "default", value: String(writableDrafts.length) },
-          { hint: "所选拿货单只需支付一次", label: "付款方式", value: "一次合并" },
-        ]}
-      />
+      <section
+        aria-label="上传概况"
+        className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <p className="text-sm font-medium text-foreground">当前上传概况</p>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
+          {[
+            { label: "可用店铺", value: stores.length },
+            { label: "进行中", value: writableDrafts.length },
+            { label: "已上传文件", value: activeFileCount },
+            { label: "可提交店铺", value: submittableGroupCount },
+          ].map((item) => (
+            <div className="flex items-baseline justify-between gap-3 sm:justify-start" key={item.label}>
+              <dt className="text-muted-foreground">{item.label}</dt>
+              <dd className="font-semibold tabular-nums text-foreground">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
 
       {!stores.length ? (
         <WorkspacePanel className="border-warning/20 bg-warning/5 px-4 py-5 text-sm text-warning">
@@ -155,14 +189,14 @@ export default async function CustomerBulkOrdersPage() {
           title={
             <span className="inline-flex items-center gap-2">
               <Store className="size-4 text-primary" />
-              上传记录
+              {latestDraft ? "其他上传记录" : "上传记录"}
             </span>
           }
         />
 
-        {drafts.length ? (
+        {otherDrafts.length ? (
           <div className="divide-y divide-border">
-            {displayedDrafts.map(({ draft, status }) => (
+            {otherDrafts.map(({ draft, status }) => (
               <article
                 className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 key={draft.id}
@@ -176,20 +210,35 @@ export default async function CustomerBulkOrdersPage() {
                     创建于 {dateTime(draft.createdAt)}，过期于 {dateTime(draft.expiresAt)}（渥太华）
                   </p>
                 </div>
-                <Link
-                  className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover"
-                  href={`/portal/bulk-orders/${draft.id}`}
-                >
-                  {isWritableDraftStatus(status) ? "继续上传" : "查看记录"}
-                  <ArrowRight className="size-4" />
-                </Link>
+                <div className="flex flex-wrap items-center gap-3">
+                  {status === "DRAFT" ? (
+                    <DiscardBulkDraftForm
+                      compact
+                      draftId={draft.id}
+                      empty={draft.groupCount === 0 && draft.fileCount === 0}
+                    />
+                  ) : null}
+                  <Link
+                    className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover"
+                    href={`/portal/bulk-orders/${draft.id}`}
+                  >
+                    {isWritableDraftStatus(status) ? "继续上传" : "查看记录"}
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </div>
               </article>
             ))}
           </div>
         ) : (
           <div className="px-5 py-16 text-center">
-            <p className="font-medium text-ink">还没有上传记录</p>
-            <p className="mt-1 text-sm text-muted">开始后即可按店铺分组上传多个 TEMU 原始 Excel。</p>
+            <p className="font-medium text-ink">
+              {latestDraft ? "没有其他上传记录" : "还没有上传记录"}
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {latestDraft
+                ? "当前进行中的上传已显示在上方。"
+                : "开始后即可按店铺分组上传多个 TEMU 原始 Excel。"}
+            </p>
           </div>
         )}
       </WorkspacePanel>

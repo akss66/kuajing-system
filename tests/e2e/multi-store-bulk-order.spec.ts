@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
+  bulkImportDrafts,
   bulkImportStoreGroups,
   customers,
   inventoryBalances,
@@ -213,6 +214,33 @@ async function seedBulkWorkspace() {
   return { customerId: customer.id, customerUser, draftId: draft.id };
 }
 
+async function seedDiscardableBulkWorkspace() {
+  const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: `DROP-${suffix}`, name: `可放弃上传客户 ${suffix}` })
+    .returning();
+  const [store] = await db
+    .insert(stores)
+    .values({ customerId: customer.id, name: `待移除店铺 ${suffix}` })
+    .returning();
+  const customerUser = await createManagedUser({
+    customerId: customer.id,
+    role: "user",
+  });
+  const draft = await createBulkDraft({
+    actorUserId: customerUser.userId,
+    customerId: customer.id,
+  });
+  await addStoreGroup({
+    customerId: customer.id,
+    draftId: draft.id,
+    storeId: store.id,
+  });
+
+  return { customerUser, draftId: draft.id };
+}
+
 async function seedSubmittedBulkWorkspace() {
   const fixture = await seedBulkWorkspace();
   const groups = await db
@@ -255,7 +283,12 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
     "href",
     `/portal/bulk-orders/${fixture.draftId}`,
   );
-  await expect(nextStep.getByRole("button", { name: "开始批量上传" })).toBeVisible();
+  await expect(
+    nextStep.getByRole("button", { name: "放弃本次上传" }),
+  ).toBeVisible();
+  await expect(
+    nextStep.getByRole("button", { name: "开始批量上传" }),
+  ).toHaveCount(0);
 
   await page.goto(`/portal/bulk-orders/${fixture.draftId}`);
   await expect(
@@ -309,6 +342,36 @@ test("customer submits an eight-store bulk workspace and lands on unified settle
     "href",
     settlementPath,
   );
+});
+
+test("customer can discard an unsubmitted multi-store upload", async ({ page }) => {
+  const fixture = await seedDiscardableBulkWorkspace();
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal/);
+  await page.goto("/portal/bulk-orders");
+
+  await page.getByRole("button", { name: "放弃本次上传" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(
+    dialog.getByRole("heading", { name: "放弃这次多店铺上传？" }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "确认放弃" }).click();
+
+  await expect(
+    page.getByRole("button", { name: "开始批量上传" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "继续上次上传" }),
+  ).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      db
+        .select({ id: bulkImportDrafts.id })
+        .from(bulkImportDrafts)
+        .where(eq(bulkImportDrafts.id, fixture.draftId)),
+    )
+    .toEqual([]);
 });
 
 test("customer bulk workspace stays usable at approved mobile widths @mobile-only", async ({

@@ -5,7 +5,13 @@ import { useFormStatus } from "react-dom";
 
 import { Button } from "@/components/ui/button";
 
-export function CreateBulkDraftSubmit({ disabled, secondary }: { disabled: boolean; secondary: boolean }) {
+export function CreateBulkDraftSubmit({
+  disabled,
+  secondary = false,
+}: {
+  disabled: boolean;
+  secondary?: boolean;
+}) {
   const { pending } = useFormStatus();
 
   return (

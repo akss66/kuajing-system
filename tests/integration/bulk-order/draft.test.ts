@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import {
   auditLogs,
   bulkImportDrafts,
+  bulkImportStoreGroups,
   customers,
   inventoryBalances,
   orderImportBatches,
@@ -18,6 +19,7 @@ import {
 import {
   addStoreGroup,
   createBulkDraft,
+  discardBulkDraft,
   getBulkDraft,
   listBulkDrafts,
   removeGroupFile,
@@ -214,6 +216,99 @@ describe("24-hour multi-store bulk import drafts", () => {
 
     expect(repeated.id).toBe(first.id);
     await expect(listBulkDrafts(fixture.customer.id)).resolves.toHaveLength(1);
+  });
+
+  test("discards only an owned unsubmitted draft and removes its preview data", async () => {
+    const fixture = await createFixture();
+    const draft = await createBulkDraft({
+      actorUserId: "auth-customer-1",
+      customerId: fixture.customer.id,
+    });
+    const group = await addStoreGroup({
+      customerId: fixture.customer.id,
+      draftId: draft.id,
+      storeId: fixture.store.id,
+    });
+    const uploaded = await uploadGroupFiles({
+      actorUserId: "auth-customer-1",
+      customerId: fixture.customer.id,
+      files: [await workbookFile()],
+      groupId: group.id,
+    });
+
+    await expect(
+      discardBulkDraft({
+        actorUserId: "auth-customer-2",
+        customerId: fixture.otherCustomer.id,
+        draftId: draft.id,
+      }),
+    ).rejects.toMatchObject({ code: "DRAFT_NOT_FOUND" });
+
+    await discardBulkDraft({
+      actorUserId: "auth-customer-1",
+      customerId: fixture.customer.id,
+      draftId: draft.id,
+    });
+
+    await expect(getBulkDraft(fixture.customer.id, draft.id)).rejects.toMatchObject({
+      code: "DRAFT_NOT_FOUND",
+    });
+    await expect(
+      db
+        .select({ id: bulkImportStoreGroups.id })
+        .from(bulkImportStoreGroups)
+        .where(eq(bulkImportStoreGroups.draftId, draft.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({ id: orderImportBatches.id })
+        .from(orderImportBatches)
+        .where(eq(orderImportBatches.id, uploaded.files[0].batchId)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({ id: orderImportRows.id })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.batchId, uploaded.files[0].batchId)),
+    ).resolves.toEqual([]);
+
+    const [discardLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "BULK_IMPORT_DRAFT_DISCARDED"));
+    expect(discardLog).toMatchObject({
+      actorId: "auth-customer-1",
+      actorType: "CUSTOMER",
+      entityId: draft.id,
+      entityType: "BULK_IMPORT_DRAFT",
+    });
+  });
+
+  test("keeps partially submitted and completed draft history immutable", async () => {
+    const fixture = await createFixture();
+
+    for (const status of ["PARTIALLY_SUBMITTED", "COMPLETED"] as const) {
+      const draft = await createBulkDraft({
+        actorUserId: "auth-customer-1",
+        customerId: fixture.customer.id,
+      });
+      await db
+        .update(bulkImportDrafts)
+        .set({ status })
+        .where(eq(bulkImportDrafts.id, draft.id));
+
+      await expect(
+        discardBulkDraft({
+          actorUserId: "auth-customer-1",
+          customerId: fixture.customer.id,
+          draftId: draft.id,
+        }),
+      ).rejects.toMatchObject({ code: "DRAFT_NOT_WRITABLE" });
+      await expect(getBulkDraft(fixture.customer.id, draft.id)).resolves.toMatchObject({
+        id: draft.id,
+        status,
+      });
+    }
   });
 
   test("requires an active owned store and keeps one group per store in a draft", async () => {
