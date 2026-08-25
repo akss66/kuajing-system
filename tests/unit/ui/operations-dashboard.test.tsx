@@ -138,6 +138,8 @@ describe("operations dashboards", () => {
       "href",
       "/portal/orders?status=FULFILLMENT_EXCEPTION",
     );
+    expect(screen.queryByRole("link", { name: /付款待确认/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /未完成上传/ })).not.toBeInTheDocument();
     expect(screen.getByText("北美主店")).toBeVisible();
     expect(document.body).not.toHaveTextContent("批量付款");
     expect(document.body).not.toHaveTextContent("仓库处理异常");
@@ -165,9 +167,11 @@ describe("operations dashboards", () => {
       />,
     );
 
-    const readyState = screen.getByRole("status", { name: "当前没有未完成任务" });
+    const readyState = screen.getByRole("status", { name: "当前拿货均已处理完成" });
     expect(readyState).toHaveAttribute("data-portal-ready");
-    expect(screen.getByRole("link", { name: /开始上传订单/ })).toHaveAttribute(
+    expect(document.querySelector("[data-portal-task-overview]")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /上传订单/ })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /上传订单/ })).toHaveAttribute(
       "href",
       "/portal/imports/new",
     );

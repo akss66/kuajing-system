@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const identityMocks = vi.hoisted(() => ({ requireCustomer: vi.fn() }));
@@ -30,18 +30,10 @@ describe("NewTemuImportPage", () => {
     vi.clearAllMocks();
   });
 
-  it("starts the same four-stage flow at store and file selection", async () => {
+  it("starts directly at store and file selection without a decorative progress bar", async () => {
     render(await NewTemuImportPage());
 
-    const progress = screen.getByRole("navigation", { name: "订单导入进度" });
-    expect(within(progress).getByText("选择店铺")).toBeVisible();
-    expect(within(progress).getByText("上传文件")).toBeVisible();
-    expect(within(progress).getByText("校验预览")).toBeVisible();
-    expect(within(progress).getByText("确认提交")).toBeVisible();
-    expect(within(progress).getByText("上传文件").closest("li")).toHaveAttribute(
-      "aria-current",
-      "step",
-    );
+    expect(screen.queryByRole("navigation", { name: "订单导入进度" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /多店铺批量上传/ })).toHaveAttribute(
       "href",
       "/portal/bulk-orders",

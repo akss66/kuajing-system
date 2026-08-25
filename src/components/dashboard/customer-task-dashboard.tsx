@@ -74,6 +74,45 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
   const continuation = dashboard.primaryContinuationTarget
     ? continuationCopy[dashboard.primaryContinuationTarget.kind]
     : null;
+  const taskLinks = [
+    {
+      count: dashboard.unfinishedDraftCount,
+      description: "未完成的多店铺上传",
+      href: "/portal/bulk-orders",
+      icon: Clock3,
+      kind: "BULK_DRAFT",
+      label: "未完成上传",
+    },
+    {
+      count: dashboard.pendingPaymentCount,
+      description: `${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`,
+      href: "/portal/orders?status=PENDING_PAYMENT",
+      icon: ReceiptText,
+      kind: "PENDING_PAYMENT",
+      label: "待付款",
+      tone: "warning" as const,
+    },
+    {
+      count: dashboard.paymentReportedCount,
+      description: "付款已申报，等待管理员确认",
+      href: "/portal/orders",
+      icon: Banknote,
+      kind: "PAYMENT_REPORTED",
+      label: "付款待确认",
+    },
+    {
+      count: dashboard.fulfillmentExceptionCount,
+      description: "需要确认进度或联系运营",
+      href: "/portal/orders?status=FULFILLMENT_EXCEPTION",
+      icon: AlertTriangle,
+      kind: "FULFILLMENT_EXCEPTION",
+      label: "需要协助",
+      tone: "danger" as const,
+    },
+  ].filter(
+    (item) =>
+      item.count > 0 && item.kind !== dashboard.primaryContinuationTarget?.kind,
+  );
 
   return (
     <div className="space-y-9" data-portal-dashboard>
@@ -102,7 +141,7 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
             </div>
           ) : (
             <div
-              aria-label="当前没有未完成任务"
+              aria-label="当前拿货均已处理完成"
               className="flex flex-col gap-4 rounded-2xl bg-[var(--portal-ready-surface)] px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between"
               data-portal-ready
               role="status"
@@ -112,22 +151,28 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
                   <CheckCircle2 aria-hidden="true" className="size-5" />
                 </span>
                 <div>
-                  <h3 className="text-base font-semibold tracking-[-0.015em] text-foreground">当前没有未完成任务</h3>
+                  <h3 className="text-base font-semibold tracking-[-0.015em] text-foreground">当前拿货均已处理完成</h3>
                   <p className="mt-1 max-w-lg text-sm leading-6 text-muted-foreground">订单、付款和异常都已处理完成，可以开始新的拿货流程。</p>
                 </div>
               </div>
-              <Link className="portal-inline-action inline-flex min-h-11 shrink-0 items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/imports/new">
-                开始上传订单 <ArrowRight aria-hidden="true" className="size-4" />
-              </Link>
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2" data-portal-task-overview>
-            <TaskLink count={dashboard.unfinishedDraftCount} description="未完成的多店铺上传" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
-            <TaskLink count={dashboard.pendingPaymentCount} description={`${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`} href="/portal/orders?status=PENDING_PAYMENT" icon={ReceiptText} label="待付款" tone="warning" />
-            <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
-            <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
-          </div>
+          {taskLinks.length ? (
+            <div className="grid gap-3 sm:grid-cols-2" data-portal-task-overview>
+              {taskLinks.map((item) => (
+                <TaskLink
+                  count={item.count}
+                  description={item.description}
+                  href={item.href}
+                  icon={item.icon}
+                  key={item.kind}
+                  label={item.label}
+                  tone={item.tone}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -173,13 +218,13 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
         </section>
 
         <section aria-labelledby="funds-summary-title" className="space-y-3">
-          <SectionHeading description="账户余额和订单占用。" id="funds-summary-title" title="资金摘要" />
+          <SectionHeading description="账户余额和订单预留。" id="funds-summary-title" title="资金摘要" />
           <WorkspacePanel className="overflow-hidden">
             <div className="divide-y divide-border">
               {[
                 { featured: true, icon: WalletCards, label: "可用余额", value: dashboard.walletAvailableFen },
                 { icon: Banknote, label: "账户余额", value: dashboard.walletBalanceFen },
-                { icon: Boxes, label: "订单占用", value: dashboard.walletHoldFen },
+                { icon: Boxes, label: "订单预留", value: dashboard.walletHoldFen },
               ].map((item) => (
                 <div className={item.featured ? "flex items-center gap-3 bg-primary/5 px-4 py-4 sm:px-5" : "flex items-center gap-3 px-4 py-4 sm:px-5"} key={item.label}>
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.65rem] bg-[var(--portal-icon-surface)] text-primary"><item.icon aria-hidden="true" className="size-4" /></span>

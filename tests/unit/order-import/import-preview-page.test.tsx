@@ -125,25 +125,17 @@ describe("ImportPreviewPage", () => {
       }),
     );
 
-    const progress = screen.getByRole("navigation", { name: "订单导入进度" });
-    const workspace = screen.getByRole("region", { name: "逐行校验工作台" });
+    const workspace = screen.getByRole("region", { name: "订单核对结果" });
     const submitBar = screen.getByRole("region", { name: "提交拿货单操作栏" });
 
     expect(screen.getByRole("link", { name: "返回重新上传" })).toBeVisible();
-    expect(within(progress).getByText("选择店铺")).toBeVisible();
-    expect(within(progress).getByText("上传文件")).toBeVisible();
-    expect(within(progress).getByText("校验预览")).toBeVisible();
-    expect(within(progress).getByText("确认提交")).toBeVisible();
-    expect(within(progress).getByText("校验预览").closest("li")).toHaveAttribute(
-      "aria-current",
-      "step",
-    );
+    expect(screen.queryByRole("navigation", { name: "订单导入进度" })).not.toBeInTheDocument();
     expect(screen.getByText(/TEMU 店铺.*orders\.xlsx.*15 行/)).toBeVisible();
-    expect(workspace).toHaveTextContent("逐行校验");
+    expect(workspace).toHaveTextContent("核对结果");
     expect(workspace).toHaveTextContent("可提交1");
     expect(workspace).toHaveTextContent("需处理0");
     expect(workspace).toHaveTextContent("重复跳过0");
-    expect(within(workspace).getByRole("list", { name: "逐行校验结果" })).toBeVisible();
+    expect(within(workspace).getByRole("list", { name: "订单逐行核对结果" })).toBeVisible();
     expect(submitBar).toHaveClass("sticky");
     expect(submitBar).toHaveClass(
       "bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)]",

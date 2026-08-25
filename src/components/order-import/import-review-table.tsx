@@ -51,13 +51,13 @@ export function ImportReviewTable({
 
   return (
     <section
-      aria-label="逐行校验工作台"
+      aria-label="订单核对结果"
       className="space-y-4"
     >
       <div className="flex flex-col gap-3 rounded-2xl bg-white px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-semibold text-ink">逐行校验</h2>
+            <h2 className="font-semibold text-ink">核对结果</h2>
             <Badge
               className={
                 attentionCount
@@ -100,7 +100,7 @@ export function ImportReviewTable({
       </dl>
 
       {visibleRows.length ? (
-        <div aria-label="逐行校验结果" className="space-y-3" role="list">
+        <div aria-label="订单逐行核对结果" className="space-y-3" role="list">
           {visibleRows.map((row) => (
             <ImportRowEditor action={action} batchId={batchId} key={`${row.id}:${row.revision}`} row={row} />
           ))}

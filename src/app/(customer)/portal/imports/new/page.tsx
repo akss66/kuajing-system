@@ -3,7 +3,6 @@ import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel } from "@/components/layout/workspace-panel";
-import { ImportProgress } from "@/components/order-import/import-progress";
 import { TemuUploadForm } from "@/components/order-import/temu-upload-form";
 import { uploadTemuOrdersAction } from "@/modules/order-import/actions";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -31,8 +30,6 @@ export default async function NewTemuImportPage() {
         </div>
         <p className="text-sm text-muted-foreground">当前可选 {stores.length} 家店铺</p>
       </section>
-
-      <ImportProgress currentStep={2} />
 
       <WorkspacePanel className="p-4 sm:p-6">
         <div className="mb-5 flex items-start gap-3 border-b border-border pb-5">

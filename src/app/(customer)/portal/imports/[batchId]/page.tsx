@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PageHeading } from "@/components/layout/page-heading";
-import { ImportProgress } from "@/components/order-import/import-progress";
 import { ImportReviewTable } from "@/components/order-import/import-review-table";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -72,8 +71,6 @@ export default async function ImportPreviewPage({
         description={`${preview.storeName} · ${preview.fileName} · 共 ${preview.summary.total} 行`}
         title="核对 TEMU 订单"
       />
-
-      <ImportProgress currentStep={3} />
 
       {blocking ? (
         <div className="flex gap-3 rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 p-4 text-sm text-warning">
