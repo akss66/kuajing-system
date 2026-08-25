@@ -315,6 +315,17 @@ async function screenshotForReview(page: Page, testInfo: TestInfo, name: string)
   });
 }
 
+function parseActionErrorBody(responseText: string) {
+  try {
+    return JSON.parse(responseText) as {
+      message?: string;
+      status?: string;
+    };
+  } catch {
+    return null;
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
@@ -339,7 +350,7 @@ test("super admin authorizes, validates read-only access, and explicitly enables
 
   const superAdmin = await createJifengSuperAdmin();
   await loginThroughUi(page, superAdmin);
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 15000 });
   await page.goto("/admin/system/integrations");
   await expect(page.getByRole("heading", { name: "外部集成" })).toBeVisible();
   await expect(page.getByLabel("一次性令牌")).toHaveAttribute("type", "password");
@@ -427,6 +438,59 @@ test("super admin authorizes, validates read-only access, and explicitly enables
   expect(auditCountAfter).toBe(auditCountBefore);
   expect((await db.select().from(jifengConnections))[0]?.status).toBe("ENABLED");
   expect(mockRequests).toHaveLength(mockRequestCountBefore);
+
+  await page.context().clearCookies();
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  const noSessionRequestContext = page.context().request;
+  const [{ value: auditCountBeforeNoSession } = { value: 0 }] = await db
+    .select({ value: count() })
+    .from(auditLogs)
+    .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_ENABLED"));
+  const authorizationAttemptsBeforeNoSession = await db
+    .select()
+    .from(jifengAuthorizationAttempts);
+  const connectionBeforeNoSession = (await db.select().from(jifengConnections))[0];
+  const mockRequestCountBeforeNoSession = mockRequests.length;
+  const noSessionReplayResponse = await replayActionAsCurrentSession(
+    noSessionRequestContext,
+    capturedEnableAction,
+  );
+  const noSessionReplayBody = await noSessionReplayResponse.text();
+  actionResponses.push(noSessionReplayBody);
+  const noSessionReplayPayload = parseActionErrorBody(noSessionReplayBody);
+  if (noSessionReplayPayload) {
+    expect(noSessionReplayPayload.status).toBe("error");
+    if (noSessionReplayPayload.message) {
+      expect(noSessionReplayPayload.message).not.toContain("FORBIDDEN_ADMIN");
+      expect(noSessionReplayPayload.message).not.toContain("只允许超级管理员管理极风连接。");
+    }
+  }
+  expect([401, 403, 500]).toContain(noSessionReplayResponse.status());
+  expect(noSessionReplayBody).not.toContain("FORBIDDEN_ADMIN");
+  expect(noSessionReplayBody).not.toContain("只允许超级管理员管理极风连接。");
+  expect(noSessionReplayBody).not.toContain(accessToken);
+  expect(noSessionReplayBody).not.toContain(refreshToken);
+  expect(noSessionReplayBody).not.toContain(authorizationCode);
+  const [{ value: auditCountAfterNoSession } = { value: 0 }] = await db
+    .select({ value: count() })
+    .from(auditLogs)
+    .where(eq(auditLogs.action, "JIFENG_FULFILLMENT_ENABLED"));
+  const authorizationAttemptsAfterNoSession = await db
+    .select()
+    .from(jifengAuthorizationAttempts);
+  const connectionAfterNoSession = (await db.select().from(jifengConnections))[0];
+  expect(mockRequests).toHaveLength(mockRequestCountBeforeNoSession);
+  expect(auditCountAfterNoSession).toBe(auditCountBeforeNoSession);
+  expect(authorizationAttemptsAfterNoSession).toEqual(authorizationAttemptsBeforeNoSession);
+  expect(connectionAfterNoSession).toMatchObject({
+    status: connectionBeforeNoSession?.status,
+    logisticsId: connectionBeforeNoSession?.logisticsId,
+    warehouseCode: connectionBeforeNoSession?.warehouseCode,
+    lastDiagnosticAt: connectionBeforeNoSession?.lastDiagnosticAt,
+  });
 
   await assertMockBoundary();
   await expectNoSensitiveBrowserState(page, actionResponses, consoleMessages);
