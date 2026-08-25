@@ -6,6 +6,7 @@ import { CreateBulkDraftSubmit } from "@/components/bulk-order/create-bulk-draft
 import { DiscardBulkDraftForm } from "@/components/bulk-order/discard-bulk-draft-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { Button } from "@/components/ui/button";
 import { createBulkDraftAction } from "@/modules/bulk-order/actions";
 import { listBulkDrafts } from "@/modules/bulk-order/draft-service";
@@ -195,10 +196,10 @@ export default async function CustomerBulkOrdersPage() {
         />
 
         {otherDrafts.length ? (
-          <div className="divide-y divide-border">
+          <div className="grid gap-3 bg-slate-50/50 p-3">
             {otherDrafts.map(({ draft, status }) => (
               <article
-                className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+                className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 key={draft.id}
               >
                 <div className="space-y-1">
@@ -230,16 +231,11 @@ export default async function CustomerBulkOrdersPage() {
             ))}
           </div>
         ) : (
-          <div className="px-5 py-16 text-center">
-            <p className="font-medium text-ink">
-              {latestDraft ? "没有其他上传记录" : "还没有上传记录"}
-            </p>
-            <p className="mt-1 text-sm text-muted">
-              {latestDraft
-                ? "当前进行中的上传已显示在上方。"
-                : "开始后即可按店铺分组上传多个 TEMU 原始 Excel。"}
-            </p>
-          </div>
+          <ActionableEmptyState
+            description={latestDraft ? "当前进行中的上传已显示在上方。" : "开始后即可按店铺分组上传多个 TEMU 原始 Excel。"}
+            kind="initial"
+            title={latestDraft ? "没有其他上传记录" : "还没有上传记录"}
+          />
         )}
       </WorkspacePanel>
     </div>

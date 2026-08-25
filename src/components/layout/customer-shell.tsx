@@ -71,6 +71,17 @@ export function CustomerShell({
   return (
     <MerchantShellFrame
       audience="customer"
+      desktopSidebarFooter={
+        <MerchantTopbar
+          audience="customer"
+          identity={identity}
+          mobileNavigation={null}
+          mobileNavigationTitle="客户导航"
+          placement="sidebar"
+          roleLabel="合作客户"
+          title="同舟行客户中心"
+        />
+      }
       mobileDock={
         <MobileTaskDock
           ariaLabel="客户快捷导航"

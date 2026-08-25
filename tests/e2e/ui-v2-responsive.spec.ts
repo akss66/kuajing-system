@@ -149,18 +149,27 @@ async function expectShellAndNavigation(
 ) {
   const topbar = page.locator("[data-merchant-topbar]");
   const topbarBox = await topbar.boundingBox();
-  expect(topbarBox, `${context} topbar should render`).not.toBeNull();
-  expect(topbarBox!.x, `${context} topbar x`).toBeCloseTo(0, 1);
-  expect(topbarBox!.y, `${context} topbar y`).toBeCloseTo(0, 1);
-  expect(topbarBox!.height, `${context} topbar height`).toBeCloseTo(56, 1);
-  expect(topbarBox!.width, `${context} topbar width`).toBeCloseTo(viewport.width, 1);
+  if (viewport.kind === "desktop" && audience === "customer") {
+    expect(topbarBox, `${context} customer desktop topbar should be hidden`).toBeNull();
+  } else {
+    expect(topbarBox, `${context} topbar should render`).not.toBeNull();
+    expect(topbarBox!.x, `${context} topbar x`).toBeCloseTo(0, 1);
+    expect(topbarBox!.y, `${context} topbar y`).toBeCloseTo(0, 1);
+    expect(topbarBox!.height, `${context} topbar height`).toBeCloseTo(56, 1);
+    expect(topbarBox!.width, `${context} topbar width`).toBeCloseTo(viewport.width, 1);
+  }
 
   const nav = navigation[audience];
   if (viewport.kind === "desktop") {
-    const brandBox = await page.locator("[data-merchant-brand]").boundingBox();
+    const brandBox = await page.locator("[data-merchant-brand]:visible").boundingBox();
     const sidebarBox = await page.locator("[data-merchant-sidebar]").boundingBox();
-    expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 56, width: 224, x: 0, y: 0 });
-    expect(sidebarBox, `${context} sidebar geometry`).toMatchObject({ width: 224, x: 0, y: 56 });
+    if (audience === "customer") {
+      expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 80, width: 255, x: 0, y: 8 });
+      expect(sidebarBox, `${context} sidebar geometry`).toMatchObject({ width: 256, x: 0, y: 0 });
+    } else {
+      expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 56, width: 224, x: 0, y: 0 });
+      expect(sidebarBox, `${context} sidebar geometry`).toMatchObject({ width: 224, x: 0, y: 56 });
+    }
 
     const desktopNavigation = page.getByRole("navigation", { name: nav.label });
     await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
@@ -438,13 +447,8 @@ async function runApprovedViewportAcceptance(
             }
           }
           if (route.path === "/portal/catalog") {
-            if (viewport.kind === "desktop") {
-              await expect(
-                page.getByRole("table", { name: /的 SKU 列表$/ }).first(),
-              ).toBeVisible();
-            } else {
-              await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
-            }
+            await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+            await expect(page.locator("[data-customer-catalog-table]")).toHaveCount(0);
           }
 
           if (viewport.kind === "mobile") {

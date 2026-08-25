@@ -125,7 +125,11 @@ for (const audience of audiences) {
     const desktopNavigation = page.getByRole("navigation", { name: audience.label });
     await expect(page.getByRole("button", { name: "帮助" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "消息" })).toHaveCount(0);
-    await page.getByRole("button", { name: "打开账号菜单" }).click();
+    const initialAccountTrigger =
+      audience.path === "/portal" && (page.viewportSize()?.width ?? 1440) >= 1024
+        ? "打开侧栏账号菜单"
+        : "打开账号菜单";
+    await page.getByRole("button", { name: initialAccountTrigger }).click();
     const accountMenu = page.locator("[data-slot='dropdown-menu-content']");
     await expect(accountMenu).toBeVisible();
     await expect(accountMenu.getByText(audience.identity.displayName, { exact: true })).toBeVisible();
@@ -152,18 +156,24 @@ for (const audience of audiences) {
         if (viewport.kind === "desktop") {
           await expect(page.getByRole("navigation", { name: audience.quickLabel })).toBeHidden();
           const topbar = await page.locator("[data-merchant-topbar]").boundingBox();
-          const brand = await page.locator("[data-merchant-brand]").boundingBox();
+          const brand = await page.locator("[data-merchant-brand]:visible").boundingBox();
           const sidebar = await page.locator("[data-merchant-sidebar]").boundingBox();
-          expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });
-          expect(brand).toMatchObject({ x: 0, y: 0, width: 224, height: 56 });
-          expect(sidebar).toMatchObject({ x: 0, y: 56, width: 224 });
-          await expect(page.locator("[data-merchant-brand]")).toHaveCSS("border-right-width", "0px");
+          if (audience.path === "/portal") {
+            expect(topbar).toBeNull();
+            expect(brand).toMatchObject({ x: 0, y: 8, width: 255, height: 80 });
+            expect(sidebar).toMatchObject({ x: 0, y: 0, width: 256 });
+          } else {
+            expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });
+            expect(brand).toMatchObject({ x: 0, y: 0, width: 224, height: 56 });
+            expect(sidebar).toMatchObject({ x: 0, y: 56, width: 224 });
+          }
+          await expect(page.locator("[data-merchant-brand]:visible")).toHaveCSS("border-right-width", "0px");
           await expect(page.locator("[data-merchant-sidebar]")).toHaveCSS("border-right-width", "1px");
 
           const brandRight = brand!.x + brand!.width;
           const sidebarRight = sidebar!.x + sidebar!.width;
-          expect(brandRight).toBe(224);
-          expect(sidebarRight).toBe(224);
+          expect(brandRight).toBe(audience.path === "/portal" ? 255 : 224);
+          expect(sidebarRight).toBe(audience.path === "/portal" ? 256 : 224);
           await expect(desktopNavigation.locator('[aria-current="page"]')).toHaveCount(1);
           await expect(desktopNavigation.locator("[data-navigation-section]")).toHaveCount(
             audience.sectionCount,

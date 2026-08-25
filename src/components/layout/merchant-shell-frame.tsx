@@ -10,6 +10,7 @@ export type MerchantShellFrameProps = {
   audience: MerchantAudience;
   navigation: ReactNode;
   topbar: ReactNode;
+  desktopSidebarFooter?: ReactNode;
   mobileDock: ReactNode;
   children: ReactNode;
 };
@@ -33,9 +34,12 @@ export function MerchantBrand({
     >
       <Image
         alt=""
-        className="h-8 w-auto shrink-0 object-contain"
+        className={cn(
+          "h-8 w-auto shrink-0 object-contain",
+          audience === "customer" && "drop-shadow-[0_2px_5px_rgb(197_20_28/0.18)]",
+        )}
         height={656}
-        priority={audience === "admin"}
+        priority
         src={BRAND.logoPath}
         width={683}
       />
@@ -53,6 +57,7 @@ export function MerchantShellFrame({
   audience,
   navigation,
   topbar,
+  desktopSidebarFooter,
   mobileDock,
   children,
 }: MerchantShellFrameProps) {
@@ -74,7 +79,10 @@ export function MerchantShellFrame({
         跳到主要内容
       </a>
       <header
-        className="fixed inset-x-0 top-0 z-40 flex h-[var(--merchant-header-height)] border-b border-[color-mix(in_oklch,var(--merchant-topbar),white_14%)] bg-[var(--merchant-topbar)] text-[var(--merchant-topbar-foreground)]"
+        className={cn(
+          "fixed inset-x-0 top-0 z-40 flex h-[var(--merchant-header-height)] border-b border-[color-mix(in_oklch,var(--merchant-topbar),white_14%)] bg-[var(--merchant-topbar)] text-[var(--merchant-topbar-foreground)]",
+          audience === "customer" && "lg:hidden",
+        )}
         data-merchant-topbar={audience}
       >
         <MerchantBrand
@@ -85,26 +93,52 @@ export function MerchantShellFrame({
       </header>
 
       <aside
-        className="fixed bottom-0 left-0 top-[var(--merchant-header-height)] z-30 hidden w-[var(--merchant-sidebar-width)] overflow-y-auto border-r border-border bg-[var(--merchant-sidebar)] lg:block"
+        className={cn(
+          "fixed bottom-0 left-0 z-30 hidden w-[var(--merchant-sidebar-width)] border-r border-border bg-[var(--merchant-sidebar)]",
+          audience === "customer"
+            ? "top-0 flex-col lg:flex"
+            : "top-[var(--merchant-header-height)] overflow-y-auto lg:block",
+        )}
         data-merchant-sidebar
       >
-        {navigation}
+        {audience === "customer" ? (
+          <>
+            <MerchantBrand audience="customer" className="mt-2 h-20 px-6" />
+            <div className="min-h-0 flex-1 overflow-y-auto">{navigation}</div>
+            {desktopSidebarFooter ? (
+              <div className="border-t border-slate-200/60 p-4" data-customer-sidebar-account>
+                {desktopSidebarFooter}
+              </div>
+            ) : null}
+          </>
+        ) : navigation}
       </aside>
 
       <div
-        className="min-w-0 pt-[var(--merchant-header-height)] lg:pl-[var(--merchant-sidebar-width)]"
+        className={cn(
+          "min-w-0 pt-[var(--merchant-header-height)] lg:pl-[var(--merchant-sidebar-width)]",
+          audience === "customer" && "lg:pt-0",
+        )}
         data-merchant-content
       >
         <main
           className={cn(
-            "mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full min-w-0 bg-[var(--merchant-canvas)] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:py-6",
-            audience === "customer" ? "max-w-[1480px] lg:px-10" : "max-w-[1600px] lg:px-8",
+            "mx-auto min-h-[calc(100svh-var(--merchant-header-height))] w-full min-w-0 bg-[var(--merchant-canvas)]",
+            audience === "customer"
+              ? "max-w-none pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] lg:min-h-svh lg:pb-0"
+              : "max-w-[1600px] px-4 pb-[calc(var(--merchant-mobile-dock-height)+1.5rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8 lg:py-6",
           )}
           data-portal-main={audience === "customer" ? true : undefined}
           id="merchant-main-content"
           tabIndex={-1}
         >
-          <div className={audience === "customer" ? "customer-surface-enter" : undefined}>
+          <div
+            className={
+              audience === "customer"
+                ? "customer-surface-enter mx-auto w-full max-w-5xl px-4 pt-5 sm:px-6 lg:px-12 lg:py-12"
+                : undefined
+            }
+          >
             {children}
           </div>
         </main>

@@ -176,6 +176,29 @@ textarea {
   font: inherit;
 }
 
+* {
+  scrollbar-color: rgb(203 213 225) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(203 213 225);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184);
+}
+
 .login-input:-webkit-autofill,
 .login-input:-webkit-autofill:hover,
 .login-input:-webkit-autofill:focus {
@@ -208,6 +231,7 @@ textarea {
 }
 
 [data-merchant-shell="customer"] {
+  --merchant-sidebar-width: 16rem;
   --merchant-topbar: rgb(249 250 251);
   --merchant-topbar-foreground: rgb(31 41 55);
   --merchant-topbar-muted: rgb(107 114 128);
@@ -255,7 +279,7 @@ textarea {
   --portal-icon-surface: rgb(233 242 237);
   --portal-ready-surface: rgb(235 246 239);
   --portal-subtle-surface: rgb(247 249 246);
-  --portal-surface-radius: 0.9rem;
+  --portal-surface-radius: 1rem;
 }
 
 [data-merchant-shell="customer"] [data-merchant-topbar="customer"] {
@@ -275,12 +299,12 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-merchant-sidebar] {
-  border-right-color: transparent;
+  border-right-color: rgb(241 245 249 / 50%);
   background: rgb(249 250 251);
 }
 
 [data-merchant-shell="customer"] [data-workspace-panel] {
-  border-color: var(--portal-border-strong);
+  border-color: transparent;
   border-radius: var(--portal-surface-radius);
   box-shadow: 0 2px 12px rgb(0 0 0 / 2%);
 }
@@ -312,6 +336,7 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-slot="button"] {
+  border-radius: 0.75rem;
   font-weight: 600;
   transition-property: background-color, border-color, color, transform, box-shadow;
 }
@@ -322,9 +347,9 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-slot="button"][data-variant="outline"] {
-  border-color: rgb(190 207 198);
+  border-color: rgb(226 232 240);
   background: rgb(255 255 255);
-  box-shadow: inset 0 1px rgb(255 255 255 / 70%);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
 [data-merchant-shell="customer"] [data-slot="button"][data-size="lg"] {
@@ -375,7 +400,8 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-portal-toolbar] {
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.88), 0 1px 2px rgb(18 53 46 / 0.04);
+  border-color: transparent;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 2%);
 }
 
 [data-merchant-shell="customer"] [data-portal-bulk-start] {

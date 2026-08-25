@@ -477,29 +477,21 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
   for (const viewport of APPROVED_VIEWPORTS) {
     await page.setViewportSize({ height: viewport.height, width: viewport.width });
     await page.goto("/portal/catalog");
-    await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
-    await expect(page.getByRole("heading", { name: "实时货盘" })).toBeVisible();
+    if (viewport.width >= 1024) {
+      await expect(page.getByRole("banner")).toHaveCount(0);
+      await expect(page.locator("[data-merchant-sidebar]")).toBeVisible();
+    } else {
+      await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
+    }
+    await expect(page.getByRole("heading", { exact: true, name: "实时货盘" })).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.manualUnavailableSku.id)).toContainText("不可售");
     await expect(visibleCatalogItem(page, fixture.soldOutSku.id)).toContainText("售罄");
     await expect(page.getByText("2 个商品 / 4 个 SKU")).toBeVisible();
     await expect(page.locator('[data-testid^="catalog-product-"]:visible')).toHaveCount(2);
     await expect(page.locator("[data-metric-strip]")).toHaveCount(0);
-    if (viewport.kind === "desktop") {
-      const productTables = page.getByRole("table");
-      await expect(productTables).toHaveCount(2);
-      const productTableNames = await productTables.evaluateAll((tables) =>
-        tables.map((table) => table.getAttribute("aria-label")),
-      );
-      expect(new Set(productTableNames).size).toBe(productTableNames.length);
-      await expect(
-        page.getByRole("table", { name: `${fixture.productName} 的 SKU 列表` }),
-      ).toBeVisible();
-      await expect(page.locator("[data-customer-catalog-cards]")).not.toBeVisible();
-    } else {
-      await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
-      await expect(page.locator("[data-customer-catalog-table]")).not.toBeVisible();
-    }
+    await expect(page.getByRole("list", { name: "客户货盘卡片列表" })).toBeVisible();
+    await expect(page.locator("[data-customer-catalog-table]")).toHaveCount(0);
 
     const searchInput = page.locator('input[name="q"]');
     await expect(searchInput).toBeVisible();
@@ -589,7 +581,7 @@ test("customer import preview uses the compact review workspace and sticky submi
   await expect(page.getByText(/preview-orders\.xlsx/)).toBeVisible();
   const workspace = page.getByRole("region", { name: "逐行校验工作台" });
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByRole("table", { name: "逐行校验结果" })).toBeVisible();
+  await expect(workspace.getByRole("list", { name: "逐行校验结果" })).toBeVisible();
   if (testInfo.project.name === "mobile-chromium") {
     const workspaceWidth = await workspace.evaluate((element) => ({
       clientWidth: element.clientWidth,
@@ -608,7 +600,7 @@ test("customer import preview uses the compact review workspace and sticky submi
     (page.viewportSize()?.height ?? 0) + 1,
   );
 
-  const row = page.getByRole("row", { name: "Excel 第 2 行" });
+  const row = page.getByRole("listitem", { name: "Excel 第 2 行" });
   await expect(row.getByText("校验通过", { exact: true })).toBeVisible();
   await expect(row.getByText("TZX-PREVIEW-1", { exact: true })).toBeVisible();
   await expect(page.getByLabel("同系列替代 SKU")).toHaveCount(0);

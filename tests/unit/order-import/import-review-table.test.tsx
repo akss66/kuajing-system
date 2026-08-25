@@ -60,27 +60,24 @@ describe("ImportReviewTable", () => {
       />,
     );
 
-    expect(screen.getByRole("table", { name: "逐行校验结果" })).toHaveClass(
-      "block",
-      "md:table",
-    );
+    expect(screen.getByRole("list", { name: "逐行校验结果" })).toBeVisible();
     expect(screen.getByRole("button", { name: "修改 Excel 第 2 行" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    expect(screen.queryByRole("row", { name: "Excel 第 2 行编辑器" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Excel 第 2 行编辑器" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起 Excel 第 3 行" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-    expect(screen.getByRole("row", { name: "Excel 第 3 行编辑器" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Excel 第 3 行编辑器" })).toBeVisible();
     expect(screen.getByText("对应 SKU 库存不足，请更换 SKU")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "修改 Excel 第 2 行" }));
-    expect(screen.getByRole("row", { name: "Excel 第 2 行编辑器" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Excel 第 2 行编辑器" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "仅看需处理（1）" }));
-    expect(screen.queryByRole("row", { name: "Excel 第 2 行" })).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "Excel 第 3 行" })).toBeVisible();
+    expect(screen.queryByRole("listitem", { name: "Excel 第 2 行" })).not.toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "Excel 第 3 行" })).toBeVisible();
   });
 });

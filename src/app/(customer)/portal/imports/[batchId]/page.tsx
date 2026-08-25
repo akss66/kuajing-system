@@ -95,7 +95,7 @@ export default async function ImportPreviewPage({
 
       <section
         aria-label="提交拿货单操作栏"
-        className="sticky bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)] z-20 rounded-[var(--radius-surface)] border border-border bg-background/96 p-3 shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] backdrop-blur sm:flex sm:items-end sm:justify-between sm:gap-3 sm:px-5 sm:py-4 lg:bottom-4"
+        className="sticky bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)] z-20 rounded-2xl bg-white p-3 shadow-[0_-8px_24px_oklch(0.22_0.018_175/0.08)] sm:flex sm:items-end sm:justify-between sm:gap-3 sm:px-5 sm:py-4 lg:bottom-4"
       >
         <div className="min-w-0">
           <div className="flex items-start gap-3">

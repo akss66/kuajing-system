@@ -244,6 +244,11 @@ describe("merchant shells", () => {
       "portal",
     );
     expect(screen.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
+    expect(screen.getByRole("banner")).toHaveClass("lg:hidden");
+    const desktopSidebar = document.querySelector<HTMLElement>("[data-merchant-sidebar]");
+    expect(desktopSidebar).toHaveClass("top-0", "flex-col", "lg:flex");
+    expect(desktopSidebar?.querySelector("[data-merchant-brand]")).toBeInTheDocument();
+    expect(desktopSidebar?.querySelector("[data-customer-sidebar-account]")).toBeInTheDocument();
     const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
     expect(navigation).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "客户首页" })).toBeVisible();
@@ -272,7 +277,7 @@ describe("merchant shells", () => {
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "打开侧栏账号菜单" }));
 
     const accountMenu = document.querySelector("[data-slot='dropdown-menu-content']");
     expect(accountMenu).toHaveClass("w-[236px]", "p-1.5", "sm:w-64", "sm:p-2");

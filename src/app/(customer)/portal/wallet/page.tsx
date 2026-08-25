@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -83,9 +84,9 @@ export default async function CustomerWalletPage() {
           title="订单资金占用"
         >
         {wallet.holds.length ? (
-          <div className="divide-y divide-border">
+          <div className="grid gap-3 bg-slate-50/50 p-3">
             {wallet.holds.map((hold) => (
-              <article className="p-4 sm:px-5" key={hold.id}>
+              <article className="rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:px-5" key={hold.id}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -107,10 +108,11 @@ export default async function CustomerWalletPage() {
             ))}
           </div>
         ) : (
-          <div className="px-5 py-14 text-center">
-            <p className="font-medium text-ink">暂无订单资金占用</p>
-            <p className="mt-1 text-sm text-muted">使用余额支付或合并付款后，会在这里保留占用记录。</p>
-          </div>
+          <ActionableEmptyState
+            description="使用余额支付或合并付款后，会在这里保留占用记录。"
+            kind="initial"
+            title="暂无订单资金占用"
+          />
         )}
         </SettlementRegion>
 
@@ -120,9 +122,9 @@ export default async function CustomerWalletPage() {
           kind="transactions"
         >
         {wallet.transactions.length ? (
-          <div className="divide-y divide-border">
+          <div className="grid gap-3 bg-slate-50/50 p-3">
             {wallet.transactions.map((transaction) => (
-              <article className="flex items-start gap-3 p-4 sm:px-5" key={transaction.id}>
+              <article className="flex items-start gap-3 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:px-5" key={transaction.id}>
                 <span
                   className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${
                     transaction.deltaFen > 0 ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
@@ -150,10 +152,11 @@ export default async function CustomerWalletPage() {
             ))}
           </div>
         ) : (
-          <div className="px-5 py-16 text-center">
-            <p className="font-medium text-ink">暂无资金流水</p>
-            <p className="mt-1 text-sm text-muted">管理员充值或订单扣款后会显示在这里。</p>
-          </div>
+          <ActionableEmptyState
+            description="管理员充值或订单扣款后会显示在这里。"
+            kind="initial"
+            title="暂无资金流水"
+          />
         )}
         </SettlementRegion>
       </SettlementWorkspace>

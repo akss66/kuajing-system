@@ -20,7 +20,7 @@ export default async function CustomerPortalPage() {
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         }
-        description="从货盘确认到订单履约，把今天要做的事放在一条清楚的路径上。"
+        description="优先完成上传、付款和异常处理，再开始新的拿货流程。"
         title="客户首页"
       />
       <CustomerTaskDashboard dashboard={dashboard} />

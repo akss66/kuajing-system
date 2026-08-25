@@ -528,15 +528,15 @@ describe("catalog workspaces", () => {
     expect(screen.getByText("库存实时更新")).toBeVisible();
     expect(screen.getByRole("searchbox")).toBeVisible();
     const results = within(screen.getByTestId("customer-catalog-results"));
-    expect(results.getAllByText("¥7.60")).toHaveLength(2);
-    expect(results.getAllByText("可售")).toHaveLength(2);
-    expect(results.getAllByText("不可售")).toHaveLength(2);
-    expect(results.getAllByText("售罄")).toHaveLength(2);
-    expect(screen.getAllByText(longSpecification)).toHaveLength(2);
+    expect(results.getAllByText("¥7.60")).toHaveLength(1);
+    expect(results.getAllByText("可售")).toHaveLength(1);
+    expect(results.getAllByText("不可售")).toHaveLength(1);
+    expect(results.getAllByText("售罄")).toHaveLength(1);
+    expect(screen.getAllByText(longSpecification)).toHaveLength(1);
     expect(screen.queryByText("SKU 名称不能冒充规格")).not.toBeInTheDocument();
-    expect(screen.getAllByText("颜色：炭黑")).toHaveLength(2);
-    expect(screen.getAllByText("组合销售：10 件组合装")).toHaveLength(2);
-    expect(screen.getAllByText("重量：480 克")).toHaveLength(2);
+    expect(screen.getAllByText("颜色：炭黑")).toHaveLength(1);
+    expect(screen.getAllByText("组合销售：10 件组合装")).toHaveLength(1);
+    expect(screen.getAllByText("重量：480 克")).toHaveLength(1);
 
     for (const specification of screen.getAllByText(longSpecification)) {
       expect(specification).toHaveClass(
@@ -547,7 +547,7 @@ describe("catalog workspaces", () => {
     }
 
     const links = screen.getAllByRole("link", { name: "查看商品详情" });
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
     for (const link of links) {
       expect(link).toHaveAttribute("href", "https://example.test/products/available");
       expect(link).toHaveAttribute("target", "_blank");
@@ -557,15 +557,6 @@ describe("catalog workspaces", () => {
     for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
-
-    const desktopTable = screen.getByRole("table", {
-      name: "冬季运输防护袋 的 SKU 列表",
-    });
-    expect(
-      within(desktopTable)
-        .getAllByRole("columnheader")
-        .map((header) => header.textContent),
-    ).toEqual(["SKU", "规格/属性", "拿货价", "可售库存", "状态", "链接"]);
 
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
     expect(
@@ -588,8 +579,8 @@ describe("catalog workspaces", () => {
       "catalog-customer-sku-manual",
     );
     const soldOutSurfaces = screen.getAllByTestId("catalog-customer-sku-sold-out");
-    expect(manualUnavailableSurfaces).toHaveLength(2);
-    expect(soldOutSurfaces).toHaveLength(2);
+    expect(manualUnavailableSurfaces).toHaveLength(1);
+    expect(soldOutSurfaces).toHaveLength(1);
     for (const surface of [...manualUnavailableSurfaces, ...soldOutSurfaces]) {
       expect(surface).not.toHaveAttribute("aria-disabled");
     }
@@ -597,7 +588,7 @@ describe("catalog workspaces", () => {
     const manualUnavailableLinks = screen.getAllByRole("link", {
       name: "人工不可售商品",
     });
-    expect(manualUnavailableLinks).toHaveLength(2);
+    expect(manualUnavailableLinks).toHaveLength(1);
     for (const link of manualUnavailableLinks) {
       expect(link).toHaveAttribute("href", "https://example.test/products/manual");
       expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
@@ -606,7 +597,7 @@ describe("catalog workspaces", () => {
       screen.queryByRole("button", { name: /下单|加入拿货单/ }),
     ).not.toBeInTheDocument();
     expect(document.querySelector("[data-customer-catalog-cards]")).not.toBeNull();
-    expect(document.querySelector("[data-customer-catalog-table]")).not.toBeNull();
+    expect(document.querySelector("[data-customer-catalog-table]")).toBeNull();
     expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toBeVisible();
   });
 
@@ -624,26 +615,23 @@ describe("catalog workspaces", () => {
     expect(screen.getByText("1 个商品 / 3 个 SKU")).toBeVisible();
     expect(screen.queryByText("另一件客户货品")).not.toBeInTheDocument();
 
-    const desktopGroup = screen
-      .getAllByTestId("catalog-product-customer-group-product")
-      .find((element) => element.tagName === "SECTION");
-    expect(desktopGroup).toBeDefined();
-    expect(within(desktopGroup!).getByRole("heading", { name: "三规格客户货品" })).toBeVisible();
-    const desktopTable = within(desktopGroup!).getByRole("table", {
-      name: "三规格客户货品 的 SKU 列表",
+    const productGroup = screen.getByTestId("catalog-product-customer-group-product");
+    expect(within(productGroup).getByRole("heading", { name: "三规格客户货品" })).toBeVisible();
+    const variantCards = within(productGroup).getByRole("list", {
+      name: "三规格客户货品 SKU 变体",
     });
     for (const skuCode of [
       "TZX-CUSTOMER-GROUP-001",
       "TZX-CUSTOMER-GROUP-002",
       "TZX-CUSTOMER-GROUP-003",
     ]) {
-      expect(within(desktopTable).getByText(skuCode)).toBeVisible();
+      expect(within(variantCards).getByText(skuCode)).toBeVisible();
     }
 
-    expect(desktopGroup!.textContent).not.toContain("sourceSequence");
-    expect(desktopGroup!.textContent).not.toContain("采购价");
-    expect(desktopGroup!.textContent).not.toContain("总库存");
-    expect(desktopGroup!.textContent).not.toContain("货品价格");
+    expect(productGroup.textContent).not.toContain("sourceSequence");
+    expect(productGroup.textContent).not.toContain("采购价");
+    expect(productGroup.textContent).not.toContain("总库存");
+    expect(productGroup.textContent).not.toContain("货品价格");
   });
 
   it("opens an accessible large preview when a customer selects a SKU image", () => {
@@ -652,7 +640,7 @@ describe("catalog workspaces", () => {
     const triggers = screen.getAllByRole("button", {
       name: "查看 冬季运输防护袋 大图",
     });
-    expect(triggers).toHaveLength(2);
+    expect(triggers).toHaveLength(1);
 
     fireEvent.click(triggers[0]!);
 
@@ -682,7 +670,7 @@ describe("catalog workspaces", () => {
     );
 
     const results = within(screen.getByTestId("customer-catalog-results"));
-    expect(results.getAllByText("价格待维护")).toHaveLength(4);
+    expect(results.getAllByText("价格待维护")).toHaveLength(2);
     expect(screen.queryByText("实际拿货价")).not.toBeInTheDocument();
   });
 
@@ -720,7 +708,7 @@ describe("catalog workspaces", () => {
       Array.from(
         screen
           .getByTestId("customer-catalog-results")
-          .querySelectorAll("[data-customer-catalog-table] > section h3"),
+          .querySelectorAll("[data-customer-catalog-cards] > li h3"),
       ).map((heading) => heading.textContent);
 
     expect(screen.getByRole("combobox", { name: "货盘排序方式" })).toHaveTextContent(
@@ -768,12 +756,12 @@ describe("catalog workspaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "只看不可售 SKU" }));
 
     expect(screen.queryByText("TZX-034-1")).not.toBeInTheDocument();
-    expect(screen.getAllByText("TZX-034-2")).toHaveLength(2);
-    expect(screen.getAllByText("TZX-034-3")).toHaveLength(2);
+    expect(screen.getAllByText("TZX-034-2")).toHaveLength(1);
+    expect(screen.getAllByText("TZX-034-3")).toHaveLength(1);
     expect(screen.getByText("1 个商品 / 2 个 SKU")).toBeVisible();
     const results = within(screen.getByTestId("customer-catalog-results"));
-    expect(results.getAllByText("不可售")).toHaveLength(2);
-    expect(results.getAllByText("售罄")).toHaveLength(2);
+    expect(results.getAllByText("不可售")).toHaveLength(1);
+    expect(results.getAllByText("售罄")).toHaveLength(1);
 
     for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
@@ -792,7 +780,7 @@ describe("catalog workspaces", () => {
 
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(screen.getByText("3 个商品 / 3 个 SKU")).toBeVisible();
-    expect(within(screen.getByTestId("customer-catalog-results")).getAllByText("可售")).toHaveLength(2);
+    expect(within(screen.getByTestId("customer-catalog-results")).getAllByText("可售")).toHaveLength(1);
   });
 
   it("does not rebuild customer grouping and search results until the draft query is submitted", () => {
@@ -815,7 +803,7 @@ describe("catalog workspaces", () => {
     expect(searchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("gives duplicate customer product names distinct table names without exposing source sequence", () => {
+  it("gives duplicate customer product names distinct variant-list names without exposing source sequence", () => {
     render(
       <CustomerCatalogWorkspace
         items={[
@@ -831,12 +819,12 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    const tableNames = screen
-      .getAllByRole("table")
-      .map((table) => table.getAttribute("aria-label"));
-    expect(tableNames).toHaveLength(2);
-    expect(new Set(tableNames).size).toBe(2);
-    expect(tableNames.join(" ")).not.toContain("sourceSequence");
+    const variantListNames = Array.from(
+      document.querySelectorAll("[data-customer-catalog-cards] > li > ul"),
+    ).map((list) => list.getAttribute("aria-label"));
+    expect(variantListNames).toHaveLength(2);
+    expect(new Set(variantListNames).size).toBe(2);
+    expect(variantListNames.join(" ")).not.toContain("sourceSequence");
   });
 
   it.each([
@@ -852,11 +840,9 @@ describe("catalog workspaces", () => {
       />,
     );
 
-    const desktopTable = screen.getByRole("table", { name: "冬季运输防护袋 的 SKU 列表" });
     const cards = screen.getByRole("list", { name: "客户货盘卡片列表" });
-    expect(within(desktopTable).queryByRole("link")).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.getAllByText("链接不可用")).toHaveLength(2);
+    expect(screen.getAllByText("链接不可用")).toHaveLength(1);
   });
 
   it("renders protected catalog asset URLs through the image component", () => {
@@ -890,7 +876,7 @@ describe("catalog workspaces", () => {
     );
 
     const images = screen.getAllByRole("img", { name: "Demo Cable 商品图片" });
-    expect(images).toHaveLength(2);
+    expect(images).toHaveLength(1);
     for (const image of images) {
       expect(image).toHaveAttribute("src", "/api/catalog-assets/asset-1");
     }

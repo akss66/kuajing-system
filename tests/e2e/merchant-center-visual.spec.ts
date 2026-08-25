@@ -454,7 +454,15 @@ for (const route of workspaceRoutes) {
     await page.goto(route.path);
 
     await expect(page).toHaveURL(new RegExp(route.path.replace(/\//g, "\\/")));
-    await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", route.audience);
+    if (route.audience === "customer" && testInfo.project.name.startsWith("desktop")) {
+      await expect(page.getByRole("banner")).toHaveCount(0);
+      await expect(page.locator("[data-merchant-sidebar]")).toBeVisible();
+    } else {
+      await expect(page.getByRole("banner")).toHaveAttribute(
+        "data-merchant-topbar",
+        route.audience,
+      );
+    }
     await expect(
       page.getByRole("heading", { exact: true, name: route.heading }),
     ).toBeVisible();

@@ -45,13 +45,7 @@ function renderEditor(
   row: EditableImportRow,
   action: React.ComponentProps<typeof ImportRowEditor>["action"] = vi.fn(),
 ) {
-  return render(
-    <table>
-      <tbody>
-        <ImportRowEditor action={action} batchId="batch-1" row={row} />
-      </tbody>
-    </table>,
-  );
+  return render(<ImportRowEditor action={action} batchId="batch-1" row={row} />);
 }
 
 describe("ImportRowEditor", () => {
@@ -61,12 +55,12 @@ describe("ImportRowEditor", () => {
   it("shows original and effective fulfillment data with an explicit pass result", () => {
     renderEditor(systemRow());
 
-    const row = screen.getByRole("row", { name: "Excel 第 2 行" });
-    expect(row).toHaveClass("grid", "md:table-row");
+    const row = screen.getByRole("listitem", { name: "Excel 第 2 行" });
+    expect(row).toHaveClass("rounded-2xl", "bg-white");
     expect(within(row).getByText("TZX-024-2PCS")).toBeVisible();
     expect(within(row).getByText("TZX-024", { exact: true })).toBeVisible();
     expect(within(row).getByText("原 1")).toBeVisible();
-    expect(within(row).getAllByText("2", { exact: true })).toHaveLength(2);
+    expect(within(row).getByText("2", { exact: true })).toBeVisible();
     expect(within(row).getByText("校验通过")).toBeVisible();
     expect(within(row).getByText(/2PCS.*实际发货 2 件/)).toBeVisible();
     expect(screen.queryByLabelText("实际发货数量")).not.toBeInTheDocument();

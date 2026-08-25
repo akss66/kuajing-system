@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { SettlementRegion, SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -95,7 +96,7 @@ export default async function CustomerSettlementListPage() {
           title="最近 20 次合并付款"
         >
           {batches.length ? (
-            <div className="divide-y divide-border">
+            <div className="grid gap-3 bg-slate-50/50 p-3">
               {batches.map((batch) => {
                 const actionLabel =
                   batch.status === "PENDING_PAYMENT"
@@ -106,7 +107,7 @@ export default async function CustomerSettlementListPage() {
 
                 return (
                   <article
-                    className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+                    className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:flex-row sm:items-center sm:justify-between sm:px-5"
                     key={batch.id}
                   >
                     <div className="min-w-0">
@@ -139,10 +140,11 @@ export default async function CustomerSettlementListPage() {
               })}
             </div>
           ) : (
-            <div className="px-5 py-16 text-center">
-              <p className="font-medium text-ink">暂无合并付款记录</p>
-              <p className="mt-1 text-sm text-muted">提交多店铺订单后，会在这里保留付款历史与状态。</p>
-            </div>
+            <ActionableEmptyState
+              description="提交多店铺订单后，会在这里保留付款历史与状态。"
+              kind="initial"
+              title="暂无合并付款记录"
+            />
           )}
         </SettlementRegion>
       </SettlementWorkspace>

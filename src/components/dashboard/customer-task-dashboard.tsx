@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { cn } from "@/lib/utils";
 import type { CustomerTaskDashboard as CustomerDashboardData } from "@/modules/dashboard/customer-queries";
 
 const money = new Intl.NumberFormat("zh-CN", { currency: "CNY", style: "currency" });
@@ -21,7 +22,7 @@ const money = new Intl.NumberFormat("zh-CN", { currency: "CNY", style: "currency
 function SectionHeading({ description, id, title }: { description: string; id: string; title: string }) {
   return (
     <div className="portal-section-heading">
-      <h2 className="text-lg font-semibold tracking-[-0.015em] text-foreground" id={id}>{title}</h2>
+      <h2 className="text-base font-semibold tracking-[-0.015em] text-foreground" id={id}>{title}</h2>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
     </div>
   );
@@ -35,22 +36,26 @@ function TaskLink({ count, description, href, icon: Icon, label, tone = "default
   label: string;
   tone?: "danger" | "default" | "warning";
 }) {
-  const iconTone = tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-primary";
+  const inactive = count === 0;
+  const iconTone = inactive ? "text-slate-500" : tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-primary";
   return (
     <Link
-      className="group flex min-h-[5.5rem] items-center gap-3 rounded-[var(--portal-surface-radius)] border border-border bg-background px-4 py-3.5 shadow-[0_2px_12px_rgb(0_0_0/0.02)] outline-none transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-[var(--portal-hover)] hover:shadow-[0_8px_24px_rgb(0_0_0/0.04)] focus-visible:ring-3 focus-visible:ring-primary/20 sm:px-5"
+      className={cn(
+        "group flex min-h-20 items-center gap-3 rounded-2xl bg-white px-4 py-3.5 shadow-[0_2px_12px_rgb(0_0_0/0.02)] outline-none transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-white hover:shadow-lg focus-visible:ring-3 focus-visible:ring-primary/20 sm:px-5",
+        inactive && "bg-slate-50/60",
+      )}
       data-task-tone={tone}
       href={href}
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--portal-icon-surface)]">
+      <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-full", inactive ? "bg-slate-50" : "bg-[var(--portal-icon-surface)]")}>
         <Icon aria-hidden="true" className={`size-[18px] ${iconTone}`} />
       </span>
       <span className="min-w-0 flex-1">
         <strong className="block text-sm font-semibold text-foreground">{label}</strong>
-        <span className="mt-0.5 hidden text-xs leading-5 text-muted-foreground sm:block">{description}</span>
+        <span className="mt-0.5 hidden text-xs leading-5 text-slate-600 sm:block">{description}</span>
       </span>
-      <span className="tabular-nums text-lg font-semibold tracking-tight text-foreground">{count}</span>
-      <ArrowRight aria-hidden="true" className="hidden size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:block" />
+      <span className={cn("tabular-nums text-lg font-semibold tracking-tight", inactive ? "text-slate-500" : "text-foreground")}>{count}</span>
+      <ArrowRight aria-hidden="true" className="hidden size-4 text-slate-500 transition-transform group-hover:translate-x-0.5 sm:block" />
     </Link>
   );
 }
@@ -76,7 +81,7 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
         <SectionHeading description="把影响付款和发货的事项放在最前面。" id="continuation-title" title="继续处理" />
         <div className="space-y-4">
           {dashboard.primaryContinuationTarget && continuation ? (
-            <div className="flex flex-col gap-4 rounded-[var(--portal-surface-radius)] border border-primary/15 bg-primary-soft/55 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6" data-portal-focus>
+            <div className="flex flex-col gap-4 rounded-2xl bg-primary-soft/70 px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between" data-portal-focus>
               <div className="flex min-w-0 items-start gap-3.5">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-background text-primary shadow-sm">
                   <Clock3 aria-hidden="true" className="size-5" />
@@ -98,7 +103,7 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
           ) : (
             <div
               aria-label="当前没有未完成任务"
-              className="flex flex-col gap-4 rounded-[var(--portal-surface-radius)] border border-success/15 bg-[var(--portal-ready-surface)] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              className="flex flex-col gap-4 rounded-2xl bg-[var(--portal-ready-surface)] px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between"
               data-portal-ready
               role="status"
             >
@@ -128,7 +133,7 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
 
       <section aria-labelledby="quick-purchase-title" className="space-y-3" data-portal-quick-actions>
         <SectionHeading description="先确认货盘，再上传 TEMU 原始订单。" id="quick-purchase-title" title="快捷拿货" />
-        <nav aria-label="快捷拿货" className="grid overflow-hidden rounded-[var(--portal-surface-radius)] border border-border bg-background md:grid-cols-2">
+        <nav aria-label="快捷拿货" className="grid overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] md:grid-cols-2">
           <Link className="portal-primary-route group flex min-h-28 items-center gap-4 px-5 py-5 outline-none md:border-r md:border-border sm:px-6" href="/portal/catalog">
             <span className="flex size-12 shrink-0 items-center justify-center rounded-[0.8rem] bg-primary text-white"><PackageSearch aria-hidden="true" className="size-5" /></span>
             <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">实时货盘</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">查看你的价格、规格和实时可售库存</span></span>

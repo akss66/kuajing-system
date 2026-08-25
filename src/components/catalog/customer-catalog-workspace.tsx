@@ -16,14 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { CustomerCatalogItem } from "@/modules/catalog/customer-catalog";
 import {
   filterCatalogGroups,
@@ -187,7 +179,7 @@ function ProductGroupHeader({
   group: CatalogProductGroup<CustomerCatalogGroupableItem>;
 }) {
   return (
-    <header className="min-w-0 border-b border-border bg-surface/35 px-4 py-3 sm:px-5">
+    <header className="min-w-0 bg-white px-4 py-4 sm:px-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
@@ -205,7 +197,7 @@ function ProductGroupHeader({
   );
 }
 
-function CustomerCatalogTable({
+function CustomerCatalogCards({
   groups,
 }: {
   groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
@@ -219,93 +211,29 @@ function CustomerCatalogTable({
   }
 
   return (
-    <div className="hidden min-w-0 space-y-3 xl:block" data-customer-catalog-table>
-      {groups.map((group) => (
-        <section
-          className="min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
-          data-testid={`catalog-product-${group.productId}`}
-          key={group.productId}
-        >
-          <ProductGroupHeader group={group} />
-          <Table
-            aria-label={
-              productNameCounts.get(group.productName) === 1
-                ? `${group.productName} 的 SKU 列表`
-                : `${group.productName}（${group.variants[0]!.skuCode} 至 ${group.variants.at(-1)!.skuCode}）的 SKU 列表`
-            }
-            className="w-full table-fixed"
-          >
-            <colgroup>
-              <col className="w-[19%]" />
-              <col className="w-[28%]" />
-              <col className="w-[13%]" />
-              <col className="w-[12%]" />
-              <col className="w-[10%]" />
-              <col className="w-[18%]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>规格/属性</TableHead>
-                <TableHead className="text-right">拿货价</TableHead>
-                <TableHead className="text-right">可售库存</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>链接</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {group.variants.map((item) => (
-                <TableRow data-testid={`catalog-${item.id}`} key={item.id}>
-                  <TableCell className="min-w-0 whitespace-normal align-top">
-                    <VariantIdentity item={item} />
-                  </TableCell>
-                  <TableCell className="min-w-0 whitespace-normal align-top">
-                    <CatalogAttributes item={item} />
-                  </TableCell>
-                  <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
-                  </TableCell>
-                  <TableCell className="whitespace-normal text-right align-top font-semibold tabular-nums">
-                    {item.availableQuantity}
-                  </TableCell>
-                  <TableCell className="whitespace-normal align-top">
-                    <CatalogStatus item={item} />
-                  </TableCell>
-                  <TableCell className="min-w-0 whitespace-normal align-top">
-                    <CatalogProductLink item={item} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function CustomerCatalogCards({
-  groups,
-}: {
-  groups: CatalogProductGroup<CustomerCatalogGroupableItem>[];
-}) {
-  return (
     <ul
       aria-label="客户货盘卡片列表"
-      className="space-y-3 xl:hidden"
+      className="space-y-4"
       data-customer-catalog-cards
     >
       {groups.map((group) => (
         <li
-          className="min-w-0 overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background"
+          className="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] transition-shadow hover:shadow-lg"
           data-testid={`catalog-product-${group.productId}`}
           key={group.productId}
         >
           <ProductGroupHeader group={group} />
-          <ul aria-label={`${group.productName} SKU 变体`} className="divide-y divide-border">
+          <ul
+            aria-label={
+              productNameCounts.get(group.productName) === 1
+                ? `${group.productName} SKU 变体`
+                : `${group.productName}（${group.variants[0]!.skuCode} 至 ${group.variants.at(-1)!.skuCode}）SKU 变体`
+            }
+            className="grid gap-3 bg-slate-50/50 p-3 lg:grid-cols-2"
+          >
             {group.variants.map((item) => (
               <li
-                className="min-w-0 p-4 transition-colors hover:bg-surface/60"
+                className="min-w-0 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] transition-[box-shadow,transform] hover:-translate-y-0.5 hover:shadow-md"
                 data-testid={`catalog-${item.id}`}
                 key={item.id}
               >
@@ -360,7 +288,6 @@ function CustomerCatalogResults({
 }) {
   return (
     <div data-testid="customer-catalog-results">
-      <CustomerCatalogTable groups={groups} />
       <CustomerCatalogCards groups={groups} />
     </div>
   );

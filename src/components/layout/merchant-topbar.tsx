@@ -33,6 +33,7 @@ type MerchantTopbarProps = {
   roleLabel: string;
   subtitle?: string;
   title: string;
+  placement?: "sidebar" | "topbar";
 };
 
 export function MerchantTopbar({
@@ -43,9 +44,57 @@ export function MerchantTopbar({
   roleLabel,
   subtitle,
   title,
+  placement = "topbar",
 }: MerchantTopbarProps) {
   const displayName = identity.displayName?.trim() || "未设置姓名";
   const displayInitial = Array.from(displayName)[0] ?? "账";
+
+  const accountMenu = (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={placement === "sidebar" ? "打开侧栏账号菜单" : "打开账号菜单"}
+          className={
+            placement === "sidebar"
+              ? "min-h-11 w-full justify-start gap-3 rounded-xl border-0 bg-transparent px-2 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+              : "min-h-11 min-w-11 max-w-48 gap-2 rounded-md border-0 bg-transparent px-1.5 text-[var(--merchant-topbar-foreground)] hover:bg-white/8 hover:text-white sm:pl-1.5 sm:pr-2"
+          }
+          data-account-trigger="true"
+          variant="ghost"
+        >
+          <span className={placement === "sidebar" ? "flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white" : "flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--merchant-nav-active)] text-xs font-semibold text-[var(--merchant-nav-active-foreground)]"}>
+            {displayInitial}
+          </span>
+          <span className={placement === "sidebar" ? "min-w-0 flex-1 truncate text-left text-sm font-medium" : "hidden max-w-28 truncate text-sm font-medium sm:inline"}>{displayName}</span>
+          <ChevronDown aria-hidden="true" className={placement === "sidebar" ? "size-3.5 text-slate-400" : "hidden size-3.5 text-[var(--merchant-topbar-muted)] sm:block"} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={placement === "sidebar" ? "start" : "end"}
+        className="w-[236px] rounded-xl border border-slate-100 bg-[var(--merchant-panel)] p-1.5 shadow-xl sm:w-64 sm:p-2"
+        side={placement === "sidebar" ? "top" : "bottom"}
+        sideOffset={8}
+      >
+        <DropdownMenuLabel className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 px-2 py-1 text-foreground sm:py-1.5">
+          <UserCircle2 aria-hidden="true" className="mt-0.5 size-4 text-primary" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium" title={displayName}>{displayName}</span>
+            <span className="mt-0.5 block break-all text-xs font-normal text-muted-foreground">{identity.email}</span>
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuLabel className="flex items-center gap-2 px-2 pb-0.5 text-xs font-normal text-muted-foreground sm:pb-1">
+          <ShieldCheck aria-hidden="true" className="size-3.5 text-primary" />
+          <span>{roleLabel}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <SignOutMenuItem className="mx-0.5 my-0.5 min-h-11 cursor-pointer justify-start px-2 text-sm sm:mx-1 sm:my-1 sm:min-h-9 sm:px-2.5" />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  if (placement === "sidebar") {
+    return accountMenu;
+  }
 
   return (
     <div className="flex h-full min-w-0 items-center justify-between px-3 sm:px-5 lg:px-6">
@@ -106,45 +155,7 @@ export function MerchantTopbar({
             </Link>
           </Button>
         ) : null}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              aria-label="打开账号菜单"
-              className="min-h-11 min-w-11 max-w-48 gap-2 rounded-md border-0 bg-transparent px-1.5 text-[var(--merchant-topbar-foreground)] hover:bg-white/8 hover:text-white sm:pl-1.5 sm:pr-2"
-              data-account-trigger="true"
-              variant="ghost"
-            >
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--merchant-nav-active)] text-xs font-semibold text-[var(--merchant-nav-active-foreground)]">
-                {displayInitial}
-              </span>
-              <span className="hidden max-w-28 truncate text-sm font-medium sm:inline">{displayName}</span>
-              <ChevronDown aria-hidden="true" className="hidden size-3.5 text-[var(--merchant-topbar-muted)] sm:block" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="w-[236px] rounded-lg border border-border bg-[var(--merchant-panel)] p-1.5 shadow-lg sm:w-64 sm:p-2"
-            sideOffset={6}
-          >
-            <DropdownMenuLabel className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 px-2 py-1 text-foreground sm:py-1.5">
-              <UserCircle2 aria-hidden="true" className="mt-0.5 size-4 text-primary" />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium" title={displayName}>
-                  {displayName}
-                </span>
-                <span className="mt-0.5 block break-all text-xs font-normal text-muted-foreground">
-                  {identity.email}
-                </span>
-              </span>
-            </DropdownMenuLabel>
-            <DropdownMenuLabel className="flex items-center gap-2 px-2 pb-0.5 text-xs font-normal text-muted-foreground sm:pb-1">
-              <ShieldCheck aria-hidden="true" className="size-3.5 text-primary" />
-              <span>{roleLabel}</span>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <SignOutMenuItem className="mx-0.5 my-0.5 min-h-11 cursor-pointer justify-start px-2 text-sm sm:mx-1 sm:my-1 sm:min-h-9 sm:px-2.5" />
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {accountMenu}
       </div>
     </div>
   );

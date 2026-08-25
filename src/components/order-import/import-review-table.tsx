@@ -4,14 +4,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 
 import { ImportRowEditor } from "./import-row-editor";
 import {
@@ -59,9 +52,9 @@ export function ImportReviewTable({
   return (
     <section
       aria-label="逐行校验工作台"
-      className="overflow-hidden rounded-[var(--radius-surface)] border border-border bg-background [&_[data-slot=table-container]]:rounded-none [&_[data-slot=table-container]]:border-0"
+      className="space-y-4"
     >
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className="flex flex-col gap-3 rounded-2xl bg-white px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-semibold text-ink">逐行校验</h2>
@@ -97,45 +90,24 @@ export function ImportReviewTable({
         </label>
       </div>
 
-      <dl className="grid grid-cols-2 border-b border-border bg-surface/35 sm:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {metrics.map((metric) => (
-          <div className="border-r border-border px-4 py-2.5 even:border-r-0 sm:last:border-r-0 sm:even:border-r" key={metric.label}>
-            <dt className="text-xs text-muted">{metric.label}</dt>
+          <div className="rounded-xl bg-white px-4 py-3 shadow-[0_2px_12px_rgb(0_0_0/0.02)]" key={metric.label}>
+            <dt className="text-xs text-slate-600">{metric.label}</dt>
             <dd className="mt-0.5 text-base font-semibold tabular-nums text-ink">{metric.value}</dd>
           </div>
         ))}
       </dl>
 
-      <Table className="block w-full md:table md:min-w-[980px]" aria-label="逐行校验结果">
-        <TableHeader className="hidden md:table-header-group">
-          <TableRow>
-            <TableHead className="w-16">行</TableHead>
-            <TableHead className="w-[17rem]">订单号 / 子订单号</TableHead>
-            <TableHead>原 SKU → 最终 SKU</TableHead>
-            <TableHead className="w-24">数量</TableHead>
-            <TableHead className="w-24">库存</TableHead>
-            <TableHead className="w-28">结果</TableHead>
-            <TableHead className="w-24 text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody className="block divide-y divide-border md:table-row-group md:divide-y-0">
+      {visibleRows.length ? (
+        <div aria-label="逐行校验结果" className="space-y-3" role="list">
           {visibleRows.map((row) => (
-            <ImportRowEditor
-              action={action}
-              batchId={batchId}
-              key={`${row.id}:${row.revision}`}
-              row={row}
-            />
+            <ImportRowEditor action={action} batchId={batchId} key={`${row.id}:${row.revision}`} row={row} />
           ))}
-          {visibleRows.length === 0 ? (
-            <TableRow className="block md:table-row">
-              <TableCell className="block h-24 pt-9 text-center text-muted md:table-cell md:pt-2" colSpan={7}>
-                当前没有需要处理的行。
-              </TableCell>
-            </TableRow>
-          ) : null}
-        </TableBody>
-      </Table>
+        </div>
+      ) : (
+        <ActionableEmptyState description="所有需要处理的行都已完成校验。" kind="filtered" title="当前没有需要处理的行" />
+      )}
     </section>
   );
 }

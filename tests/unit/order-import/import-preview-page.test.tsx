@@ -143,7 +143,7 @@ describe("ImportPreviewPage", () => {
     expect(workspace).toHaveTextContent("可提交1");
     expect(workspace).toHaveTextContent("需处理0");
     expect(workspace).toHaveTextContent("重复跳过0");
-    expect(within(workspace).getByRole("table", { name: "逐行校验结果" })).toBeVisible();
+    expect(within(workspace).getByRole("list", { name: "逐行校验结果" })).toBeVisible();
     expect(submitBar).toHaveClass("sticky");
     expect(submitBar).toHaveClass(
       "bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)]",

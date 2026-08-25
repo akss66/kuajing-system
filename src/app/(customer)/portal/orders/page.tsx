@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
-import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
@@ -155,98 +155,59 @@ export default async function CustomerOrdersPage({
         values={filters}
       />
 
-      <WorkspacePanel className="overflow-hidden">
-        <WorkspacePanelHeader
-          description="点击任一订单可查看付款记录、库存锁定与明细状态。"
-          title={pendingOnly ? "待付款清单" : isHistoricalView ? `已${historyLabel}拿货单` : "订单列表"}
-        />
+      <section className="space-y-3" aria-labelledby="customer-order-list-title">
+        <div>
+          <h2 className="text-base font-semibold text-foreground" id="customer-order-list-title">
+            {pendingOnly ? "待付款清单" : isHistoricalView ? `已${historyLabel}拿货单` : "订单列表"}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">点击任一订单可查看付款记录、库存锁定与明细状态。</p>
+        </div>
         {orders.length ? (
-          <>
-          <div className="hidden divide-y divide-border md:block">
-            {orders.map((order) => (
-              <Link
-                className="flex min-h-20 items-center gap-4 p-4 transition-colors hover:bg-surface sm:px-5"
-                href={`/portal/orders/${order.id}`}
-                key={order.id}
-              >
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-hover">
-                  <ClipboardList className="size-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <strong className="break-all text-ink">{order.orderNumber}</strong>
-                    <Badge variant="secondary">{labels[order.status]}</Badge>
-                    {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
-                  </span>
-                  <span className="mt-1 block text-sm text-muted">
-                    {order.storeName} · {order.totalPackageCount} 包裹 · {order.totalQuantity} 件
-                  </span>
-                </span>
-                <span className="shrink-0 text-right">
-                  <strong className="block tabular-nums text-ink">
-                    {money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}
-                  </strong>
-                  <ArrowRight className="ml-auto mt-2 size-4 text-primary" />
-                </span>
-              </Link>
-            ))}
-          </div>
-          <div className="divide-y divide-border md:hidden">
+          <div className="grid gap-3">
             {orders.map((order) => {
               const action = nextAction(order.status);
               return (
                 <article
                   aria-label={`订单 ${order.orderNumber}`}
-                  className="space-y-4 p-4"
+                  className="group rounded-2xl bg-white p-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] transition-[box-shadow,transform] hover:-translate-y-0.5 hover:shadow-lg sm:p-5"
                   data-mobile-order-card
                   key={order.id}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="break-all font-semibold text-ink">{order.orderNumber}</p>
-                      <p className="mt-1 text-sm text-muted">{order.storeName}</p>
-                    </div>
-                    <Badge variant="secondary">{labels[order.status]}</Badge>
-                    {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-xs text-muted">金额</p>
-                      <p className="mt-1 font-semibold tabular-nums text-ink">{money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted">包裹 / 件数</p>
-                      <p className="mt-1 text-ink">{`${order.totalPackageCount} 包 · ${order.totalQuantity} 件`}</p>
-                    </div>
-                  </div>
-                  <div className="border-t border-border pt-3">
-                    <p className="mb-2 text-xs font-medium text-muted">{`下一步：${action}`}</p>
-                    <Link
-                      className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/22"
-                      href={`/portal/orders/${order.id}`}
-                    >
-                      {action}
-                      <ArrowRight aria-hidden="true" className="size-4" />
-                    </Link>
+                  <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-hover">
+                      <ClipboardList aria-hidden="true" className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <strong className="break-all text-ink">{order.orderNumber}</strong>
+                        <Badge variant="secondary">{labels[order.status]}</Badge>
+                        {order.cancellationState === "PARTIAL" ? <Badge className="bg-warning/10 text-warning" variant="secondary">部分取消</Badge> : null}
+                      </span>
+                      <span className="mt-1 block text-sm text-slate-500">
+                        <span>{order.storeName}</span>
+                        <span> · {order.totalPackageCount} 包 · {order.totalQuantity} 件</span>
+                      </span>
+                      <span className="mt-2 block text-xs font-medium text-slate-400">下一步：{action}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center justify-between gap-4 sm:flex-col sm:items-end sm:text-right">
+                      <strong className="block text-lg font-semibold tabular-nums text-ink">{money(isHistoricalView ? order.totalAmountFen : (order.netAmountFen ?? order.totalAmountFen))}</strong>
+                      <Link className="inline-flex min-h-11 items-center gap-1 rounded-xl px-3 text-sm font-semibold text-primary-hover transition-colors hover:bg-primary-soft" href={`/portal/orders/${order.id}`}>
+                        {action}<ArrowRight aria-hidden="true" className="size-4 transition-transform group-hover:translate-x-1" />
+                      </Link>
+                    </span>
                   </div>
                 </article>
               );
             })}
           </div>
-          </>
         ) : (
-          <div className="px-6 py-16 text-center">
-            <p className="font-medium text-ink">
-              {pendingOnly ? "没有待付款订单" : "暂无拿货单"}
-            </p>
-            <p className="mt-1 text-sm text-muted">
-              {pendingOnly
-                ? "余额自动扣款的订单不会出现在这里。"
-                : "上传订单并确认提交后，会显示在这里。"}
-            </p>
-          </div>
+          <ActionableEmptyState
+            description={pendingOnly ? "余额自动扣款的订单不会出现在这里。" : "上传订单并确认提交后，会显示在这里。"}
+            kind="initial"
+            title={pendingOnly ? "没有待付款订单" : "暂无拿货单"}
+          />
         )}
-      </WorkspacePanel>
+      </section>
     </div>
   );
 }
