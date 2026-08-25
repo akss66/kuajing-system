@@ -56,6 +56,34 @@ const completeOrderRefundsSchema = orderOperationSchema.extend({
   note: z.string().trim().min(2, "请填写至少 2 个字的退款凭证或备注").max(1000),
 });
 
+const SAFE_PLATFORM_ORDER_NO = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+const UUID_REFERENCE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_FAILED_REFERENCES = 5;
+
+function failedShipmentSummary(
+  items: ReadonlyArray<{
+    externalOrderNo: string;
+    outcome: string;
+  }>,
+) {
+  const failed = items.flatMap((item, index) => {
+    if (item.outcome !== "FAILED") return [];
+    const externalOrderNo = item.externalOrderNo.trim();
+    return [
+      SAFE_PLATFORM_ORDER_NO.test(externalOrderNo) &&
+      !UUID_REFERENCE.test(externalOrderNo)
+        ? externalOrderNo
+        : `包裹序号 ${index + 1}`,
+    ];
+  });
+  if (failed.length === 0) return "";
+  const hiddenCount = Math.max(0, failed.length - MAX_FAILED_REFERENCES);
+  const hiddenCopy =
+    hiddenCount > 0 ? `，另有 ${hiddenCount} 个请在包裹明细中查看` : "";
+  return `失败包裹：${failed.slice(0, MAX_FAILED_REFERENCES).join("、")}${hiddenCopy}。`;
+}
+
 function safeStatusRefreshMessage(error: JifengStatusRefreshError) {
   switch (error.code) {
     case "FULFILLMENT_NOT_FOUND":
@@ -114,7 +142,8 @@ export async function refreshAllJifengShipmentStatusesAction(
       orderId: parsed.data.orderId,
     });
     refreshOrder(parsed.data.orderId);
-    const message = `整单状态查询完成：已更新 ${result.refreshedCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。`;
+    const failureSummary = failedShipmentSummary(result.items);
+    const message = `整单状态查询完成：已更新 ${result.refreshedCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。${failureSummary}`;
     return {
       message,
       status: result.failedCount > 0 ? "error" : "success",
@@ -144,7 +173,8 @@ export async function cancelAllCancellableOrderShipmentsAction(
       reason: parsed.data.reason,
     });
     refreshOrderFinancials(parsed.data.orderId);
-    const message = `整单取消处理完成：已取消 ${result.cancelledCount} 个，等待极风确认 ${result.pendingCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。`;
+    const failureSummary = failedShipmentSummary(result.items);
+    const message = `整单取消处理完成：已取消 ${result.cancelledCount} 个，等待极风确认 ${result.pendingCount} 个，跳过 ${result.skippedCount} 个，失败 ${result.failedCount} 个。${failureSummary}`;
     return {
       message,
       status: result.failedCount > 0 ? "error" : "success",
