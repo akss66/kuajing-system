@@ -1,6 +1,73 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+import { createManagedUser, loginThroughUi } from "./support/managed-user";
+
+test("pre-hydration login never places credentials in the request URL", async ({
+  browser,
+}, testInfo) => {
+  const context = await browser.newContext({
+    baseURL: String(testInfo.project.use.baseURL),
+    javaScriptEnabled: false,
+    viewport: testInfo.project.name.includes("mobile")
+      ? { height: 844, width: 390 }
+      : { height: 900, width: 1440 },
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto("/login");
+    const form = page.locator("form");
+    const email = page.getByLabel("登录邮箱");
+    const password = page.getByLabel("登录密码");
+    const submit = page.getByRole("button", { name: "登录系统" });
+
+    await expect(form).toHaveAttribute("method", "post");
+    await expect(form).toHaveAttribute("action", "/login");
+    await expect(email).toBeDisabled();
+    await expect(password).toBeDisabled();
+    await expect(submit).toBeDisabled();
+
+    await page.route("**/login", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ body: "", status: 204 });
+        return;
+      }
+      await route.continue();
+    });
+    const nativeRequest = page.waitForRequest(
+      (request) => request.method() === "POST" && new URL(request.url()).pathname === "/login",
+    );
+    await page.locator("form").evaluate((element) => {
+      const formElement = element as HTMLFormElement;
+      const emailInput = formElement.elements.namedItem("email") as HTMLInputElement;
+      const passwordInput = formElement.elements.namedItem("password") as HTMLInputElement;
+      const submitButton = formElement.querySelector<HTMLButtonElement>('button[type="submit"]');
+      emailInput.disabled = false;
+      passwordInput.disabled = false;
+      if (submitButton) submitButton.disabled = false;
+      emailInput.value = "pre-hydration@example.com";
+      passwordInput.value = "never-appear-in-a-url";
+      formElement.requestSubmit();
+    });
+
+    const requestUrl = (await nativeRequest).url();
+    expect(requestUrl).toBe(`${String(testInfo.project.use.baseURL)}/login`);
+    expect(requestUrl).not.toContain("pre-hydration");
+    expect(requestUrl).not.toContain("never-appear-in-a-url");
+  } finally {
+    await context.close();
+  }
+});
+
+test("hydrated login still authenticates through Better Auth", async ({ page }) => {
+  const administrator = await createManagedUser({ role: "super_admin" });
+
+  await loginThroughUi(page, administrator);
+
+  await expect(page).toHaveURL(/\/admin$/);
+});
+
 test("login surface is accessible, responsive and uses the approved teal action color", async ({
   page,
 }, testInfo) => {
