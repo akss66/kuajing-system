@@ -132,7 +132,7 @@ const workspaceRoutes = [
     expectedTexts: ["还没有上传记录", "开始批量上传"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
-    shouldShowMetricStrip: true,
+    shouldShowMetricStrip: false,
   },
   {
     audience: "admin" as const,
@@ -461,7 +461,7 @@ for (const route of workspaceRoutes) {
     await expect(page.locator("[data-page-heading]")).toBeVisible();
     await expect(page.locator("main")).toHaveCSS(
       "background-color",
-      route.audience === "customer" ? "rgb(244, 247, 244)" : "rgb(244, 245, 245)",
+      route.audience === "customer" ? "rgb(244, 245, 247)" : "rgb(244, 245, 245)",
     );
 
     if (route.shouldShowMetricStrip) {

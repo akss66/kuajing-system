@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -31,6 +31,17 @@ describe("TEMU upload form", () => {
     expect(screen.getByRole("button", { name: "上传并生成预览" })).toHaveClass(
       "min-h-11",
     );
+    expect(screen.getByText("尚未选择文件")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("TEMU 订单 Excel"), {
+      target: {
+        files: [
+          new File(["xlsx"], "订单导出.xlsx", {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          }),
+        ],
+      },
+    });
+    expect(screen.getByText("订单导出.xlsx")).toBeVisible();
     expect(screen.getByText(/系统不会保存原始 Excel 文件/)).toBeVisible();
   });
 });

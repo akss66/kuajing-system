@@ -208,13 +208,13 @@ textarea {
 }
 
 [data-merchant-shell="customer"] {
-  --merchant-topbar: rgb(22 55 50);
-  --merchant-topbar-foreground: rgb(250 252 249);
-  --merchant-topbar-muted: rgb(196 214 207);
-  --merchant-canvas: rgb(244 247 244);
-  --merchant-sidebar: rgb(249 251 248);
-  --merchant-panel: rgb(255 255 252);
-  --merchant-panel-border: rgb(216 226 220);
+  --merchant-topbar: rgb(249 250 251);
+  --merchant-topbar-foreground: rgb(31 41 55);
+  --merchant-topbar-muted: rgb(107 114 128);
+  --merchant-canvas: rgb(244 245 247);
+  --merchant-sidebar: rgb(249 250 251);
+  --merchant-panel: rgb(255 255 255);
+  --merchant-panel-border: rgb(218 224 222);
   --merchant-nav-hover: rgb(236 242 237);
   --merchant-nav-active: rgb(219 237 229);
   --merchant-nav-active-foreground: rgb(24 83 70);
@@ -246,7 +246,7 @@ textarea {
   --ring: var(--merchant-focus-ring);
   --portal-accent-foreground: rgb(137 78 16);
   --portal-accent-surface: rgb(251 238 211);
-  --portal-border-strong: rgb(196 214 204);
+  --portal-border-strong: rgb(205 216 211);
   --portal-focus-button-hover: rgb(236 246 241);
   --portal-focus-foreground: rgb(248 252 249);
   --portal-focus-muted: rgb(194 220 210);
@@ -259,22 +259,30 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-merchant-topbar="customer"] {
-  border-bottom-color: rgb(255 255 255 / 12%);
+  border-bottom-color: rgb(229 231 235 / 75%);
+  box-shadow: 0 1px 8px rgb(0 0 0 / 2%);
+}
+
+[data-merchant-shell="customer"] [data-merchant-topbar="customer"] [data-account-trigger]:hover,
+[data-merchant-shell="customer"] [data-merchant-topbar="customer"] [aria-label="打开导航"]:hover {
+  background: rgb(240 243 242);
+  color: var(--merchant-topbar-foreground);
 }
 
 [data-merchant-shell="customer"],
 [data-merchant-shell="customer"] main[data-portal-main] {
-  background-color: rgb(244 247 244);
+  background-color: rgb(244 245 247);
 }
 
 [data-merchant-shell="customer"] [data-merchant-sidebar] {
-  border-right-color: rgb(207 220 212);
-  background: rgb(249 251 248);
+  border-right-color: transparent;
+  background: rgb(249 250 251);
 }
 
 [data-merchant-shell="customer"] [data-workspace-panel] {
   border-color: var(--portal-border-strong);
   border-radius: var(--portal-surface-radius);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 2%);
 }
 
 [data-merchant-shell="customer"] [data-page-heading] {
@@ -283,10 +291,7 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-portal-home] [data-page-heading] {
-  border: 1px solid var(--portal-border-strong);
-  border-radius: var(--portal-surface-radius);
-  background: rgb(234 246 240);
-  padding: 1.1rem 1.25rem;
+  background: transparent;
 }
 
 [data-merchant-shell="customer"] [data-page-heading] h1 {
@@ -318,7 +323,7 @@ textarea {
 
 [data-merchant-shell="customer"] [data-slot="button"][data-variant="outline"] {
   border-color: rgb(190 207 198);
-  background: rgb(255 255 252);
+  background: rgb(255 255 255);
   box-shadow: inset 0 1px rgb(255 255 255 / 70%);
 }
 
@@ -388,7 +393,10 @@ textarea {
 
 [data-merchant-shell="customer"] [data-navigation-section][data-current-group="true"] {
   border-radius: calc(var(--portal-surface-radius) - 0.15rem);
-  background: rgb(239 246 242 / 0.88);
+}
+
+[data-merchant-shell="customer"] [data-navigation-section] a::before {
+  display: none;
 }
 
 [data-merchant-shell="customer"] [data-navigation-section] h2 {
@@ -397,7 +405,7 @@ textarea {
 
 [data-merchant-shell="customer"] [data-mobile-task-dock] {
   border-top-color: rgb(198 215 206);
-  background: rgb(255 255 252 / 96%);
+  background: rgb(255 255 255 / 96%);
 }
 
 [data-merchant-shell="customer"] [data-mobile-task-dock] a[aria-current="page"] {
@@ -438,7 +446,7 @@ textarea {
 
 @media (min-width: 40rem) {
   [data-merchant-shell="customer"] [data-page-heading] {
-    padding: 1.2rem 1.3rem;
+    padding: 0 0 1rem;
   }
 
   [data-merchant-shell="customer"] [data-page-heading-action] {

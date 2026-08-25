@@ -38,18 +38,18 @@ function TaskLink({ count, description, href, icon: Icon, label, tone = "default
   const iconTone = tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-primary";
   return (
     <Link
-      className="group flex min-h-[5rem] items-center gap-2.5 px-3 py-3 outline-none transition-colors hover:bg-[var(--portal-hover)] focus-visible:bg-[var(--portal-hover)] sm:gap-3 sm:px-5"
+      className="group flex min-h-[5.5rem] items-center gap-3 rounded-[var(--portal-surface-radius)] border border-border bg-background px-4 py-3.5 shadow-[0_2px_12px_rgb(0_0_0/0.02)] outline-none transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:bg-[var(--portal-hover)] hover:shadow-[0_8px_24px_rgb(0_0_0/0.04)] focus-visible:ring-3 focus-visible:ring-primary/20 sm:px-5"
       data-task-tone={tone}
       href={href}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.65rem] bg-[var(--portal-icon-surface)]">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--portal-icon-surface)]">
         <Icon aria-hidden="true" className={`size-[18px] ${iconTone}`} />
       </span>
       <span className="min-w-0 flex-1">
         <strong className="block text-sm font-semibold text-foreground">{label}</strong>
         <span className="mt-0.5 hidden text-xs leading-5 text-muted-foreground sm:block">{description}</span>
       </span>
-      <span className="tabular-nums text-xl font-semibold tracking-tight text-foreground">{count}</span>
+      <span className="tabular-nums text-lg font-semibold tracking-tight text-foreground">{count}</span>
       <ArrowRight aria-hidden="true" className="hidden size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:block" />
     </Link>
   );
@@ -71,22 +71,25 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
     : null;
 
   return (
-    <div className="space-y-8" data-portal-dashboard>
+    <div className="space-y-9" data-portal-dashboard>
       <section aria-labelledby="continuation-title" className="space-y-3" data-portal-continuation>
         <SectionHeading description="把影响付款和发货的事项放在最前面。" id="continuation-title" title="继续处理" />
-        <div className="grid overflow-hidden rounded-[var(--portal-surface-radius)] border border-[var(--portal-border-strong)] bg-background lg:grid-cols-[minmax(0,1.08fr)_minmax(24rem,0.92fr)]">
+        <div className="space-y-4">
           {dashboard.primaryContinuationTarget && continuation ? (
-            <div className="flex min-h-48 flex-col justify-between bg-[var(--portal-focus-surface)] px-5 py-5 text-[var(--portal-focus-foreground)] sm:min-h-56 sm:px-7 sm:py-7" data-portal-focus>
-              <div>
-                <span className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--portal-focus-muted)]">
-                  <Clock3 aria-hidden="true" className="size-4" /> 建议先完成
+            <div className="flex flex-col gap-4 rounded-[var(--portal-surface-radius)] border border-primary/15 bg-primary-soft/55 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6" data-portal-focus>
+              <div className="flex min-w-0 items-start gap-3.5">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-background text-primary shadow-sm">
+                  <Clock3 aria-hidden="true" className="size-5" />
                 </span>
-                <h3 className="mt-5 max-w-xl text-2xl font-semibold tracking-[-0.03em] sm:text-[1.75rem]">{continuation.label}</h3>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--portal-focus-muted)]">{continuation.description}</p>
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-primary-hover">建议先完成</span>
+                  <h3 className="mt-1 text-base font-semibold tracking-[-0.015em] text-foreground">{continuation.label}</h3>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">{continuation.description}</p>
+                </div>
               </div>
               <Link
                 aria-label={`${continuation.label}，继续处理`}
-                className="portal-focus-action mt-6 inline-flex min-h-12 w-fit items-center justify-center gap-2 rounded-[0.7rem] bg-white px-5 text-sm font-semibold text-[var(--portal-focus-surface)] outline-none transition-[transform,background-color] hover:bg-[var(--portal-focus-button-hover)] focus-visible:ring-3 focus-visible:ring-white/35"
+                className="portal-focus-action inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[0.7rem] bg-primary px-5 text-sm font-semibold text-white outline-none transition-[transform,background-color,box-shadow] hover:bg-primary-hover hover:shadow-md focus-visible:ring-3 focus-visible:ring-primary/25"
                 href={dashboard.primaryContinuationTarget.href}
               >
                 继续处理 <ArrowRight aria-hidden="true" className="size-4" />
@@ -95,34 +98,30 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
           ) : (
             <div
               aria-label="当前没有未完成任务"
-              className="flex min-h-48 flex-col justify-between bg-[var(--portal-ready-surface)] px-5 py-5 sm:min-h-56 sm:px-7 sm:py-7"
+              className="flex flex-col gap-4 rounded-[var(--portal-surface-radius)] border border-success/15 bg-[var(--portal-ready-surface)] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"
               data-portal-ready
               role="status"
             >
-              <div>
-                <span className="portal-ready-mark flex size-11 items-center justify-center rounded-full bg-success text-white">
+              <div className="flex min-w-0 items-start gap-3.5">
+                <span className="portal-ready-mark flex size-10 shrink-0 items-center justify-center rounded-full bg-success text-white">
                   <CheckCircle2 aria-hidden="true" className="size-5" />
                 </span>
-                <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-foreground">当前没有未完成任务</h3>
-                <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">订单、付款和异常都已处理完成，可以开始新的拿货流程。</p>
+                <div>
+                  <h3 className="text-base font-semibold tracking-[-0.015em] text-foreground">当前没有未完成任务</h3>
+                  <p className="mt-1 max-w-lg text-sm leading-6 text-muted-foreground">订单、付款和异常都已处理完成，可以开始新的拿货流程。</p>
+                </div>
               </div>
-              <Link className="portal-inline-action mt-6 inline-flex min-h-12 w-fit items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/imports/new">
+              <Link className="portal-inline-action inline-flex min-h-11 shrink-0 items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/imports/new">
                 开始上传订单 <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </div>
           )}
 
-          <div className="min-w-0" data-portal-task-overview>
-            <div className="border-b border-border px-4 py-4 sm:px-5">
-              <h3 className="font-semibold text-foreground">待办概览</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">点击数字可直接进入对应清单。</p>
-            </div>
-            <div className="grid grid-cols-2 [&>a]:border-b [&>a:nth-child(odd)]:border-r lg:block lg:[&>a]:border-b lg:[&>a]:border-r-0">
-              <TaskLink count={dashboard.unfinishedDraftCount} description="未完成的多店铺上传" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
-              <TaskLink count={dashboard.pendingPaymentCount} description={`${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`} href="/portal/orders?status=PENDING_PAYMENT" icon={ReceiptText} label="待付款" tone="warning" />
-              <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
-              <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2" data-portal-task-overview>
+            <TaskLink count={dashboard.unfinishedDraftCount} description="未完成的多店铺上传" href="/portal/bulk-orders" icon={Clock3} label="未完成上传" />
+            <TaskLink count={dashboard.pendingPaymentCount} description={`${money.format(dashboard.pendingPaymentFen / 100)} 等待付款`} href="/portal/orders?status=PENDING_PAYMENT" icon={ReceiptText} label="待付款" tone="warning" />
+            <TaskLink count={dashboard.paymentReportedCount} description="付款已申报，等待管理员确认" href="/portal/orders" icon={Banknote} label="付款待确认" />
+            <TaskLink count={dashboard.fulfillmentExceptionCount} description="需要确认进度或联系运营" href="/portal/orders?status=FULFILLMENT_EXCEPTION" icon={AlertTriangle} label="需要协助" tone="danger" />
           </div>
         </div>
       </section>

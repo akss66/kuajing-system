@@ -14,13 +14,13 @@ export default async function NewTemuImportPage() {
   const stores = await listActiveCustomerStores(principal.customerId);
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-5xl space-y-7">
       <PageHeading
         description="直接使用 TEMU 后台导出的 33 列订单文件，系统会识别 SKU、重复订单和格式问题。"
         title="上传订单"
       />
 
-      <section aria-labelledby="upload-checklist-title" className="grid gap-3 border-y border-border py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <section aria-labelledby="upload-checklist-title" className="grid gap-3 rounded-[var(--portal-surface-radius)] border border-primary/10 bg-primary-soft/35 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
         <div>
           <h2 className="text-sm font-semibold text-foreground" id="upload-checklist-title">上传前确认</h2>
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">

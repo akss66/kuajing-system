@@ -1,8 +1,14 @@
 "use client";
 
-import { FileSpreadsheet, LoaderCircle, LockKeyhole, Upload } from "lucide-react";
+import {
+  FileCheck2,
+  FileSpreadsheet,
+  LoaderCircle,
+  LockKeyhole,
+  Upload,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +34,7 @@ export function TemuUploadForm({
     action,
     INITIAL_TEMU_UPLOAD_STATE,
   );
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
   useEffect(() => {
     if (state.status === "success" && state.batchId) {
@@ -54,19 +61,40 @@ export function TemuUploadForm({
           </select>
         </label>
 
-        <label className="min-w-0 space-y-2 text-sm font-medium text-ink">
-          TEMU 订单 Excel
-          <span className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-primary/35 bg-primary-soft/35 px-4 py-4 text-center transition-colors hover:border-primary/60 hover:bg-primary-soft/55 sm:flex-row sm:text-left">
-            <FileSpreadsheet aria-hidden="true" className="size-6 shrink-0 text-primary" />
+        <div className="min-w-0 space-y-2 text-sm font-medium text-ink">
+          <span>TEMU 订单 Excel</span>
+          <label className="group flex min-h-24 min-w-0 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-primary/30 bg-primary-soft/25 px-5 py-5 text-center transition-[background-color,border-color] hover:border-primary/55 hover:bg-primary-soft/45 sm:flex-row sm:justify-start sm:text-left">
             <input
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="min-w-0 max-w-full cursor-pointer text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white"
+              aria-label="TEMU 订单 Excel"
+              className="sr-only"
               name="temuWorkbook"
+              onChange={(event) =>
+                setSelectedFileName(event.currentTarget.files?.[0]?.name ?? null)
+              }
               required
               type="file"
             />
-          </span>
-        </label>
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-primary shadow-sm transition-transform group-hover:-translate-y-0.5">
+              {selectedFileName ? (
+                <FileCheck2 aria-hidden="true" className="size-5" />
+              ) : (
+                <FileSpreadsheet aria-hidden="true" className="size-5" />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <strong className="block truncate text-sm font-semibold text-foreground">
+                {selectedFileName ?? "尚未选择文件"}
+              </strong>
+              <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                {selectedFileName ? "点击可重新选择" : "点击选择 .xlsx 文件，最大 10 MB"}
+              </span>
+            </span>
+            <span className="inline-flex min-h-9 shrink-0 items-center rounded-lg bg-primary px-3 text-xs font-semibold text-white shadow-sm">
+              {selectedFileName ? "更换文件" : "选择文件"}
+            </span>
+          </label>
+        </div>
       </div>
 
       <div className="flex gap-3 rounded-lg border border-border bg-surface p-3 text-sm text-muted">
