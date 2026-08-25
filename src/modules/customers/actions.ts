@@ -169,7 +169,7 @@ export async function createCustomerWithStoreAction(
   _previousState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const principal = await requireSuperAdmin();
+  const principal = await requireAdmin();
   const parsed = createCustomerSchema.safeParse({
     code: formData.get("code"),
     customerName: formData.get("customerName"),

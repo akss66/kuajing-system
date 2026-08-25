@@ -53,8 +53,8 @@ describe("customer management actions", () => {
     });
   });
 
-  it("requires a super administrator to provision a customer login account", async () => {
-    guardMocks.requireSuperAdmin.mockRejectedValue(
+  it("requires an administrator to provision a customer login account", async () => {
+    guardMocks.requireAdmin.mockRejectedValue(
       Object.assign(new Error("FORBIDDEN_ADMIN"), { code: "FORBIDDEN_ADMIN" }),
     );
     const formData = new FormData();
@@ -207,7 +207,11 @@ describe("customer management actions", () => {
     );
   });
 
-  it("still provisions customer creation through the existing action path", async () => {
+  it("allows an ordinary administrator to provision a customer through the existing action path", async () => {
+    guardMocks.requireAdmin.mockResolvedValue({
+      kind: "ADMIN",
+      userId: "ordinary-admin-auth-user",
+    });
     const formData = new FormData();
     formData.set("code", "NEW-CUSTOMER");
     formData.set("customerName", "Provisioned Customer");
@@ -220,7 +224,7 @@ describe("customer management actions", () => {
 
     expect(result).toEqual({ message: "客户与首家店铺已创建。", status: "success" });
     expect(serviceMocks.provisionCustomerWithStore).toHaveBeenCalledWith({
-      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+      actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
       code: "NEW-CUSTOMER",
       customerName: "Provisioned Customer",
       email: "new-customer@test.local",

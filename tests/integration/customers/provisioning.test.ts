@@ -31,20 +31,41 @@ afterEach(async () => {
   await db.delete(customers);
 });
 
-test("customer account provisioning rejects a non-super-admin service caller", async () => {
+test("customer account provisioning accepts an ordinary administrator service caller", async () => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+
+  const result = await provisionCustomerWithStore({
+    actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
+    code: `R-${suffix}`,
+    customerName: "Ordinary admin provisioned customer",
+    email: `ordinary-${suffix}@test.tongzhouxing.local`,
+    password: "valid-customer-password-2026",
+    reason: "Create a customer as part of normal operations",
+    storeName: "Ordinary admin provisioned store",
+  });
+
+  expect(result.customerId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(await db.select().from(customers)).toHaveLength(1);
+});
+
+test("customer account provisioning rejects a customer service caller", async () => {
   const suffix = crypto.randomUUID().slice(0, 8);
 
   await expect(
     provisionCustomerWithStore({
-      actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
-      code: `R-${suffix}`,
-      customerName: "Rejected provision customer",
+      actor: {
+        customerId: crypto.randomUUID(),
+        kind: "CUSTOMER",
+        userId: "customer-auth-user",
+      },
+      code: `C-${suffix}`,
+      customerName: "Rejected customer caller",
       email: `rejected-${suffix}@test.tongzhouxing.local`,
       password: "valid-customer-password-2026",
-      reason: "Attempt account provisioning",
-      storeName: "Rejected provision store",
+      reason: "Attempt unauthorized provisioning",
+      storeName: "Rejected customer store",
     } as never),
-  ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+  ).rejects.toMatchObject({ code: "FORBIDDEN_ADMIN" });
   expect(await db.select().from(customers)).toEqual([]);
 });
 

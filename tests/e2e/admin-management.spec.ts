@@ -540,7 +540,7 @@ test("customer detail account handoff scopes the account workspace to that custo
   await expect(page.getByRole("button", { name: "查看 本地演示管理员" })).toHaveCount(0);
 });
 
-test("ordinary admins cannot provision accounts but can manage customer details and multi-store operations", async ({ page }) => {
+test("ordinary admins can provision customers and manage customer details and multi-store operations", async ({ page }) => {
   await resetAdminManagementBaseline();
   const admin = await createManagedUser({ role: "admin" });
   const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
@@ -569,7 +569,7 @@ test("ordinary admins cannot provision accounts but can manage customer details 
   await expect(page.getByRole("heading", { name: "客户与店铺" })).toBeVisible();
   await expect(page.getByLabel("客户编号")).toHaveCount(0);
   await expect(page.getByLabel("登录邮箱")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "新建客户", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建客户", exact: true })).toBeVisible();
 
   await expect.poll(async () => {
     const [customer] = await db

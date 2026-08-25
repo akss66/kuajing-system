@@ -11,7 +11,7 @@ export default async function CustomersPage() {
 
   return (
     <CustomerListWorkspace
-      canGovernAccounts={canGovernAccounts}
+      canCreateCustomers
       rows={rows}
     />
   );

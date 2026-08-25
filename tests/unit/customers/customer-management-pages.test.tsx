@@ -54,7 +54,7 @@ describe("customer management pages", () => {
     });
   });
 
-  it("does not expose customer account creation to an ordinary administrator", async () => {
+  it("exposes customer creation to an ordinary administrator", async () => {
     guardMocks.requireAdmin.mockResolvedValue({
       kind: "ADMIN",
       userId: "ordinary-admin-auth-user",
@@ -63,8 +63,7 @@ describe("customer management pages", () => {
 
     render(await CustomersPage());
 
-    expect(screen.queryByRole("button", { name: "新建客户" })).not.toBeInTheDocument();
-    expect(screen.getByText("请联系超级管理员创建客户登录账号。")).toBeVisible();
+    expect(screen.getByRole("button", { name: "新建第一位客户" })).toBeVisible();
   });
 
   afterEach(() => {

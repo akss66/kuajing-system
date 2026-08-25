@@ -21,7 +21,7 @@ import { maskEmail, maskName, maskWechat } from "@/shared/privacy";
 import { getCustomerManagementDetail as getCustomerManagementDetailQuery } from "./queries";
 
 export type ProvisionCustomerInput = {
-  actor: SuperAdminPrincipal;
+  actor: AdminPrincipal | SuperAdminPrincipal;
   code: string;
   customerName: string;
   email: string;
@@ -37,6 +37,7 @@ export class CustomerManagementError extends Error {
   constructor(
     public readonly code:
       | "CUSTOMER_NOT_FOUND"
+      | "FORBIDDEN_ADMIN"
       | "FORBIDDEN_SUPER_ADMIN"
       | "STORE_NOT_FOUND"
       | "INVALID_REASON",
@@ -44,6 +45,15 @@ export class CustomerManagementError extends Error {
   ) {
     super(message);
     this.name = "CustomerManagementError";
+  }
+}
+
+function assertAdmin(actor: CustomerManagerActor) {
+  if (actor.kind !== "ADMIN" && actor.kind !== "SUPER_ADMIN") {
+    throw new CustomerManagementError(
+      "FORBIDDEN_ADMIN",
+      "Only an administrator can create customers",
+    );
   }
 }
 
@@ -67,7 +77,7 @@ function assertReason(reason: string) {
 export async function provisionCustomerWithStore(
   input: ProvisionCustomerInput,
 ): Promise<{ customerId: string; storeId: string; userId: string }> {
-  assertSuperAdmin(input.actor);
+  assertAdmin(input.actor);
   const reason = assertReason(input.reason);
   const passwordHash = await hashPassword(input.password);
   const userId = crypto.randomUUID();
