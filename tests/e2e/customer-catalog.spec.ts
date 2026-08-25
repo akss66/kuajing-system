@@ -568,32 +568,16 @@ test("customer import preview uses the compact review workspace and sticky submi
   await loginThroughUi(page, fixture.user);
   await expect(page).toHaveURL(/\/portal/);
   await page.goto("/portal/imports/new");
-  const uploadProgress = page.getByRole("navigation", { name: "订单导入进度" });
-  await expect(uploadProgress.getByText("选择店铺")).toBeVisible();
-  await expect(uploadProgress.getByText("上传文件")).toBeVisible();
-  await expect(uploadProgress.getByText("校验预览")).toBeVisible();
-  await expect(uploadProgress.getByText("确认提交")).toBeVisible();
-  await expect(uploadProgress.getByText("上传文件").locator("..")).toHaveAttribute(
-    "aria-current",
-    "step",
-  );
+  await expect(page.getByRole("navigation", { name: "订单导入进度" })).toHaveCount(0);
   await page.goto(`/portal/imports/${fixture.preview.batchId}`);
 
   await expect(page.getByRole("heading", { name: "核对 TEMU 订单" })).toBeVisible();
   await expect(page.getByRole("link", { name: "返回重新上传" })).toBeVisible();
-  const progress = page.getByRole("navigation", { name: "订单导入进度" });
-  await expect(progress.getByText("选择店铺")).toBeVisible();
-  await expect(progress.getByText("上传文件")).toBeVisible();
-  await expect(progress.getByText("校验预览")).toBeVisible();
-  await expect(progress.getByText("确认提交")).toBeVisible();
-  await expect(progress.getByText("校验预览").locator("..")).toHaveAttribute(
-    "aria-current",
-    "step",
-  );
+  await expect(page.getByRole("navigation", { name: "订单导入进度" })).toHaveCount(0);
   await expect(page.getByText(/preview-orders\.xlsx/)).toBeVisible();
-  const workspace = page.getByRole("region", { name: "逐行校验工作台" });
+  const workspace = page.getByRole("region", { name: "订单核对结果" });
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByRole("list", { name: "逐行校验结果" })).toBeVisible();
+  await expect(workspace.getByRole("list", { name: "订单逐行核对结果" })).toBeVisible();
   if (testInfo.project.name === "mobile-chromium") {
     const workspaceWidth = await workspace.evaluate((element) => ({
       clientWidth: element.clientWidth,
