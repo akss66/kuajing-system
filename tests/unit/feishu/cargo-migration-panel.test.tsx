@@ -75,7 +75,9 @@ function createProps(
   return {
     actorKind: "SUPER_ADMIN",
     cargoImportEnabled: true,
+    catalogMirrorCutoffLabel: "2026年9月1日 00:00",
     catalogMirrorEnabled: true,
+    catalogMirrorPhase: "TRANSITION",
     catalogMirrorTaskState: {
       isActive: false,
       lastUpdatedLabel: null,
@@ -198,6 +200,9 @@ describe("CargoMigrationPanel", () => {
     expect(screen.getByText(/资料不完整的 SKU 会强制保持不可售/)).toBeVisible();
     expect(screen.getByText(/飞书缺失的 SKU 会归档并清零/)).toBeVisible();
     expect(screen.getByText(/不会写入飞书/)).toBeVisible();
+    expect(
+      screen.getAllByText(/2026年9月1日 00:00 自动关闭/),
+    ).toHaveLength(2);
     expect(screen.getByText("最近同步：2026/08/20 15:30")).toBeVisible();
     expect(screen.getByText("首批导入时间：2026/08/13 14:12")).toBeVisible();
     expect(
@@ -215,6 +220,40 @@ describe("CargoMigrationPanel", () => {
       />,
     );
 
+    expect(
+      screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows system takeover and hides mirror controls after the cutoff", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          catalogMirrorEnabled: false,
+          catalogMirrorPhase: "RETIRED",
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/飞书货盘镜像已于北京时间/)).toBeVisible();
+    expect(screen.getByText(/系统货盘现已接管/)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "一键同步飞书货盘" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("fails closed when the mirror cutoff is missing or invalid", () => {
+    render(
+      <CargoMigrationPanel
+        {...createProps({
+          catalogMirrorCutoffLabel: null,
+          catalogMirrorEnabled: false,
+          catalogMirrorPhase: "MISCONFIGURED",
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/缺少有效截止时间/)).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "一键同步飞书货盘" }),
     ).not.toBeInTheDocument();

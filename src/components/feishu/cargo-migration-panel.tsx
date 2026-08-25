@@ -12,6 +12,7 @@ import {
   WorkspacePanelHeader,
 } from "@/components/layout/workspace-panel";
 import { Badge } from "@/components/ui/badge";
+import type { FeishuCatalogMirrorPhase } from "@/integrations/feishu/config";
 import { cn } from "@/lib/utils";
 import type { CargoMigrationActionState } from "@/modules/feishu/actions";
 import type {
@@ -43,7 +44,9 @@ type SourceSheetOption = {
 export type CargoMigrationPanelProps = {
   actorKind: ActorKind;
   cargoImportEnabled: boolean;
+  catalogMirrorCutoffLabel: string | null;
   catalogMirrorEnabled: boolean;
+  catalogMirrorPhase: FeishuCatalogMirrorPhase;
   catalogMirrorTaskState: CatalogMirrorTaskState;
   cargoWritesEnabled: boolean;
   confirmCargoMigrationAction?: ManagedAction;
@@ -104,7 +107,9 @@ function Field({
 export function CargoMigrationPanel({
   actorKind,
   cargoImportEnabled,
+  catalogMirrorCutoffLabel,
   catalogMirrorEnabled,
+  catalogMirrorPhase,
   catalogMirrorTaskState,
   cargoWritesEnabled,
   confirmCargoMigrationAction,
@@ -207,6 +212,14 @@ export function CargoMigrationPanel({
           : "开始只读预检";
   const showMetricSummary = Boolean(latestMigrationRun);
   const showExpandedSourceFields = Boolean(latestMigrationRun);
+  const catalogMirrorSummary =
+    catalogMirrorPhase === "TRANSITION"
+      ? `飞书源货盘始终只读。当前处于单向镜像过渡期，飞书仍是唯一人工维护源；同步入口将在北京时间 ${catalogMirrorCutoffLabel ?? "配置的截止时间"} 自动关闭，之后系统货盘接管。`
+      : catalogMirrorPhase === "RETIRED"
+        ? `飞书货盘镜像已于北京时间 ${catalogMirrorCutoffLabel ?? "配置的截止时间"} 停用，系统货盘现已接管；飞书仅保留历史，不会再覆盖系统商品或库存。`
+        : catalogMirrorPhase === "MISCONFIGURED"
+          ? "飞书迁移镜像缺少有效截止时间，系统已安全关闭同步入口；请由系统维护人员补齐配置。"
+          : "飞书源货盘始终只读。系统货盘已接管；不会再从飞书覆盖商品或库存。";
   const sourceStatusSummary = (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field
@@ -348,9 +361,7 @@ export function CargoMigrationPanel({
         />
         <div className="space-y-3 px-4 py-4 sm:px-5">
           <div className="rounded-[var(--radius-surface)] border border-warning/25 bg-warning/5 px-4 py-3 text-sm text-foreground">
-            {catalogMirrorEnabled
-              ? "飞书源货盘始终只读。迁移期全量镜像会覆盖本系统商品、SKU 与库存，并为每次库存校准留下流水。"
-              : "飞书源货盘始终只读。确认只会写入本系统数据库；已有 SKU 的库存不会被覆盖，新 SKU 仅在首次创建时初始化库存。"}
+            {catalogMirrorSummary}
           </div>
           {showMetricSummary ? (
             <MetricStrip
@@ -411,7 +422,7 @@ export function CargoMigrationPanel({
       catalogMirrorEnabled ? (
         <WorkspacePanel>
           <WorkspacePanelHeader
-            description="迁移期以飞书为唯一货盘来源，将商品、SKU、图片、字段和库存全量镜像到系统。"
+            description={`过渡期以飞书为唯一人工维护源；入口将在北京时间 ${catalogMirrorCutoffLabel ?? "配置的截止时间"} 自动关闭。`}
             title="飞书货盘迁移镜像"
           />
           <form action={catalogSyncFormAction} className="space-y-4 px-4 py-4 sm:px-5">

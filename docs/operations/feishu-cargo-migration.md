@@ -9,7 +9,8 @@
 - 不配置目标 spreadsheet/sheet，不创建飞书镜像表。
 - `compose.production.yaml` 必须把 `FEISHU_CARGO_WRITES_ENABLED` 硬编码为 `false`，环境文件不能覆盖。
 - `FEISHU_CARGO_IMPORT_ENABLED` 只控制“已确认的预检快照写入 PostgreSQL”，不控制飞书远程写入。
-- `FEISHU_CATALOG_MIRROR_ENABLED` 只用于正式业务切换前的临时全量镜像。为 `true` 时，超级管理员可把飞书商品、SKU 和库存覆盖到系统；正式业务开始前必须改回 `false`。
+- `FEISHU_CATALOG_MIRROR_ENABLED` 只用于正式业务切换前的临时全量镜像。为 `true` 时，还必须设置带时区的 `FEISHU_CATALOG_MIRROR_CUTOFF_AT`；缺失、格式错误或到达截止时间都会自动关闭入口。
+- 本次过渡窗口截止时间为北京时间 `2026-09-01 00:00`。截止前飞书仍是唯一人工维护源，系统只做单向镜像；截止后系统货盘成为唯一事实来源，飞书不再覆盖系统。
 - 只有超级管理员可以执行只读预检和数据库回填确认。
 - 没有新鲜的 `PREFLIGHT_READY` 结果、数据库备份或数量核验时，禁止打开数据库导入开关。
 
@@ -37,13 +38,34 @@ FEISHU_CARGO_SOURCE_WIKI_TOKEN=
 FEISHU_CARGO_SOURCE_SHEET_ID=
 FEISHU_CARGO_IMPORT_ENABLED=false
 FEISHU_CATALOG_MIRROR_ENABLED=false
+FEISHU_CATALOG_MIRROR_CUTOFF_AT=
 FEISHU_CARGO_WRITES_ENABLED=false
 FEISHU_CARGO_TARGET_SPREADSHEET_TOKEN=
 FEISHU_CARGO_TARGET_SHEET_ID=
 CATALOG_ASSET_DIR=/app/data/catalog-assets
 ```
 
-目标表两个变量必须留空。部署与预检期间两个开关都保持 `false`。
+目标表两个变量必须留空。只有经过批准的过渡窗口可临时设置：
+
+```dotenv
+FEISHU_CATALOG_MIRROR_ENABLED=true
+FEISHU_CATALOG_MIRROR_CUTOFF_AT=2026-09-01T00:00:00+08:00
+```
+
+即使开关误留为 `true`，系统也会在截止时间自动关闭 Web 操作入口和 Worker 镜像任务。任何时候都不得设置 `FEISHU_CARGO_WRITES_ENABLED=true`。
+
+## 3.1 正式接管清单
+
+在截止前完成以下操作：
+
+1. 通知维护人员停止修改飞书货盘。
+2. 超级管理员执行最后一次“一键同步飞书货盘”，等待后台任务明确完成。
+3. 对比系统商品、SKU、图片、价格、可售状态和库存总量；阻断问题必须为 0。
+4. 备份 PostgreSQL 和商品图片卷，并记录校验和。
+5. 到达截止时间后确认同步按钮消失、服务端操作被拒绝、Worker 不再处理镜像任务。
+6. 将生产环境 `FEISHU_CATALOG_MIRROR_ENABLED` 改回 `false`，再进行一次无迁移发布。
+
+飞书同步代码保留一个稳定观察期用于紧急回滚，但默认与截止时间双重关闭；不得删除历史审计、库存流水或源迁移记录。
 
 ## 4. 部署只读版本
 

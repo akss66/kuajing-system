@@ -20,8 +20,8 @@ import { integrationOutbox } from "@/db/schema";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canImportFeishuCargo,
-  canMirrorFeishuCatalog,
   canWriteFeishuCargo,
+  getFeishuCatalogMirrorAvailability,
   hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
   readFeishuConfig,
@@ -58,6 +58,19 @@ function maskIdentifier(value: string | undefined) {
   if (!normalized) return null;
   if (normalized.length <= 4) return "****";
   return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+}
+
+function formatBeijingTimestamp(value: string | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("zh-CN", {
+    day: "numeric",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "long",
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
 function integrationTargetLabel(target: "JIFENG" | "FEISHU_SHEET" | "FEISHU_BOT") {
@@ -181,9 +194,12 @@ export default async function IntegrationsPage() {
 
   const cargoWritesEnabled = feishuConfig ? canWriteFeishuCargo(feishuConfig) : false;
   const cargoImportEnabled = feishuConfig ? canImportFeishuCargo(feishuConfig) : false;
-  const catalogMirrorEnabled = feishuConfig
-    ? canMirrorFeishuCatalog(feishuConfig)
-    : false;
+  const catalogMirrorAvailability = feishuConfig
+    ? getFeishuCatalogMirrorAvailability(feishuConfig)
+    : { cutoffAt: null, enabled: false, phase: "DISABLED" as const };
+  const catalogMirrorCutoffLabel = formatBeijingTimestamp(
+    catalogMirrorAvailability.cutoffAt,
+  );
   const targetConfigured = feishuConfig
     ? hasFeishuCargoTargetConfig(feishuConfig)
     : false;
@@ -325,7 +341,9 @@ export default async function IntegrationsPage() {
                 <CargoMigrationPanel
                   actorKind={principal.kind}
                   cargoImportEnabled={cargoImportEnabled}
-                  catalogMirrorEnabled={catalogMirrorEnabled}
+                  catalogMirrorCutoffLabel={catalogMirrorCutoffLabel}
+                  catalogMirrorEnabled={catalogMirrorAvailability.enabled}
+                  catalogMirrorPhase={catalogMirrorAvailability.phase}
                   catalogMirrorTaskState={catalogMirrorTaskState}
                   cargoWritesEnabled={cargoWritesEnabled}
                   confirmCargoMigrationAction={confirmCargoMigrationAction}

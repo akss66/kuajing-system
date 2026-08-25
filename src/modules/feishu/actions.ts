@@ -8,8 +8,8 @@ import { db } from "@/db/client";
 import { FeishuClient } from "@/integrations/feishu/client";
 import {
   canImportFeishuCargo,
-  canMirrorFeishuCatalog,
   canWriteFeishuCargo,
+  getFeishuCatalogMirrorAvailability,
   hasFeishuCargoTargetConfig,
   readFeishuApiBaseUrl,
   readFeishuConfig,
@@ -133,9 +133,15 @@ export async function syncFeishuCatalogFieldsAction(
     }
 
     const config = readFeishuConfig();
-    if (!canMirrorFeishuCatalog(config)) {
+    const availability = getFeishuCatalogMirrorAvailability(config);
+    if (!availability.enabled) {
       return {
-        message: "飞书迁移镜像功能当前已关闭。",
+        message:
+          availability.phase === "RETIRED"
+            ? "飞书货盘过渡期已结束，系统货盘现已接管；不会再从飞书覆盖商品或库存。"
+            : availability.phase === "MISCONFIGURED"
+              ? "飞书货盘迁移镜像缺少有效截止时间，已安全关闭；请联系系统维护人员。"
+              : "飞书迁移镜像功能当前已关闭。",
         status: "error",
       };
     }

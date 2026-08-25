@@ -14,6 +14,7 @@ x-app: &app
     APP_VERSION: ${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
     FEISHU_CARGO_IMPORT_ENABLED: ${FEISHU_CARGO_IMPORT_ENABLED:-false}
     FEISHU_CATALOG_MIRROR_ENABLED: ${FEISHU_CATALOG_MIRROR_ENABLED:-false}
+    FEISHU_CATALOG_MIRROR_CUTOFF_AT: ${FEISHU_CATALOG_MIRROR_CUTOFF_AT:-}
     # Production source access is permanently read-only. This cannot be
     # overridden by the secret env file.
     FEISHU_CARGO_WRITES_ENABLED: "false"

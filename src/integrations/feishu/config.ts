@@ -21,6 +21,7 @@ const configSchema = z
     FEISHU_CARGO_SOURCE_SHEET_ID: optionalString,
     FEISHU_CARGO_SOURCE_WIKI_TOKEN: z.string().trim().min(1),
     FEISHU_CARGO_IMPORT_ENABLED: optionalExactString,
+    FEISHU_CATALOG_MIRROR_CUTOFF_AT: optionalExactString,
     FEISHU_CATALOG_MIRROR_ENABLED: optionalExactString,
     FEISHU_CARGO_WRITES_ENABLED: optionalExactString,
     FEISHU_CARGO_TARGET_SHEET_ID: optionalString,
@@ -55,6 +56,7 @@ export type FeishuIntegrationConfig = {
   appId: string;
   appSecret: string;
   cargoImportEnabled: boolean;
+  catalogMirrorCutoffAt?: string;
   catalogMirrorEnabled?: boolean;
   cargoWritesEnabled: boolean;
   sourceWikiToken: string;
@@ -75,8 +77,68 @@ type FeishuCargoImportConfig = {
 };
 
 type FeishuCatalogMirrorConfig = {
+  catalogMirrorCutoffAt?: string;
   catalogMirrorEnabled?: boolean;
 };
+
+export type FeishuCatalogMirrorPhase =
+  | "DISABLED"
+  | "MISCONFIGURED"
+  | "RETIRED"
+  | "TRANSITION";
+
+export type FeishuCatalogMirrorAvailability = {
+  cutoffAt: string | null;
+  enabled: boolean;
+  phase: FeishuCatalogMirrorPhase;
+};
+
+const ISO_TIMESTAMP_WITH_ZONE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/;
+
+function parseIsoTimestampWithZone(value: string) {
+  const match = ISO_TIMESTAMP_WITH_ZONE.exec(value);
+  if (!match) return null;
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, millisecondsText, zone] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const milliseconds = Number(millisecondsText ?? "0");
+  const zoneSign = zone === "Z" || zone.startsWith("+") ? 1 : -1;
+  const zoneHours = zone === "Z" ? 0 : Number(zone.slice(1, 3));
+  const zoneMinutes = zone === "Z" ? 0 : Number(zone.slice(4, 6));
+  if (zoneHours > 23 || zoneMinutes > 59) return null;
+
+  const offsetMinutes = zoneSign * (zoneHours * 60 + zoneMinutes);
+  const localTimestamp = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute,
+    second,
+    milliseconds,
+  );
+  const normalizedLocal = new Date(localTimestamp);
+  if (
+    normalizedLocal.getUTCFullYear() !== year ||
+    normalizedLocal.getUTCMonth() !== month - 1 ||
+    normalizedLocal.getUTCDate() !== day ||
+    normalizedLocal.getUTCHours() !== hour ||
+    normalizedLocal.getUTCMinutes() !== minute ||
+    normalizedLocal.getUTCSeconds() !== second ||
+    normalizedLocal.getUTCMilliseconds() !== milliseconds
+  ) {
+    return null;
+  }
+
+  return localTimestamp - offsetMinutes * 60_000;
+}
 
 type FeishuBotConfig = Pick<FeishuIntegrationConfig, "internalChatId">;
 
@@ -120,6 +182,7 @@ export function readFeishuConfig(
     appId: parsed.data.FEISHU_APP_ID,
     appSecret: parsed.data.FEISHU_APP_SECRET,
     cargoImportEnabled: parsed.data.FEISHU_CARGO_IMPORT_ENABLED === "true",
+    catalogMirrorCutoffAt: parsed.data.FEISHU_CATALOG_MIRROR_CUTOFF_AT,
     catalogMirrorEnabled:
       parsed.data.FEISHU_CATALOG_MIRROR_ENABLED === "true",
     cargoWritesEnabled: parsed.data.FEISHU_CARGO_WRITES_ENABLED === "true",
@@ -135,8 +198,36 @@ export function canImportFeishuCargo(config: FeishuCargoImportConfig) {
   return config.cargoImportEnabled === true;
 }
 
-export function canMirrorFeishuCatalog(config: FeishuCatalogMirrorConfig) {
-  return config.catalogMirrorEnabled === true;
+export function getFeishuCatalogMirrorAvailability(
+  config: FeishuCatalogMirrorConfig,
+  now = new Date(),
+): FeishuCatalogMirrorAvailability {
+  if (config.catalogMirrorEnabled !== true) {
+    return { cutoffAt: null, enabled: false, phase: "DISABLED" };
+  }
+
+  const cutoffAt = config.catalogMirrorCutoffAt;
+  if (!cutoffAt) {
+    return { cutoffAt: null, enabled: false, phase: "MISCONFIGURED" };
+  }
+
+  const cutoffTimestamp = parseIsoTimestampWithZone(cutoffAt);
+  if (cutoffTimestamp === null || !Number.isFinite(now.getTime())) {
+    return { cutoffAt: null, enabled: false, phase: "MISCONFIGURED" };
+  }
+
+  if (now.getTime() >= cutoffTimestamp) {
+    return { cutoffAt, enabled: false, phase: "RETIRED" };
+  }
+
+  return { cutoffAt, enabled: true, phase: "TRANSITION" };
+}
+
+export function canMirrorFeishuCatalog(
+  config: FeishuCatalogMirrorConfig,
+  now = new Date(),
+) {
+  return getFeishuCatalogMirrorAvailability(config, now).enabled;
 }
 
 export function hasFeishuCargoTargetConfig(config: FeishuCargoTargetConfig) {

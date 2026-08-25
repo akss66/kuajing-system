@@ -66,4 +66,19 @@ describe("Feishu catalog mirror provider", () => {
       sourceWikiToken: "wiki-token",
     });
   });
+
+  it("does not construct clients or claim queued mirrors after the runtime gate closes", async () => {
+    configMocks.canMirrorFeishuCatalog.mockReturnValue(false);
+
+    await expect(runFeishuCatalogMirrorCycle()).resolves.toEqual({
+      completed: 0,
+      enabled: false,
+      failed: 0,
+      processed: 0,
+    });
+
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+    expect(serviceMocks.createCatalogFieldRefreshService).not.toHaveBeenCalled();
+    expect(outboxMocks.processCatalogMirrorOutbox).not.toHaveBeenCalled();
+  });
 });

@@ -20,14 +20,57 @@ describe("Feishu integration config", () => {
       FEISHU_CARGO_SOURCE_WIKI_TOKEN: "wiki-source",
     };
 
+    const transitionConfig = readFeishuConfig({
+      ...base,
+      FEISHU_CATALOG_MIRROR_CUTOFF_AT: "2026-09-01T00:00:00+08:00",
+      FEISHU_CATALOG_MIRROR_ENABLED: "true",
+    });
+
+    expect(transitionConfig.catalogMirrorCutoffAt).toBe(
+      "2026-09-01T00:00:00+08:00",
+    );
+    expect(
+      canMirrorFeishuCatalog(
+        transitionConfig,
+        new Date("2026-08-31T15:59:59.999Z"),
+      ),
+    ).toBe(true);
+    expect(
+      canMirrorFeishuCatalog(
+        transitionConfig,
+        new Date("2026-08-31T16:00:00.000Z"),
+      ),
+    ).toBe(false);
+
     expect(
       canMirrorFeishuCatalog(
         readFeishuConfig({
           ...base,
           FEISHU_CATALOG_MIRROR_ENABLED: "true",
         }),
+        new Date("2026-08-25T00:00:00.000Z"),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      canMirrorFeishuCatalog(
+        readFeishuConfig({
+          ...base,
+          FEISHU_CATALOG_MIRROR_CUTOFF_AT: "2026-02-31T00:00:00+08:00",
+          FEISHU_CATALOG_MIRROR_ENABLED: "true",
+        }),
+        new Date("2026-02-01T00:00:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(
+      canMirrorFeishuCatalog(
+        readFeishuConfig({
+          ...base,
+          FEISHU_CATALOG_MIRROR_CUTOFF_AT: "not-a-date",
+          FEISHU_CATALOG_MIRROR_ENABLED: "true",
+        }),
+        new Date("2026-08-25T00:00:00.000Z"),
+      ),
+    ).toBe(false);
     for (const malformed of [undefined, "", "TRUE", " true ", "1", "false"]) {
       expect(
         canMirrorFeishuCatalog(

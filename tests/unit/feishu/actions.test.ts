@@ -19,6 +19,7 @@ const configMocks = vi.hoisted(() => ({
   canMirrorFeishuCatalog: vi.fn(),
   canImportFeishuCargo: vi.fn(),
   canWriteFeishuCargo: vi.fn(),
+  getFeishuCatalogMirrorAvailability: vi.fn(),
   hasFeishuCargoTargetConfig: vi.fn(),
   readFeishuApiBaseUrl: vi.fn(),
   readFeishuConfig: vi.fn(),
@@ -105,6 +106,7 @@ describe("feishu admin actions", () => {
     guardMocks.requireSuperAdmin.mockReset();
     configMocks.canWriteFeishuCargo.mockReset();
     configMocks.canMirrorFeishuCatalog.mockReset();
+    configMocks.getFeishuCatalogMirrorAvailability.mockReset();
     configMocks.canImportFeishuCargo.mockReset();
     configMocks.hasFeishuCargoTargetConfig.mockReset();
     configMocks.readFeishuApiBaseUrl.mockReset();
@@ -131,6 +133,11 @@ describe("feishu admin actions", () => {
     });
     configMocks.canWriteFeishuCargo.mockReturnValue(true);
     configMocks.canMirrorFeishuCatalog.mockReturnValue(true);
+    configMocks.getFeishuCatalogMirrorAvailability.mockReturnValue({
+      cutoffAt: "2026-09-01T00:00:00+08:00",
+      enabled: true,
+      phase: "TRANSITION",
+    });
     configMocks.canImportFeishuCargo.mockReturnValue(true);
     configMocks.hasFeishuCargoTargetConfig.mockReturnValue(true);
     configMocks.readFeishuApiBaseUrl.mockReturnValue("http://127.0.0.1:4010");
@@ -138,6 +145,7 @@ describe("feishu admin actions", () => {
       appId: "app-id",
       appSecret: "app-secret",
       cargoImportEnabled: true,
+      catalogMirrorCutoffAt: "2026-09-01T00:00:00+08:00",
       catalogMirrorEnabled: true,
       cargoWritesEnabled: true,
       sourceSheetId: undefined,
@@ -562,7 +570,11 @@ describe("feishu admin actions", () => {
   });
 
   it("rejects migration mirror while its temporary rollout flag is disabled", async () => {
-    configMocks.canMirrorFeishuCatalog.mockReturnValue(false);
+    configMocks.getFeishuCatalogMirrorAvailability.mockReturnValue({
+      cutoffAt: null,
+      enabled: false,
+      phase: "DISABLED",
+    });
 
     const result = await syncFeishuCatalogFieldsAction(
       { status: "idle" },
@@ -575,6 +587,25 @@ describe("feishu admin actions", () => {
     });
     expect(serviceMocks.applyCatalogFieldRefresh).not.toHaveBeenCalled();
     expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects migration mirror after the configured transition cutoff", async () => {
+    configMocks.getFeishuCatalogMirrorAvailability.mockReturnValue({
+      cutoffAt: "2026-09-01T00:00:00+08:00",
+      enabled: false,
+      phase: "RETIRED",
+    });
+
+    const result = await syncFeishuCatalogFieldsAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "飞书货盘过渡期已结束，系统货盘现已接管；不会再从飞书覆盖商品或库存。",
+      status: "error",
+    });
+    expect(outboxMocks.enqueueCatalogMirror).not.toHaveBeenCalled();
   });
 
   it("requires an imported baseline before reading configuration or calling Feishu", async () => {

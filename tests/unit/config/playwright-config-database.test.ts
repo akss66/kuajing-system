@@ -74,6 +74,9 @@ describe("playwright.config database isolation", () => {
     const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
 
     expect(webServer?.env?.FEISHU_CARGO_WRITES_ENABLED).toBe("false");
+    expect(webServer?.env?.FEISHU_CATALOG_MIRROR_CUTOFF_AT).toBe(
+      "2099-01-01T00:00:00+08:00",
+    );
   });
 
   test("shares one absolute catalog asset root between the runner and isolated app workspaces", async () => {
