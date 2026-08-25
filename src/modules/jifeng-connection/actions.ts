@@ -166,7 +166,16 @@ async function resolveJifengManager(): Promise<
   try {
     return { actor: await requireSuperAdmin() };
   } catch (error) {
-    if (businessErrorCode(error) === "FORBIDDEN_ADMIN") {
+    const code = businessErrorCode(error);
+    if (code === "UNAUTHENTICATED") {
+      return {
+        errorState: {
+          message: "登录状态已失效，请重新登录。",
+          status: "error",
+        },
+      };
+    }
+    if (code === "FORBIDDEN_ADMIN") {
       return {
         errorState: {
           message: "只有超级管理员可以管理极风连接。",

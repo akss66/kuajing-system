@@ -110,7 +110,7 @@ describe("Jifeng connection actions", () => {
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("does not downgrade an unauthenticated request into a forbidden business state", async () => {
+  it("returns a stable safe state for an unauthenticated request", async () => {
     const unauthenticated = Object.assign(new Error("UNAUTHENTICATED"), {
       code: "UNAUTHENTICATED",
       status: 401,
@@ -119,7 +119,10 @@ describe("Jifeng connection actions", () => {
 
     await expect(
       runJifengDiagnosticAction({ status: "idle" }, form()),
-    ).rejects.toBe(unauthenticated);
+    ).resolves.toEqual({
+      message: "登录状态已失效，请重新登录。",
+      status: "error",
+    });
     expect(serviceMocks.runStoredJifengDiagnostic).not.toHaveBeenCalled();
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });

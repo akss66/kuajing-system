@@ -468,7 +468,8 @@ test("super admin authorizes, validates read-only access, and explicitly enables
       expect(noSessionReplayPayload.message).not.toContain("只允许超级管理员管理极风连接。");
     }
   }
-  expect([401, 403, 500]).toContain(noSessionReplayResponse.status());
+  expect(noSessionReplayResponse.status()).toBe(200);
+  expect(noSessionReplayBody).toContain("登录状态已失效，请重新登录。");
   expect(noSessionReplayBody).not.toContain("FORBIDDEN_ADMIN");
   expect(noSessionReplayBody).not.toContain("只允许超级管理员管理极风连接。");
   expect(noSessionReplayBody).not.toContain(accessToken);
