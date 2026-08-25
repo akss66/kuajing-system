@@ -481,76 +481,78 @@ export function CargoMigrationPanel({
         </WorkspacePanel>
       ) : null}
 
-      <WorkspacePanel>
-        <WorkspacePanelHeader
-          description={
-            cargoWritesEnabled
-              ? "连接验证只读执行；目标测试表重试或重跑只影响派生同步。"
-              : "连接验证只读取飞书源货盘，不会修改任何飞书数据。"
-          }
-          title={cargoWritesEnabled ? "连接与目标同步" : "只读连接"}
-        />
-        <div
-          className={cn(
-            "grid gap-4 px-4 py-4 sm:px-5",
-            cargoWritesEnabled && "lg:grid-cols-2",
-          )}
-        >
-          <ActionForm
-            action={testFeishuConnectionAction}
-            className="space-y-3"
-            submitLabel="验证只读连接"
+      {actorKind === "SUPER_ADMIN" ? (
+        <WorkspacePanel>
+          <WorkspacePanelHeader
+            description={
+              cargoWritesEnabled
+                ? "连接验证只读执行；目标测试表重试或重跑只影响派生同步。"
+                : "连接验证只读取飞书源货盘，不会修改任何飞书数据。"
+            }
+            title={cargoWritesEnabled ? "连接与目标同步" : "只读连接"}
+          />
+          <div
+            className={cn(
+              "grid gap-4 px-4 py-4 sm:px-5",
+              cargoWritesEnabled && "lg:grid-cols-2",
+            )}
           >
-            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
-              <p>{readOnlyConnectionMessage}</p>
-              {actorKind === "SUPER_ADMIN" && sourceSheetDiscoveryMessage ? (
-                <p
-                  className={cn(
-                    "rounded-[var(--radius-surface)] border px-3 py-2 text-sm",
-                    sourceSheetDiscoveryStatus === "error"
-                      ? "border-warning/30 bg-warning/5 text-foreground"
-                      : "border-border bg-muted/40 text-foreground",
-                  )}
-                >
-                  {sourceSheetDiscoveryMessage}
-                </p>
-              ) : null}
-            </div>
-          </ActionForm>
-
-          {cargoWritesEnabled ? (
             <ActionForm
-              action={retryFeishuCargoSyncAction}
+              action={testFeishuConnectionAction}
               className="space-y-3"
-              submitDisabled={!targetConfigured}
-              submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
-              submitLabel={syncSubmitLabel}
+              submitLabel="验证只读连接"
             >
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p>
-                  {targetConfigured
-                    ? targetSyncState.canRetry
-                      ? "仅重试目标测试表的失败同步，不会反向改动源业务货盘。"
-                      : "按需重新同步目标测试表，不会反向改动源业务货盘。"
-                    : "目标测试表尚未配置，当前只能保留只读预检结果。"}
-                </p>
-                {targetSyncState.rowCount != null ? (
-                  <p>最近同步行数：{targetSyncState.rowCount}</p>
-                ) : null}
-                {targetSyncState.imageCount != null ? (
-                  <p>最近同步图片数：{targetSyncState.imageCount}</p>
-                ) : null}
-                {targetSyncState.lastUpdatedLabel ? (
-                  <p>最近同步时间：{targetSyncState.lastUpdatedLabel}</p>
-                ) : null}
-                {targetSyncState.canRetry && targetSyncState.lastErrorMessage ? (
-                  <p>最近失败原因：{targetSyncState.lastErrorMessage}</p>
+              <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <p>{readOnlyConnectionMessage}</p>
+                {sourceSheetDiscoveryMessage ? (
+                  <p
+                    className={cn(
+                      "rounded-[var(--radius-surface)] border px-3 py-2 text-sm",
+                      sourceSheetDiscoveryStatus === "error"
+                        ? "border-warning/30 bg-warning/5 text-foreground"
+                        : "border-border bg-muted/40 text-foreground",
+                    )}
+                  >
+                    {sourceSheetDiscoveryMessage}
+                  </p>
                 ) : null}
               </div>
             </ActionForm>
-          ) : null}
-        </div>
-      </WorkspacePanel>
+
+            {cargoWritesEnabled ? (
+              <ActionForm
+                action={retryFeishuCargoSyncAction}
+                className="space-y-3"
+                submitDisabled={!targetConfigured}
+                submitClassName={targetSyncState.canRetry ? undefined : "border-border"}
+                submitLabel={syncSubmitLabel}
+              >
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    {targetConfigured
+                      ? targetSyncState.canRetry
+                        ? "仅重试目标测试表的失败同步，不会反向改动源业务货盘。"
+                        : "按需重新同步目标测试表，不会反向改动源业务货盘。"
+                      : "目标测试表尚未配置，当前只能保留只读预检结果。"}
+                  </p>
+                  {targetSyncState.rowCount != null ? (
+                    <p>最近同步行数：{targetSyncState.rowCount}</p>
+                  ) : null}
+                  {targetSyncState.imageCount != null ? (
+                    <p>最近同步图片数：{targetSyncState.imageCount}</p>
+                  ) : null}
+                  {targetSyncState.lastUpdatedLabel ? (
+                    <p>最近同步时间：{targetSyncState.lastUpdatedLabel}</p>
+                  ) : null}
+                  {targetSyncState.canRetry && targetSyncState.lastErrorMessage ? (
+                    <p>最近失败原因：{targetSyncState.lastErrorMessage}</p>
+                  ) : null}
+                </div>
+              </ActionForm>
+            ) : null}
+          </div>
+        </WorkspacePanel>
+      ) : null}
 
       <WorkspacePanel>
         <WorkspacePanelHeader

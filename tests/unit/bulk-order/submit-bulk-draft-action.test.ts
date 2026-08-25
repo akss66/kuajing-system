@@ -23,7 +23,10 @@ const draftServiceMocks = vi.hoisted(() => ({
 vi.mock("next/cache", () => cacheMocks);
 vi.mock("@/modules/identity/guards", () => authMocks);
 vi.mock("@/modules/bulk-order/draft-service", () => draftServiceMocks);
-vi.mock("@/modules/bulk-order/submission-service", () => serviceMocks);
+vi.mock("@/modules/bulk-order/submission-service", () => ({
+  ...serviceMocks,
+  BulkSubmissionError: class BulkSubmissionError extends Error {},
+}));
 
 import { submitBulkDraftAction } from "@/modules/bulk-order/actions";
 
@@ -92,5 +95,25 @@ describe("submitBulkDraftAction", () => {
         idempotencyKey: "11111111-1111-4111-8111-111111111111",
       }),
     );
+  });
+
+  it("does not expose an unexpected persistence error to the customer", async () => {
+    serviceMocks.submitBulkDraft.mockRejectedValue(
+      new Error(
+        'duplicate key value violates unique constraint "wallet_transactions_pkey"',
+      ),
+    );
+
+    const result = await submitBulkDraftAction({
+      draftId: "11111111-1111-4111-8111-111111111111",
+      requestedWalletFen: 0,
+      selectedGroupIds: ["22222222-2222-4222-8222-222222222222"],
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+    });
+
+    expect(result).toEqual({
+      message: "批量拿货提交失败，请稍后重试。",
+      ok: false,
+    });
   });
 });

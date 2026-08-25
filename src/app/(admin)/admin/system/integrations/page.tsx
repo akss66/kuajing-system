@@ -327,8 +327,9 @@ export default async function IntegrationsPage() {
                 </dd>
               </div>
             </dl>
-            <div className="mt-5">
-              <EntityDrawer
+            {principal.kind === "SUPER_ADMIN" ? (
+              <div className="mt-5">
+                <EntityDrawer
                 description="连接验证只做只读校验；目标测试表重试与首批迁移确认分离执行。"
                 size="lg"
                 title="管理飞书集成"
@@ -372,8 +373,9 @@ export default async function IntegrationsPage() {
                   targetSyncState={targetSyncState}
                   testFeishuConnectionAction={testFeishuConnectionAction}
                 />
-              </EntityDrawer>
-            </div>
+                </EntityDrawer>
+              </div>
+            ) : null}
           </article>
         </div>
       </section>

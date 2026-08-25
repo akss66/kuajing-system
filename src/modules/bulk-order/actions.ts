@@ -49,18 +49,6 @@ export type SubmitBulkDraftActionResult =
   | { ok: true; result: BulkSubmissionResult }
   | { message: string; ok: false };
 
-function draftErrorMessage(error: unknown) {
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-  return "批量拿货草稿处理失败，请稍后重试。";
-}
-
 export async function createBulkDraftAction() {
   const principal = await requireCustomer();
   return createBulkDraft({
@@ -173,6 +161,6 @@ export async function submitBulkDraftAction(
     if (error instanceof BulkSubmissionError) {
       return { message: error.message, ok: false };
     }
-    return { message: draftErrorMessage(error), ok: false };
+    return { message: "批量拿货提交失败，请稍后重试。", ok: false };
   }
 }

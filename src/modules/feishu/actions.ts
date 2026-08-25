@@ -14,7 +14,7 @@ import {
   readFeishuApiBaseUrl,
   readFeishuConfig,
 } from "@/integrations/feishu/config";
-import { requireAdmin, requireSuperAdmin } from "@/modules/identity/guards";
+import { requireSuperAdmin } from "@/modules/identity/guards";
 import type { ActionState } from "@/shared/action-state";
 
 import { enqueueCatalogMirror } from "./catalog-mirror-outbox";
@@ -171,7 +171,7 @@ export async function retryFeishuCargoSyncAction(
 ): Promise<ActionState> {
   void _previousState;
   void _formData;
-  await requireAdmin();
+  await requireSuperAdmin();
 
   const config = readFeishuConfig();
   if (!canWriteFeishuCargo(config)) {
@@ -204,7 +204,7 @@ export async function testFeishuConnectionAction(
 ): Promise<ActionState> {
   void _previousState;
   void _formData;
-  await requireAdmin();
+  await requireSuperAdmin();
 
   try {
     const { client, config } = createFeishuClient();

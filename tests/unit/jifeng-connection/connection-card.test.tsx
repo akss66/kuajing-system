@@ -493,6 +493,7 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
     expect(pageMocks.getAdminView).not.toHaveBeenCalled();
     expect(screen.getByText("只读状态")).toBeVisible();
     expect(screen.queryByRole("button", { name: "停用自动履约" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "管理飞书" })).not.toBeInTheDocument();
     expect(screen.queryByText("de***76")).not.toBeInTheDocument();
   });
 

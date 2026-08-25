@@ -149,7 +149,7 @@ describe("CargoMigrationPanel", () => {
     navigationMocks.refresh.mockReset();
   });
 
-  it("shows an ordinary admin the status view without discovery or first-import controls", () => {
+  it("shows an ordinary admin a read-only status without system-operation controls", () => {
     render(
       <CargoMigrationPanel
         {...createProps({
@@ -163,8 +163,12 @@ describe("CargoMigrationPanel", () => {
     );
 
     expect(screen.getByText(/飞书源货盘始终只读/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "验证只读连接" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "重新同步目标测试表" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "验证只读连接" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "重新同步目标测试表" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "源工作表" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "选择源工作表后开始只读预检" }),

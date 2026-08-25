@@ -514,6 +514,29 @@ describe("feishu admin actions", () => {
     expect(serviceMocks.confirmCargoMigration).not.toHaveBeenCalled();
   });
 
+  it("stops at the super-admin guard before a manual target sync", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
+
+    await expect(
+      retryFeishuCargoSyncAction({ status: "idle" }, new FormData()),
+    ).rejects.toThrow("FORBIDDEN_ADMIN");
+
+    expect(configMocks.readFeishuConfig).not.toHaveBeenCalled();
+    expect(dbMocks.transaction).not.toHaveBeenCalled();
+    expect(outboxMocks.enqueueCargoSyncEvent).not.toHaveBeenCalled();
+  });
+
+  it("stops at the super-admin guard before testing the Feishu connection", async () => {
+    guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
+
+    await expect(
+      testFeishuConnectionAction({ status: "idle" }, new FormData()),
+    ).rejects.toThrow("FORBIDDEN_ADMIN");
+
+    expect(configMocks.readFeishuConfig).not.toHaveBeenCalled();
+    expect(constructorMocks.FeishuClient).not.toHaveBeenCalled();
+  });
+
   it("stops before configuration, database, or Feishu access when catalog sync is unauthorized", async () => {
     guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
 
