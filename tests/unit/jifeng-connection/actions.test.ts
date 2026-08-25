@@ -92,15 +92,35 @@ describe("Jifeng connection actions", () => {
       form({ reason: "轮换授权负责人" }),
     ],
   ])("requires a fresh super-admin check before the %s action", async (_name, action, data) => {
-    const accessError = new Error("FORBIDDEN_ADMIN");
+    const accessError = Object.assign(new Error("FORBIDDEN_ADMIN"), {
+      code: "FORBIDDEN_ADMIN",
+      status: 403,
+    });
     guardMocks.requireSuperAdmin.mockRejectedValueOnce(accessError);
 
-    await expect(action({ status: "idle" }, data)).rejects.toBe(accessError);
+    await expect(action({ status: "idle" }, data)).resolves.toEqual({
+      message: "只有超级管理员可以管理极风连接。",
+      status: "error",
+    });
 
     expect(guardMocks.requireSuperAdmin).toHaveBeenCalledTimes(1);
     expect(Object.values(serviceMocks).every((service) => service.mock.calls.length === 0)).toBe(
       true,
     );
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("does not downgrade an unauthenticated request into a forbidden business state", async () => {
+    const unauthenticated = Object.assign(new Error("UNAUTHENTICATED"), {
+      code: "UNAUTHENTICATED",
+      status: 401,
+    });
+    guardMocks.requireSuperAdmin.mockRejectedValueOnce(unauthenticated);
+
+    await expect(
+      runJifengDiagnosticAction({ status: "idle" }, form()),
+    ).rejects.toBe(unauthenticated);
+    expect(serviceMocks.runStoredJifengDiagnostic).not.toHaveBeenCalled();
     expect(cacheMocks.revalidatePath).not.toHaveBeenCalled();
   });
 

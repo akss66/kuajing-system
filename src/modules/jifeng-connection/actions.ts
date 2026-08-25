@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireSuperAdmin } from "@/modules/identity/guards";
+import type { SuperAdminPrincipal } from "@/modules/identity/principal";
 import type { ActionState } from "@/shared/action-state";
 
 import {
@@ -158,6 +159,25 @@ function businessErrorState(error: unknown): JifengActionState | null {
   }
 }
 
+async function resolveJifengManager(): Promise<
+  | { actor: SuperAdminPrincipal; errorState?: never }
+  | { actor?: never; errorState: JifengActionState }
+> {
+  try {
+    return { actor: await requireSuperAdmin() };
+  } catch (error) {
+    if (businessErrorCode(error) === "FORBIDDEN_ADMIN") {
+      return {
+        errorState: {
+          message: "只有超级管理员可以管理极风连接。",
+          status: "error",
+        },
+      };
+    }
+    throw error;
+  }
+}
+
 async function runMutation(
   mutation: () => Promise<void>,
   successMessage: string,
@@ -188,7 +208,9 @@ export async function authorizeJifengConnectionAction(
   _previousState: JifengActionState,
   formData: FormData,
 ): Promise<JifengActionState> {
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   const parsed = authorizationSchema.safeParse({
     email: formData.get("email"),
     oneTimeToken: formData.get("oneTimeToken"),
@@ -207,7 +229,9 @@ export async function discoverJifengResourcesAction(
 ): Promise<JifengActionState> {
   void _previousState;
   void _formData;
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   try {
     const discovery = await discoverJifengResources({ actor });
     revalidateIntegrations();
@@ -227,7 +251,9 @@ export async function selectJifengResourcesAction(
   _previousState: JifengActionState,
   formData: FormData,
 ): Promise<JifengActionState> {
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   const parsed = resourceSelectionSchema.safeParse({
     logisticsId: formData.get("logisticsId"),
     warehouseCode: formData.get("warehouseCode"),
@@ -267,7 +293,9 @@ export async function runJifengDiagnosticAction(
 ): Promise<JifengActionState> {
   void _previousState;
   void _formData;
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   try {
     const result = await runStoredJifengDiagnostic({ actor });
     revalidateIntegrations();
@@ -288,7 +316,9 @@ export async function setJifengFulfillmentAction(
   _previousState: JifengActionState,
   formData: FormData,
 ): Promise<JifengActionState> {
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   const parsed = fulfillmentSchema.safeParse({
     enabled: formData.get("enabled"),
     reason: formData.get("reason"),
@@ -311,7 +341,9 @@ export async function disconnectJifengConnectionAction(
   _previousState: JifengActionState,
   formData: FormData,
 ): Promise<JifengActionState> {
-  const actor = await requireSuperAdmin();
+  const authorization = await resolveJifengManager();
+  if (authorization.errorState) return authorization.errorState;
+  const { actor } = authorization;
   const parsed = disconnectSchema.safeParse({ reason: formData.get("reason") });
   if (!parsed.success) return validationState(parsed.error);
 

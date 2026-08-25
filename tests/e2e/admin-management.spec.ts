@@ -773,10 +773,40 @@ test("ordinary admins can provision customers and manage customer details and mu
   await closeAccountDrawer(restoreStoreDrawer);
 
   const customerAccessDrawer = await openCustomerEditDrawer(page);
-  await expect(
-    customerStatusForm(customerId, "DISABLED", customerAccessDrawer),
-  ).toHaveCount(0);
+  const disableCustomerForm = customerStatusForm(
+    customerId,
+    "DISABLED",
+    customerAccessDrawer,
+  );
+  await disableCustomerForm.getByLabel("操作原因").fill("E2E 普通管理员停用客户");
+  await confirmDialog(disableCustomerForm, page, "停用客户");
+  await expect(page.getByText("客户已停用。")).toBeVisible();
+  await expect.poll(async () => {
+    const [customer] = await db
+      .select({ status: customers.status })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    return customer?.status;
+  }).toBe("DISABLED");
   await closeAccountDrawer(customerAccessDrawer);
+
+  const restoreCustomerDrawer = await openCustomerEditDrawer(page);
+  const restoreCustomerForm = customerStatusForm(
+    customerId,
+    "ACTIVE",
+    restoreCustomerDrawer,
+  );
+  await restoreCustomerForm.getByLabel("操作原因").fill("E2E 普通管理员恢复客户");
+  await confirmDialog(restoreCustomerForm, page, "恢复客户");
+  await expect(page.getByText("客户已恢复。")).toBeVisible();
+  await expect.poll(async () => {
+    const [customer] = await db
+      .select({ status: customers.status })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    return customer?.status;
+  }).toBe("ACTIVE");
+  await closeAccountDrawer(restoreCustomerDrawer);
 
   await signOutThroughShell(page);
   await expect(page).toHaveURL(/\/login$/);

@@ -69,7 +69,7 @@ test("customer account provisioning rejects a customer service caller", async ()
   expect(await db.select().from(customers)).toEqual([]);
 });
 
-test("customer login status accepts an ordinary administrator service caller", async () => {
+test("customer login status accepts ordinary-administrator disable and restore operations", async () => {
   const [customer] = await db
     .insert(customers)
     .values({ code: `S-${crypto.randomUUID()}`, name: "Protected status customer" })
@@ -87,6 +87,61 @@ test("customer login status accepts an ordinary administrator service caller", a
     .from(customers)
     .where(eq(customers.id, customer.id));
   expect(persisted.status).toBe("DISABLED");
+
+  await setCustomerStatus({
+    actor: { kind: "ADMIN", userId: "ordinary-admin-auth-user" },
+    customerId: customer.id,
+    reason: "Resume customer operations",
+    status: "ACTIVE",
+  });
+
+  const [restored] = await db
+    .select({ status: customers.status })
+    .from(customers)
+    .where(eq(customers.id, customer.id));
+  expect(restored.status).toBe("ACTIVE");
+
+  const statusAudits = await db
+    .select({ actorId: auditLogs.actorId, afterJson: auditLogs.afterJson })
+    .from(auditLogs)
+    .where(eq(auditLogs.entityId, customer.id));
+  expect(statusAudits).toEqual([
+    {
+      actorId: "ordinary-admin-auth-user",
+      afterJson: { status: "DISABLED" },
+    },
+    {
+      actorId: "ordinary-admin-auth-user",
+      afterJson: { status: "ACTIVE" },
+    },
+  ]);
+});
+
+test("customer login status rejects a customer caller without changing state", async () => {
+  const [customer] = await db
+    .insert(customers)
+    .values({ code: `U-${crypto.randomUUID()}`, name: "Unauthorized status target" })
+    .returning({ id: customers.id });
+
+  await expect(
+    setCustomerStatus({
+      actor: {
+        customerId: customer.id,
+        kind: "CUSTOMER",
+        userId: "customer-auth-user",
+      },
+      customerId: customer.id,
+      reason: "Attempt self-disable through service boundary",
+      status: "DISABLED",
+    } as never),
+  ).rejects.toMatchObject({ code: "FORBIDDEN_ADMIN" });
+
+  const [persisted] = await db
+    .select({ status: customers.status })
+    .from(customers)
+    .where(eq(customers.id, customer.id));
+  expect(persisted.status).toBe("ACTIVE");
+  expect(await db.select().from(auditLogs)).toEqual([]);
 });
 
 test("provisions a customer, store and sign-in account together", async () => {

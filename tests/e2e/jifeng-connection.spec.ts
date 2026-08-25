@@ -417,8 +417,9 @@ test("super admin authorizes, validates read-only access, and explicitly enables
   );
   const forbiddenResponseBody = await forbiddenResponse.text();
   actionResponses.push(forbiddenResponseBody);
-  expect(forbiddenResponse.status()).toBe(500);
-  expect(forbiddenResponseBody).toContain("FORBIDDEN_ADMIN");
+  expect(forbiddenResponse.status()).toBe(200);
+  expect(forbiddenResponseBody).toContain("只有超级管理员可以管理极风连接。");
+  expect(forbiddenResponseBody).not.toContain("FORBIDDEN_ADMIN");
   const [{ value: auditCountAfter }] = await db
     .select({ value: count() })
     .from(auditLogs)
