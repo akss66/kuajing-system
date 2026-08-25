@@ -50,17 +50,19 @@ function createFeishuClient(config = readFeishuConfig()) {
   };
 }
 
-type KnownMigrationError = Error & {
-  code?:
-    | "ACTOR_NOT_FOUND"
-    | "ALREADY_IMPORTED"
-    | "CATALOG_NOT_EMPTY"
-    | "FORBIDDEN_SUPER_ADMIN"
-    | "MIGRATION_NOT_CONFIRMABLE"
-    | "MIGRATION_NOT_FOUND"
-    | "ROLLOUT_READ_ONLY"
-    | "SOURCE_STALE";
-};
+const KNOWN_MIGRATION_ERROR_CODES = [
+  "ACTOR_NOT_FOUND",
+  "ALREADY_IMPORTED",
+  "CATALOG_NOT_EMPTY",
+  "FORBIDDEN_SUPER_ADMIN",
+  "MIGRATION_NOT_CONFIRMABLE",
+  "MIGRATION_NOT_FOUND",
+  "ROLLOUT_READ_ONLY",
+  "SOURCE_STALE",
+] as const;
+
+type KnownMigrationErrorCode = (typeof KNOWN_MIGRATION_ERROR_CODES)[number];
+type KnownMigrationError = Error & { code: KnownMigrationErrorCode };
 
 function mapMigrationErrorMessage(error: KnownMigrationError) {
   switch (error.code) {
@@ -76,13 +78,19 @@ function mapMigrationErrorMessage(error: KnownMigrationError) {
       return READ_ONLY_CONFIRM_MESSAGE;
     case "SOURCE_STALE":
       return "源货盘已经变化，请重新执行只读预检。";
+    case "ACTOR_NOT_FOUND":
+    case "FORBIDDEN_SUPER_ADMIN":
+      return "当前账号无法执行飞书货盘迁移。";
     default:
-      return error.message;
+      return "飞书货盘迁移失败，请稍后重试。";
   }
 }
 
 function isKnownMigrationError(error: unknown): error is KnownMigrationError {
-  return error instanceof Error && "code" in error;
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  return KNOWN_MIGRATION_ERROR_CODES.includes(
+    String(error.code) as KnownMigrationErrorCode,
+  );
 }
 
 function mapCatalogRefreshErrorMessage(error: unknown) {
@@ -213,7 +221,10 @@ export async function testFeishuConnectionAction(
     );
     const sourceSheets = await client.listSheets(spreadsheet.spreadsheetToken);
     if (sourceSheets.length === 0) {
-      throw new Error("源货盘不可访问，未找到任何工作表。");
+      return {
+        message: "源货盘不可访问，未找到任何工作表。",
+        status: "error",
+      };
     }
 
     if (!hasFeishuCargoTargetConfig(config)) {
@@ -231,9 +242,9 @@ export async function testFeishuConnectionAction(
       status: "success",
     };
   } catch (error) {
+    void error;
     return {
-      message:
-        error instanceof Error ? error.message : "飞书连接验证失败，请稍后重试。",
+      message: "飞书连接验证失败，请稍后重试。",
       status: "error",
     };
   }
@@ -292,8 +303,7 @@ export async function createCargoPreflightAction(
 
     return {
       availableSourceSheets: [],
-      message:
-        error instanceof Error ? error.message : "只读预检失败，请稍后重试。",
+      message: "只读预检失败，请稍后重试。",
       status: "error",
     };
   }
@@ -372,8 +382,7 @@ export async function confirmCargoMigrationAction(
     }
 
     return {
-      message:
-        error instanceof Error ? error.message : "迁移确认失败，请稍后重试。",
+      message: "迁移确认失败，请稍后重试。",
       status: "error",
     };
   }

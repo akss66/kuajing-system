@@ -40,6 +40,7 @@ import {
   getLatestCatalogFieldRefreshState,
   getLatestCargoMigrationRun,
   getLatestCargoTargetSyncState,
+  type CargoMigrationTargetSyncState,
 } from "@/modules/feishu/queries";
 import { discoverFeishuSourceSheets } from "@/modules/feishu/source-reader";
 import { requireAdmin } from "@/modules/identity/guards";
@@ -140,6 +141,21 @@ export default async function IntegrationsPage() {
   const catalogRefreshBaselinePromise = canManageJifeng
     ? findLatestImportedCargoRefreshBaseline()
     : Promise.resolve(null);
+  const latestMigrationRunPromise = canManageJifeng
+    ? getLatestCargoMigrationRun()
+    : Promise.resolve(null);
+  const targetSyncStatePromise = canManageJifeng
+    ? getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null)
+    : Promise.resolve({
+        canRetry: false,
+        imageCount: null,
+        lastErrorMessage: null,
+        lastUpdatedLabel: null,
+        rowCount: null,
+        statusLabel: "仅超级管理员可查看",
+        targetSheetId: null,
+        tone: "default",
+      } satisfies CargoMigrationTargetSyncState);
 
   const [
     connection,
@@ -167,7 +183,7 @@ export default async function IntegrationsPage() {
         .where(eq(integrationOutbox.status, "FAILED"))
         .orderBy(desc(integrationOutbox.updatedAt))
         .limit(10),
-      getLatestCargoMigrationRun(),
+      latestMigrationRunPromise,
       catalogRefreshBaselinePromise.then((baseline) =>
         loadSourceSheetDiscovery(
           principal.kind,
@@ -175,7 +191,7 @@ export default async function IntegrationsPage() {
           Boolean(baseline),
         ),
       ),
-      getLatestCargoTargetSyncState(feishuConfig?.targetSheetId ?? null),
+      targetSyncStatePromise,
       catalogRefreshBaselinePromise,
       canManageJifeng
         ? getLatestCatalogFieldRefreshState()

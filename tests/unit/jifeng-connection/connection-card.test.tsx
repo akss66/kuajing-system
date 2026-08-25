@@ -463,6 +463,8 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
 
     expect(pageMocks.getAdminView).toHaveBeenCalledOnce();
     expect(pageMocks.getPublicStatus).not.toHaveBeenCalled();
+    expect(pageMocks.getLatestCargoMigrationRun).toHaveBeenCalledOnce();
+    expect(pageMocks.getLatestCargoTargetSyncState).toHaveBeenCalledOnce();
     expect(
       screen.getByRole("heading", { name: "集成配置与运行状态" }),
     ).toBeVisible();
@@ -491,6 +493,8 @@ describe("IntegrationsPage Jifeng connection assembly", () => {
 
     expect(pageMocks.getPublicStatus).toHaveBeenCalledOnce();
     expect(pageMocks.getAdminView).not.toHaveBeenCalled();
+    expect(pageMocks.getLatestCargoMigrationRun).not.toHaveBeenCalled();
+    expect(pageMocks.getLatestCargoTargetSyncState).not.toHaveBeenCalled();
     expect(screen.getByText("只读状态")).toBeVisible();
     expect(screen.queryByRole("button", { name: "停用自动履约" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "管理飞书" })).not.toBeInTheDocument();

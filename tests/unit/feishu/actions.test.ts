@@ -500,6 +500,122 @@ describe("feishu admin actions", () => {
     expect(clientMocks.createFilter).not.toHaveBeenCalled();
   });
 
+  it("does not expose an unexpected Feishu connection error", async () => {
+    clientMocks.resolveWikiSpreadsheet.mockRejectedValue(
+      Object.assign(new Error("request failed with app_secret=secret-value"), {
+        code: "ECONNRESET",
+      }),
+    );
+
+    const result = await testFeishuConnectionAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "飞书连接验证失败，请稍后重试。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("secret-value");
+  });
+
+  it("keeps the safe no-source-sheet diagnosis actionable", async () => {
+    clientMocks.listSheets.mockResolvedValueOnce([]);
+
+    const result = await testFeishuConnectionAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      message: "源货盘不可访问，未找到任何工作表。",
+      status: "error",
+    });
+  });
+
+  it("does not treat an infrastructure error code as a migration business error", async () => {
+    serviceMocks.createCargoPreflight.mockRejectedValue(
+      Object.assign(new Error("postgres password=secret-value"), {
+        code: "ECONNRESET",
+      }),
+    );
+
+    const result = await createCargoPreflightAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      availableSourceSheets: [],
+      message: "只读预检失败，请稍后重试。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("secret-value");
+  });
+
+  it("keeps an allowlisted migration conflict actionable", async () => {
+    serviceMocks.createCargoPreflight.mockRejectedValue(
+      Object.assign(new Error("raw stale revision details"), {
+        code: "SOURCE_STALE",
+      }),
+    );
+
+    const result = await createCargoPreflightAction(
+      { status: "idle" },
+      new FormData(),
+    );
+
+    expect(result).toEqual({
+      availableSourceSheets: [],
+      message: "源货盘已经变化，请重新执行只读预检。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("raw stale revision details");
+  });
+
+  it.each(["ACTOR_NOT_FOUND", "FORBIDDEN_SUPER_ADMIN"] as const)(
+    "maps the %s migration authorization code without exposing its raw message",
+    async (code) => {
+      serviceMocks.createCargoPreflight.mockRejectedValue(
+        Object.assign(new Error(`raw authorization detail for ${code}`), {
+          code,
+        }),
+      );
+
+      const result = await createCargoPreflightAction(
+        { status: "idle" },
+        new FormData(),
+      );
+
+      expect(result).toEqual({
+        availableSourceSheets: [],
+        message: "当前账号无法执行飞书货盘迁移。",
+        status: "error",
+      });
+      expect(result.message).not.toContain("raw authorization detail");
+    },
+  );
+
+  it("does not expose an unexpected migration confirmation error", async () => {
+    serviceMocks.confirmCargoMigration.mockRejectedValue(
+      new Error('duplicate key on table "products" secret-value'),
+    );
+    const formData = new FormData();
+    formData.set("confirmationPhrase", "确认迁移74个SKU");
+    formData.set("runId", "run-74");
+
+    const result = await confirmCargoMigrationAction(
+      { status: "idle" },
+      formData,
+    );
+
+    expect(result).toEqual({
+      message: "迁移确认失败，请稍后重试。",
+      status: "error",
+    });
+    expect(result.message).not.toContain("secret-value");
+  });
+
   it("stops at the super-admin guard when an ordinary admin tries to confirm a migration", async () => {
     guardMocks.requireSuperAdmin.mockRejectedValue(new Error("FORBIDDEN_ADMIN"));
 

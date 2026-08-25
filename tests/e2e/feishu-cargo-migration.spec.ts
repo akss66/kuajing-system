@@ -726,39 +726,20 @@ test.describe.serial("Feishu cargo migration", () => {
 
     for (const width of [360, 390]) {
       await page.setViewportSize({ width, height: 844 });
-      const drawer = await openFeishuDrawer(page);
+      await page.goto("/admin/system/integrations");
       await expect(
-        drawer.getByText("飞书源货盘始终只读。", { exact: false }),
+        page.getByRole("heading", { name: "飞书货盘与机器人" }),
       ).toBeVisible();
       await expect(
-        drawer.getByRole("button", { name: "验证只读连接" }),
-      ).toBeVisible();
-      await expect(
-        drawer.getByRole("button", { name: "验证只读连接" }),
-      ).toHaveJSProperty("disabled", false);
-      await expect(
-        drawer.getByRole("button", { name: "开始只读预检" }),
+        page.getByRole("button", { name: "管理飞书" }),
       ).toHaveCount(0);
       await expect(
-        drawer.getByRole("button", { name: "确认迁移 140 个SKU" }),
+        page.getByRole("button", { name: "验证只读连接" }),
       ).toHaveCount(0);
       await expect(
-        drawer.getByRole("combobox", { name: "源工作表" }),
+        page.getByRole("button", { name: "开始只读预检" }),
       ).toHaveCount(0);
-
-      const detailButtons = drawer.getByRole("button", { name: "查看详情" });
-      await expect(detailButtons.nth(0)).toHaveJSProperty("disabled", false);
-      await expect(detailButtons.nth(1)).toHaveAttribute("aria-expanded", "false");
-
-      const readOnlyButtonBox = await drawer
-        .getByRole("button", { name: "验证只读连接" })
-        .boundingBox();
-      const detailsButtonBox = await drawer
-        .getByRole("button", { name: "查看详情" })
-        .first()
-        .boundingBox();
-      expect(readOnlyButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-      expect(detailsButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expect(page.getByText("源 wiki 只用于只读预检", { exact: false })).toBeVisible();
 
       const overflow = await page.evaluate(
         () =>
