@@ -1,4 +1,10 @@
+ARG APP_VERSION
+ARG RELEASE_SHA
+
 FROM node:24-alpine AS build
+
+ARG APP_VERSION
+ARG RELEASE_SHA
 
 WORKDIR /app
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -13,15 +19,25 @@ COPY package.json package-lock.json ./
 RUN npm config set registry "$NPM_REGISTRY" && npm ci
 
 COPY . .
+RUN APP_VERSION="$APP_VERSION" RELEASE_SHA="$RELEASE_SHA" npm run verify:release-metadata
 RUN npm run build
 
 FROM node:24-alpine AS runtime
+
+ARG APP_VERSION
+ARG RELEASE_SHA
 
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
-    PORT=3000
+    PORT=3000 \
+    APP_VERSION=$APP_VERSION \
+    RELEASE_SHA=$RELEASE_SHA
+
+LABEL org.opencontainers.image.title="tongzhouxing-shop" \
+      org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.revision=$RELEASE_SHA
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs \

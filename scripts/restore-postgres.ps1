@@ -24,6 +24,18 @@ if (-not (Test-Path -LiteralPath $resolvedBackup -PathType Leaf)) {
 if ([System.IO.Path]::GetExtension($resolvedBackup) -ne ".dump") {
   throw "Backup file must use the .dump extension."
 }
+$checksumFile = "$resolvedBackup.sha256"
+if (-not (Test-Path -LiteralPath $checksumFile -PathType Leaf)) {
+  throw "Backup checksum is required before restore: $checksumFile"
+}
+$expectedChecksum = (Get-Content -LiteralPath $checksumFile -Encoding ascii -Raw).Trim().ToLowerInvariant()
+if ($expectedChecksum -notmatch '^[0-9a-f]{64}$') {
+  throw "Backup checksum file is invalid: $checksumFile"
+}
+$actualChecksum = (Get-FileHash -LiteralPath $resolvedBackup -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualChecksum -ne $expectedChecksum) {
+  throw "Backup checksum mismatch; restore refused."
+}
 
 $containerId = (docker compose ps -q postgres).Trim()
 if (-not $containerId) {

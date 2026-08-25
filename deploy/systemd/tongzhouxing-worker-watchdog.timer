@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Tongzhouxing worker health every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=tongzhouxing-worker-watchdog.service
+
+[Install]
+WantedBy=timers.target

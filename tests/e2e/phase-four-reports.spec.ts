@@ -180,7 +180,11 @@ test("public health is minimal and administrator health details are protected @d
 }) => {
   const publicHealth = await request.get("/api/health");
   expect(publicHealth.status()).toBe(200);
-  expect(await publicHealth.json()).toEqual({ status: "ok" });
+  expect(await publicHealth.json()).toEqual({
+    revision: null,
+    status: "ok",
+    version: "development",
+  });
 
   const fixture = await seedReportFixture();
   await loginThroughUi(page, fixture.admin);

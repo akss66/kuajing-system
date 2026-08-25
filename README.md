@@ -1,6 +1,6 @@
 # 同舟行跨境
 
-面向加拿大 TEMU 一件代发业务的拿货、库存、人民币结算、极风履约与飞书货盘系统。当前版本为 `v0.1.0`，数据库是库存、订单、资金和履约的唯一事实来源，飞书货盘作为自动同步的对外展示。
+面向加拿大 TEMU 一件代发业务的拿货、库存、人民币结算、极风履约与飞书货盘系统。当前发布候选为 `v0.2.0`，数据库是库存、订单、资金和履约的唯一事实来源，飞书货盘作为只读来源同步到系统数据库。
 
 ## 已实现
 
@@ -47,6 +47,7 @@ npm.cmd run test:e2e
 npm.cmd run typecheck
 npm.cmd run lint
 npm.cmd run build
+npm.cmd run diff-check
 ```
 
 ## 极风授权与安全上线
@@ -67,7 +68,8 @@ npm.cmd run build
 - [生产运行手册](docs/operations/production-runbook.md)
 - [飞书货盘迁移上线手册](docs/operations/feishu-cargo-migration.md)
 - [备份恢复演练](docs/operations/backup-restore-drill-2026-08-12.md)
-- [v0.1.0 版本说明](docs/releases/v0.1.0.md)
+- [v0.2.0 版本说明](docs/releases/v0.2.0.md)
+- [发布门禁与外部证据](docs/operations/release-gates.md)
 - [产品定义](PRODUCT.md)
 - [设计系统](DESIGN.md)
 

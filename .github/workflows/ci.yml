@@ -1,0 +1,132 @@
+name: Release gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+
+concurrency:
+  group: release-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BETTER_AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+  BETTER_AUTH_URL: http://127.0.0.1:3101
+  DATABASE_URL: postgres://build:build@127.0.0.1:5432/build
+  PII_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+
+jobs:
+  quality:
+    name: Static, unit, build, supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: TypeScript
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Diff hygiene
+        run: npm run diff-check
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Full dependency audit (high and critical block; moderate is tracked)
+        run: npm audit --audit-level=high
+      - name: Production build
+        run: npm run build
+      - name: Preserve build identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-build-identity-${{ github.sha }}
+          path: |
+            .next/BUILD_ID
+            package.json
+          if-no-files-found: error
+          retention-days: 14
+
+  integration:
+    name: Serial integration on isolated PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: tongzhouxing
+          POSTGRES_USER: tongzhouxing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tongzhouxing -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - name: Create, migrate, test and remove an isolated database
+        run: npm run test:integration -- --maxWorkers 1
+
+  e2e:
+    name: Browser release gate
+    needs:
+      - integration
+      - quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: tongzhouxing
+          POSTGRES_USER: tongzhouxing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tongzhouxing -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - name: Install pinned Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run full desktop and mobile E2E serially
+        run: npm run test:e2e -- --workers 1
+        env:
+          E2E_PORT: 3101
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

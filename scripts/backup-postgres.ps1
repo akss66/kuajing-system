@@ -40,4 +40,8 @@ try {
 
 $backup = Get-Item -LiteralPath $hostFile
 if ($backup.Length -le 0) { throw "Backup file is empty: $hostFile" }
+$checksumFile = "$hostFile.sha256"
+$checksum = (Get-FileHash -LiteralPath $hostFile -Algorithm SHA256).Hash.ToLowerInvariant()
+Set-Content -LiteralPath $checksumFile -Value $checksum -Encoding ascii -NoNewline
 Write-Output $backup.FullName
+Write-Output $checksumFile

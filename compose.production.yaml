@@ -1,13 +1,17 @@
 name: tongzhouxing-shop
 
 x-app: &app
-  image: tongzhouxing-shop:${APP_VERSION:-current}
+  image: tongzhouxing-shop:${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      APP_VERSION: ${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
+      RELEASE_SHA: ${RELEASE_SHA:?RELEASE_SHA must be the full release Git SHA}
   env_file:
     - ${APP_ENV_FILE:-.env.production}
   environment:
+    APP_VERSION: ${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
     FEISHU_CARGO_IMPORT_ENABLED: ${FEISHU_CARGO_IMPORT_ENABLED:-false}
     FEISHU_CATALOG_MIRROR_ENABLED: ${FEISHU_CATALOG_MIRROR_ENABLED:-false}
     # Production source access is permanently read-only. This cannot be
@@ -20,6 +24,7 @@ x-app: &app
     JIFENG_CLIENT_ID: ${JIFENG_CLIENT_ID:-}
     JIFENG_CLIENT_SECRET: ${JIFENG_CLIENT_SECRET:-}
     JIFENG_TOKEN_ENCRYPTION_KEY: ${JIFENG_TOKEN_ENCRYPTION_KEY:-}
+    RELEASE_SHA: ${RELEASE_SHA:?RELEASE_SHA must be the full release Git SHA}
     WORKER_HEALTH_FILE: /app/runtime/worker-health/heartbeat.json
   init: true
   restart: unless-stopped
@@ -34,6 +39,9 @@ x-app: &app
       max-size: 20m
   networks:
     - backend
+  labels:
+    org.opencontainers.image.revision: ${RELEASE_SHA:?RELEASE_SHA must be the full release Git SHA}
+    org.opencontainers.image.version: ${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
 
 services:
   postgres:
@@ -63,10 +71,13 @@ services:
       - postgres_data:/var/lib/postgresql
 
   worker-health-init:
-    image: tongzhouxing-shop:${APP_VERSION:-current}
+    image: tongzhouxing-shop:${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}
+        RELEASE_SHA: ${RELEASE_SHA:?RELEASE_SHA must be the full release Git SHA}
     user: "0:0"
     command:
       - sh

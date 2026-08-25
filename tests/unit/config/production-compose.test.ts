@@ -15,6 +15,17 @@ describe("production compose integration rollout", () => {
     expect(normalizedCompose).toContain('FEISHU_CARGO_WRITES_ENABLED: "false"');
   });
 
+  it("requires an immutable release SHA instead of a movable current tag", () => {
+    expect(normalizedCompose).not.toMatch(/APP_VERSION:-current/);
+    expect(normalizedCompose).toContain(
+      "${APP_VERSION:?APP_VERSION must be the immutable release Git SHA}",
+    );
+    expect(normalizedCompose).toContain(
+      "${RELEASE_SHA:?RELEASE_SHA must be the full release Git SHA}",
+    );
+    expect(normalizedCompose).toContain("org.opencontainers.image.revision:");
+  });
+
   it("initializes the shared worker heartbeat volume before web and worker run as uid 1001", () => {
     expect(normalizedCompose).toMatch(/worker-health-init:\n(?:.*\n)*?\s+user:\s*"0:0"/);
     expect(normalizedCompose).not.toContain("  worker-health-init:\n    <<: *app");
