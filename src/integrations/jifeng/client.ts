@@ -152,6 +152,14 @@ export class JifengClient {
         retryable: true,
       });
     }
+    if (input.erpNo !== undefined && parsed.data.erpNo !== input.erpNo) {
+      throw new JifengApiError({
+        code: "INVALID_RESPONSE",
+        message: "极风订单响应与查询单号不一致",
+        requestId: response.requestId,
+        retryable: true,
+      });
+    }
     return parsed.data;
   }
 

@@ -135,6 +135,31 @@ describe("Jifeng API client", () => {
     });
   });
 
+  test("rejects an order detail that does not match the requested ERP number", async () => {
+    const client = new JifengClient({
+      credentials,
+      fetch: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          data: {
+            erpNo: "TZX-JF-WRONG-ORDER",
+            status: 7,
+            trackingNo: "CP-WRONG-ORDER",
+          },
+          requestId: "mismatched-order-response",
+        }),
+      ),
+    });
+
+    await expect(
+      client.getOrder({ erpNo: "TZX-JF-EXPECTED-ORDER" }),
+    ).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      requestId: "mismatched-order-response",
+      retryable: true,
+    });
+  });
+
   test.each([
     [
       "warehouses",
