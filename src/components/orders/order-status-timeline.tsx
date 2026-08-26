@@ -4,6 +4,7 @@ import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-la
 import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 
 type OrderStatusTimelineProps = {
+  audience: "admin" | "customer";
   orderStatus: string;
   paidAt?: Date | string | null;
   paymentClaimStatus?: string | null;
@@ -76,6 +77,7 @@ function replacementDetail(status: string) {
 }
 
 function buildActiveStages({
+  audience,
   orderStatus,
   paymentClaimStatus,
   replacementStatuses = [],
@@ -130,11 +132,17 @@ function buildActiveStages({
     stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
     stages[3] = { detail: "包裹已取消", label: "仓库处理", state: "danger" };
   } else if (shipmentStatus === "SUBMITTED") {
-    stages[2] = {
-      detail: "已匹配到极风订单，待同舟行选择物流渠道并提交仓库；系统随后自动同步。",
-      label: "待同舟行提交仓库",
-      state: "current",
-    };
+    stages[2] = audience === "admin"
+      ? {
+          detail: "已匹配到极风订单，请在极风后台选择物流渠道并提交仓库；系统随后自动同步。",
+          label: "待在极风后台提交仓库",
+          state: "current",
+        }
+      : {
+          detail: "已匹配到极风订单，待同舟行选择物流渠道并提交仓库；系统随后自动同步。",
+          label: "待同舟行提交仓库",
+          state: "current",
+        };
   } else if (shipmentStatus === "SUBMITTING") {
     stages[2] = { detail: "正在匹配仓库订单", label: "仓库接单", state: "current" };
   } else if (shipmentStatus === "PENDING") {
@@ -153,7 +161,12 @@ function buildActiveStages({
     stages.push({
       detail: replacementDetail(replacementStatus),
       label: "补发处理",
-      state: replacementStatus === "EXCEPTION" ? "danger" : "current",
+      state:
+        replacementStatus === "SHIPPED"
+          ? "complete"
+          : replacementStatus === "EXCEPTION"
+            ? "danger"
+            : "current",
     });
   }
 

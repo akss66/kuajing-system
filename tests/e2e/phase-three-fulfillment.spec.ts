@@ -120,6 +120,56 @@ async function seedShippedOrder() {
   return { admin, adminProfile, customerUser, order, shipment, sku };
 }
 
+test("customer waits while administrator gets the Jifeng submission instruction", async ({
+  browser,
+  page,
+}, testInfo) => {
+  const fixture = await seedShippedOrder();
+  await db
+    .update(fulfillmentOrders)
+    .set({ status: "FULFILLING" })
+    .where(eq(fulfillmentOrders.id, fixture.order.id));
+  await db
+    .update(shipmentFulfillments)
+    .set({ jifengStatus: null, shippedAt: null, status: "SUBMITTED" })
+    .where(eq(shipmentFulfillments.shipmentId, fixture.shipment.id));
+  await db
+    .update(orderShipments)
+    .set({ shippedAt: null, trackingNumber: null })
+    .where(eq(orderShipments.id, fixture.shipment.id));
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 30_000 });
+  await page.goto(`/portal/orders/${fixture.order.id}`);
+  await expect(page.getByRole("heading", { name: "同舟行正在提交仓库" })).toBeVisible();
+  const customerTimeline = page.getByRole("region", { name: "订单状态时间线" });
+  await expect(customerTimeline).toContainText("待同舟行提交仓库");
+  await expect(customerTimeline).not.toContainText("请在极风后台");
+
+  const adminContext = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL as string,
+    viewport: page.viewportSize() ?? { height: 900, width: 1_440 },
+  });
+  const adminPage = await adminContext.newPage();
+  await loginThroughUi(adminPage, fixture.admin);
+  await expect(adminPage).toHaveURL(/\/admin$/, { timeout: 30_000 });
+  await adminPage.goto(`/admin/orders/${fixture.order.id}`);
+  const adminTimeline = adminPage.getByRole("region", { name: "订单状态时间线" });
+  await expect(adminTimeline).toContainText("待在极风后台提交仓库");
+  await expect(adminTimeline).toContainText(
+    "请在极风后台选择物流渠道并提交仓库；系统随后自动同步。",
+  );
+
+  for (const activePage of [page, adminPage]) {
+    expect(
+      await activePage.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+  await adminContext.close();
+});
+
 test("customer and administrator share the full shipped-order progress", async ({
   browser,
   page,

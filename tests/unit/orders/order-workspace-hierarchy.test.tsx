@@ -355,6 +355,7 @@ describe("order workspace hierarchy", () => {
   it("keeps payment and proven wallet refund facts visible before cancellation", () => {
     render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="CANCELLED"
         paidAt="2026-08-12T10:30:00.000Z"
         refundedAt="2026-08-12T11:00:00.000Z"
@@ -373,6 +374,7 @@ describe("order workspace hierarchy", () => {
   it("does not claim a refund when a paid cancellation has no refund record", () => {
     render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="CANCELLED"
         paidAt="2026-08-12T10:30:00.000Z"
       />,
@@ -433,6 +435,7 @@ describe("order workspace hierarchy", () => {
   it("keeps every active order stage visible while warehouse progress advances", () => {
     const { rerender } = render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="FULFILLING"
         paidAt="2026-08-12T10:30:00.000Z"
         shipmentStatuses={["SUBMITTED"]}
@@ -452,6 +455,23 @@ describe("order workspace hierarchy", () => {
 
     rerender(
       <OrderStatusTimeline
+        audience="admin"
+        orderStatus="FULFILLING"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["SUBMITTED"]}
+      />,
+    );
+    timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("待在极风后台提交仓库")).toBeVisible();
+    expect(
+      within(timeline).getByText(
+        "已匹配到极风订单，请在极风后台选择物流渠道并提交仓库；系统随后自动同步。",
+      ),
+    ).toHaveAttribute("aria-current", "step");
+
+    rerender(
+      <OrderStatusTimeline
+        audience="customer"
         orderStatus="FULFILLING"
         paidAt="2026-08-12T10:30:00.000Z"
         shipmentStatuses={["FULFILLING"]}
@@ -472,6 +492,7 @@ describe("order workspace hierarchy", () => {
   it("does not complete a multi-package order while another package is still pending", () => {
     render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="FULFILLING"
         paidAt="2026-08-12T10:30:00.000Z"
         shipmentStatuses={["SHIPPED", null]}
@@ -492,6 +513,7 @@ describe("order workspace hierarchy", () => {
   it("finishes a partially cancelled order without claiming every package shipped", () => {
     render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="SHIPPED"
         paidAt="2026-08-12T10:30:00.000Z"
         shipmentStatuses={["SHIPPED", "SHIPPED", "SHIPPED", "CANCELLED"]}
@@ -512,6 +534,7 @@ describe("order workspace hierarchy", () => {
   it("describes warehouse processing exceptions without fulfillment jargon", () => {
     render(
       <OrderStatusTimeline
+        audience="customer"
         orderStatus="FULFILLMENT_EXCEPTION"
         paidAt="2026-08-12T10:30:00.000Z"
         shipmentStatuses={["EXCEPTION"]}
@@ -524,5 +547,27 @@ describe("order workspace hierarchy", () => {
       "step",
     );
     expect(within(timeline).queryByText("履约异常")).not.toBeInTheDocument();
+  });
+
+  it("marks a shipped replacement as complete instead of the current step", () => {
+    render(
+      <OrderStatusTimeline
+        audience="customer"
+        orderStatus="SHIPPED"
+        paidAt="2026-08-12T10:30:00.000Z"
+        replacementStatuses={["SHIPPED"]}
+        shipmentStatuses={["SHIPPED"]}
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("补发仓库已发货")).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(within(timeline).getByText("流程已完成")).toBeVisible();
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
   });
 });

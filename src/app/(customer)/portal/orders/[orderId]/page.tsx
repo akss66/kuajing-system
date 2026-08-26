@@ -83,6 +83,7 @@ export default async function CustomerOrderDetailPage({
       />
 
       <OrderStatusTimeline
+        audience="customer"
         orderStatus={order.status}
         paidAt={order.paidAt}
         paymentClaimStatus={order.latestPaymentClaim?.status ?? null}

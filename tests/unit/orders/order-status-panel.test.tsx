@@ -11,6 +11,7 @@ import type { CustomerOrderDetail } from "@/modules/orders/queries";
 function paidOrder(input: {
   offlineAmountFen?: number | null;
   paymentMode: "DIRECT_OFFLINE" | "MIXED" | "WALLET";
+  shipmentStatuses?: string[];
   status?: "FULFILLING" | "PAID_PENDING_FULFILLMENT" | "SHIPPED";
   walletAmountFen?: number | null;
 }) {
@@ -29,7 +30,12 @@ function paidOrder(input: {
     paidAt: new Date("2026-08-21T02:00:00.000Z"),
     paymentMode: input.paymentMode,
     refundedAt: null,
-    shipments: [],
+    shipments: (input.shipmentStatuses ?? []).map((fulfillmentStatus, index) => ({
+      fulfillmentStatus,
+      id: `shipment-${index + 1}`,
+      kind: "NORMAL",
+      replacementStatus: null,
+    })),
     status: input.status ?? "PAID_PENDING_FULFILLMENT",
     storeName: "混合结算店铺",
     totalAmountFen: 500,
@@ -89,10 +95,33 @@ describe("OrderStatusPanel payment facts", () => {
   });
 
   it.each([
-    { expected: "仓库已接单，正在处理发货", status: "FULFILLING" as const },
+    {
+      expected: "包裹取消处理中，待仓库确认",
+      shipmentStatuses: ["CANCEL_PENDING"],
+      status: "FULFILLING" as const,
+    },
+    {
+      expected: "同舟行正在匹配仓库订单",
+      shipmentStatuses: ["SUBMITTING"],
+      status: "FULFILLING" as const,
+    },
+    {
+      expected: "同舟行正在提交仓库",
+      shipmentStatuses: ["SUBMITTED"],
+      status: "FULFILLING" as const,
+    },
+    {
+      expected: "仓库已接单，正在处理发货",
+      shipmentStatuses: ["FULFILLING"],
+      status: "FULFILLING" as const,
+    },
     { expected: "包裹已发货，可留意后续物流状态", status: "SHIPPED" as const },
-  ])("uses the real $status progress instead of saying every paid order is waiting", ({ expected, status }) => {
-    render(<OrderStatusPanel order={paidOrder({ paymentMode: "WALLET", status })} />);
+  ])("uses real shipment progress instead of overclaiming $status", ({ expected, shipmentStatuses, status }) => {
+    render(
+      <OrderStatusPanel
+        order={paidOrder({ paymentMode: "WALLET", shipmentStatuses, status })}
+      />,
+    );
 
     expect(screen.getByRole("heading", { name: expected })).toBeVisible();
     expect(

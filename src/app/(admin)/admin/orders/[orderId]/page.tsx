@@ -147,6 +147,7 @@ export default async function AdminOrderDetailPage({
       />
 
       <OrderStatusTimeline
+        audience="admin"
         orderStatus={order.status}
         paidAt={order.paidAt}
         refundedAt={order.refundedAt}

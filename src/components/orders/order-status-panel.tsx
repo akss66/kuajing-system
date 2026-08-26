@@ -32,7 +32,24 @@ function paidOrderHeadline(order: CustomerOrderDetail) {
     return "包裹已发货，可留意后续物流状态";
   }
   if (order.status === "FULFILLING") {
-    return "仓库已接单，正在处理发货";
+    const shipmentStatuses = order.shipments.map((shipment) => shipment.fulfillmentStatus);
+    if (shipmentStatuses.includes("CANCEL_PENDING")) {
+      return "包裹取消处理中，待仓库确认";
+    }
+    if (
+      shipmentStatuses.some((status) =>
+        status === null || ["PENDING", "SUBMITTING"].includes(status),
+      )
+    ) {
+      return "同舟行正在匹配仓库订单";
+    }
+    if (shipmentStatuses.includes("SUBMITTED")) {
+      return "同舟行正在提交仓库";
+    }
+    if (shipmentStatuses.includes("FULFILLING")) {
+      return "仓库已接单，正在处理发货";
+    }
+    return "订单已进入履约处理";
   }
   return "付款已完成，等待同舟行发货";
 }
