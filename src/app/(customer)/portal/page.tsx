@@ -8,9 +8,9 @@ export default async function CustomerPortalPage() {
   const dashboard = await getCustomerTaskDashboard(principal.customerId);
 
   return (
-    <div className="space-y-8" data-portal-home>
+    <div className="space-y-6" data-portal-home>
       <PageHeading
-        description="优先完成上传、付款和异常处理，再开始新的拿货流程。"
+        description="查看当前待办，快速开始下一次拿货。"
         title="客户首页"
       />
       <CustomerTaskDashboard dashboard={dashboard} />

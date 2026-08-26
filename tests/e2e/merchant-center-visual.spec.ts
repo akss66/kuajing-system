@@ -112,7 +112,7 @@ const workspaceRoutes = [
   {
     audience: "customer" as const,
     heading: "客户首页",
-    expectedTexts: ["继续处理", "快捷拿货", "店铺摘要", "资金摘要"],
+    expectedTexts: ["下一步推荐", "开始下一批拿货", "店铺摘要", "资金摘要"],
     path: "/portal",
     screenshot: "customer-home",
     shouldShowMetricStrip: false,

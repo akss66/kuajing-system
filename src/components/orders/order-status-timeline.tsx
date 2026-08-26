@@ -1,7 +1,7 @@
 import { Check, Circle, CircleAlert, Clock3 } from "lucide-react";
 
-import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
+import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 
 type OrderStatusTimelineProps = {
   orderStatus: string;
@@ -12,21 +12,15 @@ type OrderStatusTimelineProps = {
   shipmentStatuses?: Array<string | null>;
 };
 
+type TimelineStageState = "complete" | "current" | "danger" | "upcoming" | "warning";
+
 type TimelineStage = {
+  detail?: string;
   label: string;
-  tone?: "danger" | "warning";
+  state: TimelineStageState;
 };
 
-const shipmentLabels: Record<string, string> = {
-  CANCELLED: "包裹已取消",
-  CANCEL_PENDING: "包裹取消中",
-  EXCEPTION: "仓库处理异常",
-  FULFILLING: "待仓库发货",
-  PENDING: "等待匹配极风订单",
-  SHIPPED: "仓库已发货",
-  SUBMITTED: "已匹配极风订单",
-  SUBMITTING: "正在匹配极风订单",
-};
+const FULL_FLOW_STAGE_COUNT = 5;
 
 function mostRelevantStatus(statuses: Array<string | null>) {
   const priority = [
@@ -43,119 +37,224 @@ function mostRelevantStatus(statuses: Array<string | null>) {
   return priority.find((status) => statuses.includes(status)) ?? null;
 }
 
-function buildStages({
+function terminalStages({
   orderStatus,
   paidAt,
-  paymentClaimStatus,
   refundedAt,
-  replacementStatuses = [],
-  shipmentStatuses = [],
-}: OrderStatusTimelineProps): TimelineStage[] {
-  const stages: TimelineStage[] = [{ label: "订单已创建" }];
+}: Pick<OrderStatusTimelineProps, "orderStatus" | "paidAt" | "refundedAt">) {
+  const stages: TimelineStage[] = [{ label: "订单已创建", state: "complete" }];
 
   if (orderStatus === "EXPIRED") {
     stages.push({
       label: getAdminSettlementOrderStatusLabel(orderStatus),
-      tone: "danger",
+      state: "danger",
     });
     return stages;
   }
 
-  if (orderStatus === "CANCELLED") {
-    if (paidAt) stages.push({ label: "已付款" });
-    if (refundedAt) stages.push({ label: "余额已退回" });
-    stages.push({ label: getAdminSettlementOrderStatusLabel(orderStatus), tone: "danger" });
-    return stages;
-  }
+  if (paidAt) stages.push({ label: "已付款", state: "complete" });
+  if (refundedAt) stages.push({ label: "余额已退回", state: "complete" });
+  stages.push({
+    label: getAdminSettlementOrderStatusLabel(orderStatus),
+    state: "danger",
+  });
+  return stages;
+}
+
+function paymentDetail(paymentClaimStatus?: string | null) {
+  if (paymentClaimStatus === "PENDING") return "待核款";
+  if (paymentClaimStatus === "REJECTED") return "付款声明已拒绝";
+  return "等待付款";
+}
+
+function replacementDetail(status: string) {
+  const label = formatReplacementStatus(status);
+  if (status === "FULFILLING") return "补发待仓库发货";
+  if (status === "SHIPPED") return "补发仓库已发货";
+  if (status === "PENDING_FULFILLMENT") return "待补发";
+  return `补发${label}`;
+}
+
+function buildActiveStages({
+  orderStatus,
+  paymentClaimStatus,
+  replacementStatuses = [],
+  shipmentStatuses = [],
+}: OrderStatusTimelineProps): TimelineStage[] {
+  const stages: TimelineStage[] = [
+    { detail: "创建成功", label: "订单已创建", state: "complete" },
+    { detail: "尚未付款", label: "付款确认", state: "upcoming" },
+    { detail: "等待付款完成", label: "仓库接单", state: "upcoming" },
+    { detail: "尚未开始", label: "仓库处理", state: "upcoming" },
+    { detail: "尚未发货", label: "仓库已发货", state: "upcoming" },
+  ];
 
   if (orderStatus === "PENDING_PAYMENT") {
-    if (paymentClaimStatus === "PENDING") stages.push({ label: "待核款", tone: "warning" });
-    else if (paymentClaimStatus === "REJECTED") stages.push({ label: "付款声明已拒绝", tone: "danger" });
-    else stages.push({ label: "待付款", tone: "warning" });
+    stages[1] = {
+      detail: paymentDetail(paymentClaimStatus),
+      label: "付款确认",
+      state: paymentClaimStatus === "REJECTED" ? "danger" : "warning",
+    };
     return stages;
   }
 
-  stages.push({ label: "已付款" });
-
+  stages[1] = { detail: "付款已确认", label: "付款确认", state: "complete" };
   const shipmentStatus = mostRelevantStatus(shipmentStatuses);
+  const allActiveShipmentsShipped =
+    shipmentStatuses.some((status) => status === "SHIPPED") &&
+    shipmentStatuses.every((status) => status === "SHIPPED" || status === "CANCELLED");
+
   if (orderStatus === "FULFILLMENT_EXCEPTION" || shipmentStatus === "EXCEPTION") {
-    stages.push({ label: "仓库处理异常", tone: "danger" });
-  } else if (orderStatus === "SHIPPED" || shipmentStatus === "SHIPPED") {
-    stages.push({ label: "仓库已发货" });
-  } else if (orderStatus === "FULFILLING" || shipmentStatus) {
-    stages.push({ label: shipmentStatus ? (shipmentLabels[shipmentStatus] ?? "待仓库发货") : "待仓库发货" });
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "仓库处理异常", label: "仓库处理", state: "danger" };
+  } else if (orderStatus === "SHIPPED" || allActiveShipmentsShipped) {
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "处理完成", label: "仓库处理", state: "complete" };
+    stages[4] = { detail: "全部包裹已发出", label: "仓库已发货", state: "current" };
+  } else if (shipmentStatus === "FULFILLING") {
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "仓库正在处理", label: "仓库处理", state: "current" };
+  } else if (shipmentStatus === "CANCEL_PENDING") {
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "包裹取消中", label: "仓库处理", state: "warning" };
+  } else if (shipmentStatus === "CANCELLED") {
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "包裹已取消", label: "仓库处理", state: "danger" };
+  } else if (shipmentStatus === "SUBMITTED") {
+    stages[2] = { detail: "已匹配仓库订单", label: "仓库接单", state: "current" };
+  } else if (shipmentStatus === "SUBMITTING") {
+    stages[2] = { detail: "正在匹配仓库订单", label: "仓库接单", state: "current" };
+  } else if (shipmentStatus === "PENDING") {
+    stages[2] = { detail: "等待匹配仓库订单", label: "仓库接单", state: "current" };
+  } else if (orderStatus === "FULFILLING") {
+    stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
+    stages[3] = { detail: "仓库正在处理", label: "仓库处理", state: "current" };
   } else {
-    stages.push({ label: "待发货", tone: "warning" });
+    stages[2] = { detail: "等待对接仓库", label: "仓库接单", state: "current" };
   }
 
   const replacementStatus = mostRelevantStatus(replacementStatuses);
   if (replacementStatus) {
-    const replacementLabel = formatReplacementStatus(replacementStatus);
+    const currentStage = stages.find((stage) => ["current", "danger", "warning"].includes(stage.state));
+    if (currentStage?.state === "current") currentStage.state = "complete";
     stages.push({
-      label:
-        replacementStatus === "FULFILLING"
-          ? "补发待仓库发货"
-          : replacementStatus === "SHIPPED"
-            ? "补发仓库已发货"
-          : replacementStatus === "PENDING_FULFILLMENT"
-            ? "待补发"
-            : `补发${replacementLabel}`,
-      tone: replacementStatus === "EXCEPTION" ? "danger" : undefined,
+      detail: replacementDetail(replacementStatus),
+      label: "补发处理",
+      state: replacementStatus === "EXCEPTION" ? "danger" : "current",
     });
   }
 
   return stages;
 }
 
+function buildStages(props: OrderStatusTimelineProps): TimelineStage[] {
+  if (["CANCELLED", "EXPIRED"].includes(props.orderStatus)) {
+    return terminalStages(props);
+  }
+  return buildActiveStages(props);
+}
+
+function progressValue(stages: TimelineStage[], terminal: boolean) {
+  if (terminal) return null;
+  const activeIndex = stages.findIndex((stage) =>
+    ["current", "danger", "warning"].includes(stage.state),
+  );
+  if (activeIndex < 0) return 0;
+  return Math.min(100, Math.round((activeIndex / (FULL_FLOW_STAGE_COUNT - 1)) * 100));
+}
+
 export function OrderStatusTimeline(props: OrderStatusTimelineProps) {
   const stages = buildStages(props);
+  const terminal = ["CANCELLED", "EXPIRED"].includes(props.orderStatus);
+  const value = progressValue(stages, terminal);
 
   return (
     <section
       aria-label="订单状态时间线"
       className="rounded-[var(--radius-surface)] border border-border bg-background p-4 sm:p-5"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-ink">订单进度</h2>
-          <p className="mt-1 text-sm text-muted">按付款、仓库处理和补发的真实状态显示当前进度。</p>
+          <p className="mt-1 text-sm text-muted">客户端与管理端同步展示付款、仓库接单、处理和发货状态。</p>
         </div>
-        <Clock3 aria-hidden="true" className="size-5 shrink-0 text-primary" />
+        <div className="flex items-center gap-2 text-sm text-primary">
+          <Clock3 aria-hidden="true" className="size-5 shrink-0" />
+          {value === null ? "流程已终止" : `全流程 ${value}%`}
+        </div>
       </div>
-      <ol className="mt-5 grid gap-0 sm:grid-cols-[repeat(auto-fit,minmax(130px,1fr))]">
+
+      {value !== null ? (
+        <div
+          aria-label="订单全流程进度"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={value}
+          className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-muted"
+          role="progressbar"
+        >
+          <span
+            aria-hidden="true"
+            className="block h-full rounded-full bg-primary transition-[width] duration-300"
+            style={{ width: `${value}%` }}
+          />
+        </div>
+      ) : null}
+
+      <ol className="mt-4 grid gap-0 sm:mt-5 sm:grid-cols-[repeat(auto-fit,minmax(130px,1fr))]">
         {stages.map((stage, index) => {
-          const current = index === stages.length - 1;
-          const Icon = stage.tone === "danger" ? CircleAlert : current ? Circle : Check;
+          const current = ["current", "danger", "warning"].includes(stage.state);
+          const Icon = stage.state === "danger" ? CircleAlert : stage.state === "complete" ? Check : Circle;
           return (
             <li
-              className="relative flex min-w-0 gap-3 pb-5 last:pb-0 sm:block sm:pb-0 sm:pr-4"
+              className="relative flex min-w-0 gap-3 pb-3 last:pb-0 sm:block sm:pb-0 sm:pr-4"
+              data-state={stage.state}
               key={`${stage.label}-${index}`}
             >
               {index < stages.length - 1 ? (
                 <span
                   aria-hidden="true"
-                  className="absolute left-[11px] top-6 h-[calc(100%-16px)] w-px bg-border sm:left-6 sm:top-[11px] sm:h-px sm:w-[calc(100%-24px)]"
+                  className={`absolute left-[11px] top-6 h-[calc(100%-16px)] w-px sm:left-6 sm:top-[11px] sm:h-px sm:w-[calc(100%-24px)] ${
+                    stage.state === "complete" ? "bg-success/45" : "bg-border"
+                  }`}
                 />
               ) : null}
               <span
-                className={`relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border bg-background ${
-                  stage.tone === "danger"
-                    ? "border-danger/40 text-danger"
-                    : current
-                      ? "border-primary bg-primary text-white"
-                      : "border-success/40 text-success"
+                className={`relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border ${
+                  stage.state === "danger"
+                    ? "border-danger/40 bg-danger/10 text-danger"
+                    : stage.state === "warning"
+                      ? "border-warning bg-warning text-white"
+                      : stage.state === "current"
+                        ? "border-primary bg-primary text-white"
+                        : stage.state === "complete"
+                          ? "border-success/40 bg-background text-success"
+                          : "border-border bg-background text-muted"
                 }`}
               >
                 <Icon aria-hidden="true" className="size-3.5" />
               </span>
-              <p
-                aria-current={current ? "step" : undefined}
-                className={`min-w-0 pt-0.5 text-sm font-medium sm:mt-2 sm:pt-0 ${
-                  stage.tone === "danger" ? "text-danger" : current ? "text-ink" : "text-muted"
-                }`}
-              >
-                {stage.label}
-              </p>
+              <div className="min-w-0 pt-0.5 sm:mt-2 sm:pt-0">
+                <p className={`text-sm font-semibold ${stage.state === "upcoming" ? "text-muted" : "text-ink"}`}>
+                  {stage.label}
+                </p>
+                {stage.detail ? (
+                  <p
+                    aria-current={current ? "step" : undefined}
+                    className={`mt-0.5 text-xs leading-4 sm:mt-1 sm:leading-5 ${
+                      stage.state === "danger"
+                        ? "text-danger"
+                        : stage.state === "warning"
+                          ? "text-warning"
+                          : stage.state === "current"
+                            ? "text-primary-hover"
+                            : "text-muted"
+                    }`}
+                  >
+                    {stage.detail}
+                  </p>
+                ) : null}
+              </div>
             </li>
           );
         })}

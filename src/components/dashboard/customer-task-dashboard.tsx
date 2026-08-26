@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Banknote,
-  Boxes,
   CheckCircle2,
   Clock3,
   PackageSearch,
@@ -115,9 +114,15 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
   );
 
   return (
-    <div className="space-y-9" data-portal-dashboard>
+    <div className="space-y-7" data-portal-dashboard>
       <section aria-labelledby="continuation-title" className="space-y-3" data-portal-continuation>
-        <SectionHeading description="把影响付款和发货的事项放在最前面。" id="continuation-title" title="继续处理" />
+        <SectionHeading
+          description={dashboard.primaryContinuationTarget
+            ? "把影响付款和发货的事项放在最前面。"
+            : "当前没有待办，从实时货盘开始下一次拿货。"}
+          id="continuation-title"
+          title={dashboard.primaryContinuationTarget ? "继续处理" : "下一步推荐"}
+        />
         <div className="space-y-4">
           {dashboard.primaryContinuationTarget && continuation ? (
             <div className="flex flex-col gap-4 rounded-2xl bg-primary-soft/70 px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between" data-portal-focus>
@@ -133,29 +138,64 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
               </div>
               <Link
                 aria-label={`${continuation.label}，继续处理`}
-                className="portal-focus-action inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[0.7rem] bg-primary px-5 text-sm font-semibold text-white outline-none transition-[transform,background-color,box-shadow] hover:bg-primary-hover hover:shadow-md focus-visible:ring-3 focus-visible:ring-primary/25"
+                className="portal-focus-action inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-5 text-sm font-semibold text-white outline-none transition-[transform,background-color,box-shadow] hover:bg-primary-hover hover:shadow-md focus-visible:ring-3 focus-visible:ring-primary/25"
                 href={dashboard.primaryContinuationTarget.href}
               >
                 继续处理 <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </div>
           ) : (
-            <div
-              aria-label="当前拿货均已处理完成"
-              className="flex flex-col gap-4 rounded-2xl bg-[var(--portal-ready-surface)] px-4 py-4 shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:flex-row sm:items-center sm:justify-between"
+            <section
+              aria-labelledby="next-purchase-title"
+              className="grid overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]"
               data-portal-ready
-              role="status"
             >
-              <div className="flex min-w-0 items-start gap-3.5">
+              <div className="px-5 py-5 sm:px-6 sm:py-6">
+                <h3 className="text-xl font-semibold tracking-[-0.025em] text-foreground" id="next-purchase-title">
+                  开始下一批拿货
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  先查看最新拿货价与可售库存，确认后再上传 TEMU 原始订单。
+                </p>
+                <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap">
+                  <Link
+                    className="portal-focus-action inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-primary px-5 text-sm font-semibold text-white outline-none transition-[transform,background-color,box-shadow] hover:bg-primary-hover hover:shadow-md focus-visible:ring-3 focus-visible:ring-primary/25"
+                    href="/portal/catalog"
+                  >
+                    <PackageSearch aria-hidden="true" className="size-4" />
+                    查看实时货盘
+                    <ArrowRight aria-hidden="true" className="size-4" />
+                  </Link>
+                  <Link
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-5 text-sm font-semibold text-foreground outline-none transition-[background-color,border-color,transform] hover:bg-[var(--portal-hover)] focus-visible:ring-3 focus-visible:ring-primary/20"
+                    href="/portal/imports/new"
+                  >
+                    <Upload aria-hidden="true" className="size-4 text-[var(--portal-accent-foreground)]" />
+                    上传订单
+                  </Link>
+                  <Link
+                    className="inline-flex min-h-12 items-center justify-center gap-2 px-3 text-sm font-semibold text-primary-hover outline-none hover:underline hover:underline-offset-4 focus-visible:ring-3 focus-visible:ring-primary/20"
+                    href="/portal/bulk-orders"
+                  >
+                    <Store aria-hidden="true" className="size-4" />
+                    多店铺批量上传
+                  </Link>
+                </div>
+              </div>
+              <div
+                aria-label="当前无待付款和异常事项"
+                className="flex items-center gap-3.5 border-t border-border/70 bg-[var(--portal-ready-surface)] px-5 py-5 lg:border-l lg:border-t-0 lg:px-6"
+                role="status"
+              >
                 <span className="portal-ready-mark flex size-10 shrink-0 items-center justify-center rounded-full bg-success text-white">
                   <CheckCircle2 aria-hidden="true" className="size-5" />
                 </span>
-                <div>
-                  <h3 className="text-base font-semibold tracking-[-0.015em] text-foreground">当前拿货均已处理完成</h3>
-                  <p className="mt-1 max-w-lg text-sm leading-6 text-muted-foreground">订单、付款和异常都已处理完成，可以开始新的拿货流程。</p>
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">当前无待付款和异常事项</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">上传、付款和履约均已处理完成。</p>
                 </div>
               </div>
-            </div>
+            </section>
           )}
 
           {taskLinks.length ? (
@@ -176,25 +216,29 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
         </div>
       </section>
 
-      <section aria-labelledby="quick-purchase-title" className="space-y-3" data-portal-quick-actions>
-        <SectionHeading description="先确认货盘，再上传 TEMU 原始订单。" id="quick-purchase-title" title="快捷拿货" />
-        <nav aria-label="快捷拿货" className="grid overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] md:grid-cols-2">
-          <Link className="portal-primary-route group flex min-h-28 items-center gap-4 px-5 py-5 outline-none md:border-r md:border-border sm:px-6" href="/portal/catalog">
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-[0.8rem] bg-primary text-white"><PackageSearch aria-hidden="true" className="size-5" /></span>
-            <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">实时货盘</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">查看你的价格、规格和实时可售库存</span></span>
-            <ArrowRight aria-hidden="true" className="size-5 text-primary transition-transform group-hover:translate-x-1" />
-          </Link>
-          <Link className="portal-primary-route group flex min-h-28 items-center gap-4 border-t border-border px-5 py-5 outline-none md:border-t-0 sm:px-6" href="/portal/imports/new">
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-[0.8rem] bg-[var(--portal-accent-surface)] text-[var(--portal-accent-foreground)]"><Upload aria-hidden="true" className="size-5" /></span>
-            <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">上传订单</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">上传一个店铺的 TEMU 原始订单</span></span>
-            <ArrowRight aria-hidden="true" className="size-5 text-primary transition-transform group-hover:translate-x-1" />
-          </Link>
-          <div className="flex flex-col gap-2 border-t border-border bg-[var(--portal-subtle-surface)] px-5 py-3 text-sm md:col-span-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <span className="text-muted-foreground">多个店铺都有订单文件？</span>
-            <Link className="inline-flex min-h-11 items-center gap-2 font-semibold text-primary-hover" href="/portal/bulk-orders">使用多店铺批量上传 <Store aria-hidden="true" className="size-4" /></Link>
-          </div>
-        </nav>
-      </section>
+      {dashboard.primaryContinuationTarget ? (
+        <section aria-labelledby="quick-purchase-title" className="space-y-3" data-portal-quick-actions>
+          <SectionHeading description="先确认货盘，再上传 TEMU 原始订单。" id="quick-purchase-title" title="快捷拿货" />
+          <nav aria-label="快捷拿货" className="grid overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] md:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
+            <Link className="portal-primary-route group flex min-h-28 items-center gap-4 px-5 py-5 outline-none md:border-r md:border-border sm:px-6" href="/portal/catalog">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-white"><PackageSearch aria-hidden="true" className="size-5" /></span>
+              <span className="min-w-0 flex-1"><strong className="block text-base font-semibold text-foreground">实时货盘</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">查看你的价格、规格和实时可售库存</span></span>
+              <ArrowRight aria-hidden="true" className="size-5 text-primary transition-transform group-hover:translate-x-1" />
+            </Link>
+            <div className="grid border-t border-border md:border-l md:border-t-0">
+              <Link className="portal-primary-route group flex min-h-20 items-center gap-3 px-5 py-4 outline-none sm:px-6" href="/portal/imports/new">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--portal-accent-surface)] text-[var(--portal-accent-foreground)]"><Upload aria-hidden="true" className="size-[18px]" /></span>
+                <span className="min-w-0 flex-1"><strong className="block text-sm font-semibold text-foreground">上传订单</strong><span className="mt-0.5 block text-xs leading-5 text-muted-foreground">单个店铺订单文件</span></span>
+                <ArrowRight aria-hidden="true" className="size-4 text-primary transition-transform group-hover:translate-x-1" />
+              </Link>
+              <Link className="portal-primary-route flex min-h-12 items-center gap-3 border-t border-border bg-[var(--portal-subtle-surface)] px-5 py-3 text-sm font-semibold text-primary-hover outline-none sm:px-6" href="/portal/bulk-orders">
+                <Store aria-hidden="true" className="size-4" />
+                多店铺批量上传
+              </Link>
+            </div>
+          </nav>
+        </section>
+      ) : null}
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]" data-portal-summary-grid>
         <section aria-labelledby="store-summary-title" className="space-y-3">
@@ -220,18 +264,15 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
         <section aria-labelledby="funds-summary-title" className="space-y-3">
           <SectionHeading description="账户余额和订单预留。" id="funds-summary-title" title="资金摘要" />
           <WorkspacePanel className="overflow-hidden">
-            <div className="divide-y divide-border">
-              {[
-                { featured: true, icon: WalletCards, label: "可用余额", value: dashboard.walletAvailableFen },
-                { icon: Banknote, label: "账户余额", value: dashboard.walletBalanceFen },
-                { icon: Boxes, label: "订单预留", value: dashboard.walletHoldFen },
-              ].map((item) => (
-                <div className={item.featured ? "flex items-center gap-3 bg-primary/5 px-4 py-4 sm:px-5" : "flex items-center gap-3 px-4 py-4 sm:px-5"} key={item.label}>
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.65rem] bg-[var(--portal-icon-surface)] text-primary"><item.icon aria-hidden="true" className="size-4" /></span>
-                  <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">{item.label}</p><p className={item.featured ? "mt-1 truncate text-xl font-semibold tabular-nums text-primary-hover" : "mt-1 truncate text-lg font-semibold tabular-nums text-foreground"}>{money.format(item.value / 100)}</p></div>
-                </div>
-              ))}
+            <div className="flex items-center gap-3 bg-primary/5 px-4 py-4 sm:px-5">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--portal-icon-surface)] text-primary"><WalletCards aria-hidden="true" className="size-[18px]" /></span>
+              <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">可用余额</p><p className="mt-1 truncate text-xl font-semibold tabular-nums text-primary-hover">{money.format(dashboard.walletAvailableFen / 100)}</p></div>
             </div>
+            <dl className="grid grid-cols-2 border-t border-border">
+              <div className="px-4 py-3.5 sm:px-5"><dt className="text-xs text-muted-foreground">账户余额</dt><dd className="mt-1 truncate text-base font-semibold tabular-nums text-foreground">{money.format(dashboard.walletBalanceFen / 100)}</dd></div>
+              <div className="border-l border-border px-4 py-3.5 sm:px-5"><dt className="text-xs text-muted-foreground">订单预留</dt><dd className="mt-1 truncate text-base font-semibold tabular-nums text-foreground">{money.format(dashboard.walletHoldFen / 100)}</dd></div>
+            </dl>
+            <p className="border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground sm:px-5">可用余额是当前可用于新订单的金额。</p>
             <div className="border-t border-border px-4 py-2.5 text-right sm:px-5"><Link className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover" href="/portal/wallet">进入资金中心 <ArrowRight aria-hidden="true" className="size-4" /></Link></div>
           </WorkspacePanel>
         </section>

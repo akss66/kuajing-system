@@ -305,6 +305,17 @@ describe("order workspace hierarchy", () => {
 
     const timeline = screen.getByRole("region", { name: "订单状态时间线" });
     expect(within(timeline).getByText("待核款")).toHaveAttribute("aria-current", "step");
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "25",
+    );
+    expect(Array.from(timeline.querySelectorAll("li"), (item) => item.textContent)).toEqual([
+      "订单已创建创建成功",
+      "付款确认待核款",
+      "仓库接单等待付款完成",
+      "仓库处理尚未开始",
+      "仓库已发货尚未发货",
+    ]);
     expect(within(timeline).queryByText("PENDING")).not.toBeInTheDocument();
   });
 
@@ -412,6 +423,66 @@ describe("order workspace hierarchy", () => {
     expect(within(timeline).getByText("补发待仓库发货")).toHaveAttribute(
       "aria-current",
       "step",
+    );
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
+  });
+
+  it("keeps every active order stage visible while warehouse progress advances", () => {
+    const { rerender } = render(
+      <OrderStatusTimeline
+        orderStatus="FULFILLING"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["SUBMITTED"]}
+      />,
+    );
+
+    let timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("已匹配仓库订单")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(timeline).getByText("仓库处理")).toBeVisible();
+    expect(within(timeline).getByText("尚未发货")).toBeVisible();
+
+    rerender(
+      <OrderStatusTimeline
+        orderStatus="FULFILLING"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["FULFILLING"]}
+      />,
+    );
+
+    timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("仓库正在处理")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "75",
+    );
+  });
+
+  it("does not complete a multi-package order while another package is still pending", () => {
+    render(
+      <OrderStatusTimeline
+        orderStatus="FULFILLING"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["SHIPPED", null]}
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("仓库正在处理")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "75",
     );
   });
 

@@ -305,6 +305,7 @@ textarea {
 
 [data-merchant-shell="customer"] [data-portal-home] [data-page-heading] {
   background: transparent;
+  padding-bottom: 1rem;
 }
 
 [data-merchant-shell="customer"] [data-page-heading] h1 {

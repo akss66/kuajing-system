@@ -148,7 +148,7 @@ describe("operations dashboards", () => {
     expect(document.body).not.toHaveTextContent("快捷入口");
   });
 
-  it("renders a calm ready state when the customer has no unfinished work", () => {
+  it("turns the ready state into a clear next-purchase path", () => {
     render(
       <CustomerTaskDashboard
         dashboard={{
@@ -167,9 +167,15 @@ describe("operations dashboards", () => {
       />,
     );
 
-    const readyState = screen.getByRole("status", { name: "当前拿货均已处理完成" });
+    const readyState = screen.getByRole("region", { name: "开始下一批拿货" });
     expect(readyState).toHaveAttribute("data-portal-ready");
     expect(document.querySelector("[data-portal-task-overview]")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-portal-quick-actions]")).not.toBeInTheDocument();
+    expect(screen.getByText("当前无待付款和异常事项")).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看实时货盘" })).toHaveAttribute(
+      "href",
+      "/portal/catalog",
+    );
     expect(screen.getAllByRole("link", { name: /上传订单/ })).toHaveLength(1);
     expect(screen.getByRole("link", { name: /上传订单/ })).toHaveAttribute(
       "href",

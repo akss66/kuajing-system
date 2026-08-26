@@ -120,6 +120,69 @@ async function seedShippedOrder() {
   return { admin, adminProfile, customerUser, order, shipment, sku };
 }
 
+test("customer and administrator share the full shipped-order progress", async ({
+  browser,
+  page,
+}, testInfo) => {
+  const fixture = await seedShippedOrder();
+  const mobile = testInfo.project.name.includes("mobile");
+
+  await loginThroughUi(page, fixture.customerUser);
+  await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 30_000 });
+  await page.goto(`/portal/orders/${fixture.order.id}`);
+  const customerTimeline = page.getByRole("region", { name: "订单状态时间线" });
+  await expect(customerTimeline.locator("li")).toHaveCount(5);
+  await expect(customerTimeline.getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+    "aria-valuenow",
+    "100",
+  );
+  await expect(customerTimeline).toContainText("订单已创建");
+  await expect(customerTimeline).toContainText("付款确认");
+  await expect(customerTimeline).toContainText("仓库接单");
+  await expect(customerTimeline).toContainText("仓库处理");
+  await expect(customerTimeline).toContainText("仓库已发货");
+  if (mobile) {
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+  } else {
+    await expect(customerTimeline).toHaveScreenshot(
+      `customer-order-progress-${testInfo.project.name}.png`,
+      { animations: "disabled" },
+    );
+  }
+
+  const adminContext = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL as string,
+    viewport: page.viewportSize() ?? { height: 900, width: 1_440 },
+  });
+  const adminPage = await adminContext.newPage();
+  await loginThroughUi(adminPage, fixture.admin);
+  await expect(adminPage).toHaveURL(/\/admin$/, { timeout: 30_000 });
+  await adminPage.goto(`/admin/orders/${fixture.order.id}`);
+  const adminTimeline = adminPage.getByRole("region", { name: "订单状态时间线" });
+  await expect(adminTimeline.locator("li")).toHaveCount(5);
+  await expect(adminTimeline.getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+    "aria-valuenow",
+    "100",
+  );
+  if (mobile) {
+    expect(
+      await adminPage.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+  } else {
+    await expect(adminTimeline).toHaveScreenshot(
+      `admin-order-progress-${testInfo.project.name}.png`,
+      { animations: "disabled" },
+    );
+  }
+  await adminContext.close();
+});
+
 test("administrator can inspect a shipped package and create a replacement @desktop-only", async ({
   page,
 }) => {
