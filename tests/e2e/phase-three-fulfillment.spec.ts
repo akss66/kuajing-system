@@ -237,6 +237,7 @@ test("customer and administrator share the full shipped-order progress", async (
 });
 
 test("administrator can inspect a shipped package and create a replacement @desktop-only", async ({
+  browser,
   page,
 }) => {
   const fixture = await seedShippedOrder();
@@ -267,6 +268,14 @@ test("administrator can inspect a shipped package and create a replacement @desk
   await expect(
     page.getByText("补发已创建并锁定库存，系统将等待匹配极风已有订单。"),
   ).toBeVisible();
+  await expect(statusTimeline).not.toContainText("全流程 100%");
+  expect(
+    Number(
+      await statusTimeline
+        .getByRole("progressbar", { name: "订单全流程进度" })
+        .getAttribute("aria-valuenow"),
+    ),
+  ).toBeLessThan(100);
 
   await expect.poll(async () => {
     const rows = await db
@@ -280,6 +289,22 @@ test("administrator can inspect a shipped package and create a replacement @desk
     .from(inventoryReservations)
     .where(eq(inventoryReservations.referenceType, "REPLACEMENT_REQUEST"));
   expect(reservations.some((row) => row.skuId === fixture.sku.id && row.quantity === 1)).toBe(true);
+
+  const customerContext = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    viewport: page.viewportSize() ?? { height: 900, width: 1_440 },
+  });
+  const customerPage = await customerContext.newPage();
+  await loginThroughUi(customerPage, fixture.customerUser);
+  await expect(customerPage).toHaveURL(/\/portal\/?$/, { timeout: 30_000 });
+  await customerPage.goto(`/portal/orders/${fixture.order.id}`);
+  await expect(
+    customerPage.getByRole("heading", { name: "补发处理中，等待仓库发货" }),
+  ).toBeVisible();
+  await expect(
+    customerPage.getByRole("region", { name: "订单状态时间线" }),
+  ).not.toContainText("全流程 100%");
+  await customerContext.close();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations.filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))).toEqual([]);

@@ -29,6 +29,23 @@ function paidPaymentDescription(order: CustomerOrderDetail) {
 
 function paidOrderHeadline(order: CustomerOrderDetail) {
   if (order.status === "SHIPPED") {
+    const replacementStatuses = order.shipments.map(
+      (shipment) => shipment.replacementStatus,
+    );
+    if (replacementStatuses.includes("EXCEPTION")) {
+      return "补发处理遇到异常，待同舟行处理";
+    }
+    if (replacementStatuses.includes("CANCEL_PENDING")) {
+      return "补发取消处理中，待仓库确认";
+    }
+    if (
+      replacementStatuses.some(
+        (status) =>
+          status !== null && !["CANCELLED", "SHIPPED"].includes(status),
+      )
+    ) {
+      return "补发处理中，等待仓库发货";
+    }
     return "包裹已发货，可留意后续物流状态";
   }
   if (order.status === "FULFILLING") {

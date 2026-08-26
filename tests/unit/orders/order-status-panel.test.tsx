@@ -11,6 +11,7 @@ import type { CustomerOrderDetail } from "@/modules/orders/queries";
 function paidOrder(input: {
   offlineAmountFen?: number | null;
   paymentMode: "DIRECT_OFFLINE" | "MIXED" | "WALLET";
+  replacementStatus?: string | null;
   shipmentStatuses?: string[];
   status?: "FULFILLING" | "PAID_PENDING_FULFILLMENT" | "SHIPPED";
   walletAmountFen?: number | null;
@@ -33,8 +34,8 @@ function paidOrder(input: {
     shipments: (input.shipmentStatuses ?? []).map((fulfillmentStatus, index) => ({
       fulfillmentStatus,
       id: `shipment-${index + 1}`,
-      kind: "NORMAL",
-      replacementStatus: null,
+      kind: input.replacementStatus ? "REPLACEMENT" : "NORMAL",
+      replacementStatus: input.replacementStatus ?? null,
     })),
     status: input.status ?? "PAID_PENDING_FULFILLMENT",
     storeName: "混合结算店铺",
@@ -128,4 +129,29 @@ describe("OrderStatusPanel payment facts", () => {
       screen.queryByRole("heading", { name: "付款已完成，等待同舟行发货" }),
     ).not.toBeInTheDocument();
   });
+
+  it.each([
+    { expected: "补发处理中，等待仓库发货", replacementStatus: "FULFILLING" },
+    { expected: "补发取消处理中，待仓库确认", replacementStatus: "CANCEL_PENDING" },
+    { expected: "补发处理遇到异常，待同舟行处理", replacementStatus: "EXCEPTION" },
+  ])(
+    "prioritizes active replacement fact $replacementStatus over the shipped parent status",
+    ({ expected, replacementStatus }) => {
+      render(
+        <OrderStatusPanel
+          order={paidOrder({
+            paymentMode: "WALLET",
+            replacementStatus,
+            shipmentStatuses: ["FULFILLING"],
+            status: "SHIPPED",
+          })}
+        />,
+      );
+
+      expect(screen.getByRole("heading", { name: expected })).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "包裹已发货，可留意后续物流状态" }),
+      ).not.toBeInTheDocument();
+    },
+  );
 });

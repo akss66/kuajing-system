@@ -188,7 +188,11 @@ function progressValue(stages: TimelineStage[], terminal: boolean) {
   if (activeIndex < 0) {
     return stages.every((stage) => stage.state === "complete") ? 100 : 0;
   }
-  return Math.min(100, Math.round((activeIndex / (FULL_FLOW_STAGE_COUNT - 1)) * 100));
+  const progressStepCount =
+    stages.length > FULL_FLOW_STAGE_COUNT
+      ? stages.length
+      : FULL_FLOW_STAGE_COUNT - 1;
+  return Math.min(99, Math.round((activeIndex / progressStepCount) * 100));
 }
 
 export function OrderStatusTimeline(props: OrderStatusTimelineProps) {

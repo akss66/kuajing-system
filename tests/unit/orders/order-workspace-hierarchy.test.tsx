@@ -389,7 +389,7 @@ describe("order workspace hierarchy", () => {
     expect(within(timeline).queryByText("余额已退回")).not.toBeInTheDocument();
   });
 
-  it("shows real shipment and replacement progress on the customer detail", async () => {
+  it("keeps an active replacement below 100% on the customer detail", async () => {
     queryMocks.getCustomerOrderDetail.mockResolvedValue({
       ...order,
       cancelReason: null,
@@ -426,10 +426,9 @@ describe("order workspace hierarchy", () => {
       "aria-current",
       "step",
     );
-    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
-      "aria-valuenow",
-      "100",
-    );
+    const progress = within(timeline).getByRole("progressbar", { name: "订单全流程进度" });
+    expect(Number(progress.getAttribute("aria-valuenow"))).toBeLessThan(100);
+    expect(timeline).not.toHaveTextContent("全流程 100%");
   });
 
   it("keeps every active order stage visible while warehouse progress advances", () => {
