@@ -1,7 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, test, vi } from "vitest";
 
 import {
   assertAllowedE2ETestDatabaseName,
+  deriveLocalE2ETestDatabaseUrl,
   describeDatabaseTarget,
   isDerivedLocalE2ETestDatabaseUrl,
   provisionDerivedE2ETestDatabase,
@@ -25,15 +30,36 @@ describe("resolveE2ETestDatabaseUrl", () => {
       E2E_PORT: "3101",
     });
 
-    expect(resolved).toBe(
-      "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
-    );
+    expect(resolved).toBe(deriveLocalE2ETestDatabaseUrl("3101"));
   });
 
   test("assigns different default databases to different worktree ports", () => {
     expect(resolveE2ETestDatabaseUrl({ E2E_PORT: "3101" })).not.toBe(
       resolveE2ETestDatabaseUrl({ E2E_PORT: "3107" }),
     );
+  });
+
+  test("isolates the default database by workspace and migration state", () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), "e2e-db-identity-"));
+    const firstWorkspace = join(temporaryRoot, "first");
+    const secondWorkspace = join(temporaryRoot, "second");
+    try {
+      mkdirSync(join(firstWorkspace, "drizzle"), { recursive: true });
+      mkdirSync(join(secondWorkspace, "drizzle"), { recursive: true });
+      writeFileSync(join(firstWorkspace, "drizzle", "0001.sql"), "select 1;\n");
+      writeFileSync(join(secondWorkspace, "drizzle", "0001.sql"), "select 1;\n");
+
+      const firstUrl = deriveLocalE2ETestDatabaseUrl("3101", firstWorkspace);
+      const secondUrl = deriveLocalE2ETestDatabaseUrl("3101", secondWorkspace);
+      expect(firstUrl).not.toBe(secondUrl);
+
+      writeFileSync(join(firstWorkspace, "drizzle", "0002.sql"), "select 2;\n");
+      expect(deriveLocalE2ETestDatabaseUrl("3101", firstWorkspace)).not.toBe(
+        firstUrl,
+      );
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+    }
   });
 
   test("rejects an unsafe E2E port instead of interpolating it into a database name", () => {
@@ -43,15 +69,18 @@ describe("resolveE2ETestDatabaseUrl", () => {
   });
 
   test("only classifies the exact derived local target as harness-provisioned", () => {
+    const derived = deriveLocalE2ETestDatabaseUrl("3101");
     expect(
       isDerivedLocalE2ETestDatabaseUrl(
-        "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_e2e_3101_test",
+        derived,
         "3101",
       ),
     ).toBe(true);
+    const localhostTarget = new URL(derived);
+    localhostTarget.hostname = "localhost";
     expect(
       isDerivedLocalE2ETestDatabaseUrl(
-        "postgres://tongzhouxing:tongzhouxing@localhost:5432/tongzhouxing_e2e_3101_test",
+        localhostTarget.toString(),
         "3101",
       ),
     ).toBe(false);

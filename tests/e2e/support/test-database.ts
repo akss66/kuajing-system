@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+
 import { sql } from "drizzle-orm";
 
 export const LOCAL_E2E_DATABASE_URL =
@@ -89,10 +93,44 @@ export function resolveE2EPort(rawPort: string | undefined) {
   return normalized;
 }
 
-export function deriveLocalE2ETestDatabaseUrl(rawPort: string | undefined) {
+function listMigrationFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return listMigrationFiles(path);
+    return entry.isFile() && entry.name.endsWith(".sql") ? [path] : [];
+  });
+}
+
+function deriveE2EIsolationKey(workspaceRoot: string) {
+  const resolvedRoot = resolve(workspaceRoot);
+  const normalizedRoot = process.platform === "win32"
+    ? resolvedRoot.replaceAll("\\", "/").toLowerCase()
+    : resolvedRoot;
+  const migrationRoot = join(resolvedRoot, "drizzle");
+  const migrationFiles = listMigrationFiles(migrationRoot).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  if (migrationFiles.length === 0) {
+    throw new Error(`E2E database isolation found no SQL migrations under ${migrationRoot}`);
+  }
+  const hash = createHash("sha256").update(normalizedRoot);
+  for (const path of migrationFiles) {
+    hash.update("\0");
+    hash.update(relative(migrationRoot, path).replaceAll("\\", "/"));
+    hash.update("\0");
+    hash.update(readFileSync(path));
+  }
+  return hash.digest("hex").slice(0, 12);
+}
+
+export function deriveLocalE2ETestDatabaseUrl(
+  rawPort: string | undefined,
+  workspaceRoot = process.cwd(),
+) {
   const port = resolveE2EPort(rawPort);
+  const isolationKey = deriveE2EIsolationKey(workspaceRoot);
   const url = new URL(LOCAL_E2E_DATABASE_URL);
-  url.pathname = `/tongzhouxing_e2e_${port}_test`;
+  url.pathname = `/tongzhouxing_e2e_${port}_${isolationKey}_test`;
   return url.toString();
 }
 
@@ -131,8 +169,9 @@ export function resolveE2ETestDatabaseUrl(env: EnvironmentSource) {
 export function isDerivedLocalE2ETestDatabaseUrl(
   connectionString: string,
   rawPort: string | undefined,
+  workspaceRoot = process.cwd(),
 ) {
-  return connectionString === deriveLocalE2ETestDatabaseUrl(rawPort);
+  return connectionString === deriveLocalE2ETestDatabaseUrl(rawPort, workspaceRoot);
 }
 
 export function configureE2ETestDatabaseEnvironment(env: EnvironmentSource = process.env) {
