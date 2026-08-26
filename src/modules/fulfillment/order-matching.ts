@@ -16,6 +16,10 @@ import {
   resolveSystemNotificationsByDeduplicationPrefix,
 } from "@/modules/notifications/service";
 
+import {
+  isJifengMatchLeaseExpired,
+  JIFENG_MATCH_LEASE_MS,
+} from "./jifeng-match-lease";
 import { refreshParentFulfillmentStatus } from "./order-rollup";
 import {
   applyJifengOrderStatus,
@@ -23,7 +27,7 @@ import {
 } from "./status-sync";
 
 const LEGACY_MATCH_EVENT_TYPE = "JIFENG_CREATE_ORDER";
-export const JIFENG_MATCH_LEASE_MS = 5 * 60 * 1000;
+export { JIFENG_MATCH_LEASE_MS } from "./jifeng-match-lease";
 const NOT_FOUND_CODES = new Set(["50017", "50071"]);
 const NEVER_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 
@@ -209,7 +213,7 @@ async function claimExistingOrderMatch(eventId: string, now: Date) {
         : row.lockedAt
           ? new Date(row.lockedAt)
           : null;
-      if (lockedAt && lockedAt.getTime() + JIFENG_MATCH_LEASE_MS > now.getTime()) {
+      if (!isJifengMatchLeaseExpired(lockedAt, now)) {
         return "BUSY" as const;
       }
       if (row.attemptCount > 0) {

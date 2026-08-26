@@ -660,6 +660,48 @@ describe("paid order Jifeng dispatch", () => {
     });
   });
 
+  test("reclaims an expired matching lease before cancelling the whole local order", async () => {
+    const { order, shipment } = await createShipmentFixture();
+    await enqueuePaidOrdersForFulfillment();
+    const lockedAt = new Date("2026-08-26T02:00:00.000Z");
+    const cancelledAt = new Date("2026-08-26T02:06:00.000Z");
+    await db
+      .update(integrationOutbox)
+      .set({
+        claimToken: "00000000-0000-4000-8000-000000000092",
+        lockedAt,
+        status: "PROCESSING",
+      })
+      .where(eq(integrationOutbox.aggregateId, shipment.id));
+    await db
+      .update(shipmentFulfillments)
+      .set({ status: "SUBMITTING" })
+      .where(eq(shipmentFulfillments.shipmentId, shipment.id));
+
+    await expect(
+      cancelFulfillmentOrder({
+        actorType: "ADMIN",
+        actorUserId: crypto.randomUUID(),
+        now: cancelledAt,
+        orderId: order.id,
+        reason: "回收过期租约后取消整单",
+      }),
+    ).resolves.toEqual({ orderId: order.id, status: "CANCELLED" });
+
+    const [event] = await db.select().from(integrationOutbox);
+    const [fulfillment] = await db.select().from(shipmentFulfillments);
+    expect(event).toMatchObject({
+      claimToken: null,
+      lastErrorCode: "LOCAL_CANCEL_MONITORING",
+      lockedAt: null,
+      status: "PENDING",
+    });
+    expect(fulfillment).toMatchObject({
+      cancelledAt,
+      status: "CANCELLED",
+    });
+  });
+
   test("does not call Jifeng when platform order number is not globally unique among active shipments", async () => {
     const first = await createShipmentFixture();
     const second = await createShipmentFixture();

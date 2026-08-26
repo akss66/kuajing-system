@@ -16,6 +16,7 @@ import { enqueueCargoSyncEvent } from "@/modules/feishu/outbox";
 import { recordPackageCancellationAdjustment } from "@/modules/fulfillment/package-cancellation-adjustment";
 import { prepareSettlementForPackageCancellation } from "@/modules/settlement/batch-service";
 import { refundWalletForOrder } from "@/modules/wallet/service";
+import { isJifengMatchLeaseExpired } from "@/modules/fulfillment/jifeng-match-lease";
 
 const PAYMENT_CLAIM_LOCK_MS = 12 * 60 * 60 * 1000;
 const PENDING_PAYMENT_LOCK_MS = 2 * 60 * 60 * 1000;
@@ -490,11 +491,15 @@ export async function cancelFulfillmentOrder(input: {
     const outboxRows = await tx.execute<{
       attemptCount: number;
       fulfillmentStatus: string;
+      lockedAt: Date | string | null;
+      shipmentId: string;
       status: string;
     }>(sql`
       select
         e.attempt_count as "attemptCount",
         f.status as "fulfillmentStatus",
+        e.locked_at as "lockedAt",
+        s.id as "shipmentId",
         e.status
       from integration_outbox e
       inner join order_shipments s on s.id::text = e.aggregate_id
@@ -505,6 +510,15 @@ export async function cancelFulfillmentOrder(input: {
       order by e.id
       for update of e
     `);
+    const staleMatchingShipmentIds = new Set(
+      outboxRows
+        .filter(
+          (event) =>
+            event.status === "PROCESSING" &&
+            isJifengMatchLeaseExpired(event.lockedAt, now),
+        )
+        .map((event) => event.shipmentId),
+    );
     if (
       fulfillmentRows.some(
         (fulfillment) =>
@@ -512,12 +526,17 @@ export async function cancelFulfillmentOrder(input: {
           (fulfillment.externalOrderNo !== null ||
             fulfillment.jifengStatus !== null ||
             fulfillment.submittedAt !== null ||
-            !["PENDING", "EXCEPTION"].includes(fulfillment.status)),
+            (!["PENDING", "EXCEPTION"].includes(fulfillment.status) &&
+              !(
+                fulfillment.status === "SUBMITTING" &&
+                staleMatchingShipmentIds.has(fulfillment.shipmentId)
+              ))),
       ) ||
       outboxRows.some(
         (event) =>
           event.fulfillmentStatus !== "CANCELLED" &&
-          event.status === "PROCESSING",
+          event.status === "PROCESSING" &&
+          !staleMatchingShipmentIds.has(event.shipmentId),
       )
     ) {
       throw new OrderLifecycleError(
@@ -538,7 +557,7 @@ export async function cancelFulfillmentOrder(input: {
       .where(sql`${shipmentFulfillments.id} in (
         select f.id from shipment_fulfillments f
         inner join order_shipments s on s.id = f.shipment_id
-        where s.order_id = ${input.orderId} and f.status in ('PENDING', 'EXCEPTION')
+        where s.order_id = ${input.orderId} and f.status in ('PENDING', 'EXCEPTION', 'SUBMITTING')
       )`);
     await tx
       .update(integrationOutbox)
@@ -558,7 +577,7 @@ export async function cancelFulfillmentOrder(input: {
         where s.order_id = ${input.orderId}
           and e.target = 'JIFENG'
           and e.event_type = 'JIFENG_CREATE_ORDER'
-          and e.status in ('PENDING', 'FAILED')
+          and e.status in ('PENDING', 'FAILED', 'PROCESSING')
       )`);
 
     const fulfillmentStatusByShipment = new Map(

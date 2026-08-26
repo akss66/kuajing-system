@@ -459,7 +459,7 @@ describe("replacement fulfillment", () => {
     });
     await db
       .update(integrationOutbox)
-      .set({ status: "PROCESSING" })
+      .set({ lockedAt: new Date(), status: "PROCESSING" })
       .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
     const cancelOrder = vi.fn(async () => ({ data: null }));
 
@@ -478,6 +478,59 @@ describe("replacement fulfillment", () => {
       .from(shipmentFulfillments)
       .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
     expect(fulfillment.status).toBe("PENDING");
+  });
+
+  test("reclaims an expired matching lease before cancelling a local replacement", async () => {
+    const fixture = await createShippedFixture();
+    const created = await createReplacementRequest({
+      actorUserId: "auth-admin-replacement",
+      adminUserId: fixture.admin.id,
+      items: [{ quantity: 1, skuId: fixture.sku.id }],
+      originalShipmentId: fixture.shipment.id,
+      reason: "过期匹配租约取消测试",
+    });
+    const lockedAt = new Date("2026-08-26T01:00:00.000Z");
+    const cancelledAt = new Date("2026-08-26T01:06:00.000Z");
+    await db
+      .update(integrationOutbox)
+      .set({
+        claimToken: "00000000-0000-4000-8000-000000000091",
+        lockedAt,
+        status: "PROCESSING",
+      })
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    await db
+      .update(shipmentFulfillments)
+      .set({ status: "SUBMITTING" })
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+
+    await expect(
+      cancelJifengShipment({
+        actorUserId: "auth-admin-replacement",
+        now: cancelledAt,
+        reason: "回收过期租约后取消",
+        shipmentId: created.replacementShipmentId,
+      }),
+    ).resolves.toEqual({ status: "CANCELLED" });
+
+    const [event] = await db
+      .select()
+      .from(integrationOutbox)
+      .where(eq(integrationOutbox.aggregateId, created.replacementShipmentId));
+    const [fulfillment] = await db
+      .select()
+      .from(shipmentFulfillments)
+      .where(eq(shipmentFulfillments.shipmentId, created.replacementShipmentId));
+    expect(event).toMatchObject({
+      claimToken: null,
+      lastErrorCode: "LOCAL_CANCEL_MONITORING",
+      lockedAt: null,
+      status: "PENDING",
+    });
+    expect(fulfillment).toMatchObject({
+      cancelledAt,
+      status: "CANCELLED",
+    });
   });
 
   test("does not release inventory twice when status sync confirms cancellation first", async () => {

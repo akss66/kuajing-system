@@ -21,6 +21,7 @@ import {
   prepareSettlementForPackageCancellation,
 } from "@/modules/settlement/batch-service";
 
+import { isJifengMatchLeaseExpired } from "./jifeng-match-lease";
 import { refreshParentFulfillmentStatus } from "./order-rollup";
 import { recordPackageCancellationAdjustment } from "./package-cancellation-adjustment";
 
@@ -326,7 +327,7 @@ async function finalizeShipmentCancellation(
         aggregate_id = ${input.shipmentId}
         and target = 'JIFENG'
         and event_type = 'JIFENG_CREATE_ORDER'
-        and status in ('PENDING', 'FAILED')
+        and status in ('PENDING', 'FAILED', 'PROCESSING')
       `);
   }
   if (input.claim.replacementRequestId) {
@@ -458,9 +459,10 @@ export async function cancelJifengShipment(input: {
     }
     const outboxRows = await tx.execute<{
       attemptCount: number;
+      lockedAt: Date | string | null;
       status: string;
     }>(sql`
-      select attempt_count as "attemptCount", status
+      select attempt_count as "attemptCount", locked_at as "lockedAt", status
       from integration_outbox
       where aggregate_id = ${input.shipmentId}
         and target = 'JIFENG'
@@ -468,14 +470,17 @@ export async function cancelJifengShipment(input: {
       for update
     `);
     const outbox = outboxRows[0];
-    if (outbox?.status === "PROCESSING") {
+    const staleMatch =
+      outbox?.status === "PROCESSING" &&
+      isJifengMatchLeaseExpired(outbox.lockedAt, now);
+    if (outbox?.status === "PROCESSING" && !staleMatch) {
       throw new ReplacementError(
         "FULFILLMENT_SUBMISSION_IN_PROGRESS",
         "该包裹正在匹配极风订单，请等待本次查询结束后再取消",
       );
     }
     const localOnly =
-      ["PENDING", "EXCEPTION"].includes(row.status) &&
+      (["PENDING", "EXCEPTION"].includes(row.status) || staleMatch) &&
       row.externalOrderNo === null &&
       row.jifengStatus === null &&
       row.submittedAt === null;

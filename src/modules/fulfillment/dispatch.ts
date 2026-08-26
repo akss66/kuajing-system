@@ -8,8 +8,8 @@ import {
   shipmentFulfillments,
 } from "@/db/schema";
 
+import { isJifengMatchLeaseExpired } from "./jifeng-match-lease";
 import { refreshParentFulfillmentStatus } from "./order-rollup";
-import { JIFENG_MATCH_LEASE_MS } from "./order-matching";
 
 // This persisted event name predates match-only fulfillment. Keep it until a
 // dedicated data migration renames historical outbox rows and idempotency keys.
@@ -24,16 +24,6 @@ export class JifengDispatchError extends Error {
 
 function erpNumberForShipment(shipmentId: string) {
   return `TZX-${shipmentId.replaceAll("-", "")}`;
-}
-
-function asDate(value: Date | string | null) {
-  return value instanceof Date ? value : value ? new Date(value) : null;
-}
-
-function leaseExpired(lockedAt: Date | string | null, now: Date) {
-  const claimedAt = asDate(lockedAt);
-  return claimedAt === null ||
-    claimedAt.getTime() + JIFENG_MATCH_LEASE_MS <= now.getTime();
 }
 
 export async function enqueuePaidOrdersForFulfillment(input?: {
@@ -209,7 +199,10 @@ export async function retryJifengShipment(input: {
         "未找到极风已有订单匹配任务",
       );
     }
-    if (event.status === "PROCESSING" && !leaseExpired(event.lockedAt, now)) {
+    if (
+      event.status === "PROCESSING" &&
+      !isJifengMatchLeaseExpired(event.lockedAt, now)
+    ) {
       throw new JifengDispatchError(
         "MATCH_IN_PROGRESS",
         "极风已有订单正在匹配，请勿重复重试",
