@@ -178,7 +178,7 @@ class FakeFeishuServer {
     const sourceRangePrefix = `/open-apis/sheets/v2/spreadsheets/${SOURCE_SPREADSHEET_TOKEN}/values/`;
     if (method === "GET" && path.startsWith(sourceRangePrefix)) {
       const range = decodeURIComponent(path.slice(sourceRangePrefix.length));
-      if (range !== "sheet-source-a!A1:Z500") {
+      if (range !== "sheet-source-a!A1:Z501") {
         this.json(response, { code: 404, msg: `Unknown source range ${range}` }, 404);
         return;
       }
@@ -186,7 +186,7 @@ class FakeFeishuServer {
         code: 0,
         data: {
           valueRange: {
-            range: "sheet-source-a!A1:Z500",
+            range: "sheet-source-a!A1:Z501",
             revision: this.revision,
             values: this.dataset.values,
           },
