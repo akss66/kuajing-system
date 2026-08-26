@@ -46,36 +46,56 @@ type OrderFilterBarProps = {
 };
 
 const ALL_OPTION_VALUE = "__all__";
+const nativeSelectClassName =
+  "min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18";
 
 function FilterSelect({
   allLabel,
   label,
   name,
+  native = false,
   options,
   value,
 }: {
   allLabel: string;
   label: string;
   name: string;
+  native?: boolean;
   options: FilterOption[];
   value?: string;
 }) {
   return (
     <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
       {label}
-      <Select defaultValue={value || ALL_OPTION_VALUE} name={name}>
-        <SelectTrigger aria-label={label} className="min-h-11 w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper">
-          <SelectItem value={ALL_OPTION_VALUE}>{allLabel}</SelectItem>
+      {native ? (
+        <select
+          aria-label={label}
+          className={nativeSelectClassName}
+          defaultValue={value ?? ""}
+          name={name}
+        >
+          <option value="">{allLabel}</option>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
+            <option key={option.value} value={option.value}>
               {option.label}
-            </SelectItem>
+            </option>
           ))}
-        </SelectContent>
-      </Select>
+        </select>
+      ) : (
+        <Select defaultValue={value || ALL_OPTION_VALUE} name={name}>
+          <SelectTrigger aria-label={label} className="min-h-11 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            <SelectItem value={ALL_OPTION_VALUE}>{allLabel}</SelectItem>
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </label>
   );
 }
@@ -177,6 +197,7 @@ export function OrderFilterBar({
           key={`status-${values.status ?? ""}`}
           label="状态"
           name="status"
+          native={!isCustomer}
           options={statusOptions}
           value={values.status}
         />
@@ -186,6 +207,7 @@ export function OrderFilterBar({
             key={`customer-${values.customerId ?? ""}`}
             label="客户"
             name="customerId"
+            native={!isCustomer}
             options={customerOptions}
             value={values.customerId}
           />
@@ -196,6 +218,7 @@ export function OrderFilterBar({
             key={`store-${values.storeId ?? ""}`}
             label="店铺"
             name="storeId"
+            native={!isCustomer}
             options={storeOptions}
             value={values.storeId}
           />

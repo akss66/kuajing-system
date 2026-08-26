@@ -56,6 +56,28 @@ describe("OrderFilterBar", () => {
     expect(container.querySelector("select:not([aria-hidden='true'])")).not.toBeInTheDocument();
   });
 
+  it("keeps the admin order filters on the native select surface", () => {
+    render(
+      <OrderFilterBar
+        audience="admin"
+        customerOptions={[{ label: "渥太华演示客户", value: "customer-1" }]}
+        statusOptions={[
+          { label: "待付款", value: "PENDING_PAYMENT" },
+          { label: "已发货", value: "SHIPPED" },
+        ]}
+        storeOptions={[{ label: "TEMU 加拿大店", value: "store-1" }]}
+        values={{}}
+      />,
+    );
+
+    for (const name of ["状态", "客户", "店铺"]) {
+      const filter = screen.getByRole("combobox", { name });
+      expect(filter.tagName).toBe("SELECT");
+      expect(filter).not.toHaveAttribute("data-slot", "select-trigger");
+      expect(filter).toHaveValue("");
+    }
+  });
+
   it("serializes the selected status into the customer order query", () => {
     render(
       <OrderFilterBar
