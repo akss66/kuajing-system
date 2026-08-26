@@ -737,14 +737,14 @@ test("admin business-detail visual uses the read-only customer workspace", async
 for (const dashboard of [
   {
     audience: "admin" as const,
-    actionSectionId: "quick-actions-title",
+    actionSelector: 'section[aria-labelledby="quick-actions-title"] a',
     path: "/admin",
     firstSectionId: "today-operations-title",
     summarySectionId: "operations-trend-title",
   },
   {
     audience: "customer" as const,
-    actionSectionId: "quick-purchase-title",
+    actionSelector: "[data-portal-continuation] a",
     path: "/portal",
     firstSectionId: "continuation-title",
     summarySectionId: "store-summary-title",
@@ -778,7 +778,7 @@ for (const dashboard of [
       expect(firstBox!.y).toBeLessThan(summaryBox!.y);
 
       const actionBox = await page
-        .locator(`section[aria-labelledby="${dashboard.actionSectionId}"] a`)
+        .locator(dashboard.actionSelector)
         .first()
         .boundingBox();
       expect(actionBox).not.toBeNull();
