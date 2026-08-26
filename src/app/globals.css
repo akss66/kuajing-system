@@ -361,15 +361,23 @@ textarea {
   box-shadow: inset 0 1px rgb(255 255 255 / 16%), 0 3px 8px rgb(14 68 58 / 16%);
 }
 
-[data-merchant-shell="customer"] [data-portal-action="start-bulk-upload"],
-[data-merchant-shell="customer"] [data-portal-action="search-catalog"],
-[data-merchant-shell="customer"] [data-filter-action-group] [data-slot="button"] {
+[data-merchant-shell="customer"] [data-portal-action="start-bulk-upload"] {
   border-radius: 0.9rem;
 }
 
 [data-merchant-shell="customer"] [data-portal-action="start-bulk-upload"] {
   min-width: 12rem;
   justify-content: center;
+}
+
+[data-merchant-shell="customer"] [data-portal-control],
+[data-merchant-shell="customer"] [data-portal-action="search-catalog"],
+[data-merchant-shell="customer"] [data-filter-action-group] button {
+  border-radius: var(--radius-control);
+}
+
+[data-merchant-shell="customer"] [data-sale-status-segments] button {
+  border-radius: calc(var(--radius-control) - 2px);
 }
 
 [data-merchant-shell="customer"] [data-filter-action-group] {

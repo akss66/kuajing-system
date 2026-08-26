@@ -377,7 +377,7 @@ export function CustomerCatalogWorkspace({
               />
               <Input
                 aria-label="搜索 SKU、商品、规格或链接文字"
-                className="min-h-11 pl-10"
+                className="min-h-12 pl-10"
                 name="q"
                 onChange={(event) => setDraftQuery(event.target.value)}
                 placeholder="搜索 SKU、商品、规格或链接文字"

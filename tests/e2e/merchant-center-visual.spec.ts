@@ -626,6 +626,12 @@ test("customer upload, order filters and catalog width keep the client interacti
       expect(Math.abs(controlBox.height - orderNumberBox!.height)).toBeLessThanOrEqual(1);
     }
   }
+  const orderFilterRadii = await Promise.all(
+    [orderNumberInput, statusPicker, searchButton, moreButton].map((control) =>
+      control.evaluate((element) => getComputedStyle(element).borderTopLeftRadius),
+    ),
+  );
+  expect(orderFilterRadii).toEqual(["8px", "8px", "8px", "8px"]);
   expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(moreBox!.x);
 
   const overflow = await filters.evaluate(
@@ -646,20 +652,47 @@ test("customer upload, order filters and catalog width keep the client interacti
     expect(catalogBox).not.toBeNull();
     expect(catalogBox!.width).toBeGreaterThan(1050);
   }
+  const catalogSearchInput = page.getByRole("searchbox", {
+    name: "搜索 SKU、商品、规格或链接文字",
+  });
+  const catalogSearchButton = page.getByRole("button", { exact: true, name: "搜索货盘" });
   const catalogSort = page.getByRole("combobox", { name: "货盘排序方式" });
   const saleStatusSegments = page.locator("[data-sale-status-segments]");
-  const [catalogSortBox, saleStatusBox] = await Promise.all([
+  const [
+    catalogSearchInputBox,
+    catalogSearchButtonBox,
+    catalogSortBox,
+    saleStatusBox,
+  ] = await Promise.all([
+    catalogSearchInput.boundingBox(),
+    catalogSearchButton.boundingBox(),
     catalogSort.boundingBox(),
     saleStatusSegments.boundingBox(),
   ]);
+  expect(catalogSearchInputBox).not.toBeNull();
+  expect(catalogSearchButtonBox).not.toBeNull();
   expect(catalogSortBox).not.toBeNull();
   expect(saleStatusBox).not.toBeNull();
-  expect(catalogSortBox!.height).toBeGreaterThanOrEqual(48);
-  expect(saleStatusBox!.height).toBeGreaterThanOrEqual(48);
-  if ((page.viewportSize()?.width ?? 0) >= 640) {
-    expect(Math.abs(catalogSortBox!.y - saleStatusBox!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(catalogSortBox!.height - saleStatusBox!.height)).toBeLessThanOrEqual(1);
+  for (const controlBox of [
+    catalogSearchInputBox!,
+    catalogSearchButtonBox!,
+    catalogSortBox!,
+    saleStatusBox!,
+  ]) {
+    expect(controlBox.height).toBeGreaterThanOrEqual(48);
   }
+  if ((page.viewportSize()?.width ?? 0) >= 640) {
+    for (const controlBox of [catalogSearchButtonBox!, catalogSortBox!, saleStatusBox!]) {
+      expect(Math.abs(controlBox.y - catalogSearchInputBox!.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(controlBox.height - catalogSearchInputBox!.height)).toBeLessThanOrEqual(1);
+    }
+  }
+  const catalogFilterRadii = await Promise.all(
+    [catalogSearchInput, catalogSearchButton, catalogSort, saleStatusSegments].map((control) =>
+      control.evaluate((element) => getComputedStyle(element).borderTopLeftRadius),
+    ),
+  );
+  expect(catalogFilterRadii).toEqual(["8px", "8px", "8px", "8px"]);
 });
 
 test("admin business-detail visual uses the read-only customer workspace", async ({
