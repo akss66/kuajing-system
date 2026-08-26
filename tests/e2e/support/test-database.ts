@@ -29,6 +29,8 @@ const E2E_RESET_TABLES = [
   "order_import_rows",
   "order_import_batches",
   "inventory_movements",
+  "inventory_stocktake_batches",
+  "feishu_cargo_migration_runs",
   "inventory_reservations",
   "inventory_balances",
   "sku_aliases",

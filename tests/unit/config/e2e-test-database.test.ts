@@ -156,4 +156,25 @@ describe("resetE2EDatabaseToSeedState", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(reseed).not.toHaveBeenCalled();
   });
+
+  test("resets every parent table used by repeatable inventory E2E fixtures", async () => {
+    const execute = vi.fn(async (query: unknown) => {
+      if (execute.mock.calls.length === 1) {
+        return [{ current_database: "tongzhouxing_e2e_fixture_test" }];
+      }
+      const serialized = JSON.stringify(query);
+      expect(serialized).toContain("feishu_cargo_migration_runs");
+      expect(serialized).toContain("inventory_stocktake_batches");
+      return [];
+    });
+    const reseed = vi.fn(async () => undefined);
+
+    await resetE2EDatabaseToSeedState({
+      context: "repeatable fixture test",
+      database: { execute },
+      reseed,
+    });
+
+    expect(reseed).toHaveBeenCalledOnce();
+  });
 });
