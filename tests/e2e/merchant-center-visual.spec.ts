@@ -231,6 +231,9 @@ async function resetVisualBaseline() {
     reseed: seed,
   });
   await db
+    .update(authUsers)
+    .set({ createdAt: new Date("2026-08-25T12:00:00.000Z") });
+  await db
     .update(walletAccounts)
     .set({ updatedAt: new Date("2026-08-14T00:37:00.000Z") });
 }
