@@ -100,17 +100,26 @@ function buildActiveStages({
 
   stages[1] = { detail: "付款已确认", label: "付款确认", state: "complete" };
   const shipmentStatus = mostRelevantStatus(shipmentStatuses);
-  const allActiveShipmentsShipped =
+  const shippedShipmentCount = shipmentStatuses.filter((status) => status === "SHIPPED").length;
+  const cancelledShipmentCount = shipmentStatuses.filter((status) => status === "CANCELLED").length;
+  const allShipmentsResolved =
     shipmentStatuses.some((status) => status === "SHIPPED") &&
     shipmentStatuses.every((status) => status === "SHIPPED" || status === "CANCELLED");
+  const partiallyCancelled = allShipmentsResolved && cancelledShipmentCount > 0;
 
   if (orderStatus === "FULFILLMENT_EXCEPTION" || shipmentStatus === "EXCEPTION") {
     stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
     stages[3] = { detail: "仓库处理异常", label: "仓库处理", state: "danger" };
-  } else if (orderStatus === "SHIPPED" || allActiveShipmentsShipped) {
+  } else if (orderStatus === "SHIPPED" || allShipmentsResolved) {
     stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
     stages[3] = { detail: "处理完成", label: "仓库处理", state: "complete" };
-    stages[4] = { detail: "全部包裹已发出", label: "仓库已发货", state: "current" };
+    stages[4] = partiallyCancelled
+      ? {
+          detail: `已发出 ${shippedShipmentCount} 个，已取消 ${cancelledShipmentCount} 个`,
+          label: "发货与取消",
+          state: "complete",
+        }
+      : { detail: "全部包裹已发出", label: "仓库已发货", state: "complete" };
   } else if (shipmentStatus === "FULFILLING") {
     stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
     stages[3] = { detail: "仓库正在处理", label: "仓库处理", state: "current" };
@@ -159,7 +168,9 @@ function progressValue(stages: TimelineStage[], terminal: boolean) {
   const activeIndex = stages.findIndex((stage) =>
     ["current", "danger", "warning"].includes(stage.state),
   );
-  if (activeIndex < 0) return 0;
+  if (activeIndex < 0) {
+    return stages.every((stage) => stage.state === "complete") ? 100 : 0;
+  }
   return Math.min(100, Math.round((activeIndex / (FULL_FLOW_STAGE_COUNT - 1)) * 100));
 }
 
@@ -167,6 +178,7 @@ export function OrderStatusTimeline(props: OrderStatusTimelineProps) {
   const stages = buildStages(props);
   const terminal = ["CANCELLED", "EXPIRED"].includes(props.orderStatus);
   const value = progressValue(stages, terminal);
+  const complete = !terminal && stages.every((stage) => stage.state === "complete");
 
   return (
     <section
@@ -180,7 +192,7 @@ export function OrderStatusTimeline(props: OrderStatusTimelineProps) {
         </div>
         <div className="flex items-center gap-2 text-sm text-primary">
           <Clock3 aria-hidden="true" className="size-5 shrink-0" />
-          {value === null ? "流程已终止" : `全流程 ${value}%`}
+          {value === null ? "流程已终止" : complete ? "流程已完成" : `全流程 ${value}%`}
         </div>
       </div>
 

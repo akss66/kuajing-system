@@ -486,6 +486,26 @@ describe("order workspace hierarchy", () => {
     );
   });
 
+  it("finishes a partially cancelled order without claiming every package shipped", () => {
+    render(
+      <OrderStatusTimeline
+        orderStatus="SHIPPED"
+        paidAt="2026-08-12T10:30:00.000Z"
+        shipmentStatuses={["SHIPPED", "SHIPPED", "SHIPPED", "CANCELLED"]}
+      />,
+    );
+
+    const timeline = screen.getByRole("region", { name: "订单状态时间线" });
+    expect(within(timeline).getByText("发货与取消")).toBeVisible();
+    expect(within(timeline).getByText("已发出 3 个，已取消 1 个")).toBeVisible();
+    expect(within(timeline).getByText("流程已完成")).toBeVisible();
+    expect(within(timeline).queryByText("全部包裹已发出")).not.toBeInTheDocument();
+    expect(within(timeline).getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
+  });
+
   it("describes warehouse processing exceptions without fulfillment jargon", () => {
     render(
       <OrderStatusTimeline
