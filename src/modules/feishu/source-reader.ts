@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type { FeishuIntegrationConfig } from "@/integrations/feishu/config";
 
+const MAX_FEISHU_SOURCE_ROWS = 500;
+
 export type FeishuSourcePort = {
   resolveWikiSpreadsheet(
     wikiToken: string,
@@ -147,11 +149,16 @@ export async function readFeishuSourceSnapshot(input: {
     return resolved;
   }
 
-  const range = `${resolved.selectedSheet.sheetId}!A1:Z500`;
+  const range = `${resolved.selectedSheet.sheetId}!A1:Z${MAX_FEISHU_SOURCE_ROWS + 1}`;
   const details = await input.client.readRangeDetails({
     range,
     spreadsheetToken: resolved.spreadsheetToken,
   });
+  if (details.values.length > MAX_FEISHU_SOURCE_ROWS) {
+    throw new Error(
+      `飞书源货盘超过 ${MAX_FEISHU_SOURCE_ROWS} 行，为避免截断后误归档或清零库存，本次读取已停止`,
+    );
+  }
 
   return {
     range,
@@ -159,6 +166,6 @@ export async function readFeishuSourceSnapshot(input: {
     selectedSheet: resolved.selectedSheet,
     spreadsheetToken: resolved.spreadsheetToken,
     spreadsheetTokenHash: resolved.spreadsheetTokenHash,
-    values: details.values,
+    values: details.values.slice(0, MAX_FEISHU_SOURCE_ROWS),
   };
 }
