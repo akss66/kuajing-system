@@ -192,7 +192,9 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
                 </span>
                 <div className="min-w-0">
                   <p className="font-semibold text-foreground">当前无待付款和异常事项</p>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">上传、付款和履约均已处理完成。</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    如有进行中的订单，可在“我的订单”查看最新进度。
+                  </p>
                 </div>
               </div>
             </section>

@@ -172,6 +172,10 @@ describe("operations dashboards", () => {
     expect(document.querySelector("[data-portal-task-overview]")).not.toBeInTheDocument();
     expect(document.querySelector("[data-portal-quick-actions]")).not.toBeInTheDocument();
     expect(screen.getByText("当前无待付款和异常事项")).toBeVisible();
+    expect(
+      screen.getByText("如有进行中的订单，可在“我的订单”查看最新进度。"),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent("上传、付款和履约均已处理完成。");
     expect(screen.getByRole("link", { name: "查看实时货盘" })).toHaveAttribute(
       "href",
       "/portal/catalog",
