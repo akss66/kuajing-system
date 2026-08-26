@@ -68,12 +68,14 @@ export async function getCustomerTaskDashboard(
           from bulk_import_drafts
           where customer_id = ${customerId}
             and status in ('DRAFT', 'PARTIALLY_SUBMITTED')
+            and expires_at > ${now.toISOString()}::timestamptz
         ) as "unfinishedDraftCount",
         (
           select id
           from bulk_import_drafts
           where customer_id = ${customerId}
             and status in ('DRAFT', 'PARTIALLY_SUBMITTED')
+            and expires_at > ${now.toISOString()}::timestamptz
           order by updated_at desc, id desc
           limit 1
         ) as "latestDraftId",

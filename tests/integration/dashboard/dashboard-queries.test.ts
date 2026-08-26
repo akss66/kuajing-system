@@ -545,6 +545,12 @@ describe("dashboard queries", () => {
           status: "DRAFT",
           updatedAt: new Date("2026-08-13T13:30:00.000Z"),
         },
+        {
+          customerId: customer.id,
+          expiresAt: new Date("2026-08-13T13:59:59.999Z"),
+          status: "DRAFT",
+          updatedAt: new Date("2026-08-13T13:45:00.000Z"),
+        },
       ])
       .returning();
 
