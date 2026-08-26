@@ -440,10 +440,12 @@ describe("order workspace hierarchy", () => {
     );
 
     let timeline = screen.getByRole("region", { name: "订单状态时间线" });
-    expect(within(timeline).getByText("已匹配仓库订单")).toHaveAttribute(
-      "aria-current",
-      "step",
-    );
+    expect(within(timeline).getByText("待在极风后台提交仓库")).toBeVisible();
+    expect(
+      within(timeline).getByText(
+        "已匹配到极风订单，请在极风后台选择物流渠道并提交仓库；系统随后自动同步。",
+      ),
+    ).toHaveAttribute("aria-current", "step");
     expect(within(timeline).getByText("仓库处理")).toBeVisible();
     expect(within(timeline).getByText("尚未发货")).toBeVisible();
 

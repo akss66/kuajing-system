@@ -130,6 +130,9 @@ test("customer and administrator share the full shipped-order progress", async (
   await loginThroughUi(page, fixture.customerUser);
   await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 30_000 });
   await page.goto(`/portal/orders/${fixture.order.id}`);
+  await expect(
+    page.getByRole("heading", { name: "包裹已发货，可留意后续物流状态" }),
+  ).toBeVisible();
   const customerTimeline = page.getByRole("region", { name: "订单状态时间线" });
   await expect(customerTimeline.locator("li")).toHaveCount(5);
   await expect(customerTimeline.getByRole("progressbar", { name: "订单全流程进度" })).toHaveAttribute(

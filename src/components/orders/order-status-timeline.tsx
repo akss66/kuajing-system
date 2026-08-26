@@ -1,5 +1,6 @@
 import { Check, Circle, CircleAlert, Clock3 } from "lucide-react";
 
+import { safeFulfillmentError } from "@/modules/fulfillment/fulfillment-ui-labels";
 import { formatReplacementStatus } from "@/modules/fulfillment/replacement-ui-labels";
 import { getAdminSettlementOrderStatusLabel } from "@/modules/settlement/admin-ui-labels";
 
@@ -21,6 +22,7 @@ type TimelineStage = {
 };
 
 const FULL_FLOW_STAGE_COUNT = 5;
+const matchedExistingJifengOrder = safeFulfillmentError("50017");
 
 function mostRelevantStatus(statuses: Array<string | null>) {
   const priority = [
@@ -130,7 +132,11 @@ function buildActiveStages({
     stages[2] = { detail: "仓库已接单", label: "仓库接单", state: "complete" };
     stages[3] = { detail: "包裹已取消", label: "仓库处理", state: "danger" };
   } else if (shipmentStatus === "SUBMITTED") {
-    stages[2] = { detail: "已匹配仓库订单", label: "仓库接单", state: "current" };
+    stages[2] = {
+      detail: matchedExistingJifengOrder.message,
+      label: matchedExistingJifengOrder.title,
+      state: "current",
+    };
   } else if (shipmentStatus === "SUBMITTING") {
     stages[2] = { detail: "正在匹配仓库订单", label: "仓库接单", state: "current" };
   } else if (shipmentStatus === "PENDING") {

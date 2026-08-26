@@ -11,6 +11,7 @@ import type { CustomerOrderDetail } from "@/modules/orders/queries";
 function paidOrder(input: {
   offlineAmountFen?: number | null;
   paymentMode: "DIRECT_OFFLINE" | "MIXED" | "WALLET";
+  status?: "FULFILLING" | "PAID_PENDING_FULFILLMENT" | "SHIPPED";
   walletAmountFen?: number | null;
 }) {
   return {
@@ -29,7 +30,7 @@ function paidOrder(input: {
     paymentMode: input.paymentMode,
     refundedAt: null,
     shipments: [],
-    status: "PAID_PENDING_FULFILLMENT",
+    status: input.status ?? "PAID_PENDING_FULFILLMENT",
     storeName: "混合结算店铺",
     totalAmountFen: 500,
     totalPackageCount: 1,
@@ -85,5 +86,17 @@ describe("OrderStatusPanel payment facts", () => {
     expect(
       screen.getByText("管理员已确认微信付款到账，本单未经过钱包充值和扣款。"),
     ).toBeVisible();
+  });
+
+  it.each([
+    { expected: "仓库已接单，正在处理发货", status: "FULFILLING" as const },
+    { expected: "包裹已发货，可留意后续物流状态", status: "SHIPPED" as const },
+  ])("uses the real $status progress instead of saying every paid order is waiting", ({ expected, status }) => {
+    render(<OrderStatusPanel order={paidOrder({ paymentMode: "WALLET", status })} />);
+
+    expect(screen.getByRole("heading", { name: expected })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "付款已完成，等待同舟行发货" }),
+    ).not.toBeInTheDocument();
   });
 });

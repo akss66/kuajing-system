@@ -27,6 +27,16 @@ function paidPaymentDescription(order: CustomerOrderDetail) {
     : "管理员已确认微信付款到账，本单未经过钱包充值和扣款。";
 }
 
+function paidOrderHeadline(order: CustomerOrderDetail) {
+  if (order.status === "SHIPPED") {
+    return "包裹已发货，可留意后续物流状态";
+  }
+  if (order.status === "FULFILLING") {
+    return "仓库已接单，正在处理发货";
+  }
+  return "付款已完成，等待同舟行发货";
+}
+
 export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
   const paid = ["PAID_PENDING_FULFILLMENT", "FULFILLING", "SHIPPED"].includes(
     order.status,
@@ -70,7 +80,7 @@ export function OrderStatusPanel({ order }: { order: CustomerOrderDetail }) {
       <section className="flex gap-3 rounded-[var(--radius-surface)] border border-success/20 bg-success/5 p-4 text-success">
         <CheckCircle2 className="mt-0.5 size-5 shrink-0" />
         <div>
-          <h2 className="font-semibold">付款已完成，等待同舟行发货</h2>
+          <h2 className="font-semibold">{paidOrderHeadline(order)}</h2>
           <p className="mt-1 text-sm">{paidPaymentDescription(order)}</p>
         </div>
       </section>
