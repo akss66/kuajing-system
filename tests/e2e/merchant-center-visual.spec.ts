@@ -559,13 +559,14 @@ for (const route of workspaceRoutes) {
 
 test("customer upload, order filters and catalog width keep the client interaction quality", async ({
   page,
-}) => {
+}, testInfo) => {
   await loginAsAudience("customer", page);
 
   await page.goto("/portal/imports/new");
   const storePicker = page.getByRole("combobox", { name: "选择店铺" });
   await expect(storePicker).toHaveAttribute("data-slot", "select-trigger");
-  await expect(storePicker).toHaveCSS("min-height", "44px");
+  await expect(storePicker).toHaveAttribute("data-portal-control", "store-picker");
+  await expect(storePicker).toHaveCSS("min-height", "48px");
   await storePicker.click();
   const storeOptions = page.getByRole("listbox");
   await expect(storeOptions).toBeVisible();
@@ -601,20 +602,38 @@ test("customer upload, order filters and catalog width keep the client interacti
 
   const searchButton = filters.getByRole("button", { exact: true, name: "筛选" });
   const moreButton = filters.getByRole("button", { name: "更多筛选" });
-  const [searchBox, moreBox] = await Promise.all([
+  const orderNumberInput = filters.getByPlaceholder("搜索完整或部分单号");
+  const statusPicker = filters.getByRole("combobox", { name: "状态" });
+  const [orderNumberBox, statusBox, searchBox, moreBox] = await Promise.all([
+    orderNumberInput.boundingBox(),
+    statusPicker.boundingBox(),
     searchButton.boundingBox(),
     moreButton.boundingBox(),
   ]);
+  expect(orderNumberBox).not.toBeNull();
+  expect(statusBox).not.toBeNull();
   expect(searchBox).not.toBeNull();
   expect(moreBox).not.toBeNull();
-  expect(searchBox!.height).toBeGreaterThanOrEqual(44);
-  expect(moreBox!.height).toBeGreaterThanOrEqual(44);
+  for (const controlBox of [orderNumberBox!, statusBox!, searchBox!, moreBox!]) {
+    expect(controlBox.height).toBeGreaterThanOrEqual(48);
+  }
+  if ((page.viewportSize()?.width ?? 0) >= 1024) {
+    for (const controlBox of [statusBox!, searchBox!, moreBox!]) {
+      expect(Math.abs(controlBox.y - orderNumberBox!.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(controlBox.height - orderNumberBox!.height)).toBeLessThanOrEqual(1);
+    }
+  }
   expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(moreBox!.x);
 
   const overflow = await filters.evaluate(
     (element) => element.scrollWidth - element.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+  await waitForVisualStability(page);
+  await expect(page).toHaveScreenshot(`customer-order-filters-${testInfo.project.name}.png`, {
+    animations: "disabled",
+    fullPage: false,
+  });
 
   await page.goto("/portal/catalog");
   const catalogSurface = page.locator('[data-portal-content-width="wide"]');
@@ -623,6 +642,20 @@ test("customer upload, order filters and catalog width keep the client interacti
     const catalogBox = await catalogSurface.boundingBox();
     expect(catalogBox).not.toBeNull();
     expect(catalogBox!.width).toBeGreaterThan(1050);
+  }
+  const catalogSort = page.getByRole("combobox", { name: "货盘排序方式" });
+  const saleStatusSegments = page.locator("[data-sale-status-segments]");
+  const [catalogSortBox, saleStatusBox] = await Promise.all([
+    catalogSort.boundingBox(),
+    saleStatusSegments.boundingBox(),
+  ]);
+  expect(catalogSortBox).not.toBeNull();
+  expect(saleStatusBox).not.toBeNull();
+  expect(catalogSortBox!.height).toBeGreaterThanOrEqual(48);
+  expect(saleStatusBox!.height).toBeGreaterThanOrEqual(48);
+  if ((page.viewportSize()?.width ?? 0) >= 640) {
+    expect(Math.abs(catalogSortBox!.y - saleStatusBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(catalogSortBox!.height - saleStatusBox!.height)).toBeLessThanOrEqual(1);
   }
 });
 

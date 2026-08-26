@@ -397,7 +397,8 @@ export function CustomerCatalogWorkspace({
             >
               <SelectTrigger
                 aria-label="货盘排序方式"
-                className="min-h-[45px] w-full sm:w-48"
+                className="min-h-12 w-full sm:w-48"
+                data-portal-control="catalog-sort"
               >
                 <SelectValue />
               </SelectTrigger>

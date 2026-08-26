@@ -808,7 +808,21 @@ describe("catalog workspaces", () => {
     for (const internalLabel of ["序号", "采购价", "总库存", "货品价格"]) {
       expect(screen.queryByText(internalLabel)).not.toBeInTheDocument();
     }
-  });
+    });
+
+    it("keeps customer catalog sorting and sale-status controls in one aligned toolbar system", () => {
+      render(<CustomerCatalogWorkspace items={customerRows} query="" />);
+
+      const sortControl = screen.getByRole("combobox", { name: "货盘排序方式" });
+      const saleStatusFilter = screen.getByRole("group", { name: "销售状态筛选" });
+
+      expect(sortControl).toHaveClass("min-h-12");
+      expect(saleStatusFilter.querySelector("[data-sale-status-segments]")).toHaveClass("h-12");
+      for (const button of within(saleStatusFilter).getAllByRole("button")) {
+        expect(button).toHaveClass("min-h-11", "border-0");
+        expect(button).toHaveAttribute("data-variant", "ghost");
+      }
+    });
 
   it("clears a no-result customer query and availability filter locally", () => {
     render(<CustomerCatalogWorkspace items={customerRows} query="no customer SKU matches this query" />);

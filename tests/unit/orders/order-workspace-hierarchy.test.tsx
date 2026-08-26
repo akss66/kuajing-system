@@ -207,6 +207,11 @@ describe("order workspace hierarchy", () => {
     ).not.toBeInTheDocument();
     expect(within(filters).getByRole("button", { name: "筛选" })).toBeVisible();
     expect(within(filters).getByRole("button", { name: "更多筛选" })).toBeVisible();
+    expect(filters.querySelectorAll("[data-filter-label]")).toHaveLength(2);
+    expect(within(filters).getByPlaceholderText("搜索完整或部分单号")).toHaveClass("min-h-12");
+    expect(within(filters).getByRole("combobox", { name: "状态" })).toHaveClass("min-h-12");
+    expect(within(filters).getByRole("button", { name: "筛选" })).toHaveClass("min-h-12");
+    expect(within(filters).getByRole("button", { name: "更多筛选" })).toHaveClass("min-h-12");
 
     const card = screen.getByRole("article", { name: "订单 FH-20260812-01" });
     expect(card).toHaveAttribute("data-mobile-order-card");

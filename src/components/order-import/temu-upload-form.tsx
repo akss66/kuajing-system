@@ -85,7 +85,8 @@ export function TemuUploadForm({
           <SelectTrigger
             aria-labelledby="temu-upload-store-label"
             aria-required="true"
-            className="min-h-11 w-full bg-background px-3 text-base sm:text-sm"
+            className="min-h-12 w-full border-input bg-background px-3.5 text-base sm:text-sm"
+            data-portal-control="store-picker"
           >
             <SelectValue placeholder="选择订单所属店铺" />
           </SelectTrigger>

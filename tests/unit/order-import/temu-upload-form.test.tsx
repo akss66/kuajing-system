@@ -23,10 +23,13 @@ describe("TEMU upload form", () => {
     );
 
     expect(screen.getByLabelText("选择店铺")).toBeRequired();
-    expect(screen.getByRole("combobox", { name: "选择店铺" })).toHaveAttribute(
+    const storePicker = screen.getByRole("combobox", { name: "选择店铺" });
+    expect(storePicker).toHaveAttribute(
       "data-slot",
       "select-trigger",
     );
+    expect(storePicker).toHaveAttribute("data-portal-control", "store-picker");
+    expect(storePicker).toHaveClass("min-h-12", "border-input");
     expect(document.querySelector("select[name='storeId']")).toHaveAttribute(
       "aria-hidden",
       "true",

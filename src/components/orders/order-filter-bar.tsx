@@ -47,7 +47,7 @@ type OrderFilterBarProps = {
 
 const ALL_OPTION_VALUE = "__all__";
 const nativeSelectClassName =
-  "min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18";
+  "min-h-12 w-full rounded-[var(--radius-control)] border border-input bg-background px-3.5 text-sm outline-none transition-[border-color,box-shadow] duration-[var(--duration-fast)] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/18";
 
 function FilterSelect({
   allLabel,
@@ -65,12 +65,13 @@ function FilterSelect({
   value?: string;
 }) {
   return (
-    <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
-      {label}
+    <div className="grid gap-2 text-sm font-medium text-ink" data-testid="common-order-filter">
+      <span data-filter-label>{label}</span>
       {native ? (
         <select
           aria-label={label}
           className={nativeSelectClassName}
+          data-portal-control="order-filter"
           defaultValue={value ?? ""}
           name={name}
         >
@@ -83,7 +84,11 @@ function FilterSelect({
         </select>
       ) : (
         <Select defaultValue={value || ALL_OPTION_VALUE} name={name}>
-          <SelectTrigger aria-label={label} className="min-h-11 w-full">
+          <SelectTrigger
+            aria-label={label}
+            className="min-h-12 w-full"
+            data-portal-control="order-filter"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper">
@@ -96,7 +101,7 @@ function FilterSelect({
           </SelectContent>
         </Select>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -182,10 +187,11 @@ export function OrderFilterBar({
         )}
         onSubmit={(event) => applyFields(event, commonFields)}
       >
-        <label className="space-y-2 text-sm font-medium text-ink" data-testid="common-order-filter">
-          拿货单号
+        <label className="grid gap-2 text-sm font-medium text-ink" data-testid="common-order-filter">
+          <span data-filter-label>拿货单号</span>
           <Input
-            className="min-h-11"
+            className="min-h-12"
+            data-portal-control="order-filter"
             defaultValue={values.orderNumber}
             key={`order-number-${values.orderNumber ?? ""}`}
             name="orderNumber"
@@ -239,13 +245,13 @@ export function OrderFilterBar({
             )}
             data-filter-action-group
           >
-            <Button className="min-h-11 w-full" size="lg" type="submit">
+            <Button className="min-h-12 w-full" data-portal-control="order-filter" size="lg" type="submit">
               <Search aria-hidden="true" />
               筛选
             </Button>
             <Sheet onOpenChange={setDrawerOpen} open={drawerOpen}>
               <SheetTrigger asChild>
-                <Button className="min-h-11 w-full bg-background" size="lg" type="button" variant="outline">
+                <Button className="min-h-12 w-full bg-background" data-portal-control="order-filter" size="lg" type="button" variant="outline">
                   <Filter aria-hidden="true" />
                   更多筛选
                 </Button>
