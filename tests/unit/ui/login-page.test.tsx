@@ -25,7 +25,8 @@ describe("login page", () => {
     ).toBeVisible();
     expect(screen.getByText("AI+Agent+跨境")).toBeVisible();
     expect(screen.queryByText("WELCOME BACK")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "登录同舟行跨境" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "登录同舟行跨境" })).not.toBeInTheDocument();
     expect(screen.getByText("使用管理员为你开通的账号进入系统。")).toBeVisible();
     expect(screen.getByLabelText("登录邮箱")).toHaveAttribute("type", "email");
     expect(screen.getByLabelText("登录邮箱")).not.toHaveAttribute("placeholder");

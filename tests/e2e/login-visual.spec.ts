@@ -73,7 +73,8 @@ test("login surface is accessible, responsive and uses the approved teal action 
 }, testInfo) => {
   await page.goto("/login");
 
-  await expect(page.getByRole("heading", { name: "登录同舟行跨境" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "登录同舟行跨境" })).toHaveCount(0);
   await expect(page.getByText("AI+Agent+跨境")).toBeVisible();
   const loginPanel = page.locator("[data-login-panel]");
   await expect(loginPanel).toBeVisible();

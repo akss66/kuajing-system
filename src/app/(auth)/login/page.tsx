@@ -54,7 +54,7 @@ export default function LoginPage() {
         <div className="flex w-full flex-1 items-center justify-center py-10 sm:py-14 lg:py-16">
           <div className="w-full max-w-[27rem]" data-login-panel>
             <div className="mb-9">
-              <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">登录同舟行跨境</h1>
+              <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">欢迎回来</h1>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">使用管理员为你开通的账号进入系统。</p>
             </div>
 
