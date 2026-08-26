@@ -31,8 +31,15 @@ describe("login page", () => {
     expect(screen.getByLabelText("登录密码")).toHaveAttribute("type", "password");
     expect(screen.getByLabelText("登录密码")).not.toHaveAttribute("placeholder");
     expect(screen.getByRole("button", { name: "登录系统" })).toBeEnabled();
-    expect(document.querySelector("[data-login-panel]")).toHaveClass(
+    const signature = screen.getByText("Designed & Developed by ZZY");
+    const loginPanel = document.querySelector("[data-login-panel]");
+    expect(signature).toBeVisible();
+    expect(loginPanel).not.toContainElement(signature);
+    expect(loginPanel).toHaveClass("w-full", "max-w-[27rem]");
+    expect(loginPanel).not.toHaveClass(
       "rounded-[1.75rem]",
+      "border",
+      "shadow-[0_28px_90px_rgb(15_55_47/0.12)]",
       "backdrop-blur-xl",
     );
     expect(screen.getByRole("img", { name: "同舟行跨境" })).toHaveAttribute(

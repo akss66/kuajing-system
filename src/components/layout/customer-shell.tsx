@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, ClipboardList, LayoutDashboard, PackageSearch, Upload, UserRound } from "lucide-react";
+import { Banknote, CircleHelp, ClipboardList, LayoutDashboard, PackageSearch, Upload, UserRound } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { AuthenticatedIdentity } from "@/modules/identity/principal";
@@ -42,6 +42,11 @@ const customerNavigation: Array<{
     label: "账户",
     items: [{ href: "/portal/profile", icon: UserRound, label: "个人中心" }],
   },
+  {
+    id: "customer-system",
+    label: "系统",
+    items: [{ href: "/portal/about", icon: CircleHelp, label: "关于系统" }],
+  },
 ];
 
 function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
@@ -80,7 +85,8 @@ export function CustomerShell({
       : pathname === "/portal" ||
           pathname === "/portal/wallet" ||
           pathname.startsWith("/portal/wallet/") ||
-          pathname === "/portal/profile"
+          pathname === "/portal/profile" ||
+          pathname === "/portal/about"
         ? "standard"
         : "focused";
 

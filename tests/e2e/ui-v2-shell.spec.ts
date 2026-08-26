@@ -27,7 +27,7 @@ const navigation = {
   },
   customer: {
     drawerTitle: "客户导航",
-    groups: ["拿货", "履约", "资金"],
+    groups: ["拿货", "履约", "资金", "账户", "系统"],
     label: "客户主导航",
     quickLabel: "客户快捷导航",
   },
@@ -50,7 +50,7 @@ const audiences = [
     account: accounts.customer,
     ...navigation.customer,
     genericAccountLabel: "客户账号",
-    sectionCount: 5,
+    sectionCount: 6,
     identity: {
       displayName: "渥太华演示客户",
       email: accounts.customer.email,
@@ -267,6 +267,67 @@ test("customer personal center keeps account and store information usable on des
   await waitForResponsiveLayout(page);
   await expect(page.getByRole("heading", { level: 1, name: "个人中心" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "客户快捷导航" })).toBeVisible();
+  await expectNoPageOverflow(page);
+  await expectNoSeriousAccessibilityViolations(page);
+  expect(browserErrors, "unexpected browser console/page errors").toEqual([]);
+});
+
+test("customer about page exposes system and developer information accessibly on desktop and mobile", async ({
+  page,
+}) => {
+  const browserErrors = observeBrowserErrors(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await resetE2EDatabaseToSeedState({
+    context: "customer about system",
+    database: db,
+    reseed: seed,
+  });
+  await loginThroughUi(page, accounts.customer);
+  await expect(page).toHaveURL(/\/portal$/);
+  await page.goto("/portal/about");
+
+  await expect(page).toHaveURL(/\/portal\/about$/);
+  await expect(page.getByRole("heading", { level: 1, name: "关于系统" })).toBeVisible();
+  const systemCard = page.getByRole("region", { name: "系统信息" });
+  await expect(
+    systemCard.getByRole("heading", { level: 2, name: "同舟行跨境" }),
+  ).toBeVisible();
+  await expect(systemCard.getByText("V1.0.1")).toBeVisible();
+
+  const developerCard = page.getByRole("region", { name: "开发者信息" });
+  await expect(developerCard.getByText("产品设计与全栈开发")).toBeVisible();
+  await expect(developerCard.getByText("ZZY", { exact: true })).toBeVisible();
+  await expect(developerCard.getByText("WeChat QRCode")).toBeVisible();
+  const qrCode = developerCard.getByRole("img", { name: "ZZY 微信二维码" });
+  await expect(qrCode).toBeVisible();
+  await expect(qrCode).toHaveAttribute("src", "/images/zzy-wechat-qr.jpg");
+  await expect
+    .poll(() => qrCode.evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight]))
+    .toEqual([643, 643]);
+  const qrBox = await qrCode.boundingBox();
+  expect(qrBox).not.toBeNull();
+  expect(Math.abs(qrBox!.width - qrBox!.height)).toBeLessThanOrEqual(1);
+  expect(qrBox!.width).toBeGreaterThanOrEqual(200);
+  await expect(page.getByText("Designed & Developed by ZZY")).toBeVisible();
+
+  if ((page.viewportSize()?.width ?? 1440) >= 1024) {
+    const navigation = page.getByRole("navigation", { name: "客户主导航" });
+    await expect(navigation.getByRole("link", { name: "关于系统" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  } else {
+    await expect(page.getByRole("navigation", { name: "客户快捷导航" })).toBeVisible();
+    await page.getByRole("button", { name: "打开导航" }).click();
+    const drawer = page.getByRole("dialog", { name: "客户导航" });
+    const navigation = drawer.getByRole("navigation", { name: "客户主导航" });
+    await expect(navigation.getByRole("link", { name: "关于系统" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await page.keyboard.press("Escape");
+  }
+
   await expectNoPageOverflow(page);
   await expectNoSeriousAccessibilityViolations(page);
   expect(browserErrors, "unexpected browser console/page errors").toEqual([]);

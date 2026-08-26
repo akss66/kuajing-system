@@ -272,6 +272,10 @@ describe("merchant shells", () => {
       "href",
       "/portal/profile",
     );
+    expect(within(navigation).getByRole("link", { name: "关于系统" })).toHaveAttribute(
+      "href",
+      "/portal/about",
+    );
     expect(within(navigation).queryByRole("link", { name: "多店铺批量拿货" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "待付款" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "批量付款" })).not.toBeInTheDocument();
@@ -279,6 +283,7 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("heading", { name: "履约" })).toBeVisible();
     expect(within(navigation).getByRole("heading", { name: "资金" })).toBeVisible();
     expect(within(navigation).getByRole("heading", { name: "账户" })).toBeVisible();
+    expect(within(navigation).getByRole("heading", { name: "系统" })).toBeVisible();
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
     const currentCustomerRoute = within(navigation).getByRole("link", { name: "客户首页" });
@@ -363,6 +368,26 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("link", { name: "个人中心" })).toHaveAttribute(
       "aria-current",
       "page",
+    );
+  });
+
+  it("marks about system as the current customer location", () => {
+    navigationState.pathname = "/portal/about";
+
+    render(
+      <CustomerShell identity={customerIdentity}>
+        <div>关于系统内容</div>
+      </CustomerShell>,
+    );
+
+    const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
+    expect(within(navigation).getByRole("link", { name: "关于系统" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(document.querySelector("[data-portal-content-width]")).toHaveAttribute(
+      "data-portal-content-width",
+      "standard",
     );
   });
 

@@ -146,6 +146,21 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
+    heading: "关于系统",
+    expectedTexts: [
+      "同舟行跨境",
+      "V1.0.1",
+      "产品设计与全栈开发",
+      "WeChat QRCode",
+      "Designed & Developed by ZZY",
+    ],
+    path: "/portal/about",
+    screenshot: "customer-about-system",
+    shouldShowMetricStrip: false,
+    workspaceSelector: "[data-about-system]",
+  },
+  {
+    audience: "customer" as const,
     heading: "多店铺批量上传",
     expectedTexts: ["开始一次新的多店铺上传", "开始批量上传"],
     path: "/portal/bulk-orders",
@@ -525,6 +540,20 @@ for (const route of workspaceRoutes) {
       animations: "disabled",
       fullPage: false,
     });
+
+    if (route.path === "/portal/about" && testInfo.project.name.includes("mobile")) {
+      await page.getByRole("img", { name: "ZZY 微信二维码" }).scrollIntoViewIfNeeded();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await expect(page).toHaveScreenshot(
+        `customer-about-system-contact-${testInfo.project.name}.png`,
+        { animations: "disabled", fullPage: false },
+      );
+    }
   });
 }
 

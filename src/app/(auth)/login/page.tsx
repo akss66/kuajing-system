@@ -50,24 +50,26 @@ export default function LoginPage() {
         <p className="relative hidden shrink-0 text-xs text-login-hero-muted lg:block">业务时区 · 加拿大渥太华</p>
       </section>
 
-      <section className="relative flex items-center justify-center overflow-hidden bg-login-canvas px-6 pb-10 pt-7 sm:px-10 sm:pb-14 sm:pt-9 lg:min-h-svh lg:px-14 lg:py-14">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-28 top-20 size-96 rounded-full bg-primary/8 blur-3xl" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-36 left-10 size-80 rounded-full bg-primary-soft/60 blur-3xl" />
-        <div
-          className="relative w-full max-w-[31rem] rounded-[1.75rem] border border-white/70 bg-background/80 p-7 shadow-[0_28px_90px_rgb(15_55_47/0.12)] backdrop-blur-xl sm:p-10 lg:p-11"
-          data-login-panel
-        >
-          <div className="mb-8">
-            <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">登录同舟行跨境</h1>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">使用管理员为你开通的账号进入系统。</p>
-          </div>
+      <section className="relative flex min-h-0 flex-1 flex-col items-center border-border/70 bg-login-canvas px-6 sm:px-10 lg:min-h-svh lg:border-l lg:px-14">
+        <div className="flex w-full flex-1 items-center justify-center py-10 sm:py-14 lg:py-16">
+          <div className="w-full max-w-[27rem]" data-login-panel>
+            <div className="mb-9">
+              <p className="mb-3 text-xs font-semibold tracking-[0.12em] text-primary">WELCOME BACK</p>
+              <h1 className="text-[2rem] font-semibold tracking-[-0.035em] text-foreground">登录同舟行跨境</h1>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">使用管理员为你开通的账号进入系统。</p>
+            </div>
 
-          <LoginForm />
+            <LoginForm />
 
-          <div className="mt-8 border-t border-border pt-5 text-sm leading-6 text-muted-foreground">
-            暂无账号或忘记密码？请微信联系同舟行管理员。
+            <div className="mt-8 border-t border-border pt-5 text-sm leading-6 text-muted-foreground">
+              暂无账号或忘记密码？请微信联系同舟行管理员。
+            </div>
           </div>
         </div>
+
+        <p className="shrink-0 pb-6 text-center text-[11px] font-medium tracking-[0.08em] text-muted-foreground sm:pb-8">
+          Designed &amp; Developed by ZZY
+        </p>
       </section>
     </main>
   );

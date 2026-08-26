@@ -77,6 +77,7 @@ test("login surface is accessible, responsive and uses the approved teal action 
   await expect(page.getByText("AI+Agent+跨境")).toBeVisible();
   const loginPanel = page.locator("[data-login-panel]");
   await expect(loginPanel).toBeVisible();
+  await expect(page.getByText("Designed & Developed by ZZY")).toBeVisible();
   const heroHeading = page.getByRole("heading", { name: /加拿大本地货盘.*一站式经营更简单/ });
   const heroDescription = page.getByText(
     "一键上传订单、跟进付款与发货状态，让每一次发货都清晰、可追踪、可恢复。",
@@ -102,8 +103,10 @@ test("login surface is accessible, responsive and uses the approved teal action 
     expect(Math.min(...heroRgb)).toBeGreaterThan(38);
     expect(Math.max(...heroRgb)).toBeLessThan(86);
     expect(Math.max(...heroRgb) - Math.min(...heroRgb)).toBeLessThan(10);
-    await expect(loginPanel).toHaveCSS("border-top-width", "1px");
   }
+  await expect(loginPanel).toHaveCSS("border-top-width", "0px");
+  await expect(loginPanel).toHaveCSS("border-radius", "0px");
+  await expect(loginPanel).toHaveCSS("box-shadow", "none");
   await expect(page.getByLabel("登录邮箱")).not.toHaveAttribute("placeholder");
   await expect(page.getByLabel("登录密码")).not.toHaveAttribute("placeholder");
   const loginButton = page.getByRole("button", { name: "登录系统" });
