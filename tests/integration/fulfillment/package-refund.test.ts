@@ -529,6 +529,84 @@ describe("paid package cancellation refunds", () => {
     ).resolves.toEqual([{ deltaFen: 1_800 }]);
   });
 
+  test("restores the pending-payment lock window after a package cancellation invalidates a pending offline claim", async () => {
+    const fixture = await createPaidTwoPackageOrder({
+      paymentMode: null,
+      walletAmountFen: 0,
+    });
+    const declaredAt = new Date("2026-08-20T01:30:00.000Z");
+    const cancelledAt = new Date("2026-08-20T02:00:00.000Z");
+    const expectedRestoredLock = new Date("2026-08-20T04:00:00.000Z");
+
+    await expect(
+      declareOfflinePayment({
+        actorUserId: fixture.customer.id,
+        amountFen: 3_800,
+        customerId: fixture.customer.id,
+        now: declaredAt,
+        orderId: fixture.order.id,
+      }),
+    ).resolves.toMatchObject({
+      amountFen: 3_800,
+      lockExpiresAt: new Date("2026-08-20T13:30:00.000Z"),
+      status: "PENDING",
+    });
+
+    await db.transaction((tx) =>
+      recordPackageCancellationAdjustment(tx, {
+        actorId: fixture.admin.id,
+        actorType: "ADMIN",
+        now: cancelledAt,
+        orderId: fixture.order.id,
+        reason: "首包取消导致应付金额变更",
+        shipmentId: fixture.shipments[0].id,
+      }),
+    );
+
+    await expect(
+      db
+        .select({
+          lockExpiresAt: fulfillmentOrders.lockExpiresAt,
+          paymentDeclaredAt: fulfillmentOrders.paymentDeclaredAt,
+        })
+        .from(fulfillmentOrders)
+        .where(eq(fulfillmentOrders.id, fixture.order.id)),
+    ).resolves.toEqual([
+      {
+        lockExpiresAt: expectedRestoredLock,
+        paymentDeclaredAt: null,
+      },
+    ]);
+    await expect(
+      db
+        .select({
+          expiresAt: inventoryReservations.expiresAt,
+          status: inventoryReservations.status,
+        })
+        .from(inventoryReservations)
+        .where(eq(inventoryReservations.referenceId, fixture.order.id)),
+    ).resolves.toEqual([
+      {
+        expiresAt: expectedRestoredLock,
+        status: "ACTIVE",
+      },
+    ]);
+    await expect(
+      db
+        .select({
+          rejectionReason: paymentClaims.rejectionReason,
+          status: paymentClaims.status,
+        })
+        .from(paymentClaims)
+        .where(eq(paymentClaims.orderId, fixture.order.id)),
+    ).resolves.toEqual([
+      {
+        rejectionReason: "包裹取消后应付金额已变更，请按新金额重新申报",
+        status: "REJECTED",
+      },
+    ]);
+  });
+
   test("splits mixed-payment package refunds cumulatively without rounding loss", async () => {
     const fixture = await createPaidTwoPackageOrder({
       paymentMode: "MIXED",

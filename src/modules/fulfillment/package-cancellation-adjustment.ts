@@ -4,6 +4,7 @@ import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
   fulfillmentOrders,
+  inventoryReservations,
   orderLines,
   orderShipments,
   paymentClaims,
@@ -13,6 +14,8 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { refundWalletForShipment } from "@/modules/wallet/service";
+
+const PENDING_PAYMENT_LOCK_MS = 2 * 60 * 60 * 1000;
 
 type CancellationActor = {
   actorId: string | null;
@@ -346,16 +349,34 @@ export async function recordPackageCancellationAdjustment(
       )
       .returning({ id: paymentClaims.id });
     if (invalidatedClaims.length > 0) {
+      const restoredLockExpiresAt = new Date(
+        input.now.getTime() + PENDING_PAYMENT_LOCK_MS,
+      );
       await tx
         .update(fulfillmentOrders)
-        .set({ paymentDeclaredAt: null, updatedAt: input.now })
+        .set({
+          lockExpiresAt: restoredLockExpiresAt,
+          paymentDeclaredAt: null,
+          updatedAt: input.now,
+        })
         .where(eq(fulfillmentOrders.id, input.orderId));
+      await tx
+        .update(inventoryReservations)
+        .set({ expiresAt: restoredLockExpiresAt, updatedAt: input.now })
+        .where(
+          and(
+            eq(inventoryReservations.referenceType, "FULFILLMENT_ORDER"),
+            eq(inventoryReservations.referenceId, input.orderId),
+            eq(inventoryReservations.status, "ACTIVE"),
+          ),
+        );
       await tx.insert(auditLogs).values({
         action: "OFFLINE_PAYMENT_CLAIM_INVALIDATED_BY_SHIPMENT_CANCELLATION",
         actorId: input.actorId,
         actorType: input.actorType,
         afterJson: {
           claimIds: invalidatedClaims.map(({ id }) => id),
+          lockExpiresAt: restoredLockExpiresAt.toISOString(),
           status: "REJECTED",
         },
         beforeJson: { status: "PENDING" },
