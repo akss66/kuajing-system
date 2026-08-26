@@ -7,11 +7,6 @@ import { BRAND } from "@/shared/brand";
 
 export const metadata: Metadata = { title: "关于系统" };
 
-const systemDetails = [
-  { label: "系统名称", value: "同舟行跨境" },
-  { label: "当前版本", value: "V1.0.1" },
-] as const;
-
 export default function AboutSystemPage() {
   return (
     <div className="space-y-8" data-about-system>
@@ -25,43 +20,39 @@ export default function AboutSystemPage() {
         className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)]"
       >
         <div
-          className="flex min-h-40 flex-col items-center justify-center px-5 py-8 text-center sm:min-h-44 sm:px-7 sm:py-10"
+          className="grid gap-6 px-5 py-6 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-center sm:px-8 sm:py-8"
           data-system-brand
         >
-          <p className="text-xs font-semibold tracking-[0.12em] text-primary">系统信息</p>
-          <div className="mt-3 flex items-center justify-center gap-3" data-system-brand-lockup>
-            <Image
-              alt=""
-              className="h-10 w-auto shrink-0 object-contain sm:h-11"
-              data-system-brand-logo
-              height={656}
-              src={BRAND.logoPath}
-              width={683}
-            />
-            <h2 className="text-xl font-bold tracking-tight text-foreground">同舟行跨境</h2>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            面向跨境商家的本地货盘与履约协作系统
-          </p>
-        </div>
-
-        <dl className="grid border-t border-slate-100 bg-[var(--portal-subtle-surface)] sm:grid-cols-2">
-          {systemDetails.map((detail, index) => (
-            <div
-              className={
-                index === 0
-                  ? "px-5 py-5 sm:px-7"
-                  : "border-t border-slate-100 px-5 py-5 sm:border-l sm:border-t-0 sm:px-7"
-              }
-              key={detail.label}
-            >
-              <dt className="text-xs font-medium text-muted-foreground">{detail.label}</dt>
-              <dd className="mt-1.5 text-base font-bold tracking-tight text-foreground">
-                {detail.value}
-              </dd>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-[0.12em] text-primary">系统信息</p>
+            <div className="mt-4 flex items-center gap-3.5" data-system-brand-lockup>
+              <Image
+                alt=""
+                className="h-10 w-auto shrink-0 object-contain sm:h-11"
+                data-system-brand-logo
+                height={656}
+                src={BRAND.logoPath}
+                width={683}
+              />
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold tracking-tight text-foreground">同舟行跨境</h2>
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                  面向跨境商家的本地货盘与履约协作系统
+                </p>
+              </div>
             </div>
-          ))}
-        </dl>
+          </div>
+
+          <dl
+            className="border-t border-slate-100 pt-5 sm:border-t-0 sm:pt-0"
+            data-system-version
+          >
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">当前版本</dt>
+              <dd className="mt-1.5 text-lg font-bold tracking-tight text-foreground">V1.0.1</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <section

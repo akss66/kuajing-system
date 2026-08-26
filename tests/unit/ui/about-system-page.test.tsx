@@ -37,13 +37,14 @@ describe("about system page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "关于系统" })).toBeVisible();
 
     const systemCard = screen.getByRole("region", { name: "系统信息" });
-    expect(within(systemCard).getAllByText("同舟行跨境")).toHaveLength(2);
-    expect(within(systemCard).getByText("V1.0.1")).toBeVisible();
+    expect(within(systemCard).getAllByText("同舟行跨境")).toHaveLength(1);
+    expect(within(systemCard).queryByText("系统名称")).not.toBeInTheDocument();
     expect(within(systemCard).queryByText("正式版本")).not.toBeInTheDocument();
     const brandArea = systemCard.querySelector<HTMLElement>("[data-system-brand]");
     const brandLogo = systemCard.querySelector<HTMLImageElement>("[data-system-brand-logo]");
     const brandLockup = systemCard.querySelector<HTMLElement>("[data-system-brand-lockup]");
-    expect(brandArea).toHaveClass("min-h-40", "flex-col");
+    const versionArea = systemCard.querySelector<HTMLElement>("[data-system-version]");
+    expect(brandArea).toHaveClass("grid", "sm:grid-cols-[minmax(0,1fr)_9rem]");
     expect(brandLogo).toBeVisible();
     expect(brandLockup).toContainElement(brandLogo);
     expect(within(brandLockup as HTMLElement).getByRole("heading", { name: "同舟行跨境" })).toBeVisible();
@@ -52,6 +53,9 @@ describe("about system page", () => {
       "bg-[var(--portal-icon-surface)]",
       "p-2.5",
     );
+    expect(versionArea).toBeVisible();
+    expect(within(versionArea as HTMLElement).getByText("当前版本")).toBeVisible();
+    expect(within(versionArea as HTMLElement).getByText("V1.0.1")).toBeVisible();
 
     const developerCard = screen.getByRole("region", { name: "开发者信息" });
     expect(within(developerCard).getByText("产品设计与全栈开发")).toBeVisible();
