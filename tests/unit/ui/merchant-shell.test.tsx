@@ -166,7 +166,9 @@ describe("merchant shells", () => {
 
     const navigation = screen.getAllByRole("navigation", { name: "管理员主导航" })[0];
     expect(navigation).toBeVisible();
-    expect(within(navigation).getByRole("link", { name: "运营总览" })).toBeVisible();
+    const overviewLink = within(navigation).getByRole("link", { name: "运营总览" });
+    expect(overviewLink).toBeVisible();
+    expect(overviewLink.querySelector("[data-navigation-icon]")).toHaveClass("size-[18px]");
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: "打开账号菜单" }));
     const accountMenu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']");
@@ -251,7 +253,9 @@ describe("merchant shells", () => {
     expect(desktopSidebar?.querySelector("[data-customer-sidebar-account]")).toBeInTheDocument();
     const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
     expect(navigation).toBeVisible();
-    expect(within(navigation).getByRole("link", { name: "客户首页" })).toBeVisible();
+    const customerHomeLink = within(navigation).getByRole("link", { name: "客户首页" });
+    expect(customerHomeLink).toBeVisible();
+    expect(customerHomeLink.querySelector("[data-navigation-icon]")).toHaveClass("size-6");
     expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
       "href",
       "/portal/catalog",

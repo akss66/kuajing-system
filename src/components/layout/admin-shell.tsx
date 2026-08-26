@@ -98,6 +98,7 @@ function AdminNavigation({
       {navigationForRole(principalKind).map((group) => (
         <NavigationSection
           activePath={pathname}
+          audience="admin"
           id={group.id}
           items={group.items}
           key={group.id}

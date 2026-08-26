@@ -23,6 +23,7 @@ export type NavigationItem = {
 };
 
 export type NavigationSectionProps = {
+  audience: "admin" | "customer";
   id: string;
   label?: string;
   items: NavigationItem[];
@@ -56,6 +57,7 @@ function activeHref(items: NavigationItem[], activePath: string) {
 
 export function NavigationSection({
   activePath,
+  audience,
   id,
   items,
   label,
@@ -96,7 +98,10 @@ export function NavigationSection({
                 href={item.href}
               >
                 <span
-                  className="flex size-6 shrink-0 items-center justify-center"
+                  className={cn(
+                    "flex shrink-0 items-center justify-center",
+                    audience === "customer" ? "size-6" : "size-[18px]",
+                  )}
                   data-navigation-icon
                 >
                   <item.icon aria-hidden="true" className="size-[18px]" />

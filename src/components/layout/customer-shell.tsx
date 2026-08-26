@@ -60,6 +60,7 @@ function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
       {customerNavigation.map((group) => (
         <NavigationSection
           activePath={activePath}
+          audience="customer"
           id={group.id}
           items={group.items}
           key={group.id}
