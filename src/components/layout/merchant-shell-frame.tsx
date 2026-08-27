@@ -105,10 +105,10 @@ export function MerchantShellFrame({
       >
         {audience === "customer" ? (
           <>
-            <MerchantBrand audience="customer" className="mt-2 h-20 px-6" />
+            <MerchantBrand audience="customer" className="h-24 border-b border-slate-200/60 px-6" />
             <div className="min-h-0 flex-1 overflow-y-auto">{navigation}</div>
             {desktopSidebarFooter ? (
-              <div className="border-t border-slate-200/60 p-4" data-customer-sidebar-account>
+              <div className="border-t border-slate-200/60 px-4 py-3.5" data-customer-sidebar-account>
                 {desktopSidebarFooter}
               </div>
             ) : null}

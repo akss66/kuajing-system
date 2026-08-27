@@ -74,11 +74,11 @@ describe("operations dashboards", () => {
     expect(document.body).not.toHaveTextContent("在售 SKU");
   });
 
-  it("puts customer continuation tasks before static store and money summaries", () => {
+  it("puts the customer business overview before continuation and detail summaries", () => {
     render(
       <CustomerTaskDashboard
         dashboard={{
-          activeStoreCount: 2,
+          activeStoreCount: 6,
           fulfillmentExceptionCount: 1,
           pendingPaymentCount: 2,
           pendingPaymentFen: 8_800,
@@ -97,6 +97,14 @@ describe("operations dashboards", () => {
               storeId: "store-1",
               storeName: "北美主店",
             },
+            ...Array.from({ length: 4 }, (_, index) => ({
+              fulfillmentExceptionCount: 0,
+              pendingPaymentCount: 0,
+              pendingPaymentFen: 0,
+              recentOrderCount: 0,
+              storeId: `store-${index + 2}`,
+              storeName: `测试店铺 ${index + 2}`,
+            })),
           ],
           unfinishedDraftCount: 0,
           walletAvailableFen: 9_000,
@@ -106,19 +114,33 @@ describe("operations dashboards", () => {
       />,
     );
 
+    const overview = screen.getByRole("heading", { name: "经营总览" });
     const continuation = screen.getByRole("heading", { name: "继续处理" });
     const quickPurchase = screen.getByRole("heading", { name: "快捷拿货" });
     const storeSummary = screen.getByRole("heading", { name: "店铺摘要" });
     const fundsSummary = screen.getByRole("heading", { name: "资金摘要" });
 
+    expect(overview).toBeVisible();
     expect(continuation).toBeVisible();
     expect(quickPurchase).toBeVisible();
     expect(storeSummary).toBeVisible();
     expect(fundsSummary).toBeVisible();
+    expect(document.querySelector("[data-portal-overview]")).toBeInTheDocument();
     expect(document.querySelector("[data-portal-continuation]")).toBeInTheDocument();
-    expect(document.querySelector("[data-portal-task-overview]")).toBeInTheDocument();
+    expect(document.querySelector("[data-portal-task-overview]")).not.toBeInTheDocument();
     expect(document.querySelector("[data-portal-quick-actions]")).toBeInTheDocument();
     expect(document.querySelector("[data-portal-summary-grid]")).toBeInTheDocument();
+    expect(screen.getByText("启用店铺")).toBeVisible();
+    expect(screen.getByText("前 5 店铺订单")).toBeVisible();
+    expect(
+      screen.getByText("当前 6 家启用店铺，仅展示近 30 天订单量前 5 店铺。"),
+    ).toBeVisible();
+    expect(screen.getByText("待付款金额")).toBeVisible();
+    expect(screen.getByText("需要协助", { selector: "span" })).toBeVisible();
+    expect(
+      overview.compareDocumentPosition(continuation) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(
       continuation.compareDocumentPosition(storeSummary) &
         Node.DOCUMENT_POSITION_FOLLOWING,

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState, useSyncExternalStore } from "react";
 
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { authClient } from "@/modules/identity/auth-client";
 
 const inputClassName =
-  "login-input min-h-12 w-full rounded-[var(--radius-control)] border border-border bg-background px-3.5 text-[15px] text-ink shadow-none transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15";
+  "login-input min-h-12 w-full rounded-[var(--radius-control)] border border-border bg-background px-3.5 text-base text-ink shadow-none transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-muted focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary/15 md:text-[15px]";
 
 const subscribeToHydration = () => () => undefined;
 
@@ -17,6 +17,7 @@ export function LoginForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const hydrated = useSyncExternalStore(
     subscribeToHydration,
     () => true,
@@ -56,40 +57,57 @@ export function LoginForm() {
 
   return (
     <form action="/login" className="space-y-5" method="post" onSubmit={handleSubmit}>
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <label className="block text-sm font-medium text-ink" htmlFor="email">
           登录邮箱
         </label>
-        <Input
-          autoComplete="email"
-          className={inputClassName}
-          disabled={disabled}
-          id="email"
-          name="email"
-          required
-          type="email"
-        />
+        <div className="relative">
+          <Mail aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoComplete="email"
+            className={`${inputClassName} pl-11`}
+            disabled={disabled}
+            id="email"
+            name="email"
+            required
+            type="email"
+          />
+        </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <label className="block text-sm font-medium text-ink" htmlFor="password">
           登录密码
         </label>
-        <Input
-          autoComplete="current-password"
-          className={inputClassName}
-          disabled={disabled}
-          id="password"
-          minLength={12}
-          name="password"
-          required
-          type="password"
-        />
+        <div className="relative">
+          <LockKeyhole aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoComplete="current-password"
+            className={`${inputClassName} px-11`}
+            disabled={disabled}
+            id="password"
+            minLength={12}
+            name="password"
+            required
+            type={passwordVisible ? "text" : "password"}
+          />
+          <button
+            aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+            aria-pressed={passwordVisible}
+            className="absolute right-0.5 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-[var(--duration-fast)] hover:bg-surface-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled}
+            onClick={() => setPasswordVisible((visible) => !visible)}
+            type="button"
+          >
+            {passwordVisible ? <EyeOff aria-hidden="true" className="size-[18px]" /> : <Eye aria-hidden="true" className="size-[18px]" />}
+          </button>
+        </div>
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-danger/20 bg-danger/5 px-3 py-2.5 text-sm text-danger" role="alert">
-          {error}
+        <p className="flex items-start gap-2.5 rounded-xl bg-danger/5 px-3.5 py-3 text-sm leading-5 text-danger" role="alert">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>{error}</span>
         </p>
       ) : null}
 

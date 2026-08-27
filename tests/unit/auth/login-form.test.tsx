@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -79,5 +79,29 @@ describe("LoginForm", () => {
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/admin"));
     expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("lets the user reveal and hide the password without changing the field value", () => {
+    const { container } = render(<LoginForm />);
+    const password = container.querySelector<HTMLInputElement>('input[name="password"]');
+
+    expect(password).not.toBeNull();
+    fireEvent.change(password!, { target: { value: "a-valid-password" } });
+
+    const reveal = within(container).getByRole("button", { name: "显示密码" });
+    fireEvent.click(reveal);
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("a-valid-password");
+
+    fireEvent.click(within(container).getByRole("button", { name: "隐藏密码" }));
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("a-valid-password");
+  });
+
+  it("keeps login inputs at an iOS-safe text size", () => {
+    const { container } = render(<LoginForm />);
+
+    expect(container.querySelector('input[name="email"]')).toHaveClass("text-base");
+    expect(container.querySelector('input[name="password"]')).toHaveClass("text-base");
   });
 });

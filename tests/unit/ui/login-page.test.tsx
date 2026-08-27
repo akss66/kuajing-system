@@ -35,7 +35,10 @@ describe("login page", () => {
     expect(screen.getByRole("button", { name: "登录系统" })).toBeEnabled();
     const signature = screen.getByText("Designed & Developed by ZZY");
     const loginPanel = document.querySelector("[data-login-panel]");
+    const routeGraphic = document.querySelector("[data-login-route-graphic]");
     expect(signature).toBeVisible();
+    expect(routeGraphic).toBeInTheDocument();
+    expect(routeGraphic).toHaveAttribute("aria-hidden", "true");
     expect(loginPanel).not.toContainElement(signature);
     expect(loginPanel).toHaveClass("w-full", "max-w-[27rem]");
     expect(loginPanel).not.toHaveClass(

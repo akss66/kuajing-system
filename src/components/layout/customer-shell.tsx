@@ -17,7 +17,7 @@ const customerNavigation: Array<{
 }> = [
   {
     id: "customer-overview",
-    items: [{ href: "/portal", icon: LayoutDashboard, label: "客户首页", exact: true }],
+    items: [{ href: "/portal", icon: LayoutDashboard, label: "经营概览", exact: true }],
   },
   {
     id: "customer-purchasing",
@@ -110,7 +110,7 @@ export function CustomerShell({
         <MobileTaskDock
           ariaLabel="客户快捷导航"
           items={[
-            { exact: true, href: "/portal", icon: LayoutDashboard, label: "首页" },
+            { exact: true, href: "/portal", icon: LayoutDashboard, label: "概览" },
             { activePrefixes: ["/portal/bulk-orders"], href: "/portal/imports/new", icon: Upload, label: "上传" },
             { href: "/portal/orders", icon: ClipboardList, label: "订单" },
             { href: "/portal/wallet", icon: Banknote, label: "资金" },

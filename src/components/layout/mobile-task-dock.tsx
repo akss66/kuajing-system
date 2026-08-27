@@ -39,7 +39,7 @@ export function MobileTaskDock({
   return (
     <nav
       aria-label={ariaLabel}
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/97 pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_20px_oklch(0.22_0.018_175/0.08)] backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_20px_oklch(0.22_0.018_175/0.08)] lg:hidden"
       data-mobile-task-dock
     >
       <div className="mx-auto grid h-[var(--merchant-mobile-dock-height)] max-w-xl grid-flow-col auto-cols-fr px-2">
@@ -59,7 +59,9 @@ export function MobileTaskDock({
               href={item.href}
               key={item.href}
             >
-              <Icon aria-hidden="true" className="size-[18px]" />
+              <span className="flex size-7 items-center justify-center rounded-lg" data-mobile-task-icon>
+                <Icon aria-hidden="true" className="size-[18px]" />
+              </span>
               <span className="truncate">{item.label}</span>
             </Link>
           );

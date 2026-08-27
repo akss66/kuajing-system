@@ -111,7 +111,7 @@ const workspaceRoutes = [
   },
   {
     audience: "customer" as const,
-    heading: "客户首页",
+    heading: "经营概览",
     expectedTexts: [
       "下一步推荐",
       "开始下一批拿货",
@@ -565,6 +565,45 @@ for (const route of workspaceRoutes) {
     }
   });
 }
+
+test("login and customer overview keep their task hierarchy across the supported viewport matrix @desktop-only", async ({
+  page,
+}) => {
+  const viewports = [
+    { height: 800, width: 360 },
+    { height: 844, width: 390 },
+    { height: 900, width: 430 },
+    { height: 900, width: 1440 },
+    { height: 1080, width: 1920 },
+  ];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录系统" })).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+
+  await loginAsAudience("customer", page);
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto("/portal");
+    await expect(page.getByRole("heading", { exact: true, name: "经营概览" })).toBeVisible();
+    await expect(page.locator("[data-portal-overview]")).toBeVisible();
+    await expect(page.getByRole("region", { name: "开始下一批拿货" })).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  }
+});
 
 test("customer upload, order filters and catalog width keep the client interaction quality", async ({
   page,

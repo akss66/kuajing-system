@@ -253,7 +253,7 @@ describe("merchant shells", () => {
     expect(desktopSidebar?.querySelector("[data-customer-sidebar-account]")).toBeInTheDocument();
     const navigation = screen.getAllByRole("navigation", { name: "客户主导航" })[0];
     expect(navigation).toBeVisible();
-    const customerHomeLink = within(navigation).getByRole("link", { name: "客户首页" });
+    const customerHomeLink = within(navigation).getByRole("link", { name: "经营概览" });
     expect(customerHomeLink).toBeVisible();
     expect(customerHomeLink.querySelector("[data-navigation-icon]")).toHaveClass("size-6");
     expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
@@ -290,7 +290,7 @@ describe("merchant shells", () => {
     expect(within(navigation).getByRole("heading", { name: "系统" })).toBeVisible();
     expect(screen.queryByText("店铺数据")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link", { current: "page" })).toHaveLength(1);
-    const currentCustomerRoute = within(navigation).getByRole("link", { name: "客户首页" });
+    const currentCustomerRoute = within(navigation).getByRole("link", { name: "经营概览" });
     expect(currentCustomerRoute).toHaveAttribute("data-motion-state", "current");
     expect(currentCustomerRoute.querySelector("[data-navigation-icon]")).toBeInTheDocument();
     expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
@@ -320,7 +320,7 @@ describe("merchant shells", () => {
     expect(within(navigation).queryByRole("link", { name: "账号管理" })).not.toBeInTheDocument();
     expect(screen.getByText("客户内容")).toBeVisible();
     const quickNavigation = screen.getByRole("navigation", { name: "客户快捷导航" });
-    expect(within(quickNavigation).getByRole("link", { name: "首页" })).toHaveAttribute(
+    expect(within(quickNavigation).getByRole("link", { name: "概览" })).toHaveAttribute(
       "aria-current",
       "page",
     );

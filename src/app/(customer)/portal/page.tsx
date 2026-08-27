@@ -10,8 +10,8 @@ export default async function CustomerPortalPage() {
   return (
     <div className="space-y-6" data-portal-home>
       <PageHeading
-        description="查看当前待办，快速开始下一次拿货。"
-        title="客户首页"
+        description="总览店铺、订单、付款与异常，并继续下一步拿货。"
+        title="经营概览"
       />
       <CustomerTaskDashboard dashboard={dashboard} />
     </div>

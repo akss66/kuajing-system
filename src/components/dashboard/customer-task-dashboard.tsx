@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Banknote,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   PackageSearch,
   ReceiptText,
@@ -59,6 +60,49 @@ function TaskLink({ count, description, href, icon: Icon, label, tone = "default
   );
 }
 
+function OverviewMetric({
+  description,
+  href,
+  icon: Icon,
+  label,
+  tone = "default",
+  value,
+}: {
+  description: string;
+  href: string;
+  icon: typeof Clock3;
+  label: string;
+  tone?: "danger" | "default" | "warning";
+  value: string;
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "bg-danger/7 text-danger"
+      : tone === "warning"
+        ? "bg-[var(--portal-accent-surface)] text-[var(--portal-accent-foreground)]"
+        : "bg-[var(--portal-icon-surface)] text-primary-hover";
+
+  return (
+    <Link
+      className="group grid min-h-24 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-3.5 py-3.5 outline-none transition-colors hover:bg-[var(--portal-hover)] focus-visible:bg-[var(--portal-hover)] sm:min-h-28 sm:gap-x-3.5 sm:px-5 sm:py-4"
+      data-overview-metric
+      href={href}
+    >
+      <span className={`row-span-2 flex size-10 items-center justify-center rounded-xl ${toneClass}`}>
+        <Icon aria-hidden="true" className="size-[18px]" />
+      </span>
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <ArrowRight aria-hidden="true" className="size-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+      </span>
+      <span className="min-w-0">
+        <strong className="block truncate text-lg font-semibold tracking-[-0.02em] tabular-nums text-foreground">{value}</strong>
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{description}</span>
+      </span>
+    </Link>
+  );
+}
+
 const continuationCopy: Record<
   NonNullable<CustomerDashboardData["primaryContinuationTarget"]>["kind"],
   { description: string; label: string }
@@ -110,11 +154,66 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
     },
   ].filter(
     (item) =>
-      item.count > 0 && item.kind !== dashboard.primaryContinuationTarget?.kind,
+      item.count > 0 &&
+      item.kind !== dashboard.primaryContinuationTarget?.kind &&
+      item.kind !== "PENDING_PAYMENT" &&
+      item.kind !== "FULFILLMENT_EXCEPTION",
   );
+  const recentOrderCount = dashboard.recentStoreSummaries.reduce(
+    (total, store) => total + store.recentOrderCount,
+    0,
+  );
+  const storeSummaryIsTruncated =
+    dashboard.recentStoreSummaries.length === 5 && dashboard.activeStoreCount > 5;
 
   return (
     <div className="space-y-7" data-portal-dashboard>
+      <section aria-labelledby="business-overview-title" className="space-y-3" data-portal-overview>
+        <SectionHeading
+          description="先看经营状态，再处理付款、异常或下一批拿货。"
+          id="business-overview-title"
+          title="经营总览"
+        />
+        <WorkspacePanel className="overflow-hidden">
+          <div className="grid grid-cols-2 xl:grid-cols-4">
+            <OverviewMetric
+              description="当前可操作店铺"
+              href="/portal/profile"
+              icon={Store}
+              label="启用店铺"
+              value={`${dashboard.activeStoreCount} 家`}
+            />
+            <OverviewMetric
+              description={
+                storeSummaryIsTruncated
+                  ? "近 30 天订单量前 5 店铺合计"
+                  : "全部启用店铺订单汇总"
+              }
+              href="/portal/orders"
+              icon={ClipboardList}
+              label={storeSummaryIsTruncated ? "前 5 店铺订单" : "近 30 天订单"}
+              value={`${recentOrderCount} 单`}
+            />
+            <OverviewMetric
+              description={`${dashboard.pendingPaymentCount} 单等待付款`}
+              href="/portal/orders?status=PENDING_PAYMENT"
+              icon={ReceiptText}
+              label="待付款金额"
+              tone="warning"
+              value={money.format(dashboard.pendingPaymentFen / 100)}
+            />
+            <OverviewMetric
+              description={dashboard.fulfillmentExceptionCount ? "需要确认进度或联系运营" : "当前没有履约异常"}
+              href="/portal/orders?status=FULFILLMENT_EXCEPTION"
+              icon={AlertTriangle}
+              label="需要协助"
+              tone={dashboard.fulfillmentExceptionCount ? "danger" : "default"}
+              value={`${dashboard.fulfillmentExceptionCount} 单`}
+            />
+          </div>
+        </WorkspacePanel>
+      </section>
+
       <section aria-labelledby="continuation-title" className="space-y-3" data-portal-continuation>
         <SectionHeading
           description={dashboard.primaryContinuationTarget
@@ -244,7 +343,15 @@ export function CustomerTaskDashboard({ dashboard }: { dashboard: CustomerDashbo
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]" data-portal-summary-grid>
         <section aria-labelledby="store-summary-title" className="space-y-3">
-          <SectionHeading description={`当前 ${dashboard.activeStoreCount} 家启用店铺，按近 30 天订单量排序。`} id="store-summary-title" title="店铺摘要" />
+          <SectionHeading
+            description={
+              storeSummaryIsTruncated
+                ? `当前 ${dashboard.activeStoreCount} 家启用店铺，仅展示近 30 天订单量前 5 店铺。`
+                : `当前 ${dashboard.activeStoreCount} 家启用店铺，按近 30 天订单量排序。`
+            }
+            id="store-summary-title"
+            title="店铺摘要"
+          />
           <WorkspacePanel className="overflow-hidden">
             <WorkspacePanelHeader description="待付款金额不含已申报付款的订单。" title="近期订单与异常" />
             {dashboard.recentStoreSummaries.length ? (

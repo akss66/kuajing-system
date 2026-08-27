@@ -157,9 +157,6 @@ html {
 @media (min-width: 64rem) {
   .login-metal-surface {
     background-color: var(--login-hero);
-    background-image:
-      radial-gradient(circle at 16% 12%, rgb(255 255 255 / 7%), transparent 34%),
-      linear-gradient(128deg, transparent 0 44%, rgb(255 255 255 / 3%) 51%, transparent 62%);
     box-shadow: inset -1px 0 rgb(255 255 255 / 8%);
   }
 }
@@ -309,8 +306,20 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-page-heading] h1 {
-  font-size: clamp(1.65rem, 2.5vw, 2.15rem);
-  letter-spacing: -0.035em;
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+}
+
+[data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric] {
+  border-bottom: 1px solid var(--color-border);
+}
+
+[data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric]:nth-child(even) {
+  border-left: 1px solid var(--color-border);
+}
+
+[data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric]:nth-last-child(-n + 2) {
+  border-bottom: 0;
 }
 
 [data-merchant-shell="customer"] [data-page-heading-breadcrumbs] {
@@ -433,6 +442,10 @@ textarea {
     transform var(--motion-feedback) ease-out;
 }
 
+[data-merchant-shell="customer"] [data-navigation-section] a[aria-current="page"] {
+  box-shadow: inset 0 1px rgb(255 255 255 / 55%), 0 1px 2px rgb(18 73 62 / 5%);
+}
+
 [data-merchant-shell="customer"] [data-navigation-icon] {
   transition:
     color var(--motion-feedback) ease-out,
@@ -473,8 +486,26 @@ textarea {
 }
 
 [data-merchant-shell="customer"] [data-mobile-task-dock] a[aria-current="page"] {
-  background: rgb(241 247 243 / 0.92);
-  border-radius: 0.85rem;
+  background: transparent;
+}
+
+[data-merchant-shell="customer"] [data-mobile-task-dock] a[aria-current="page"] [data-mobile-task-icon] {
+  background: rgb(232 243 237);
+  box-shadow: inset 0 0 0 1px rgb(198 222 210 / 45%);
+}
+
+@media (min-width: 64rem) {
+  [data-merchant-shell="customer"] [data-page-heading] h1 {
+    font-size: 2.05rem;
+  }
+
+  [data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric] {
+    border-bottom: 0;
+  }
+
+  [data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric]:nth-child(n + 2) {
+    border-left: 1px solid var(--color-border);
+  }
 }
 
 @keyframes portal-ready-settle {
