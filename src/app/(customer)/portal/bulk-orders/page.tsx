@@ -3,9 +3,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CreateBulkDraftSubmit } from "@/components/bulk-order/create-bulk-draft-submit";
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { DiscardBulkDraftForm } from "@/components/bulk-order/discard-bulk-draft-form";
 import { PageHeading } from "@/components/layout/page-heading";
 import { WorkspacePanel, WorkspacePanelHeader } from "@/components/layout/workspace-panel";
+import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { Button } from "@/components/ui/button";
 import { createBulkDraftAction } from "@/modules/bulk-order/actions";
 import { listBulkDrafts } from "@/modules/bulk-order/draft-service";
@@ -71,7 +73,8 @@ export default async function CustomerBulkOrdersPage() {
     (total, { draft }) => total + draft.fileCount,
     0,
   );
-  const submittableGroupCount = displayedDrafts.reduce(
+  const activeDraftCount = writableDrafts.length;
+  const submittableGroupCount = writableDrafts.reduce(
     (total, { draft }) => total + draft.submittableGroupCount,
     0,
   );
@@ -157,27 +160,24 @@ export default async function CustomerBulkOrdersPage() {
         ) : null}
       </section>
 
-      {displayedDrafts.length ? (
-        <section
-          aria-label="上传概况"
-          className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="text-sm font-medium text-foreground">当前上传概况</p>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
-            {[
-              { label: "可用店铺", value: stores.length },
-              { label: "进行中", value: writableDrafts.length },
-              { label: "已上传文件", value: activeFileCount },
-              { label: "可提交店铺", value: submittableGroupCount },
-            ].map((item) => (
-              <div className="flex items-baseline justify-between gap-3 sm:justify-start" key={item.label}>
-                <dt className="text-muted-foreground">{item.label}</dt>
-                <dd className="font-semibold tabular-nums text-foreground">{item.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      ) : null}
+      <section aria-label="上传概况" className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">当前上传概况</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            先看可用店铺、进行中上传和当前可提交店铺，再决定继续处理还是开始新的批量上传。
+          </p>
+        </div>
+        <MetricStrip
+          compact
+          items={[
+            { label: "可用店铺", value: String(stores.length) },
+            { label: "进行中上传", value: String(activeDraftCount) },
+            { label: "已上传文件", value: String(activeFileCount) },
+            { label: "可提交店铺", value: String(submittableGroupCount) },
+          ]}
+          variant="segmented"
+        />
+      </section>
 
       {!stores.length ? (
         <WorkspacePanel className="border-warning/20 bg-warning/5 px-4 py-5 text-sm text-warning">
@@ -185,19 +185,19 @@ export default async function CustomerBulkOrdersPage() {
         </WorkspacePanel>
       ) : null}
 
-      {otherDrafts.length ? (
-      <WorkspacePanel className="overflow-hidden">
+      <WorkspacePanel aria-label="上传记录" className="overflow-hidden">
         <WorkspacePanelHeader
           description="默认按最近更新时间排序；已提交成功的店铺会从编辑区移除，失败文件会继续保留。"
           title={
             <span className="inline-flex items-center gap-2">
               <Store className="size-4 text-primary" />
-              {latestDraft ? "其他上传记录" : "上传记录"}
+              上传记录
             </span>
           }
         />
 
-        <div className="grid gap-3 bg-slate-50/50 p-3">
+        {otherDrafts.length ? (
+          <div className="grid gap-3 bg-slate-50/50 p-3">
             {otherDrafts.map(({ draft, status }) => (
               <article
                 className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-[0_1px_5px_rgb(15_23_42/0.03)] sm:flex-row sm:items-center sm:justify-between sm:px-5"
@@ -230,9 +230,43 @@ export default async function CustomerBulkOrdersPage() {
                 </div>
               </article>
             ))}
-        </div>
+          </div>
+        ) : latestDraft ? (
+          <div className="p-4 sm:p-5">
+            <ActionableEmptyState
+              action={
+                <Link
+                  className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover"
+                  href={`/portal/bulk-orders/${latestDraft.id}`}
+                >
+                  继续当前上传
+                  <ArrowRight aria-hidden="true" className="size-4" />
+                </Link>
+              }
+              description="当前只有上方这一次进行中的上传；提交或放弃后，新的上传记录会继续保留在这里。"
+              kind="initial"
+              title="还没有历史上传记录"
+            />
+          </div>
+        ) : (
+          <div className="p-4 sm:p-5">
+            <ActionableEmptyState
+              action={
+                <Link
+                  className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-hover"
+                  href="/portal/settlements"
+                >
+                  先查看合并付款记录
+                  <ArrowRight aria-hidden="true" className="size-4" />
+                </Link>
+              }
+              description="开始一次上传后，这里会保留历史记录、状态和进入详情的入口。"
+              kind="initial"
+              title="还没有上传记录"
+            />
+          </div>
+        )}
       </WorkspacePanel>
-      ) : null}
     </div>
   );
 }

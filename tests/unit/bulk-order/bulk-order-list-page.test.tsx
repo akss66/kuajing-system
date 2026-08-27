@@ -86,8 +86,12 @@ describe("CustomerBulkOrdersPage", () => {
       "href",
       "/portal/settlements",
     );
-    expect(screen.getByText("可提交店铺").parentElement).toHaveTextContent("1");
-    expect(container.querySelector("[data-metric-strip]")).not.toBeInTheDocument();
+    expect(screen.getByText("可提交店铺").closest("[data-metric-card]")).toHaveTextContent("1");
+    expect(container.querySelector("[data-metric-strip]")).not.toBeNull();
+    expect(screen.getByText("进行中上传")).toBeVisible();
+    expect(screen.getByText("已上传文件")).toBeVisible();
+    expect(screen.getByRole("region", { name: "上传记录" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "上传记录" })).toBeVisible();
     expect(screen.getByRole("button", { name: "放弃空白上传" })).toBeVisible();
     expect(screen.queryByText("新建批量草稿")).not.toBeInTheDocument();
   });
@@ -112,6 +116,7 @@ describe("CustomerBulkOrdersPage", () => {
     expect(screen.getAllByRole("link", { name: "查看记录" })).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "继续上传" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "继续上次上传" })).not.toBeInTheDocument();
+    expect(screen.getByText("可提交店铺").closest("[data-metric-card]")).toHaveTextContent("0");
   });
 
   it("keeps the first-use state focused on starting an upload", async () => {
@@ -121,7 +126,12 @@ describe("CustomerBulkOrdersPage", () => {
 
     expect(screen.getByRole("region", { name: "多店铺上传下一步" })).toBeVisible();
     expect(screen.getByRole("button", { name: "开始批量上传" })).toBeEnabled();
-    expect(screen.queryByRole("region", { name: "上传概况" })).not.toBeInTheDocument();
-    expect(screen.queryByText("还没有上传记录")).not.toBeInTheDocument();
+    expect(screen.getByText("当前上传概况")).toBeVisible();
+    expect(screen.getByRole("region", { name: "上传记录" })).toBeVisible();
+    expect(screen.getByText("还没有上传记录")).toBeVisible();
+    expect(screen.getByRole("link", { name: "先查看合并付款记录" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
   });
 });

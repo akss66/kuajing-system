@@ -15,6 +15,15 @@ export default async function NewTemuImportPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-7">
       <PageHeading
+        action={
+          <Link
+            className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius-control)] border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface"
+            href="/portal/catalog"
+          >
+            先查看实时货盘
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        }
         description="直接使用 TEMU 后台导出的 33 列订单文件，系统会识别 SKU、重复订单和格式问题。"
         title="上传订单"
       />
@@ -51,11 +60,13 @@ export default async function NewTemuImportPage() {
         )}
       </WorkspacePanel>
 
-      <section className="flex flex-col gap-3 rounded-[var(--radius-surface)] border border-border bg-surface/55 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5" aria-label="多店铺上传">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-surface)] border border-border bg-surface/55 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5" aria-label="上传路径">
         <div className="flex min-w-0 items-start gap-3">
           <Store aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
           <div>
+            <p className="text-xs font-semibold tracking-[0.08em] text-primary-hover">单店铺上传</p>
             <h2 className="text-sm font-semibold text-foreground">多个店铺都有订单？</h2>
+            <p className="mt-1 text-sm font-medium text-foreground">开始上传</p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">高级流程支持一次上传多个店铺文件，并统一检查冲突。</p>
           </div>
         </div>

@@ -84,7 +84,12 @@ export type ImportPreviewRowView = {
     | "CUSTOMER_SUPPLIED"
     | "LEGACY";
   revision: number;
-  resolvedSku: { id: string; skuCode: string; name: string } | null;
+  resolvedSku: {
+    id: string;
+    skuCode: string;
+    name: string;
+    unitPriceMilliYuan: number | null;
+  } | null;
   siblingCandidates: Array<{
     id: string;
     skuCode: string;
@@ -1115,6 +1120,7 @@ async function enrichPreviewRows(
       ? []
       : await tx
           .select({
+            cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
             id: skus.id,
             name: skus.name,
             productId: skus.productId,
@@ -1201,7 +1207,12 @@ async function enrichPreviewRows(
     return {
       ...row,
       resolvedSku: resolvedSku
-        ? { id: resolvedSku.id, name: resolvedSku.name, skuCode: resolvedSku.skuCode }
+        ? {
+            id: resolvedSku.id,
+            name: resolvedSku.name,
+            skuCode: resolvedSku.skuCode,
+            unitPriceMilliYuan: resolvedSku.cargoUnitPriceMilliYuan,
+          }
         : null,
       siblingCandidates: anchor
         ? (siblingsByProduct.get(anchor.productId) ?? [])

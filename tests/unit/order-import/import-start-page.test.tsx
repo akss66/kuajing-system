@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const identityMocks = vi.hoisted(() => ({ requireCustomer: vi.fn() }));
@@ -34,10 +34,16 @@ describe("NewTemuImportPage", () => {
     render(await NewTemuImportPage());
 
     expect(screen.queryByRole("navigation", { name: "订单导入进度" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /多店铺批量上传/ })).toHaveAttribute(
+    const routePicker = screen.getByRole("region", { name: "上传路径" });
+    expect(within(routePicker).getByText("单店铺上传")).toBeVisible();
+    expect(within(routePicker).getByRole("link", { name: /多店铺批量上传/ })).toHaveAttribute(
       "href",
       "/portal/bulk-orders",
     );
-    expect(screen.getByText("上传前确认")).toBeVisible();
+    expect(screen.getByRole("link", { name: "先查看实时货盘" })).toHaveAttribute(
+      "href",
+      "/portal/catalog",
+    );
+    expect(screen.getByText("开始上传")).toBeVisible();
   });
 });

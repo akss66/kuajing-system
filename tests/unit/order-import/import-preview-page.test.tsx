@@ -99,7 +99,12 @@ describe("ImportPreviewPage", () => {
           quantity: 1,
           quantityMultiplier: 1,
           resolutionMethod: "EXACT",
-          resolvedSku: { id: "sku-1", name: "商品 1", skuCode: "SKU-1" },
+          resolvedSku: {
+            id: "sku-1",
+            name: "商品 1",
+            skuCode: "SKU-1",
+            unitPriceMilliYuan: 1_000,
+          },
           revision: 1,
           rowNumber: 2,
           siblingCandidates: [
@@ -131,6 +136,13 @@ describe("ImportPreviewPage", () => {
     expect(screen.getByRole("link", { name: "返回重新上传" })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: "订单导入进度" })).not.toBeInTheDocument();
     expect(screen.getByText(/TEMU 店铺.*orders\.xlsx.*15 行/)).toBeVisible();
+    expect(document.querySelector("[data-metric-strip]")).not.toBeNull();
+    expect(screen.getByText("总行数")).toBeVisible();
+    expect(screen.getByText("待处理")).toBeVisible();
+    expect(screen.getByText("商品金额")).toBeVisible();
+    expect(screen.getByText("物流费")).toBeVisible();
+    expect(screen.getByText("预计总额")).toBeVisible();
+    expect(screen.getByText("¥14.00")).toBeVisible();
     expect(workspace).toHaveTextContent("核对结果");
     expect(workspace).toHaveTextContent("可提交1");
     expect(workspace).toHaveTextContent("需处理0");

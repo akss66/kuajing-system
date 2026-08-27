@@ -2,12 +2,15 @@ import { AlertTriangle, ArrowLeft, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { MetricStrip } from "@/components/data-workspace/metric-strip";
 import { PageHeading } from "@/components/layout/page-heading";
 import { ImportReviewTable } from "@/components/order-import/import-review-table";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
+import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
 import { requireCustomer } from "@/modules/identity/guards";
 import { updateCustomerImportRowAction } from "@/modules/order-import/actions";
 import { submitImportBatchAction } from "@/modules/orders/actions";
+import { PACKAGE_SHIPPING_FEE_FEN } from "@/modules/orders/pricing";
 import {
   ImportPreviewError,
   getCustomerImportPreview,
@@ -20,6 +23,10 @@ function deadline(value: Date) {
     timeStyle: "short",
     timeZone: BUSINESS_TIME_ZONE,
   }).format(value);
+}
+
+function money(fen: number) {
+  return `¥${(fen / 100).toFixed(2)}`;
 }
 
 export default async function ImportPreviewPage({
@@ -51,6 +58,15 @@ export default async function ImportPreviewPage({
     (total, row) => total + (row.effectiveQuantity ?? row.quantity ?? 0),
     0,
   );
+  const merchandiseAmountFen = readyRows.reduce((total, row) => {
+    if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") return total;
+    const unitPriceMilliYuan = row.resolvedSku?.unitPriceMilliYuan;
+    const rowQuantity = row.effectiveQuantity ?? row.quantity;
+    if (unitPriceMilliYuan == null || rowQuantity == null) return total;
+    return total + calculateLineAmountFen(rowQuantity, unitPriceMilliYuan);
+  }, 0);
+  const shippingFeeFen = packageCount * PACKAGE_SHIPPING_FEE_FEN;
+  const estimatedTotalFen = merchandiseAmountFen + shippingFeeFen;
 
   return (
     <div className="space-y-5 pb-3">
@@ -84,6 +100,26 @@ export default async function ImportPreviewPage({
         </div>
       ) : null}
 
+      <MetricStrip
+        compact
+        items={[
+          { label: "总行数", value: String(preview.summary.total) },
+          { label: "待处理", value: String(blocking) },
+          { label: "商品金额", value: money(merchandiseAmountFen) },
+          {
+            hint: `${packageCount} 包 × ${money(PACKAGE_SHIPPING_FEE_FEN)}`,
+            label: "物流费",
+            value: money(shippingFeeFen),
+          },
+          {
+            hint: "提交时会按当前价格、库存和重复订单再次校验",
+            label: "预计总额",
+            value: money(estimatedTotalFen),
+          },
+        ]}
+        variant="segmented"
+      />
+
       <ImportReviewTable
         action={updateCustomerImportRowAction}
         batchId={preview.batchId}
@@ -112,7 +148,7 @@ export default async function ImportPreviewPage({
                 {preview.summary.duplicate
                   ? ` · ${preview.summary.duplicate} 个重复订单自动跳过`
                   : ""}
-                。提交时会再次校验库存和重复订单。
+                。预计总额 {money(estimatedTotalFen)}，提交时会再次校验价格、库存和重复订单。
               </p>
             </div>
           </div>
