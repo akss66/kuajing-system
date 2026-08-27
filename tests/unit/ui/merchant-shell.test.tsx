@@ -411,7 +411,7 @@ describe("merchant shells", () => {
     navigationState.pathname = "/portal";
     rerender(
       <CustomerShell identity={customerIdentity}>
-        <div>客户首页内容</div>
+        <div>经营概览内容</div>
       </CustomerShell>,
     );
 

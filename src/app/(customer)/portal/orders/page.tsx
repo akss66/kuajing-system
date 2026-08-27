@@ -99,7 +99,7 @@ export default async function CustomerOrdersPage({
     <div className="space-y-6">
       <PageHeading
         breadcrumbs={[
-          { href: "/portal", label: "客户首页" },
+          { href: "/portal", label: "经营概览" },
           {
             label: pendingOnly
               ? "待付款订单"

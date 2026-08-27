@@ -63,7 +63,7 @@ const navigation = {
     drawerTitle: "客户导航",
     groups: ["拿货", "履约", "资金", "账户"],
     label: "客户主导航",
-    links: ["客户首页", "实时货盘", "上传订单", "我的订单", "资金中心", "个人中心"],
+    links: ["经营概览", "实时货盘", "上传订单", "我的订单", "资金中心", "个人中心"],
   },
 } as const;
 
@@ -334,7 +334,7 @@ function acceptanceRoutes(fixture: Awaited<ReturnType<typeof createBusinessDetai
     },
     {
       audience: "customer",
-      heading: "客户首页",
+      heading: "经营概览",
       keyTarget: { name: /实时货盘/, role: "link" },
       pageType: "operations-dashboard",
       path: "/portal",

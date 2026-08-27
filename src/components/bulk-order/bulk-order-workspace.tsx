@@ -645,7 +645,7 @@ export function BulkOrderWorkspace({
           </div>
         }
         breadcrumbs={[
-          { href: "/portal", label: "客户首页" },
+          { href: "/portal", label: "经营概览" },
           { href: "/portal/bulk-orders", label: "多店铺上传" },
           { label: "多店铺批量上传" },
         ]}
