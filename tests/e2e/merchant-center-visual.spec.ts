@@ -171,7 +171,7 @@ const workspaceRoutes = [
     expectedTexts: ["开始一次新的多店铺上传", "开始批量上传"],
     path: "/portal/bulk-orders",
     screenshot: "customer-bulk-orders",
-    shouldShowMetricStrip: false,
+    shouldShowMetricStrip: true,
   },
   {
     audience: "admin" as const,

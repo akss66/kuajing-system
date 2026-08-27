@@ -44,6 +44,6 @@ describe("NewTemuImportPage", () => {
       "href",
       "/portal/catalog",
     );
-    expect(screen.getByText("开始上传")).toBeVisible();
+    expect(within(routePicker).getByText("多个店铺都有订单？")).toBeVisible();
   });
 });

@@ -66,7 +66,6 @@ export default async function NewTemuImportPage() {
           <div>
             <p className="text-xs font-semibold tracking-[0.08em] text-primary-hover">单店铺上传</p>
             <h2 className="text-sm font-semibold text-foreground">多个店铺都有订单？</h2>
-            <p className="mt-1 text-sm font-medium text-foreground">开始上传</p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">高级流程支持一次上传多个店铺文件，并统一检查冲突。</p>
           </div>
         </div>
