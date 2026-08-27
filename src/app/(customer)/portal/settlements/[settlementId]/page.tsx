@@ -39,6 +39,7 @@ export default async function CustomerSettlementDetailPage({
   const { settlementId } = await params;
   const detail = await getCustomerSettlementDetail(principal.customerId, settlementId);
   if (!detail) notFound();
+  const reportingOpen = detail.status === "PENDING_PAYMENT";
 
   return (
     <div className="space-y-5">
@@ -60,9 +61,11 @@ export default async function CustomerSettlementDetailPage({
           <ArrowLeft className="size-4" />
           返回合并付款记录
         </Link>
-        <a className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface" href="#settlement-payment-form">
-          跳到付款声明
-        </a>
+        {reportingOpen ? (
+          <a className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface" href="#settlement-payment-form">
+            跳到付款声明
+          </a>
+        ) : null}
         <Badge variant="secondary">{getCustomerSettlementBatchStatusLabel(detail.status)}</Badge>
         <Badge variant="secondary">{`声明：${getCustomerSettlementClaimStatusLabel(detail.claim?.status ?? null)}`}</Badge>
       </div>
@@ -95,6 +98,7 @@ export default async function CustomerSettlementDetailPage({
                 formId="settlement-payment-form"
                 noteInputId="settlement-payment-note"
                 offlineAmountFen={detail.offlineAmountFen}
+                reportingOpen={reportingOpen}
                 settlementBatchId={detail.id}
               />
             </div>

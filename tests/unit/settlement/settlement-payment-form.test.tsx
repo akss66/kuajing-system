@@ -96,4 +96,19 @@ describe("SettlementPaymentForm", () => {
     target?.focus();
     expect(target).toHaveFocus();
   });
+
+  it("does not offer report or withdrawal actions after the settlement is closed", () => {
+    render(
+      <SettlementPaymentForm
+        claimStatus="REJECTED"
+        offlineAmountFen={168800}
+        reportingOpen={false}
+        settlementBatchId="batch-1"
+      />,
+    );
+
+    expect(screen.getByText("本次合并付款已结束，不能再提交或撤回付款声明。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "撤回整笔声明" })).not.toBeInTheDocument();
+  });
 });

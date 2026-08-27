@@ -35,10 +35,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/components/settlement/settlement-payment-form", () => ({
-  SettlementPaymentForm: () => (
+  SettlementPaymentForm: ({ reportingOpen = true }: { reportingOpen?: boolean }) => (
     <form id="settlement-payment-form" tabIndex={-1}>
       <label htmlFor="settlement-payment-note">付款备注（选填）</label>
       <input id="settlement-payment-note" name="note" />
+      {reportingOpen ? <button type="button">我已微信付款</button> : null}
     </form>
   ),
 }));
@@ -156,5 +157,44 @@ describe("CustomerSettlementDetailPage", () => {
     expect(target).toHaveAttribute("tabindex", "-1");
     target?.focus();
     expect(target).toHaveFocus();
+  });
+
+  it("removes payment declaration navigation after a settlement reaches a terminal state", async () => {
+    authMocks.requireCustomer.mockResolvedValue({
+      customerId: "customer-1",
+      userId: "user-1",
+    });
+    queryMocks.getCustomerSettlementDetail.mockResolvedValue({
+      batchNumber: "BATCH-20260812-03",
+      claim: {
+        amountFen: 168800,
+        createdAt: new Date("2026-08-12T09:11:00.000Z"),
+        id: "claim-3",
+        note: null,
+        rejectionReason: "金额不一致",
+        reviewedAt: new Date("2026-08-12T10:00:00.000Z"),
+        status: "REJECTED",
+        withdrawalReason: null,
+        withdrawnAt: null,
+      },
+      id: "batch-3",
+      offlineAmountFen: 168800,
+      orders: [],
+      paidAt: null,
+      paymentDueAt: new Date("2026-08-12T12:00:00.000Z"),
+      status: "REJECTED",
+      totalAmountFen: 188800,
+      walletAmountFen: 20000,
+      walletHold: null,
+    });
+
+    render(
+      await CustomerSettlementDetailPage({
+        params: Promise.resolve({ settlementId: "batch-3" }),
+      }),
+    );
+
+    expect(screen.queryByRole("link", { name: "跳到付款声明" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
   });
 });

@@ -20,12 +20,14 @@ export function SettlementPaymentForm({
   formId = "settlement-payment-form",
   noteInputId = "settlement-payment-note",
   offlineAmountFen,
+  reportingOpen = true,
   settlementBatchId,
 }: {
   claimStatus: "APPROVED" | "PENDING" | "REJECTED" | "WITHDRAWN" | null;
   formId?: string;
   noteInputId?: string;
   offlineAmountFen: number;
+  reportingOpen?: boolean;
   settlementBatchId: string;
 }) {
   const [state, formAction, pending] = useActionState(
@@ -40,7 +42,9 @@ export function SettlementPaymentForm({
   if (state.message) messages.push(state.message);
 
   const canReport =
-    claimStatus == null || claimStatus === "REJECTED" || claimStatus === "WITHDRAWN";
+    reportingOpen &&
+    (claimStatus == null || claimStatus === "REJECTED" || claimStatus === "WITHDRAWN");
+  const canWithdraw = reportingOpen && claimStatus === "PENDING";
 
   useEffect(() => {
     if (state.status !== "error") return;
@@ -59,6 +63,12 @@ export function SettlementPaymentForm({
 
   return (
     <div className="space-y-4" id={formId} tabIndex={-1}>
+      {!reportingOpen ? (
+        <p className="rounded-lg border border-border bg-surface px-3 py-3 text-sm leading-6 text-muted">
+          本次合并付款已结束，不能再提交或撤回付款声明。
+        </p>
+      ) : null}
+
       {canReport ? (
         <form action={formAction} className="grid gap-4">
           <input name="settlementBatchId" type="hidden" value={settlementBatchId} />
@@ -110,7 +120,7 @@ export function SettlementPaymentForm({
         </form>
       ) : null}
 
-      {claimStatus === "PENDING" ? (
+      {canWithdraw ? (
         <ConfirmedActionForm
           action={withdrawSettlementPaymentAction}
           className="grid gap-4"
