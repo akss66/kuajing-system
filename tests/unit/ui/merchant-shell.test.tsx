@@ -338,6 +338,42 @@ describe("merchant shells", () => {
     );
   });
 
+  it("keeps the mobile customer drawer compact and leaves primary routes to the bottom dock", () => {
+    navigationState.pathname = "/portal/catalog";
+
+    render(
+      <CustomerShell identity={customerIdentity}>
+        <div>实时货盘内容</div>
+      </CustomerShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开导航" }));
+
+    const drawer = screen.getByRole("dialog", { name: "客户导航" });
+    expect(drawer).toHaveClass(
+      "data-[side=left]:!w-[min(18rem,calc(100vw-3rem))]",
+      "data-[side=left]:!max-w-none",
+    );
+    expect(drawer).toHaveAttribute("data-mobile-navigation-drawer", "customer");
+
+    const navigation = within(drawer).getByRole("navigation", { name: "客户主导航" });
+    expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(navigation).getByRole("link", { name: "个人中心" })).toHaveAttribute(
+      "href",
+      "/portal/profile",
+    );
+    expect(within(navigation).getByRole("link", { name: "关于系统" })).toHaveAttribute(
+      "href",
+      "/portal/about",
+    );
+    for (const duplicatedPrimaryRoute of ["经营概览", "上传订单", "我的订单", "资金中心"]) {
+      expect(within(navigation).queryByRole("link", { name: duplicatedPrimaryRoute })).not.toBeInTheDocument();
+    }
+  });
+
   it("keeps the advanced multi-store flow under the upload navigation task", () => {
     navigationState.pathname = "/portal/bulk-orders/draft-1";
 

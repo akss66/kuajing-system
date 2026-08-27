@@ -550,7 +550,8 @@ describe("catalog workspaces", () => {
 
     for (const specification of screen.getAllByText(longSpecification)) {
       expect(specification).toHaveClass(
-        "line-clamp-2",
+        "line-clamp-1",
+        "lg:line-clamp-2",
         "whitespace-normal",
         "break-words",
       );
@@ -569,6 +570,7 @@ describe("catalog workspaces", () => {
     }
 
     const cards = screen.getByRole("list", { name: "客户货盘长条列表" });
+    expect(cards).toHaveClass("space-y-2");
     expect(
       within(cards)
         .getAllByRole("heading", { level: 3 })
@@ -585,7 +587,21 @@ describe("catalog workspaces", () => {
       ),
     ).toEqual(["identity", "attributes", "price", "inventory", "status", "link"]);
     expect(firstVariant).toHaveAttribute("data-customer-catalog-row");
+    expect(firstVariant).toHaveClass(
+      "grid-cols-[3rem_minmax(0,1fr)]",
+      "gap-x-3",
+      "gap-y-1.5",
+      "px-3",
+      "py-2.5",
+    );
     expect(firstVariant).toHaveClass("lg:grid-cols-[minmax(13rem,1.15fr)_minmax(16rem,1.35fr)_minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)]");
+    expect(firstVariant.querySelector("[data-customer-catalog-commerce]")).toHaveClass(
+      "col-start-2",
+      "flex",
+      "items-center",
+      "lg:col-span-3",
+      "lg:grid",
+    );
 
     const manualUnavailableSurfaces = screen.getAllByTestId(
       "catalog-customer-sku-manual",

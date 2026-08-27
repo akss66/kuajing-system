@@ -479,6 +479,7 @@ test("customer sees only its own price and real available inventory", async ({ p
 });
 
 test("customer catalog passes the exact five-viewport field-aligned matrix @desktop-only", async ({ page }) => {
+  test.slow();
   const failures = observeBrowserFailures(page);
   const fixture = await seedCustomerCatalog();
   await loginThroughUi(page, fixture.user);
@@ -492,6 +493,19 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
       await expect(page.locator("[data-merchant-sidebar]")).toBeVisible();
     } else {
       await expect(page.getByRole("banner")).toHaveAttribute("data-merchant-topbar", "customer");
+      await page.getByRole("button", { name: "打开导航" }).click();
+      const drawer = page.getByRole("dialog", { name: "客户导航" });
+      await expect(drawer).toHaveAttribute("data-mobile-navigation-drawer", "customer");
+      const drawerBox = await drawer.boundingBox();
+      expect(drawerBox, `${viewport.width}x${viewport.height} drawer bounding box`).not.toBeNull();
+      expect(drawerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(289);
+      const drawerNavigation = drawer.getByRole("navigation", { name: "客户主导航" });
+      await expect(drawerNavigation.getByRole("link")).toHaveCount(3);
+      for (const duplicatedPrimaryRoute of ["经营概览", "上传订单", "我的订单", "资金中心"]) {
+        await expect(drawerNavigation.getByRole("link", { name: duplicatedPrimaryRoute })).toHaveCount(0);
+      }
+      await drawer.getByRole("button", { name: "关闭导航" }).click();
+      await expect(drawer).toHaveCount(0);
     }
     await expect(page.getByRole("heading", { exact: true, name: "实时货盘" })).toBeVisible();
     await expect(visibleCatalogItem(page, fixture.availableSku.id)).toBeVisible();
@@ -537,6 +551,11 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
     expect(overflow).toBeLessThanOrEqual(1);
 
     const availableItem = visibleCatalogItem(page, fixture.availableSku.id);
+    if (viewport.width < 1024) {
+      const itemBox = await availableItem.boundingBox();
+      expect(itemBox, `${viewport.width}x${viewport.height} catalog row bounding box`).not.toBeNull();
+      expect(itemBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(152);
+    }
     const specification = availableItem.locator("[title]").first();
     const price = availableItem.getByText("¥1.366", { exact: true });
     const inventory = availableItem.getByText("6", { exact: true });

@@ -73,7 +73,10 @@ function VariantIdentity({ item }: { item: CustomerCatalogItem }) {
     <div className="flex min-w-0 items-start gap-3">
       <CatalogImage item={item} />
       <div className="min-w-0">
-        <p className="whitespace-normal break-words text-sm font-semibold tabular-nums text-foreground">
+        <p
+          className="line-clamp-1 whitespace-normal break-words text-sm font-semibold tabular-nums text-foreground lg:line-clamp-2"
+          title={item.skuCode}
+        >
           {item.skuCode}
         </p>
       </div>
@@ -91,16 +94,19 @@ function CatalogAttributes({ item }: { item: CustomerCatalogItem }) {
   return (
     <div className="min-w-0">
       <p
-        className="line-clamp-2 whitespace-normal break-words leading-5 text-foreground"
+        className="line-clamp-1 whitespace-normal break-words text-sm leading-5 text-foreground lg:line-clamp-2 lg:text-base"
         title={item.specification ?? undefined}
       >
         {item.specification ?? "规格未提供"}
       </p>
       {attributes.length > 0 ? (
-        <ul aria-label={`${item.skuCode} 属性`} className="mt-1 space-y-0.5">
+        <ul
+          aria-label={`${item.skuCode} 属性`}
+          className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 overflow-hidden lg:block lg:space-y-0.5"
+        >
           {attributes.map((attribute) => (
             <li
-              className="whitespace-normal break-words text-xs leading-4 text-muted-foreground"
+              className="max-w-full truncate text-xs leading-4 text-muted-foreground lg:whitespace-normal lg:break-words"
               key={attribute}
             >
               {attribute}
@@ -186,17 +192,17 @@ function ProductGroupHeader({
   group: CatalogProductGroup<CustomerCatalogGroupableItem>;
 }) {
   return (
-    <header className="min-w-0 bg-white px-4 py-3 sm:px-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <header className="min-w-0 bg-white px-3 py-2.5 sm:px-5 sm:py-3">
+      <div className="flex items-start justify-between gap-2 sm:gap-3">
         <div className="min-w-0">
-          <h3 className="line-clamp-2 whitespace-normal break-words font-semibold text-foreground">
+          <h3 className="line-clamp-1 whitespace-normal break-words text-sm font-semibold text-foreground sm:line-clamp-2 sm:text-base">
             {group.productName}
           </h3>
           <p className="mt-0.5 line-clamp-1 whitespace-normal break-words text-xs text-muted-foreground">
             {group.linkText?.trim() || "暂无商品链接"}
           </p>
         </div>
-        <Badge className="bg-white/80 text-primary-hover ring-1 ring-primary/10" variant="secondary">
+        <Badge className="shrink-0 bg-white/80 text-primary-hover ring-1 ring-primary/10" variant="secondary">
           {group.variants.length} 个 SKU
         </Badge>
       </div>
@@ -220,12 +226,12 @@ function CustomerCatalogList({
   return (
     <ul
       aria-label="客户货盘长条列表"
-      className="space-y-3"
+      className="space-y-2 sm:space-y-3"
       data-customer-catalog-list
     >
       {groups.map((group) => (
         <li
-          className="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)]"
+          className="min-w-0 overflow-hidden rounded-xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] sm:rounded-2xl"
           data-testid={`catalog-product-${group.productId}`}
           key={group.productId}
         >
@@ -240,7 +246,7 @@ function CustomerCatalogList({
           >
             {group.variants.map((item) => (
               <li
-                className="grid min-w-0 grid-cols-2 gap-3 px-4 py-3 transition-colors hover:bg-slate-50/70 sm:px-5 lg:grid-cols-[minmax(13rem,1.15fr)_minmax(16rem,1.35fr)_minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)] lg:items-center"
+                className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5 transition-colors hover:bg-slate-50/70 sm:px-5 lg:grid-cols-[minmax(13rem,1.15fr)_minmax(16rem,1.35fr)_minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)] lg:items-center lg:gap-3 lg:py-3"
                 data-customer-catalog-row
                 data-testid={`catalog-${item.id}`}
                 key={item.id}
@@ -249,30 +255,42 @@ function CustomerCatalogList({
                   <VariantIdentity item={item} />
                 </div>
                 <div
-                  className="col-span-2 min-w-0 pl-[3.75rem] lg:col-span-1 lg:pl-0"
+                  className="col-span-2 -mt-7 min-w-0 pl-[3.75rem] lg:col-span-1 lg:mt-0 lg:pl-0"
                   data-customer-catalog-section="attributes"
                 >
                   <CatalogAttributes item={item} />
                 </div>
-                <dl data-customer-catalog-section="price">
-                  <dt className="text-xs font-medium text-muted-foreground">拿货价</dt>
-                  <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
-                    <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
-                  </dd>
-                </dl>
-                <dl data-customer-catalog-section="inventory">
-                  <dt className="text-xs font-medium text-muted-foreground">可售库存</dt>
-                  <dd className="mt-0.5 font-semibold tabular-nums text-foreground">
-                    {item.availableQuantity}
-                  </dd>
-                </dl>
-                <div className="col-span-2 flex flex-wrap items-center gap-2 lg:col-span-1 lg:justify-end">
-                  <span data-customer-catalog-section="status">
-                    <CatalogStatus item={item} />
-                  </span>
-                  <span data-customer-catalog-section="link">
-                    <CatalogProductLink item={item} visibleLabel="查看" />
-                  </span>
+                <div
+                  className="col-start-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 lg:col-span-3 lg:col-start-auto lg:grid lg:grid-cols-[minmax(6.5rem,0.5fr)_minmax(6rem,0.45fr)_minmax(5.5rem,0.4fr)] lg:items-center lg:gap-3"
+                  data-customer-catalog-commerce
+                >
+                  <dl className="flex items-baseline gap-1 lg:block" data-customer-catalog-section="price">
+                    <dt className="sr-only lg:not-sr-only lg:text-xs lg:font-medium lg:text-muted-foreground">拿货价</dt>
+                    <dd className="text-base font-semibold tabular-nums text-foreground lg:mt-0.5">
+                      <CustomerUnitPrice value={item.actualUnitPriceMilliYuan} />
+                    </dd>
+                  </dl>
+                  <dl
+                    aria-label="可售库存"
+                    className="flex items-baseline gap-1 lg:block"
+                    data-customer-catalog-section="inventory"
+                  >
+                    <dt aria-hidden="true" className="text-xs font-normal text-muted-foreground lg:font-medium">
+                      <span className="lg:hidden">库存</span>
+                      <span className="hidden lg:inline">可售库存</span>
+                    </dt>
+                    <dd className="font-semibold tabular-nums text-foreground lg:mt-0.5">
+                      {item.availableQuantity}
+                    </dd>
+                  </dl>
+                  <div className="flex items-center gap-2 lg:justify-end">
+                    <span data-customer-catalog-section="status">
+                      <CatalogStatus item={item} />
+                    </span>
+                    <span data-customer-catalog-section="link">
+                      <CatalogProductLink item={item} visibleLabel="查看" />
+                    </span>
+                  </div>
                 </div>
               </li>
             ))}
