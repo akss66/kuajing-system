@@ -23,31 +23,55 @@ const columnClasses: Record<MetricStripColumns, string> = {
   5: "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5",
 };
 
+const segmentedColumnClasses: Record<MetricStripColumns, string> = {
+  2: "grid-cols-1 sm:grid-cols-2",
+  3: "grid-cols-1 lg:grid-cols-3",
+  4: "grid-cols-2 xl:grid-cols-4",
+  5: "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5",
+};
+
 export function MetricStrip({
   className,
   columns,
   compact = false,
   items,
+  variant = "cards",
 }: {
   className?: string;
   columns?: MetricStripColumns;
   compact?: boolean;
   items: MetricItem[];
+  variant?: "cards" | "segmented";
 }) {
   const resolvedColumns =
     columns ?? (Math.min(Math.max(items.length, 2), 5) as MetricStripColumns);
+  const segmented = variant === "segmented";
 
   return (
     <section
-      className={cn("grid gap-3", columnClasses[resolvedColumns], className)}
+      className={cn(
+        "grid",
+        segmented
+          ? "gap-0 overflow-hidden rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)]"
+          : "gap-3",
+        segmented
+          ? segmentedColumnClasses[resolvedColumns]
+          : columnClasses[resolvedColumns],
+        className,
+      )}
       data-metric-count={items.length}
       data-metric-strip
+      data-metric-variant={variant}
     >
       {items.map((item, index) => (
         <article
           className={cn(
-            "rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-4 py-3.5",
-            items.length === 5 && index === 4 ? "col-span-2 sm:col-span-1" : undefined,
+            segmented
+              ? "rounded-none border-0 bg-transparent px-4 py-3.5 sm:px-5"
+              : "rounded-[var(--radius-surface)] border border-border bg-[var(--merchant-panel)] px-4 py-3.5",
+            items.length === 5 && index === 4
+              ? "col-span-2 sm:col-span-1"
+              : undefined,
           )}
           data-metric-card
           data-workspace-panel

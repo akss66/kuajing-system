@@ -80,6 +80,7 @@ export default async function CustomerOrderDetailPage({
             ? [{ hint: "被取消包裹的商品额与每包 13 元物流费", label: "取消调整", value: `-${money(order.adjustedAmountFen ?? 0)}` }]
             : []),
         ]}
+        variant="segmented"
       />
 
       <OrderStatusTimeline

@@ -36,6 +36,28 @@ describe("data workspace primitives", () => {
     expect(screen.getByText("-¥0.00")).toHaveClass("text-warning");
   });
 
+  it("can render customer metrics as one segmented operating summary", () => {
+    render(
+      <MetricStrip
+        items={[
+          { label: "订单数", value: "2" },
+          { label: "包裹数", value: "4" },
+          { label: "商品件数", value: "6" },
+          { label: "订单总额", value: "¥88.00" },
+        ]}
+        variant="segmented"
+      />,
+    );
+
+    const strip = document.querySelector("[data-metric-strip]");
+    expect(strip).toHaveAttribute("data-metric-variant", "segmented");
+    expect(strip).toHaveClass("gap-0", "overflow-hidden", "border");
+    expect(document.querySelectorAll("[data-metric-card]")[0]).toHaveClass(
+      "rounded-none",
+      "border-0",
+    );
+  });
+
   it("keeps compact workspace headers and responsive tables inside named panels", () => {
     render(
       <WorkspacePanel aria-label="订单工作区">

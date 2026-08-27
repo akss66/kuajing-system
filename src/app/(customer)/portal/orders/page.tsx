@@ -6,6 +6,7 @@ import { PageHeading } from "@/components/layout/page-heading";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 import { OrderFilterBar } from "@/components/orders/order-filter-bar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { requireCustomer } from "@/modules/identity/guards";
 import { listCustomerOrders, type AdminOrderStatus } from "@/modules/orders/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
@@ -98,6 +99,14 @@ export default async function CustomerOrdersPage({
   return (
     <div className="space-y-6">
       <PageHeading
+        action={
+          <Button asChild className="min-h-11 w-full sm:w-auto" variant="outline">
+            <Link href="/portal/settlements">
+              查看合并付款记录
+              <ArrowRight aria-hidden="true" className="size-4 group-hover/button:translate-x-0.5" />
+            </Link>
+          </Button>
+        }
         breadcrumbs={[
           { href: "/portal", label: "经营概览" },
           {
@@ -148,6 +157,7 @@ export default async function CustomerOrdersPage({
                 { label: "订单总额", value: money(totalAmountFen) },
               ]
         }
+        variant="segmented"
       />
 
       <OrderFilterBar
@@ -203,6 +213,18 @@ export default async function CustomerOrdersPage({
           </div>
         ) : (
           <ActionableEmptyState
+            action={
+              !pendingOnly && !isHistoricalView ? (
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button asChild className="min-h-11">
+                    <Link href="/portal/catalog">查看实时货盘</Link>
+                  </Button>
+                  <Button asChild className="min-h-11" variant="outline">
+                    <Link href="/portal/imports/new">上传订单</Link>
+                  </Button>
+                </div>
+              ) : undefined
+            }
             description={pendingOnly ? "余额自动扣款的订单不会出现在这里。" : "上传订单并确认提交后，会显示在这里。"}
             kind="initial"
             title={pendingOnly ? "没有待付款订单" : "暂无拿货单"}

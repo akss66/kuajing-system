@@ -86,6 +86,7 @@ export default async function CustomerSettlementListPage() {
           },
           { label: "等待核款", tone: reviewingCount ? "warning" : "default", value: String(reviewingCount) },
         ]}
+        variant="segmented"
       />
 
       <SettlementWorkspace>

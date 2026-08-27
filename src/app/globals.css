@@ -322,6 +322,25 @@ textarea {
   border-bottom: 0;
 }
 
+[data-merchant-shell="customer"] [data-metric-variant="segmented"] [data-metric-card] {
+  border-bottom: 1px solid var(--color-border);
+}
+
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="2"] [data-metric-card]:last-child,
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="3"] [data-metric-card]:last-child,
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:last-child {
+  border-bottom: 0;
+}
+
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="4"] [data-metric-card]:nth-child(even),
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(even) {
+  border-left: 1px solid var(--color-border);
+}
+
+[data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="4"] [data-metric-card]:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
 [data-merchant-shell="customer"] [data-page-heading-breadcrumbs] {
   color: rgb(95 114 107);
 }
@@ -504,6 +523,51 @@ textarea {
   }
 
   [data-merchant-shell="customer"] [data-portal-overview] [data-overview-metric]:nth-child(n + 2) {
+    border-left: 1px solid var(--color-border);
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="3"] [data-metric-card] {
+    border-bottom: 0;
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="3"] [data-metric-card]:nth-child(n + 2) {
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+@media (min-width: 40rem) {
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="2"] [data-metric-card] {
+    border-bottom: 0;
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="2"] [data-metric-card]:nth-child(2) {
+    border-left: 1px solid var(--color-border);
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card] {
+    border-left: 0;
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(2),
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(3),
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(5) {
+    border-left: 1px solid var(--color-border);
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(n + 4) {
+    border-bottom: 0;
+  }
+}
+
+@media (min-width: 80rem) {
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="4"] [data-metric-card],
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card] {
+    border-bottom: 0;
+    border-left: 0;
+  }
+
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="4"] [data-metric-card]:nth-child(n + 2),
+  [data-merchant-shell="customer"] [data-metric-variant="segmented"][data-metric-count="5"] [data-metric-card]:nth-child(n + 2) {
     border-left: 1px solid var(--color-border);
   }
 }

@@ -78,6 +78,7 @@ export default async function CustomerSettlementDetailPage({
             value: detail.walletHold ? getCustomerWalletHoldStatusLabel(detail.walletHold.status) : "未冻结",
           },
         ]}
+        variant="segmented"
       />
 
       <SettlementWorkspace className="grid gap-6 space-y-0 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,420px)]">

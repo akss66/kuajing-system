@@ -660,6 +660,7 @@ export function BulkOrderWorkspace({
           { label: "已选分组", value: `${selectedGroups.length}` },
           { label: "已选文件", value: `${summary.fileCount}` },
         ]}
+        variant="segmented"
       />
 
       <section className="space-y-4">
