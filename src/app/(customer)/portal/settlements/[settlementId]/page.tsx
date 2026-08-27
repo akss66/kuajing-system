@@ -40,6 +40,8 @@ export default async function CustomerSettlementDetailPage({
   const detail = await getCustomerSettlementDetail(principal.customerId, settlementId);
   if (!detail) notFound();
   const reportingOpen = detail.status === "PENDING_PAYMENT";
+  const withdrawalOpen = detail.status === "PAYMENT_REPORTED";
+  const paymentActionsOpen = reportingOpen || withdrawalOpen;
 
   return (
     <div className="space-y-5">
@@ -61,7 +63,7 @@ export default async function CustomerSettlementDetailPage({
           <ArrowLeft className="size-4" />
           返回合并付款记录
         </Link>
-        {reportingOpen ? (
+        {paymentActionsOpen ? (
           <a className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium text-ink transition-colors hover:bg-surface" href="#settlement-payment-form">
             跳到付款声明
           </a>
@@ -100,6 +102,7 @@ export default async function CustomerSettlementDetailPage({
                 offlineAmountFen={detail.offlineAmountFen}
                 reportingOpen={reportingOpen}
                 settlementBatchId={detail.id}
+                withdrawalOpen={withdrawalOpen}
               />
             </div>
 

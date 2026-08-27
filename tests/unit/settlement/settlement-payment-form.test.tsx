@@ -104,11 +104,30 @@ describe("SettlementPaymentForm", () => {
         offlineAmountFen={168800}
         reportingOpen={false}
         settlementBatchId="batch-1"
+        withdrawalOpen={false}
       />,
     );
 
     expect(screen.getByText("本次合并付款已结束，不能再提交或撤回付款声明。")).toBeVisible();
     expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "撤回整笔声明" })).not.toBeInTheDocument();
+  });
+
+  it("offers withdrawal without reopening payment reporting while a declaration awaits review", () => {
+    render(
+      <SettlementPaymentForm
+        claimStatus="PENDING"
+        offlineAmountFen={168800}
+        reportingOpen={false}
+        settlementBatchId="batch-1"
+        withdrawalOpen
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "撤回整笔声明" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "我已微信付款" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("本次合并付款已结束，不能再提交或撤回付款声明。"),
+    ).not.toBeInTheDocument();
   });
 });

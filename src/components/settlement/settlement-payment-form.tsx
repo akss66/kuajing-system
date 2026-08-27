@@ -22,6 +22,7 @@ export function SettlementPaymentForm({
   offlineAmountFen,
   reportingOpen = true,
   settlementBatchId,
+  withdrawalOpen = reportingOpen,
 }: {
   claimStatus: "APPROVED" | "PENDING" | "REJECTED" | "WITHDRAWN" | null;
   formId?: string;
@@ -29,6 +30,7 @@ export function SettlementPaymentForm({
   offlineAmountFen: number;
   reportingOpen?: boolean;
   settlementBatchId: string;
+  withdrawalOpen?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(
     reportSettlementPaymentAction,
@@ -44,7 +46,7 @@ export function SettlementPaymentForm({
   const canReport =
     reportingOpen &&
     (claimStatus == null || claimStatus === "REJECTED" || claimStatus === "WITHDRAWN");
-  const canWithdraw = reportingOpen && claimStatus === "PENDING";
+  const canWithdraw = withdrawalOpen && claimStatus === "PENDING";
 
   useEffect(() => {
     if (state.status !== "error") return;
@@ -63,7 +65,7 @@ export function SettlementPaymentForm({
 
   return (
     <div className="space-y-4" id={formId} tabIndex={-1}>
-      {!reportingOpen ? (
+      {!reportingOpen && !withdrawalOpen ? (
         <p className="rounded-lg border border-border bg-surface px-3 py-3 text-sm leading-6 text-muted">
           本次合并付款已结束，不能再提交或撤回付款声明。
         </p>
