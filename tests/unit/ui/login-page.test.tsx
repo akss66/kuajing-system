@@ -35,8 +35,11 @@ describe("login page", () => {
     expect(screen.getByRole("button", { name: "登录系统" })).toBeEnabled();
     const signature = screen.getByText("Designed & Developed by ZZY");
     const loginPanel = document.querySelector("[data-login-panel]");
+    const loginScene = document.querySelector("[data-threeui-scene='login']");
     expect(signature).toBeVisible();
     expect(loginPanel).not.toContainElement(signature);
+    expect(loginScene).toHaveAttribute("data-threeui-state", "fallback");
+    expect(loginScene).toHaveAttribute("aria-hidden", "true");
     expect(loginPanel).toHaveClass("w-full", "max-w-[27rem]");
     expect(loginPanel).not.toHaveClass(
       "rounded-[1.75rem]",

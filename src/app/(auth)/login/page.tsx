@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 
+import { ThreeUiAmbientScene } from "@/components/branding/threeui-ambient-scene";
 import { LoginForm } from "@/components/auth/login-form";
 import { BRAND } from "@/shared/brand";
 
@@ -16,6 +17,7 @@ export default function LoginPage() {
         className="login-metal-surface relative flex flex-col overflow-hidden bg-login-canvas px-6 pb-2 pt-6 sm:px-10 sm:pb-3 sm:pt-8 lg:min-h-svh lg:px-12 lg:py-10 xl:px-16"
         data-login-hero
       >
+        <ThreeUiAmbientScene className="hidden lg:block" scene="login" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-login-hero-muted">
           <svg className="absolute -right-24 top-1/2 hidden h-[32rem] w-[44rem] -translate-y-1/2 opacity-[0.08] lg:block" viewBox="0 0 704 512">
             <path d="M34 390C150 316 203 164 346 143C474 124 524 252 670 96" fill="none" stroke="currentColor" strokeWidth="1.5" />
