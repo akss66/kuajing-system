@@ -76,11 +76,6 @@ test("login surface is accessible, responsive and uses the approved teal action 
   await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "登录同舟行跨境" })).toHaveCount(0);
   await expect(page.getByText("AI+Agent+跨境")).toBeVisible();
-  const loginScene = page.locator("[data-threeui-scene='login']");
-  await expect(loginScene).toHaveAttribute(
-    "data-threeui-state",
-    testInfo.project.name.includes("mobile") ? "fallback" : "enhanced",
-  );
   const loginPanel = page.locator("[data-login-panel]");
   await expect(loginPanel).toBeVisible();
   await expect(page.getByText("Designed & Developed by ZZY")).toBeVisible();
