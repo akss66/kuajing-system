@@ -1,9 +1,10 @@
-import { ArrowDownLeft, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, LockKeyhole, WalletCards } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeading } from "@/components/layout/page-heading";
 import { SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { requireCustomer } from "@/modules/identity/guards";
 import { getCustomerWalletHoldStatusLabel } from "@/modules/settlement/customer-ui-labels";
 import { getCustomerWalletView } from "@/modules/wallet/queries";
@@ -29,6 +30,14 @@ export default async function CustomerWalletPage() {
   return (
     <div className="space-y-5">
       <PageHeading
+        action={
+          <Button asChild className="min-h-11 w-full sm:w-auto" variant="outline">
+            <Link href="/portal/settlements">
+              查看合并付款记录
+              <ArrowRight aria-hidden="true" className="size-4 group-hover/button:translate-x-0.5" />
+            </Link>
+          </Button>
+        }
         description="查看可用余额、当前订单预留和最近 100 笔资金变化；充值仍通过线下微信联系管理员。"
         title="资金中心"
       />

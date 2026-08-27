@@ -47,6 +47,10 @@ describe("settlement page regions", () => {
     render(await CustomerWalletPage());
 
     expect(screen.getByRole("heading", { level: 1, name: "资金中心" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看合并付款记录" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
     expect(screen.getByRole("region", { name: "客户余额" })).toBeVisible();
     expect(screen.getByText("可用余额")).toBeVisible();
     expect(screen.getByText("订单预留")).toBeVisible();
@@ -93,6 +97,10 @@ describe("settlement page regions", () => {
 
     render(await CustomerWalletPage());
 
+    expect(screen.getByRole("link", { name: "查看合并付款记录" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
     expect(screen.getByText("付款编号 PAY-001")).toBeVisible();
     expect(screen.getByText("冻结中")).toBeVisible();
     expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
