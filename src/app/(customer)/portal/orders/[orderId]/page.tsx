@@ -11,6 +11,7 @@ import { OrderStatusTimeline } from "@/components/orders/order-status-timeline";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
 import { formatMilliYuan } from "@/modules/catalog/unit-price";
+import { PACKAGE_SHIPPING_FEE_FEN } from "@/modules/orders/pricing";
 import { getCustomerOrderDetail } from "@/modules/orders/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -47,6 +48,11 @@ export default async function CustomerOrderDetailPage({
 
   const paid = ["PAID_PENDING_FULFILLMENT", "FULFILLING", "SHIPPED"].includes(order.status);
   const cancellationAdjustments = order.cancellationAdjustments ?? [];
+  const merchandiseAmountFen = order.lines.reduce(
+    (total, line) => total + line.lineAmountFen,
+    0,
+  );
+  const shippingFeeFen = order.totalPackageCount * PACKAGE_SHIPPING_FEE_FEN;
 
   return (
     <div className="space-y-5">
@@ -73,12 +79,21 @@ export default async function CustomerOrderDetailPage({
 
       <MetricStrip
         items={[
-          { hint: (order.adjustedAmountFen ?? 0) > 0 ? `原始金额 ${money(order.totalAmountFen)}` : undefined, label: "当前净额", value: money(order.netAmountFen ?? order.totalAmountFen) },
-          { label: "包裹数", value: String(order.totalPackageCount) },
+          {
+            hint:
+              (order.adjustedAmountFen ?? 0) > 0
+                ? `已取消调整 -${money(order.adjustedAmountFen ?? 0)}`
+                : "商品金额与物流费合计",
+            label: "当前净额",
+            value: money(order.netAmountFen ?? order.totalAmountFen),
+          },
+          { label: "商品金额", value: money(merchandiseAmountFen) },
+          {
+            hint: `${order.totalPackageCount} 包 × ${money(PACKAGE_SHIPPING_FEE_FEN)}`,
+            label: "物流费",
+            value: money(shippingFeeFen),
+          },
           { label: "商品件数", value: String(order.totalQuantity) },
-          ...((order.adjustedAmountFen ?? 0) > 0
-            ? [{ hint: "被取消包裹的商品额与每包 13 元物流费", label: "取消调整", value: `-${money(order.adjustedAmountFen ?? 0)}` }]
-            : []),
         ]}
         variant="segmented"
       />

@@ -41,7 +41,6 @@ function localDate(value: Date) {
 function nextAction(status: keyof typeof labels) {
   if (status === "PENDING_PAYMENT") return "去付款";
   if (status === "FULFILLMENT_EXCEPTION") return "查看详情";
-  if (status === "SHIPPED") return "查看物流";
   return "查看进度";
 }
 
@@ -60,6 +59,9 @@ export default async function CustomerOrdersPage({
     status: selectedStatus && selectedStatus in labels ? selectedStatus : undefined,
   };
   const pendingOnly = filters.status === "PENDING_PAYMENT";
+  const hasResultFilters = Boolean(
+    filters.dateFrom || filters.dateTo || filters.orderNumber,
+  );
   const isCancelledView = filters.status === "CANCELLED";
   const isExpiredView = filters.status === "EXPIRED";
   const isHistoricalView = isCancelledView || isExpiredView;
@@ -214,7 +216,7 @@ export default async function CustomerOrdersPage({
         ) : (
           <ActionableEmptyState
             action={
-              !pendingOnly && !isHistoricalView ? (
+              !hasResultFilters && !pendingOnly && !isHistoricalView ? (
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <Button asChild className="min-h-11">
                     <Link href="/portal/catalog">查看实时货盘</Link>
@@ -225,9 +227,21 @@ export default async function CustomerOrdersPage({
                 </div>
               ) : undefined
             }
-            description={pendingOnly ? "余额自动扣款的订单不会出现在这里。" : "上传订单并确认提交后，会显示在这里。"}
-            kind="initial"
-            title={pendingOnly ? "没有待付款订单" : "暂无拿货单"}
+            description={
+              hasResultFilters
+                ? "请调整或清除筛选条件后重试。"
+                : pendingOnly
+                  ? "余额自动扣款的订单不会出现在这里。"
+                  : "上传订单并确认提交后，会显示在这里。"
+            }
+            kind={hasResultFilters ? "filtered" : "initial"}
+            title={
+              hasResultFilters
+                ? "没有符合条件的订单"
+                : pendingOnly
+                  ? "没有待付款订单"
+                  : "暂无拿货单"
+            }
           />
         )}
       </section>

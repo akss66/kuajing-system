@@ -222,6 +222,53 @@ describe("order workspace hierarchy", () => {
     expect(within(card).getByRole("link", { name: "去付款" })).toHaveClass("min-h-11");
   });
 
+  it("describes shipped orders as progress when tracking details are unavailable", async () => {
+    queryMocks.listCustomerOrders.mockResolvedValueOnce([
+      { ...order, status: "SHIPPED" },
+    ]);
+
+    render(await CustomerOrdersPage({ searchParams: Promise.resolve({}) }));
+
+    const card = screen.getByRole("article", { name: "订单 FH-20260812-01" });
+    expect(within(card).getByText("下一步：查看进度")).toBeVisible();
+    expect(within(card).getByRole("link", { name: "查看进度" })).toBeVisible();
+    expect(within(card).queryByText("查看物流")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes filtered customer order results from an empty account", async () => {
+    queryMocks.listCustomerOrders.mockResolvedValueOnce([]);
+
+    render(
+      await CustomerOrdersPage({
+        searchParams: Promise.resolve({ orderNumber: "missing-order" }),
+      }),
+    );
+
+    expect(screen.getByText("没有符合条件的订单")).toBeVisible();
+    expect(screen.getByText("请调整或清除筛选条件后重试。")).toBeVisible();
+    expect(screen.queryByText("暂无拿货单")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "上传订单" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the empty customer order state actionable", async () => {
+    queryMocks.listCustomerOrders.mockResolvedValueOnce([]);
+
+    render(await CustomerOrdersPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("link", { name: "查看合并付款记录" })).toHaveAttribute(
+      "href",
+      "/portal/settlements",
+    );
+    expect(screen.getByRole("link", { name: "查看实时货盘" })).toHaveAttribute(
+      "href",
+      "/portal/catalog",
+    );
+    expect(screen.getByRole("link", { name: "上传订单" })).toHaveAttribute(
+      "href",
+      "/portal/imports/new",
+    );
+  });
+
   it("presents expired admin orders as non-operating archive values", async () => {
     queryMocks.listAdminOrders.mockResolvedValueOnce([
       {
@@ -327,7 +374,19 @@ describe("order workspace hierarchy", () => {
       cancellationAdjustments: [],
       cancellationState: "PARTIAL",
       latestPaymentClaim: null,
-      lines: [],
+      lines: [
+        {
+          externalSku: "EXT-1",
+          externalSubOrderNo: "SUB-1",
+          id: "line-1",
+          lineAmountFen: 166200,
+          quantity: 8,
+          skuCode: "SKU-1",
+          skuName: "商品一",
+          unitPriceFen: 20775,
+          unitPriceMilliYuan: 207750,
+        },
+      ],
       netAmountFen: 167500,
       paidAt: new Date("2026-08-12T10:30:00.000Z"),
       refundedAt: null,
@@ -349,7 +408,11 @@ describe("order workspace hierarchy", () => {
     expect(screen.getByText("部分取消")).toBeVisible();
     expect(screen.queryByText("订单状态")).not.toBeInTheDocument();
     expect(screen.getByText("当前净额")).toBeVisible();
-    expect(screen.getByText("取消调整")).toBeVisible();
+    expect(screen.getByText("商品金额")).toBeVisible();
+    expect(screen.getByText("物流费")).toBeVisible();
+    expect(screen.getByText("2 包 × ¥13.00")).toBeVisible();
+    expect(screen.getByText("¥26.00")).toBeVisible();
+    expect(screen.getByText("已取消调整 -¥13.00")).toBeVisible();
   });
 
   it("keeps payment and proven wallet refund facts visible before cancellation", () => {
