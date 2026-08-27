@@ -166,7 +166,7 @@ for (const audience of audiences) {
           const sidebar = await page.locator("[data-merchant-sidebar]").boundingBox();
           if (audience.path === "/portal") {
             expect(topbar).toBeNull();
-            expect(brand).toMatchObject({ x: 0, y: 8, width: 255, height: 80 });
+            expect(brand).toMatchObject({ x: 0, y: 0, width: 255, height: 96 });
             expect(sidebar).toMatchObject({ x: 0, y: 0, width: 256 });
           } else {
             expect(topbar).toMatchObject({ x: 0, y: 0, height: 56 });

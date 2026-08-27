@@ -161,7 +161,7 @@ async function expectShellAndNavigation(
     const brandBox = await page.locator("[data-merchant-brand]:visible").boundingBox();
     const sidebarBox = await page.locator("[data-merchant-sidebar]").boundingBox();
     if (audience === "customer") {
-      expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 80, width: 255, x: 0, y: 8 });
+      expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 96, width: 255, x: 0, y: 0 });
       expect(sidebarBox, `${context} sidebar geometry`).toMatchObject({ width: 256, x: 0, y: 0 });
     } else {
       expect(brandBox, `${context} brand geometry`).toMatchObject({ height: 56, width: 224, x: 0, y: 0 });
