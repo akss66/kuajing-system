@@ -94,6 +94,8 @@ describe("settlement page regions", () => {
     render(await CustomerWalletPage());
 
     expect(screen.getByText("付款编号 PAY-001")).toBeVisible();
+    expect(screen.getByText("冻结中")).toBeVisible();
+    expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "订单预留金额" })).toBeVisible();
     expect(screen.getByRole("link", { name: "查看付款" })).toHaveAttribute("href", "/portal/settlements/batch-1");
     expect(screen.getByText("管理员人工入账")).toBeVisible();

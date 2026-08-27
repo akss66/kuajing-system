@@ -5,6 +5,7 @@ import { PageHeading } from "@/components/layout/page-heading";
 import { SettlementWorkspace } from "@/components/settlement/settlement-workspace";
 import { Badge } from "@/components/ui/badge";
 import { requireCustomer } from "@/modules/identity/guards";
+import { getCustomerWalletHoldStatusLabel } from "@/modules/settlement/customer-ui-labels";
 import { getCustomerWalletView } from "@/modules/wallet/queries";
 import { BUSINESS_TIME_ZONE } from "@/shared/brand";
 
@@ -90,7 +91,7 @@ export default async function CustomerWalletPage() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="font-medium text-ink">付款编号 {hold.batchNumber}</p>
-                          <Badge variant="secondary">{hold.status}</Badge>
+                          <Badge variant="secondary">{getCustomerWalletHoldStatusLabel(hold.status)}</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted">预留于 {dateTime(hold.createdAt)}（渥太华）</p>
                         {hold.releasedAt ? <p className="mt-1 text-xs text-muted">处理于 {dateTime(hold.releasedAt)}（渥太华）</p> : null}
