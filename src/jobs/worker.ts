@@ -20,6 +20,7 @@ import {
   processFeishuOutbox,
 } from "@/modules/feishu/outbox";
 import { expirePendingPaymentOrders } from "@/modules/orders/lifecycle";
+import { deleteExpiredAiSkuMatchRecords } from "@/modules/ai-sku-matching/service";
 import { createDailyStockCoverageAlerts } from "@/modules/reports/stock-coverage";
 import { expireSettlementBatches } from "@/modules/settlement/batch-service";
 import { safeLogError } from "@/shared/privacy";
@@ -33,11 +34,13 @@ const JIFENG_FULFILLMENT_QUEUE = "jifeng-fulfillment-cycle";
 const FEISHU_SYNC_QUEUE = "feishu-integration-cycle";
 const FEISHU_CATALOG_MIRROR_QUEUE = "feishu-catalog-mirror-cycle";
 const STOCK_COVERAGE_ALERT_QUEUE = "daily-stock-coverage-alerts";
+const AI_SKU_MATCH_CLEANUP_QUEUE = "cleanup-ai-sku-match-records";
 const boss = new PgBoss(connectionString);
 const expectedWorkerQueues = [
   EXPIRE_PENDING_ORDERS_QUEUE,
   EXPIRE_SETTLEMENT_BATCHES_QUEUE,
   JIFENG_FULFILLMENT_QUEUE,
+  AI_SKU_MATCH_CLEANUP_QUEUE,
   STOCK_COVERAGE_ALERT_QUEUE,
 ];
 const workerHealth = createWorkerHealthMonitor({
@@ -70,6 +73,16 @@ await boss.work(EXPIRE_SETTLEMENT_BATCHES_QUEUE, { batchSize: 1 }, async () => {
   const expiredCount = await expireSettlementBatches(new Date());
   console.info(`[worker] expired ${expiredCount} settlement batch(es)`);
   return { expiredCount };
+});
+
+await boss.createQueue(AI_SKU_MATCH_CLEANUP_QUEUE);
+await boss.schedule(AI_SKU_MATCH_CLEANUP_QUEUE, "15 3 * * *", null, {
+  tz: "UTC",
+});
+await boss.work(AI_SKU_MATCH_CLEANUP_QUEUE, { batchSize: 1 }, async () => {
+  const deletedCount = await deleteExpiredAiSkuMatchRecords();
+  console.info(`[worker] deleted ${deletedCount} expired AI SKU matching record(s)`);
+  return { deletedCount };
 });
 
 await boss.createQueue(STOCK_COVERAGE_ALERT_QUEUE);

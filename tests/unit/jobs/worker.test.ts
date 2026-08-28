@@ -17,6 +17,9 @@ const configMocks = vi.hoisted(() => ({
   readFeishuApiBaseUrl: vi.fn(),
   readFeishuConfig: vi.fn(),
 }));
+const aiSkuMatchMocks = vi.hoisted(() => ({
+  deleteExpiredAiSkuMatchRecords: vi.fn(async () => 0),
+}));
 
 vi.mock("pg-boss", () => ({
   PgBoss: class MockPgBoss {
@@ -72,6 +75,8 @@ vi.mock("@/modules/feishu/outbox", () => ({
 vi.mock("@/modules/orders/lifecycle", () => ({
   expirePendingPaymentOrders: vi.fn(async () => 0),
 }));
+
+vi.mock("@/modules/ai-sku-matching/service", () => aiSkuMatchMocks);
 
 vi.mock("@/modules/reports/stock-coverage", () => ({
   createDailyStockCoverageAlerts: vi.fn(async () => 0),
@@ -138,6 +143,7 @@ describe("worker Feishu bootstrap", () => {
     configMocks.hasFeishuRuntimeConfiguration.mockClear();
     configMocks.readFeishuApiBaseUrl.mockClear();
     configMocks.readFeishuConfig.mockClear();
+    aiSkuMatchMocks.deleteExpiredAiSkuMatchRecords.mockClear();
     replaceProcessEnv({
       DATABASE_URL: "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_test",
     });
@@ -179,5 +185,31 @@ describe("worker Feishu bootstrap", () => {
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[worker] Feishu jobs disabled: credentials not configured",
     );
+  });
+
+  it("registers a daily AI SKU retention job and deletes expired records", async () => {
+    aiSkuMatchMocks.deleteExpiredAiSkuMatchRecords.mockResolvedValueOnce(4);
+
+    await expect(import("@/jobs/worker")).resolves.toBeDefined();
+
+    expect(bossMocks.createQueue).toHaveBeenCalledWith(
+      "cleanup-ai-sku-match-records",
+    );
+    expect(bossMocks.schedule).toHaveBeenCalledWith(
+      "cleanup-ai-sku-match-records",
+      "15 3 * * *",
+      null,
+      { tz: "UTC" },
+    );
+    const workCalls = bossMocks.work.mock.calls as unknown as Array<
+      [string, unknown, () => Promise<{ deletedCount: number }>]
+    >;
+    const workCall = workCalls.find(
+      ([queueName]) => queueName === "cleanup-ai-sku-match-records",
+    );
+    expect(workCall).toBeDefined();
+    const handler = workCall![2];
+    await expect(handler()).resolves.toEqual({ deletedCount: 4 });
+    expect(aiSkuMatchMocks.deleteExpiredAiSkuMatchRecords).toHaveBeenCalledOnce();
   });
 });

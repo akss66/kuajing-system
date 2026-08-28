@@ -8,6 +8,8 @@ beforeAll(async () => {
   await assertCurrentE2ETestDatabase(db, "Vitest integration reset");
   await db.execute(sql.raw(`
     truncate table
+      ai_sku_match_suggestions,
+      ai_sku_match_runs,
       system_notifications,
       integration_attempts,
       integration_outbox,

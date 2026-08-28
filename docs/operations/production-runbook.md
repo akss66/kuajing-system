@@ -3,7 +3,7 @@
 ## 运行拓扑
 
 - Web：Next.js 16，负责管理员后台、客户门户、Better Auth 和极风 Webhook。
-- Worker：独立执行 `npm.cmd run worker`，负责待付款过期、极风推送/状态同步、飞书货盘/机器人和每日库存覆盖预警。
+- Worker：独立执行 `npm.cmd run worker`，负责待付款过期、极风推送/状态同步、飞书货盘/机器人、每日库存覆盖预警和智能 SKU 匹配记录到期清理。
 - PostgreSQL 18：业务事实唯一来源，同时承载 pg-boss。Web 与 Worker 必须连接同一数据库。
 - 入口代理：只开放 HTTPS 443；把 `/api/integrations/jifeng/webhook` 和其他 Web 请求转发到 Next.js。PostgreSQL 不暴露公网。
 
