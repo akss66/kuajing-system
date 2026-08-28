@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import {
   link,
@@ -61,12 +61,12 @@ type TargetCleanupContext = {
   targetPath: string;
 };
 type FileIdentity = {
-  birthtimeMs: number;
-  ctimeMs: number;
-  dev: number;
-  ino: number;
-  mtimeMs: number;
-  size: number;
+  birthtimeNs: bigint;
+  ctimeNs: bigint;
+  dev: bigint;
+  ino: bigint;
+  mtimeNs: bigint;
+  size: bigint;
 };
 type CatalogAssetStorageOptions = {
   assetDir?: string;
@@ -402,31 +402,38 @@ async function safeClose(handle: FileHandle | null | undefined) {
   await handle.close().catch(() => undefined);
 }
 
-function toFileIdentity(stats: Stats): FileIdentity {
+function toFileIdentity(stats: BigIntStats): FileIdentity {
   return {
-    birthtimeMs: stats.birthtimeMs,
-    ctimeMs: stats.ctimeMs,
+    birthtimeNs: stats.birthtimeNs,
+    ctimeNs: stats.ctimeNs,
     dev: stats.dev,
     ino: stats.ino,
-    mtimeMs: stats.mtimeMs,
+    mtimeNs: stats.mtimeNs,
     size: stats.size,
   };
 }
 
 function hasStableDeviceInode(identity: FileIdentity) {
-  return identity.dev !== 0 && identity.ino !== 0;
+  return identity.dev !== 0n && identity.ino !== 0n;
 }
 
 function fileIdentityMatches(expected: FileIdentity, actual: FileIdentity) {
   if (hasStableDeviceInode(expected) && hasStableDeviceInode(actual)) {
-    return expected.dev === actual.dev && expected.ino === actual.ino;
+    return (
+      expected.dev === actual.dev &&
+      expected.ino === actual.ino &&
+      expected.birthtimeNs === actual.birthtimeNs &&
+      expected.ctimeNs === actual.ctimeNs &&
+      expected.mtimeNs === actual.mtimeNs &&
+      expected.size === actual.size
+    );
   }
 
   if (process.platform === "win32") {
     return (
-      expected.birthtimeMs === actual.birthtimeMs &&
-      expected.ctimeMs === actual.ctimeMs &&
-      expected.mtimeMs === actual.mtimeMs &&
+      expected.birthtimeNs === actual.birthtimeNs &&
+      expected.ctimeNs === actual.ctimeNs &&
+      expected.mtimeNs === actual.mtimeNs &&
       expected.size === actual.size
     );
   }
@@ -439,7 +446,7 @@ async function safeUnlinkOwnedPath(path: string, expectedIdentity: FileIdentity 
     return false;
   }
 
-  const currentStats = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+  const currentStats = await lstat(path, { bigint: true }).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") {
       return null;
     }
@@ -576,7 +583,7 @@ async function writeExclusiveFile(
   try {
     await options?.assertCanContinue?.();
     handle = await open(path, WRITE_NOFOLLOW_FLAGS, 0o600);
-    ownedIdentity = toFileIdentity(await handle.stat());
+    ownedIdentity = toFileIdentity(await handle.stat({ bigint: true }));
     const chunkSize = Math.max(1, options?.chunkSize ?? bytes.byteLength);
     let bytesWritten = 0;
     while (bytesWritten < bytes.byteLength) {
@@ -597,7 +604,15 @@ async function writeExclusiveFile(
 
     await handle.sync();
     await options?.assertCanContinue?.();
+    ownedIdentity = toFileIdentity(await handle.stat({ bigint: true }));
   } catch (error) {
+    if (handle) {
+      try {
+        ownedIdentity = toFileIdentity(await handle.stat({ bigint: true }));
+      } catch {
+        // Keep the last identity captured from this handle.
+      }
+    }
     await safeClose(handle);
     const cleanupErrors =
       ownedIdentity && options?.cleanupOnFailure
