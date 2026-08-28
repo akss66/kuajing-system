@@ -127,6 +127,10 @@ describe("playwright.config database isolation", () => {
     expect(config.projects?.every(({ use }) => use?.baseURL === "http://127.0.0.1:13101")).toBe(true);
     expect(webServers).toHaveLength(1);
     expect(webServers[0]).toMatchObject({
+      gracefulShutdown: {
+        signal: "SIGTERM",
+        timeout: 10_000,
+      },
       url: "http://127.0.0.1:13101",
     });
     expect(webServers[0]?.command).toContain("start-isolated-app-servers.mjs --mode jifeng");

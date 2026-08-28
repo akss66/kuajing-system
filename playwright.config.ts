@@ -168,6 +168,10 @@ export default defineConfig({
       ` --normal-port ${e2ePort}` +
       ` --jifeng-port ${e2eJifengAppPort}` +
       ` --jifeng-mock-url ${e2eJifengMockUrl}`,
+    gracefulShutdown: {
+      signal: "SIGTERM",
+      timeout: 10_000,
+    },
     env: {
       ...commonWebServerEnvironment,
       BETTER_AUTH_URL: e2eBaseUrl,
