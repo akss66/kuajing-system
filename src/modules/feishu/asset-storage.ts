@@ -417,18 +417,27 @@ function hasStableDeviceInode(identity: FileIdentity) {
   return identity.dev !== 0 && identity.ino !== 0;
 }
 
-function fileIdentityMatches(expected: FileIdentity, actual: FileIdentity) {
+function fileOriginMatches(expected: FileIdentity, actual: FileIdentity) {
   if (hasStableDeviceInode(expected) && hasStableDeviceInode(actual)) {
     return expected.dev === actual.dev && expected.ino === actual.ino;
   }
 
+  return process.platform === "win32" && expected.birthtimeMs === actual.birthtimeMs;
+}
+
+function fileIdentityMatches(expected: FileIdentity, actual: FileIdentity) {
+  const metadataMatches =
+    expected.birthtimeMs === actual.birthtimeMs &&
+    expected.ctimeMs === actual.ctimeMs &&
+    expected.mtimeMs === actual.mtimeMs &&
+    expected.size === actual.size;
+
+  if (hasStableDeviceInode(expected) && hasStableDeviceInode(actual)) {
+    return fileOriginMatches(expected, actual) && metadataMatches;
+  }
+
   if (process.platform === "win32") {
-    return (
-      expected.birthtimeMs === actual.birthtimeMs &&
-      expected.ctimeMs === actual.ctimeMs &&
-      expected.mtimeMs === actual.mtimeMs &&
-      expected.size === actual.size
-    );
+    return metadataMatches;
   }
 
   return false;
@@ -599,6 +608,18 @@ async function writeExclusiveFile(
     await options?.assertCanContinue?.();
   } catch (error) {
     await safeClose(handle);
+    const finalStats = await lstat(path).catch((statsError: NodeJS.ErrnoException) => {
+      if (statsError.code === "ENOENT") {
+        return null;
+      }
+      throw statsError;
+    });
+    if (ownedIdentity && finalStats?.isFile()) {
+      const finalIdentity = toFileIdentity(finalStats);
+      if (fileOriginMatches(ownedIdentity, finalIdentity)) {
+        ownedIdentity = finalIdentity;
+      }
+    }
     const cleanupErrors =
       ownedIdentity && options?.cleanupOnFailure
         ? await cleanupOwnedPathOnFailure(path, ownedIdentity, options.cleanupOnFailure)
@@ -606,6 +627,11 @@ async function writeExclusiveFile(
     throw attachCleanupFailures(error, cleanupErrors);
   }
   await safeClose(handle);
+  const finalStats = await lstat(path);
+  const finalIdentity = toFileIdentity(finalStats);
+  if (ownedIdentity && fileOriginMatches(ownedIdentity, finalIdentity)) {
+    ownedIdentity = finalIdentity;
+  }
   return {
     fileIdentity: ownedIdentity,
   };

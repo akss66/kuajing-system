@@ -50,7 +50,7 @@ describe("PII encryption", () => {
   });
 
   it("requires an exact 32-byte base64 environment key", () => {
-    expect(() => parsePiiEncryptionKey(undefined)).toThrow(
+    expect(() => parsePiiEncryptionKey("")).toThrow(
       "PII_ENCRYPTION_KEY 未配置",
     );
     expect(() => parsePiiEncryptionKey("not-base64")).toThrow(
