@@ -71,9 +71,12 @@ process.env.PII_ENCRYPTION_KEY ??=
   "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
 const commonWebServerEnvironment = {
+  AI_SKU_MATCH_ENABLED: "true",
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
   CATALOG_ASSET_DIR: process.env.CATALOG_ASSET_DIR,
   DATABASE_URL: e2eDatabaseUrl,
+  DEEPSEEK_API_KEY: "e2e-placeholder-never-sent",
+  DEEPSEEK_MODEL: "deepseek-v4-flash",
   FEISHU_API_BASE_URL:
     process.env.FEISHU_API_BASE_URL ?? "http://127.0.0.1:4010",
   FEISHU_APP_ID: process.env.FEISHU_APP_ID ?? "e2e-feishu-app-id",

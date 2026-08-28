@@ -9,6 +9,8 @@ export const LOCAL_E2E_DATABASE_URL =
 export const DEFAULT_E2E_PORT = "3101";
 
 const E2E_RESET_TABLES = [
+  "ai_sku_match_suggestions",
+  "ai_sku_match_runs",
   "system_notifications",
   "integration_attempts",
   "integration_outbox",
