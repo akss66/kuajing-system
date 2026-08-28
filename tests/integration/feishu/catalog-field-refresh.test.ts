@@ -29,6 +29,7 @@ import { buildFieldAlignedCargoSourceFixture } from "../../fixtures/feishu/field
 
 const sourceWikiToken = "read-only-wiki-token";
 const sourceSheetId = "read-only-sheet";
+const catalogRefreshLockName = "feishu-catalog-field-refresh";
 
 function createRepeatedSourceSequenceValues() {
   const values = buildFieldAlignedCargoSourceFixture().value;
@@ -366,19 +367,22 @@ describe("catalog field refresh", () => {
     );
     const client = createReadOnlyClient(values);
     const downloadedTokens: string[] = [];
-    const advisoryLockCounts: number[] = [];
+    const catalogRefreshLockAvailableDuringDownloads: boolean[] = [];
     let activeDownloads = 0;
     let maxActiveDownloads = 0;
     client.downloadMedia = async (fileToken) => {
       downloadedTokens.push(fileToken);
       activeDownloads += 1;
       maxActiveDownloads = Math.max(maxActiveDownloads, activeDownloads);
-      const [lockCount] = await db.execute<{ count: number }>(sql`
-        select count(*)::int as count
-        from pg_locks
-        where locktype = 'advisory' and granted
-      `);
-      advisoryLockCounts.push(lockCount?.count ?? -1);
+      const lockAvailable = await db.transaction(async (transaction) => {
+        const [lockState] = await transaction.execute<{ acquired: boolean }>(sql`
+          select pg_try_advisory_xact_lock_shared(
+            hashtext(${catalogRefreshLockName})
+          ) as acquired
+        `);
+        return lockState?.acquired ?? false;
+      });
+      catalogRefreshLockAvailableDuringDownloads.push(lockAvailable);
       await new Promise((resolve) => setTimeout(resolve, 5));
       activeDownloads -= 1;
       return {
@@ -397,7 +401,7 @@ describe("catalog field refresh", () => {
     expect(new Set(downloadedTokens)).toEqual(expectedTokens);
     expect(downloadedTokens).toHaveLength(expectedTokens.size);
     expect(maxActiveDownloads).toBeGreaterThan(1);
-    expect(advisoryLockCounts.every((count) => count === 0)).toBe(true);
+    expect(catalogRefreshLockAvailableDuringDownloads.every(Boolean)).toBe(true);
   });
 
   test("rejects a source snapshot that changes while its images are staged", async () => {
