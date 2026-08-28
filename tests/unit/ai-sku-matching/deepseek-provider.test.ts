@@ -50,14 +50,14 @@ function completion(content: string, finishReason = "stop") {
 }
 
 describe("DeepSeek SKU match provider", () => {
-  it("sends only allowlisted product fields and returns schema-validated suggestions", async () => {
+  it("uses ephemeral row keys, sends only allowlisted product fields, and restores internal row ids", async () => {
     const fetchMock = vi.fn(async () =>
       response(
         completion(
           JSON.stringify({
             matches: [
               {
-                rowId: input.rows[0].rowId,
+                rowKey: "row_1",
                 suggestions: [
                   {
                     candidateId: input.candidates[0].id,
@@ -82,6 +82,7 @@ describe("DeepSeek SKU match provider", () => {
       candidateId: input.candidates[0].id,
       confidence: "HIGH",
     });
+    expect(result.matches[0]?.rowId).toBe(input.rows[0].rowId);
     const [, requestInit] = fetchMock.mock.calls[0] as unknown as [
       string,
       RequestInit,
@@ -98,6 +99,8 @@ describe("DeepSeek SKU match provider", () => {
     expect(JSON.stringify(request)).not.toMatch(
       /recipient|address|phone|email|externalOrderNo|subOrder/i,
     );
+    expect(JSON.stringify(request)).not.toContain(input.rows[0].rowId);
+    expect(request.messages[1].content).toContain('"rowKey":"row_1"');
   });
 
   it("rejects hallucinated candidate IDs even when the JSON shape is valid", async () => {
@@ -107,7 +110,7 @@ describe("DeepSeek SKU match provider", () => {
           JSON.stringify({
             matches: [
               {
-                rowId: input.rows[0].rowId,
+                rowKey: "row_1",
                 suggestions: [
                   {
                     candidateId: "00000000-0000-4000-8000-000000000999",
@@ -129,13 +132,13 @@ describe("DeepSeek SKU match provider", () => {
     await expect(provider.suggest(input)).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries 429 and empty invalid JSON once, but never retries auth failures", async () => {
+  it("retries only empty responses, 429, and 5xx once", async () => {
     const valid = completion(
       JSON.stringify({
-        matches: [{ rowId: input.rows[0].rowId, suggestions: [] }],
+        matches: [{ rowKey: "row_1", suggestions: [] }],
       }),
     );
     const rateLimited = vi
@@ -149,6 +152,18 @@ describe("DeepSeek SKU match provider", () => {
       ).suggest(input),
     ).resolves.toBeDefined();
     expect(rateLimited).toHaveBeenCalledTimes(2);
+
+    const unavailable = vi
+      .fn()
+      .mockResolvedValueOnce(response({ error: { message: "unavailable" } }, 503))
+      .mockResolvedValueOnce(response(valid));
+    await expect(
+      createDeepSeekSkuMatchProvider(
+        { apiKey: "secret", model: "deepseek-v4-flash" },
+        unavailable,
+      ).suggest(input),
+    ).resolves.toBeDefined();
+    expect(unavailable).toHaveBeenCalledTimes(2);
 
     const empty = vi
       .fn()
@@ -170,16 +185,53 @@ describe("DeepSeek SKU match provider", () => {
       ).suggest(input),
     ).rejects.toBeInstanceOf(AiSkuMatchProviderError);
     expect(unauthorized).toHaveBeenCalledTimes(1);
+
+    const quota = vi.fn(async () => response({ error: {} }, 402));
+    await expect(
+      createDeepSeekSkuMatchProvider(
+        { apiKey: "secret", model: "deepseek-v4-flash" },
+        quota,
+      ).suggest(input),
+    ).rejects.toBeInstanceOf(AiSkuMatchProviderError);
+    expect(quota).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects truncated completions instead of consuming partial suggestions", async () => {
+  it("rejects truncated completions without retrying or consuming partial suggestions", async () => {
+    const fetchMock = vi.fn(async () => response(completion('{"matches":[', "length")));
     const provider = createDeepSeekSkuMatchProvider(
       { apiKey: "secret", model: "deepseek-v4-flash" },
-      vi.fn(async () => response(completion('{"matches":[', "length"))),
+      fetchMock,
     );
 
     await expect(provider.suggest(input)).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out after fifteen seconds without retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(
+        async (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("aborted", "AbortError"));
+            });
+          }),
+      );
+      const assertion = expect(
+        createDeepSeekSkuMatchProvider(
+          { apiKey: "secret", model: "deepseek-v4-flash" },
+          fetchMock,
+        ).suggest(input),
+      ).rejects.toMatchObject({ code: "TIMEOUT" });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
