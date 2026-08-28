@@ -9,6 +9,7 @@ import type { ActionState } from "@/shared/action-state";
 import {
   createAdminAccount,
   resetManagedAccountPassword,
+  setCustomerAiSkuMatchAccess,
   setManagedAccountStatus,
   updateManagedAccount,
 } from "./service";
@@ -89,6 +90,11 @@ function governanceErrorState(error: unknown): ActionState | null {
     case "FORBIDDEN_SUPER_ADMIN":
       return {
         message: "只有超级管理员可以执行账号治理操作。",
+        status: "error",
+      };
+    case "CUSTOMER_ACCOUNT_REQUIRED":
+      return {
+        message: "智能核单试用只能对客户账号开放。",
         status: "error",
       };
     case "INVALID_PASSWORD":
@@ -246,6 +252,41 @@ export async function setManagedAccountStatusAction(
   revalidateAccountManagement();
   return {
     message: parsed.data.status === "DISABLED" ? "账号已停用。" : "账号已恢复。",
+    status: "success",
+  };
+}
+
+const aiSkuMatchAccessSchema = z.object({
+  enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
+  reason: z.string().trim().min(1).max(500),
+  userId: z.string().min(1),
+});
+
+export async function setCustomerAiSkuMatchAccessAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const actor = await requireSuperAdmin();
+  const parsed = aiSkuMatchAccessSchema.safeParse({
+    enabled: formData.get("enabled"),
+    reason: formData.get("reason"),
+    userId: formData.get("userId"),
+  });
+  if (!parsed.success) return validationState(parsed.error);
+
+  try {
+    await setCustomerAiSkuMatchAccess({ actor, ...parsed.data });
+  } catch (error) {
+    const state = governanceErrorState(error);
+    if (state) return state;
+    throw error;
+  }
+
+  revalidateAccountManagement();
+  return {
+    message: parsed.data.enabled
+      ? "已开放智能核单试用。"
+      : "已关闭智能核单试用。",
     status: "success",
   };
 }

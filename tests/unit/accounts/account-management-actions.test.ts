@@ -11,6 +11,7 @@ const guardMocks = vi.hoisted(() => ({
 const serviceMocks = vi.hoisted(() => ({
   createAdminAccount: vi.fn(),
   resetManagedAccountPassword: vi.fn(),
+  setCustomerAiSkuMatchAccess: vi.fn(),
   setManagedAccountStatus: vi.fn(),
   updateManagedAccount: vi.fn(),
 }));
@@ -20,12 +21,14 @@ vi.mock("@/modules/identity/guards", () => guardMocks);
 vi.mock("@/modules/accounts/service", () => ({
   createAdminAccount: serviceMocks.createAdminAccount,
   resetManagedAccountPassword: serviceMocks.resetManagedAccountPassword,
+  setCustomerAiSkuMatchAccess: serviceMocks.setCustomerAiSkuMatchAccess,
   setManagedAccountStatus: serviceMocks.setManagedAccountStatus,
   updateManagedAccount: serviceMocks.updateManagedAccount,
 }));
 
 import {
   createAdminAccountAction,
+  setCustomerAiSkuMatchAccessAction,
   setManagedAccountStatusAction,
   updateManagedAccountAction,
 } from "@/modules/accounts/actions";
@@ -36,12 +39,69 @@ describe("account management actions", () => {
     guardMocks.requireSuperAdmin.mockReset();
     serviceMocks.createAdminAccount.mockReset();
     serviceMocks.resetManagedAccountPassword.mockReset();
+    serviceMocks.setCustomerAiSkuMatchAccess.mockReset();
     serviceMocks.setManagedAccountStatus.mockReset();
     serviceMocks.updateManagedAccount.mockReset();
 
     guardMocks.requireSuperAdmin.mockResolvedValue({
       kind: "SUPER_ADMIN",
       userId: "super-admin-auth-user",
+    });
+  });
+
+  it("uses the super-admin actor and a required reason to enable customer AI matching", async () => {
+    const formData = new FormData();
+    formData.set("userId", "customer-user-1");
+    formData.set("enabled", "true");
+    formData.set("reason", "  首批试用客户  ");
+
+    const result = await setCustomerAiSkuMatchAccessAction(
+      { status: "idle" },
+      formData,
+    );
+
+    expect(serviceMocks.setCustomerAiSkuMatchAccess).toHaveBeenCalledWith({
+      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+      enabled: true,
+      reason: "首批试用客户",
+      userId: "customer-user-1",
+    });
+    expect(result).toEqual({ message: "已开放智能核单试用。", status: "success" });
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/admin/accounts");
+  });
+
+  it("rejects AI access changes without a reason before calling the service", async () => {
+    const formData = new FormData();
+    formData.set("userId", "customer-user-1");
+    formData.set("enabled", "false");
+    formData.set("reason", "   ");
+
+    const result = await setCustomerAiSkuMatchAccessAction(
+      { status: "idle" },
+      formData,
+    );
+
+    expect(result.status).toBe("error");
+    expect(serviceMocks.setCustomerAiSkuMatchAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe error when AI access targets a non-customer account", async () => {
+    serviceMocks.setCustomerAiSkuMatchAccess.mockRejectedValueOnce({
+      code: "CUSTOMER_ACCOUNT_REQUIRED",
+    });
+    const formData = new FormData();
+    formData.set("userId", "admin-user-1");
+    formData.set("enabled", "true");
+    formData.set("reason", "should fail");
+
+    const result = await setCustomerAiSkuMatchAccessAction(
+      { status: "idle" },
+      formData,
+    );
+
+    expect(result).toEqual({
+      message: "智能核单试用只能对客户账号开放。",
+      status: "error",
     });
   });
 

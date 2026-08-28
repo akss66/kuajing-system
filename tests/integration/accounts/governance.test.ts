@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { auth } from "@/modules/identity/auth";
 import {
   adminUsers,
+  auditLogs,
   authSessions,
   authUsers,
   customers,
@@ -15,6 +16,7 @@ import {
   createAdminAccount,
   listManagedAccounts,
   setManagedAccountStatus,
+  setCustomerAiSkuMatchAccess,
   updateManagedAccount,
 } from "@/modules/accounts/service";
 import { seed } from "@/db/seed";
@@ -41,6 +43,8 @@ describe("account governance", () => {
   afterEach(async () => {
     await db.execute(sql.raw(`
       truncate table
+        ai_sku_match_suggestions,
+        ai_sku_match_runs,
         system_notifications,
         integration_attempts,
         integration_outbox,
@@ -301,11 +305,87 @@ describe("account governance", () => {
     expect(accounts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          aiSkuMatchEnabled: false,
           customerId: customer.id,
           kind: "CUSTOMER",
           storeCount: 0,
         }),
       ]),
     );
+  });
+
+  test("super admin can govern per-customer AI matching with an audited reason", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({
+        code: `AI-ACCESS-${crypto.randomUUID().slice(0, 8)}`,
+        name: "AI access customer",
+      })
+      .returning({ id: customers.id });
+    const userId = crypto.randomUUID();
+    await db.insert(authUsers).values({
+      customerId: customer.id,
+      email: `ai-access-${crypto.randomUUID()}@tongzhouxing.local`,
+      id: userId,
+      name: "AI Access Customer",
+      role: "user",
+    });
+
+    await setCustomerAiSkuMatchAccess({
+      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+      enabled: true,
+      reason: "Pilot cohort approval",
+      userId,
+    });
+
+    await expect(
+      db
+        .select({ enabled: customers.aiSkuMatchEnabled })
+        .from(customers)
+        .where(eq(customers.id, customer.id)),
+    ).resolves.toEqual([{ enabled: true }]);
+    await expect(
+      db
+        .select({
+          action: auditLogs.action,
+          entityId: auditLogs.entityId,
+          reason: auditLogs.reason,
+        })
+        .from(auditLogs)
+        .where(eq(auditLogs.entityId, customer.id)),
+    ).resolves.toEqual([
+      {
+        action: "CUSTOMER_AI_SKU_MATCH_ACCESS_CHANGED",
+        entityId: customer.id,
+        reason: "Pilot cohort approval",
+      },
+    ]);
+  });
+
+  test("ordinary admins and non-customer targets cannot change AI access", async () => {
+    const created = await createAdminAccount({
+      actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+      displayName: "Operations Admin",
+      email: `ai-admin-${crypto.randomUUID()}@tongzhouxing.local`,
+      password: "valid-admin-password-2026",
+      reason: "Provision admin",
+    });
+
+    await expect(
+      setCustomerAiSkuMatchAccess({
+        actor: { kind: "ADMIN", userId: created.userId },
+        enabled: true,
+        reason: "Should fail",
+        userId: created.userId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_SUPER_ADMIN" });
+    await expect(
+      setCustomerAiSkuMatchAccess({
+        actor: { kind: "SUPER_ADMIN", userId: "super-admin-auth-user" },
+        enabled: true,
+        reason: "Should fail",
+        userId: created.userId,
+      }),
+    ).rejects.toMatchObject({ code: "CUSTOMER_ACCOUNT_REQUIRED" });
   });
 });

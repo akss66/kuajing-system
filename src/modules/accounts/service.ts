@@ -8,6 +8,7 @@ import {
   authAccounts,
   authSessions,
   authUsers,
+  customers,
   customerUsers,
 } from "@/db/schema";
 import type { DbTransaction } from "@/db/client";
@@ -26,6 +27,7 @@ export class AccountGovernanceError extends Error {
   constructor(
     public readonly code:
       | "ACCOUNT_NOT_FOUND"
+      | "CUSTOMER_ACCOUNT_REQUIRED"
       | "FORBIDDEN_SUPER_ADMIN"
       | "INVALID_PASSWORD"
       | "INVALID_REASON"
@@ -422,6 +424,56 @@ export async function setManagedAccountStatus(input: {
       afterJson: { status: input.status },
       beforeJson: { status: accountStatusFromUser(user) },
       entityId: user.id,
+      reason,
+    });
+  });
+}
+
+export async function setCustomerAiSkuMatchAccess(input: {
+  actor: AccountActor;
+  enabled: boolean;
+  reason: string;
+  userId: string;
+}) {
+  assertSuperAdmin(input.actor);
+  const reason = assertReason(input.reason);
+
+  await db.transaction(async (tx) => {
+    const user = await getManagedUser(tx, input.userId);
+    if (user.role !== "user" || !user.customerId) {
+      throw new AccountGovernanceError(
+        "CUSTOMER_ACCOUNT_REQUIRED",
+        "AI SKU matching access can only target a customer account",
+      );
+    }
+    const [customer] = await tx
+      .select({
+        aiSkuMatchEnabled: customers.aiSkuMatchEnabled,
+        id: customers.id,
+      })
+      .from(customers)
+      .where(eq(customers.id, user.customerId))
+      .for("update")
+      .limit(1);
+    if (!customer) {
+      throw new AccountGovernanceError(
+        "CUSTOMER_ACCOUNT_REQUIRED",
+        "Customer record not found",
+      );
+    }
+
+    await tx
+      .update(customers)
+      .set({ aiSkuMatchEnabled: input.enabled, updatedAt: new Date() })
+      .where(eq(customers.id, customer.id));
+    await tx.insert(auditLogs).values({
+      action: "CUSTOMER_AI_SKU_MATCH_ACCESS_CHANGED",
+      actorId: input.actor.userId,
+      actorType: "ADMIN",
+      afterJson: { aiSkuMatchEnabled: input.enabled },
+      beforeJson: { aiSkuMatchEnabled: customer.aiSkuMatchEnabled },
+      entityId: customer.id,
+      entityType: "CUSTOMER",
       reason,
     });
   });

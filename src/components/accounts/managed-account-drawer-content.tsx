@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   resetManagedAccountPasswordAction,
+  setCustomerAiSkuMatchAccessAction,
   setManagedAccountStatusAction,
   updateManagedAccountAction,
 } from "@/modules/accounts/actions";
@@ -113,6 +114,50 @@ function AccountStatusForm({ account }: { account: ManagedAccountSummary }) {
   );
 }
 
+function AiSkuMatchAccessForm({ account }: { account: ManagedAccountSummary }) {
+  const enabling = !account.aiSkuMatchEnabled;
+  const actionLabel = enabling ? "开放智能核单" : "关闭智能核单";
+
+  return (
+    <ConfirmedActionForm
+      action={setCustomerAiSkuMatchAccessAction}
+      className="grid gap-4"
+      confirmDescription={
+        enabling
+          ? "开放后，该客户可在订单预览中主动请求 DeepSeek 辅助排序候选 SKU；建议不会自动修改订单。"
+          : "关闭后，该客户立即回到现有手工核单流程；历史审计记录仍会保留。"
+      }
+      confirmLabel={actionLabel}
+      confirmTitle={
+        enabling
+          ? "确认向这个客户开放智能核单试用？"
+          : "确认关闭这个客户的智能核单试用？"
+      }
+      submitLabel={actionLabel}
+      variant="outline"
+    >
+      <input name="enabled" type="hidden" value={String(enabling)} />
+      <input name="userId" type="hidden" value={account.userId} />
+      <div className="flex items-center gap-2 text-sm text-foreground">
+        <span>当前状态</span>
+        <Badge variant="outline">
+          {account.aiSkuMatchEnabled ? "已开放" : "当前未开放"}
+        </Badge>
+      </div>
+      <label className="space-y-2 text-sm font-medium text-foreground">
+        操作原因
+        <Input
+          className="min-h-11"
+          maxLength={500}
+          name="reason"
+          placeholder={enabling ? "例如：首批试用客户" : "例如：结束试用"}
+          required
+        />
+      </label>
+    </ConfirmedActionForm>
+  );
+}
+
 export function ManagedAccountDrawerContent({ account }: { account: ManagedAccountSummary }) {
   return (
     <>
@@ -144,6 +189,14 @@ export function ManagedAccountDrawerContent({ account }: { account: ManagedAccou
           <DrawerSection title="基本资料" description="仅维护登录身份；客户业务资料请前往客户详情。">
             <AccountProfileForm account={account} />
           </DrawerSection>
+          {account.kind === "CUSTOMER" ? (
+            <DrawerSection
+              description="仅超级管理员可逐客户开放；全局开关关闭时此授权不会生效。"
+              title="智能核单试用"
+            >
+              <AiSkuMatchAccessForm account={account} />
+            </DrawerSection>
+          ) : null}
           <DrawerSection title="登录安全" description="重置密码需要填写原因并再次确认。">
             <PasswordResetForm account={account} />
           </DrawerSection>

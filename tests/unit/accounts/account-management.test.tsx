@@ -16,6 +16,7 @@ const queryMocks = vi.hoisted(() => ({
 vi.mock("@/modules/accounts/actions", () => ({
   createAdminAccountAction: vi.fn(),
   resetManagedAccountPasswordAction: vi.fn(),
+  setCustomerAiSkuMatchAccessAction: vi.fn(),
   setManagedAccountStatusAction: vi.fn(),
   updateManagedAccountAction: vi.fn(),
 }));
@@ -45,6 +46,7 @@ const customerId = "11111111-1111-4111-8111-111111111111";
 const accountsFixture = [
   {
     customerId: null,
+    aiSkuMatchEnabled: false,
     customerName: null,
     displayName: "Bootstrap Super Admin",
     email: "super-admin@test.local",
@@ -56,6 +58,7 @@ const accountsFixture = [
   },
   {
     customerId: null,
+    aiSkuMatchEnabled: false,
     customerName: null,
     displayName: "Operations Admin",
     email: "ops-admin@test.local",
@@ -67,6 +70,7 @@ const accountsFixture = [
   },
   {
     customerId,
+    aiSkuMatchEnabled: false,
     customerName: "华北客户",
     displayName: "Customer Owner",
     email: "customer-owner@test.local",
@@ -383,6 +387,16 @@ describe("AccountsPage", () => {
       `/admin/customers/${customerId}`,
     );
     expect(within(customerDialog).queryByLabelText("客户名称")).not.toBeInTheDocument();
+    expect(
+      within(customerDialog).getByRole("region", { name: "智能核单试用" }),
+    ).toBeVisible();
+    expect(within(customerDialog).getByText("当前未开放")).toBeVisible();
+    fireEvent.click(
+      within(customerDialog).getByRole("button", { name: "开放智能核单" }),
+    );
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "确认向这个客户开放智能核单试用？",
+    );
   });
 
   it("safely denies the route to an ordinary admin without loading governed accounts", async () => {

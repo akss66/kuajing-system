@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 
 export type ManagedAccountSummary = {
+  aiSkuMatchEnabled: boolean;
   customerId: string | null;
   customerName: string | null;
   displayName: string;
@@ -18,6 +19,7 @@ export async function listManagedAccounts(): Promise<ManagedAccountSummary[]> {
   const rows = await db.execute<ManagedAccountSummary>(sql`
     select
       u.id as "userId",
+      coalesce(c.ai_sku_match_enabled, false) as "aiSkuMatchEnabled",
       u.name as "displayName",
       u.email as "email",
       u.customer_id as "customerId",
