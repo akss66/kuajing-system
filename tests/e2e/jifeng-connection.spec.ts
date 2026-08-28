@@ -181,6 +181,7 @@ function stopMockJifengServer() {
   if (!server?.listening) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
+    server.closeAllConnections();
   });
 }
 
