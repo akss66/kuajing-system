@@ -117,11 +117,12 @@ jobs:
       - name: Install pinned Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Run full desktop and mobile E2E serially
+        timeout-minutes: 40
         run: npm run test:e2e -- --workers 1
         env:
           E2E_PORT: 3101
       - name: Upload browser evidence on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failure-${{ github.sha }}
