@@ -376,7 +376,13 @@ describe("catalog field refresh", () => {
       const [lockCount] = await db.execute<{ count: number }>(sql`
         select count(*)::int as count
         from pg_locks
-        where locktype = 'advisory' and granted
+        where locktype = 'advisory'
+          and granted
+          and database = (
+            select oid
+            from pg_database
+            where datname = current_database()
+          )
       `);
       advisoryLockCounts.push(lockCount?.count ?? -1);
       await new Promise((resolve) => setTimeout(resolve, 5));
