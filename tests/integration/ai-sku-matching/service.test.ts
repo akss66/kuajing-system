@@ -22,7 +22,10 @@ import {
   rejectAiSkuMatchSuggestion,
 } from "@/modules/ai-sku-matching/service";
 import type { AiSkuMatchProvider } from "@/modules/ai-sku-matching/types";
-import { updateCustomerImportRowOverride } from "@/modules/order-import/service";
+import {
+  refreshActiveImportPreviewsForAlias,
+  updateCustomerImportRowOverride,
+} from "@/modules/order-import/service";
 
 const originalAiEnv = {
   AI_SKU_MATCH_ENABLED: process.env.AI_SKU_MATCH_ENABLED,
@@ -129,6 +132,7 @@ async function createFixture(options: { enabled?: boolean } = {}) {
     eligibleSku,
     otherCustomer,
     row,
+    store,
   };
 }
 
@@ -468,6 +472,68 @@ describe("AI SKU matching service", () => {
     ).resolves.toEqual([
       { resolutionMethod: "EXACT", revision: 0, status: "READY" },
     ]);
+  });
+
+  it("does not revive an old AI suggestion when deterministic matching later hits an inventory error", async () => {
+    const fixture = await createFixture();
+    await db
+      .update(orderImportRows)
+      .set({ externalSku: "TZX-LATER-NORMALIZED-LK" })
+      .where(eq(orderImportRows.id, fixture.row.id));
+    await generateAiSkuMatchSuggestions(
+      {
+        actorUserId: "customer-user-a",
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+      },
+      { provider: acceptingProvider(fixture.eligibleSku.id) },
+    );
+    const [suggestion] = await listActiveAiSkuMatchSuggestions(
+      fixture.customer.id,
+      fixture.batch.id,
+    );
+    await db
+      .update(inventoryBalances)
+      .set({ totalQuantity: 0 })
+      .where(eq(inventoryBalances.skuId, fixture.eligibleSku.id));
+    await db.insert(skuAliases).values({
+      externalSku: "TZX-LATER-NORMALIZED",
+      skuId: fixture.eligibleSku.id,
+      storeId: fixture.store.id,
+    });
+    await db.transaction((tx) =>
+      refreshActiveImportPreviewsForAlias(tx, {
+        actorUserId: "admin-user",
+        externalSku: "TZX-LATER-NORMALIZED",
+        skuId: fixture.eligibleSku.id,
+        storeId: fixture.store.id,
+      }),
+    );
+    await db
+      .update(inventoryBalances)
+      .set({ totalQuantity: 10 })
+      .where(eq(inventoryBalances.skuId, fixture.eligibleSku.id));
+    const [currentRow] = await db
+      .select({ revision: orderImportRows.revision, status: orderImportRows.status })
+      .from(orderImportRows)
+      .where(eq(orderImportRows.id, fixture.row.id));
+
+    expect(currentRow).toMatchObject({ status: "UNKNOWN_SKU" });
+    await expect(
+      listActiveAiSkuMatchSuggestions(fixture.customer.id, fixture.batch.id),
+    ).resolves.toEqual([]);
+    await expect(
+      updateCustomerImportRowOverride({
+        actorUserId: "customer-user-a",
+        aiSuggestionId: suggestion.id,
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+        effectiveQuantity: 2,
+        expectedRevision: currentRow.revision,
+        rowId: fixture.row.id,
+        skuCode: fixture.eligibleSku.skuCode,
+      }),
+    ).rejects.toMatchObject({ code: "AI_SUGGESTION_INVALID" });
   });
 
   it("keeps the row unchanged when suggested inventory changes before confirmation", async () => {

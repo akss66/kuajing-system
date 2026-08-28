@@ -685,6 +685,7 @@ export async function refreshActiveImportPreviewsForAlias(
         quantityMultiplier: row.derivation.quantityMultiplier,
         resolutionMethod: resolution.resolutionMethod,
         resolvedSkuId: resolution.skuId,
+        revision: sql`${orderImportRows.revision} + 1`,
         status: "READY",
         updatedAt: new Date(),
       })
