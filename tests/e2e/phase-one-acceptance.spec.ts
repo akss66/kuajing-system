@@ -133,10 +133,8 @@ test("phase one customer, price and inventory flow is operational @desktop-only"
     .where(eq(skus.skuCode, "TZX-DEMO-001"));
   const row = page.locator(`[data-testid="catalog-${sku.id}"]:visible`);
   await expect(row).toContainText("¥6.90");
-  const availableInventory = row
-    .locator("dt")
-    .filter({ hasText: /^可售库存$/ })
-    .locator("xpath=following-sibling::dd[1]");
-  await expect(availableInventory).toHaveText("10");
+  const availableInventory = row.locator('[data-customer-catalog-section="inventory"]');
+  await expect(availableInventory).toHaveAccessibleName("可售库存");
+  await expect(availableInventory.locator("dd")).toHaveText("10");
   await expect(row.getByText("可售", { exact: true })).toBeVisible();
 });
