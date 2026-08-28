@@ -15,6 +15,7 @@ import {
 import { db, type DbTransaction } from "@/db/client";
 import {
   auditLogs,
+  aiSkuMatchSuggestions,
   inventoryBalances,
   inventoryReservations,
   orderImportBatches,
@@ -53,6 +54,7 @@ export class ImportPreviewError extends Error {
       | "INVALID_ROW_OVERRIDE"
       | "SKU_NOT_AVAILABLE"
       | "INSUFFICIENT_STOCK"
+      | "AI_SUGGESTION_INVALID"
       | "EMPTY_DATA"
       | "INVALID_FILE_NAME",
     message: string,
@@ -879,6 +881,7 @@ export async function revalidateBatchInventory(
 
 export async function updateCustomerImportRowOverride(input: {
   actorUserId: string;
+  aiSuggestionId?: string;
   customerId: string;
   batchId: string;
   rowId: string;
@@ -1014,9 +1017,62 @@ export async function updateCustomerImportRowOverride(input: {
       );
     }
 
+    let aiSuggestion:
+      | { candidates: unknown; id: string; rowRevision: number }
+      | undefined;
+    if (input.aiSuggestionId) {
+      if (row.fulfillmentMode !== "SYSTEM_SKU" || !resolvedSkuId) {
+        throw new ImportPreviewError(
+          "AI_SUGGESTION_INVALID",
+          "该智能建议已失效，请重新选择",
+        );
+      }
+      const [suggestion] = await tx
+        .select({
+          candidates: aiSkuMatchSuggestions.candidates,
+          id: aiSkuMatchSuggestions.id,
+          rowRevision: aiSkuMatchSuggestions.rowRevision,
+        })
+        .from(aiSkuMatchSuggestions)
+        .where(
+          and(
+            eq(aiSkuMatchSuggestions.id, input.aiSuggestionId),
+            eq(aiSkuMatchSuggestions.customerId, input.customerId),
+            eq(aiSkuMatchSuggestions.batchId, batch.id),
+            eq(aiSkuMatchSuggestions.rowId, row.id),
+            eq(aiSkuMatchSuggestions.decision, "PENDING"),
+            gt(aiSkuMatchSuggestions.expiresAt, now),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      const includesResolvedSku =
+        suggestion &&
+        Array.isArray(suggestion.candidates) &&
+        suggestion.candidates.some(
+          (candidate) =>
+            typeof candidate === "object" &&
+            candidate !== null &&
+            "skuId" in candidate &&
+            candidate.skuId === resolvedSkuId,
+        );
+      if (
+        !suggestion ||
+        suggestion.rowRevision !== input.expectedRevision ||
+        !includesResolvedSku
+      ) {
+        throw new ImportPreviewError(
+          "AI_SUGGESTION_INVALID",
+          "该智能建议已失效，请重新获取或手工填写",
+        );
+      }
+      aiSuggestion = suggestion;
+    }
+
     if (
       row.effectiveQuantity === input.effectiveQuantity &&
-      row.resolvedSkuId === resolvedSkuId
+      row.resolvedSkuId === resolvedSkuId &&
+      !aiSuggestion
     ) {
       await revalidateBatchInventory(tx, batch.id, now);
       return;
@@ -1031,7 +1087,9 @@ export async function updateCustomerImportRowOverride(input: {
         resolutionMethod:
           row.fulfillmentMode === "CUSTOMER_SUPPLIED"
             ? "CUSTOMER_SUPPLIED"
-            : "MANUAL_OVERRIDE",
+            : aiSuggestion
+              ? "AI_CONFIRMED"
+              : "MANUAL_OVERRIDE",
         resolvedSkuId,
         revision: row.revision + 1,
         status: "READY",
@@ -1051,7 +1109,49 @@ export async function updateCustomerImportRowOverride(input: {
       );
     }
 
-    await revalidateBatchInventory(tx, batch.id, now);
+    const inventoryOutcome = await revalidateBatchInventory(tx, batch.id, now);
+    if (
+      aiSuggestion &&
+      resolvedSkuId &&
+      inventoryOutcome.insufficientSkuIds.has(resolvedSkuId)
+    ) {
+      throw new ImportPreviewError(
+        "INSUFFICIENT_STOCK",
+        "智能建议对应 SKU 的库存已变化，请重新选择",
+      );
+    }
+    if (aiSuggestion && resolvedSkuId) {
+      const [accepted] = await tx
+        .update(aiSkuMatchSuggestions)
+        .set({
+          acceptedSkuId: resolvedSkuId,
+          decidedAt: now,
+          decision: "ACCEPTED",
+        })
+        .where(
+          and(
+            eq(aiSkuMatchSuggestions.id, aiSuggestion.id),
+            eq(aiSkuMatchSuggestions.decision, "PENDING"),
+          ),
+        )
+        .returning({ id: aiSkuMatchSuggestions.id });
+      if (!accepted) {
+        throw new ImportPreviewError(
+          "AI_SUGGESTION_INVALID",
+          "该智能建议已被处理，请刷新后重试",
+        );
+      }
+      await tx.insert(auditLogs).values({
+        action: "AI_SKU_MATCH_SUGGESTION_ACCEPTED",
+        actorId: input.actorUserId,
+        actorType: "CUSTOMER",
+        afterJson: { decision: "ACCEPTED", skuId: resolvedSkuId },
+        beforeJson: { decision: "PENDING" },
+        entityId: aiSuggestion.id,
+        entityType: "AI_SKU_MATCH_SUGGESTION",
+        reason: "客户确认智能 SKU 建议并通过现有库存与价格校验",
+      });
+    }
     await tx.insert(auditLogs).values({
       action: "TEMU_IMPORT_ROW_OVERRIDDEN",
       actorId: input.actorUserId,
