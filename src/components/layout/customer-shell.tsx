@@ -49,30 +49,15 @@ const customerNavigation: Array<{
   },
 ];
 
-const customerMobileNavigation: typeof customerNavigation = [
-  {
-    id: "customer-mobile-more",
-    items: [
-      { href: "/portal/catalog", icon: PackageSearch, label: "实时货盘" },
-      { href: "/portal/profile", icon: UserRound, label: "个人中心" },
-      { href: "/portal/about", icon: CircleHelp, label: "关于系统" },
-    ],
-  },
-];
-
 function CustomerNavigation({ mobile = false }: { mobile?: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const query = searchParams.toString();
   const activePath = query ? `${pathname}?${query}` : pathname;
-  const navigation = mobile ? customerMobileNavigation : customerNavigation;
 
   return (
-    <nav
-      aria-label="客户主导航"
-      className={mobile ? "space-y-1 px-2.5 py-3" : "space-y-2 px-3 py-3"}
-    >
-      {navigation.map((group) => (
+    <nav aria-label="客户主导航" className="space-y-2 px-3 py-3">
+      {customerNavigation.map((group) => (
         <NavigationSection
           activePath={activePath}
           audience="customer"

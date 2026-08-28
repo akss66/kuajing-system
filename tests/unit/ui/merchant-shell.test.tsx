@@ -338,7 +338,7 @@ describe("merchant shells", () => {
     );
   });
 
-  it("keeps the mobile customer drawer compact and leaves primary routes to the bottom dock", () => {
+  it("keeps the complete mobile customer navigation on a light client surface", () => {
     navigationState.pathname = "/portal/catalog";
 
     render(
@@ -350,27 +350,32 @@ describe("merchant shells", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开导航" }));
 
     const drawer = screen.getByRole("dialog", { name: "客户导航" });
-    expect(drawer).toHaveClass(
-      "data-[side=left]:!w-[min(18rem,calc(100vw-3rem))]",
-      "data-[side=left]:!max-w-none",
-    );
+    expect(drawer).toHaveClass("w-[min(20rem,calc(100vw-2rem))]");
     expect(drawer).toHaveAttribute("data-mobile-navigation-drawer", "customer");
+    const drawerHeader = drawer.querySelector('[data-mobile-navigation-header="customer"]');
+    expect(drawerHeader).not.toBeNull();
+    expect(drawerHeader).toHaveAttribute("data-mobile-navigation-header", "customer");
+    expect(drawerHeader).toHaveClass(
+      "bg-[var(--merchant-sidebar)]",
+      "[--merchant-topbar-foreground:var(--foreground)]",
+      "[--merchant-topbar-muted:var(--muted-foreground)]",
+    );
+    expect(drawerHeader).not.toHaveClass("bg-[var(--merchant-topbar)]");
 
     const navigation = within(drawer).getByRole("navigation", { name: "客户主导航" });
     expect(within(navigation).getByRole("link", { name: "实时货盘" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(within(navigation).getByRole("link", { name: "个人中心" })).toHaveAttribute(
-      "href",
-      "/portal/profile",
-    );
-    expect(within(navigation).getByRole("link", { name: "关于系统" })).toHaveAttribute(
-      "href",
-      "/portal/about",
-    );
-    for (const duplicatedPrimaryRoute of ["经营概览", "上传订单", "我的订单", "资金中心"]) {
-      expect(within(navigation).queryByRole("link", { name: duplicatedPrimaryRoute })).not.toBeInTheDocument();
+    for (const [label, href] of [
+      ["经营概览", "/portal"],
+      ["上传订单", "/portal/imports/new"],
+      ["我的订单", "/portal/orders"],
+      ["资金中心", "/portal/wallet"],
+      ["个人中心", "/portal/profile"],
+      ["关于系统", "/portal/about"],
+    ]) {
+      expect(within(navigation).getByRole("link", { name: label })).toHaveAttribute("href", href);
     }
   });
 

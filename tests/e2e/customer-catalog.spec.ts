@@ -496,13 +496,27 @@ test("customer catalog passes the exact five-viewport field-aligned matrix @desk
       await page.getByRole("button", { name: "打开导航" }).click();
       const drawer = page.getByRole("dialog", { name: "客户导航" });
       await expect(drawer).toHaveAttribute("data-mobile-navigation-drawer", "customer");
-      const drawerBox = await drawer.boundingBox();
-      expect(drawerBox, `${viewport.width}x${viewport.height} drawer bounding box`).not.toBeNull();
-      expect(drawerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(289);
+      const drawerHeader = drawer.locator('[data-mobile-navigation-header="customer"]');
+      await expect(drawerHeader).toBeVisible();
+      const [drawerBackground, headerBackground] = await Promise.all([
+        drawer.evaluate((element) => getComputedStyle(element).backgroundColor),
+        drawerHeader.evaluate((element) => getComputedStyle(element).backgroundColor),
+      ]);
+      expect(headerBackground, `${viewport.width}x${viewport.height} drawer header background`).toBe(
+        drawerBackground,
+      );
       const drawerNavigation = drawer.getByRole("navigation", { name: "客户主导航" });
-      await expect(drawerNavigation.getByRole("link")).toHaveCount(3);
-      for (const duplicatedPrimaryRoute of ["经营概览", "上传订单", "我的订单", "资金中心"]) {
-        await expect(drawerNavigation.getByRole("link", { name: duplicatedPrimaryRoute })).toHaveCount(0);
+      await expect(drawerNavigation.getByRole("link")).toHaveCount(7);
+      for (const route of [
+        "经营概览",
+        "实时货盘",
+        "上传订单",
+        "我的订单",
+        "资金中心",
+        "个人中心",
+        "关于系统",
+      ]) {
+        await expect(drawerNavigation.getByRole("link", { name: route })).toBeVisible();
       }
       await drawer.getByRole("button", { name: "关闭导航" }).click();
       await expect(drawer).toHaveCount(0);

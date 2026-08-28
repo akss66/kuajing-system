@@ -120,11 +120,7 @@ export function MerchantTopbar({
             </Button>
           </SheetTrigger>
           <SheetContent
-            className={
-              audience === "customer"
-                ? "data-[side=left]:!w-[min(18rem,calc(100vw-3rem))] data-[side=left]:!max-w-none gap-0 border-r border-border bg-[var(--merchant-sidebar)] p-0 text-foreground"
-                : "w-[min(20rem,calc(100vw-2rem))] gap-0 border-r border-border bg-[var(--merchant-sidebar)] p-0 text-foreground"
-            }
+            className="w-[min(20rem,calc(100vw-2rem))] gap-0 border-r border-border bg-[var(--merchant-sidebar)] p-0 text-foreground"
             data-mobile-navigation-drawer={audience}
             side="left"
             showCloseButton={false}
@@ -132,15 +128,23 @@ export function MerchantTopbar({
             <SheetHeader className="sr-only">
               <SheetTitle>{mobileNavigationTitle}</SheetTitle>
             </SheetHeader>
-            <div className="relative bg-[var(--merchant-topbar)]">
-              <MerchantBrand
-                audience={audience}
-                className={audience === "customer" ? "h-16 pr-14 [&_img]:h-7" : "pr-14"}
-              />
+            <div
+              className={
+                audience === "customer"
+                  ? "relative bg-[var(--merchant-sidebar)] [--merchant-topbar-foreground:var(--foreground)] [--merchant-topbar-muted:var(--muted-foreground)]"
+                  : "relative bg-[var(--merchant-topbar)]"
+              }
+              data-mobile-navigation-header={audience}
+            >
+              <MerchantBrand audience={audience} className="pr-14" />
               <SheetClose asChild>
                 <Button
                   aria-label="关闭导航"
-                  className="absolute right-2.5 top-2.5 size-11 rounded-md text-[var(--merchant-topbar-muted)] hover:bg-white/10 hover:text-white"
+                  className={
+                    audience === "customer"
+                      ? "absolute right-1.5 top-1.5 size-11 rounded-md text-[var(--merchant-topbar-muted)] hover:bg-[var(--merchant-nav-hover)] hover:text-[var(--merchant-topbar-foreground)]"
+                      : "absolute right-1.5 top-1.5 size-11 rounded-md text-[var(--merchant-topbar-muted)] hover:bg-white/10 hover:text-white"
+                  }
                   size="icon"
                   variant="ghost"
                 >
