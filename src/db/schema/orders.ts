@@ -48,6 +48,7 @@ export const importSkuResolutionMethod = pgEnum(
     "GLOBAL_ALIAS",
     "NORMALIZED_SUFFIX",
     "MANUAL_OVERRIDE",
+    "AI_CONFIRMED",
     "CUSTOMER_SUPPLIED",
     "LEGACY",
   ],

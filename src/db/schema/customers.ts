@@ -1,4 +1,5 @@
 import {
+  boolean,
   pgEnum,
   pgTable,
   timestamp,
@@ -24,6 +25,7 @@ export const customers = pgTable("customers", {
   name: varchar("name", { length: 160 }).notNull(),
   contactName: varchar("contact_name", { length: 120 }),
   contactWechat: varchar("contact_wechat", { length: 120 }),
+  aiSkuMatchEnabled: boolean("ai_sku_match_enabled").default(false).notNull(),
   status: accountStatus("status").default("ACTIVE").notNull(),
   ...timestamps,
 });

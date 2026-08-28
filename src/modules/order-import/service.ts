@@ -81,6 +81,7 @@ export type ImportPreviewRowView = {
     | "GLOBAL_ALIAS"
     | "NORMALIZED_SUFFIX"
     | "MANUAL_OVERRIDE"
+    | "AI_CONFIRMED"
     | "CUSTOMER_SUPPLIED"
     | "LEGACY";
   revision: number;
