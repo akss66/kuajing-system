@@ -87,12 +87,22 @@ jobs:
         run: npm run test:integration -- --maxWorkers 1
 
   e2e:
-    name: Browser release gate
+    name: Browser release gate (${{ matrix.suite }})
     needs:
       - integration
       - quality
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core
+            command: npm run test:e2e -- --workers 1 --project=desktop-chromium --project=mobile-chromium
+            step_timeout: 35
+          - suite: jifeng
+            command: npm run test:e2e -- tests/e2e/jifeng-connection.spec.ts --workers 1
+            step_timeout: 10
     services:
       postgres:
         image: postgres:18-alpine
@@ -117,15 +127,15 @@ jobs:
       - name: Install pinned Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Run full desktop and mobile E2E serially
-        timeout-minutes: 40
-        run: npm run test:e2e -- --workers 1
+        timeout-minutes: ${{ matrix.step_timeout }}
+        run: ${{ matrix.command }}
         env:
           E2E_PORT: 3101
       - name: Upload browser evidence on failure
         if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-failure-${{ github.sha }}
+          name: playwright-failure-${{ matrix.suite }}-${{ github.sha }}
           path: |
             playwright-report/
             test-results/
