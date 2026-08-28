@@ -21,6 +21,10 @@ const previewMocks = vi.hoisted(() => ({
   },
   getCustomerImportPreview: vi.fn(),
 }));
+const aiMocks = vi.hoisted(() => ({
+  getAiSkuMatchAvailability: vi.fn(),
+  listActiveAiSkuMatchSuggestions: vi.fn(),
+}));
 
 vi.mock("next/link", () => ({
   default: ({
@@ -51,6 +55,11 @@ vi.mock("@/modules/order-import/service", () => {
     getCustomerImportPreview: previewMocks.getCustomerImportPreview,
   };
 });
+vi.mock("@/modules/ai-sku-matching/service", () => aiMocks);
+vi.mock("@/modules/ai-sku-matching/actions", () => ({
+  generateAiSkuMatchSuggestionsAction: vi.fn(),
+  rejectAiSkuMatchSuggestionAction: vi.fn(),
+}));
 vi.mock("@/components/orders/order-submit-button", () => ({
   OrderSubmitButton: ({ disabled }: { disabled: boolean }) => (
     <button disabled={disabled} type="button">
@@ -71,6 +80,68 @@ describe("ImportPreviewPage", () => {
   beforeEach(() => {
     authMocks.requireCustomer.mockReset();
     previewMocks.getCustomerImportPreview.mockReset();
+    aiMocks.getAiSkuMatchAvailability.mockReset();
+    aiMocks.listActiveAiSkuMatchSuggestions.mockReset();
+    aiMocks.getAiSkuMatchAvailability.mockResolvedValue({ enabled: false });
+    aiMocks.listActiveAiSkuMatchSuggestions.mockResolvedValue([]);
+  });
+
+  it("loads customer-scoped suggestions only when the account entitlement is enabled", async () => {
+    authMocks.requireCustomer.mockResolvedValue({
+      customerId: "customer-1",
+      userId: "user-1",
+    });
+    aiMocks.getAiSkuMatchAvailability.mockResolvedValue({ enabled: true });
+    aiMocks.listActiveAiSkuMatchSuggestions.mockResolvedValue([
+      {
+        candidates: [],
+        id: "suggestion-1",
+        rowId: "row-1",
+        rowRevision: 1,
+      },
+    ]);
+    previewMocks.getCustomerImportPreview.mockResolvedValue({
+      batchId: "batch-1",
+      expiresAt: new Date("2026-08-13T10:00:00.000Z"),
+      fileName: "orders.xlsx",
+      rows: [
+        {
+          effectiveQuantity: 1,
+          errorCode: "UNKNOWN_SKU",
+          errorMessage: "SKU 未匹配",
+          externalOrderNo: "PO-1",
+          externalSku: "UNKNOWN-1",
+          externalSubOrderNo: "SUB-1",
+          fulfillmentMode: "SYSTEM_SKU",
+          id: "row-1",
+          quantity: 1,
+          quantityMultiplier: 1,
+          resolutionMethod: null,
+          resolvedSku: null,
+          revision: 1,
+          rowNumber: 2,
+          siblingCandidates: [],
+          status: "UNKNOWN_SKU",
+        },
+      ],
+      storeId: "store-1",
+      storeName: "TEMU 店铺",
+      summary: { duplicate: 0, invalid: 0, ready: 0, total: 1, unknownSku: 1 },
+    });
+
+    render(
+      await ImportPreviewPage({
+        params: Promise.resolve({ batchId: "batch-1" }),
+      }),
+    );
+
+    expect(aiMocks.listActiveAiSkuMatchSuggestions).toHaveBeenCalledWith(
+      "customer-1",
+      "batch-1",
+    );
+    expect(
+      screen.getByRole("button", { name: "智能推荐待匹配 SKU" }),
+    ).toBeVisible();
   });
 
   afterEach(() => {

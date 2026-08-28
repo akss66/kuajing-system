@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -79,5 +79,46 @@ describe("ImportReviewTable", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "仅看需处理（1）" }));
     expect(screen.queryByRole("listitem", { name: "Excel 第 2 行" })).not.toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "Excel 第 3 行" })).toBeVisible();
+  });
+
+  it("shows the authorized batch AI control with the fixed privacy disclosure", async () => {
+    const generateAction = vi.fn(
+      async (state: unknown, formData: FormData) => {
+        void state;
+        void formData;
+        return {
+          message: "已生成 2 个智能建议，请逐行确认后保存。",
+          status: "success" as const,
+        };
+      },
+    );
+    render(
+      <ImportReviewTable
+        action={vi.fn()}
+        aiSkuMatching={{ generateAction, rejectAction: vi.fn() }}
+        batchId="43f18cb3-9dc2-4651-94d3-e1ed67d89b15"
+        rows={[
+          row({
+            id: "row-unknown",
+            resolvedSku: null,
+            status: "UNKNOWN_SKU",
+          }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "仅发送商品名称、规格和 SKU 信息至 DeepSeek，不发送收件人、地址、联系方式或订单标识。",
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "智能推荐待匹配 SKU" }),
+    );
+    await waitFor(() => expect(generateAction).toHaveBeenCalledTimes(1));
+    expect(Object.fromEntries(generateAction.mock.calls[0]![1])).toEqual({
+      batchId: "43f18cb3-9dc2-4651-94d3-e1ed67d89b15",
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("已生成 2 个智能建议");
   });
 });

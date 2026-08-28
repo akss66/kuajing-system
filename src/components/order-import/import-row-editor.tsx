@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import {
   importRowExplanation,
   importRowResult,
+  type AiSkuMatchAction,
   type EditableImportRow,
   type ImportRowAction,
 } from "./import-row-model";
@@ -56,10 +57,12 @@ function resultMeta(row: EditableImportRow) {
 
 export function ImportRowEditor({
   action,
+  aiRejectAction,
   batchId,
   row,
 }: {
   action: ImportRowAction;
+  aiRejectAction?: AiSkuMatchAction;
   batchId: string;
   row: EditableImportRow;
 }) {
@@ -157,7 +160,12 @@ export function ImportRowEditor({
           id={editorId}
           role="region"
         >
-          <ImportRowOverrideForm action={action} batchId={batchId} row={row} />
+          <ImportRowOverrideForm
+            action={action}
+            aiRejectAction={aiRejectAction}
+            batchId={batchId}
+            row={row}
+          />
         </div>
       ) : null}
     </article>

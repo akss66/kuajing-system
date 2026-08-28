@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { ActionableEmptyState } from "@/components/management/actionable-empty-state";
 
 import { ImportRowEditor } from "./import-row-editor";
+import { AiSkuMatchBatchControl } from "./ai-sku-match-batch-control";
 import {
+  type AiSkuMatchAction,
   importRowResult,
   type EditableImportRow,
   type ImportRowAction,
@@ -24,15 +26,24 @@ function uniquePackageCount(rows: readonly EditableImportRow[]) {
 
 export function ImportReviewTable({
   action,
+  aiSkuMatching,
   batchId,
   rows,
 }: {
   action: ImportRowAction;
+  aiSkuMatching?: {
+    generateAction: AiSkuMatchAction;
+    rejectAction: AiSkuMatchAction;
+  };
   batchId: string;
   rows: EditableImportRow[];
 }) {
   const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
   const attentionCount = rows.filter((row) => importRowResult(row) === "failed").length;
+  const aiEligibleCount = rows.filter(
+    (row) =>
+      row.fulfillmentMode === "SYSTEM_SKU" && row.status === "UNKNOWN_SKU",
+  ).length;
   const readyRows = rows.filter((row) => row.status === "READY");
   const visibleRows = onlyNeedsAttention
     ? rows.filter((row) => importRowResult(row) === "failed")
@@ -90,6 +101,14 @@ export function ImportReviewTable({
         </label>
       </div>
 
+      {aiSkuMatching && aiEligibleCount > 0 ? (
+        <AiSkuMatchBatchControl
+          action={aiSkuMatching.generateAction}
+          batchId={batchId}
+          pendingRowCount={aiEligibleCount}
+        />
+      ) : null}
+
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {metrics.map((metric) => (
           <div className="rounded-xl bg-white px-4 py-3 shadow-[0_2px_12px_rgb(0_0_0/0.02)]" key={metric.label}>
@@ -102,7 +121,13 @@ export function ImportReviewTable({
       {visibleRows.length ? (
         <div aria-label="订单逐行核对结果" className="space-y-3" role="list">
           {visibleRows.map((row) => (
-            <ImportRowEditor action={action} batchId={batchId} key={`${row.id}:${row.revision}`} row={row} />
+            <ImportRowEditor
+              action={action}
+              aiRejectAction={aiSkuMatching?.rejectAction}
+              batchId={batchId}
+              key={`${row.id}:${row.revision}`}
+              row={row}
+            />
           ))}
         </div>
       ) : (

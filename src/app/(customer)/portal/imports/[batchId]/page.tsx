@@ -7,6 +7,14 @@ import { PageHeading } from "@/components/layout/page-heading";
 import { ImportReviewTable } from "@/components/order-import/import-review-table";
 import { OrderSubmitButton } from "@/components/orders/order-submit-button";
 import { calculateLineAmountFen } from "@/modules/catalog/unit-price";
+import {
+  generateAiSkuMatchSuggestionsAction,
+  rejectAiSkuMatchSuggestionAction,
+} from "@/modules/ai-sku-matching/actions";
+import {
+  getAiSkuMatchAvailability,
+  listActiveAiSkuMatchSuggestions,
+} from "@/modules/ai-sku-matching/service";
 import { requireCustomer } from "@/modules/identity/guards";
 import { updateCustomerImportRowAction } from "@/modules/order-import/actions";
 import { submitImportBatchAction } from "@/modules/orders/actions";
@@ -46,6 +54,14 @@ export default async function ImportPreviewPage({
     }
     throw error;
   }
+
+  const aiAvailability = await getAiSkuMatchAvailability(principal.customerId);
+  const aiSuggestions = aiAvailability.enabled
+    ? await listActiveAiSkuMatchSuggestions(principal.customerId, batchId)
+    : [];
+  const aiSuggestionByRow = new Map(
+    aiSuggestions.map((suggestion) => [suggestion.rowId, suggestion]),
+  );
 
   const blocking = preview.summary.unknownSku + preview.summary.invalid;
   const readyRows = preview.rows.filter((row) => row.status === "READY");
@@ -122,8 +138,19 @@ export default async function ImportPreviewPage({
 
       <ImportReviewTable
         action={updateCustomerImportRowAction}
+        aiSkuMatching={
+          aiAvailability.enabled
+            ? {
+                generateAction: generateAiSkuMatchSuggestionsAction,
+                rejectAction: rejectAiSkuMatchSuggestionAction,
+              }
+            : undefined
+        }
         batchId={preview.batchId}
-        rows={preview.rows}
+        rows={preview.rows.map((row) => ({
+          ...row,
+          aiSuggestion: aiSuggestionByRow.get(row.id) ?? null,
+        }))}
       />
 
       <section

@@ -1,4 +1,36 @@
+export type AiSkuMatchActionState = {
+  status: "idle" | "error" | "success";
+  message?: string;
+};
+
+export type AiSkuMatchAction = (
+  previousState: AiSkuMatchActionState,
+  formData: FormData,
+) => Promise<AiSkuMatchActionState>;
+
+export type AiSkuMatchSuggestion = {
+  id: string;
+  rowId: string;
+  rowRevision: number;
+  candidates: Array<{
+    available: boolean;
+    availableQuantity: number;
+    color: string | null;
+    combination: string | null;
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    name: string;
+    productName: string;
+    rank: number;
+    reason: string;
+    skuCode: string;
+    skuId: string;
+    specification: string | null;
+    unitPriceMilliYuan: number | null;
+  }>;
+};
+
 export type EditableImportRow = {
+  aiSuggestion?: AiSkuMatchSuggestion | null;
   id: string;
   rowNumber: number;
   status: "READY" | "DUPLICATE" | "UNKNOWN_SKU" | "INVALID";
@@ -55,6 +87,9 @@ export function importRowExplanation(row: EditableImportRow) {
   const sku = row.resolvedSku?.skuCode ?? "系统 SKU";
   if (row.resolutionMethod === "MANUAL_OVERRIDE") {
     return `已手动替换为 ${sku}，实际发货 ${row.effectiveQuantity ?? 0} 件。`;
+  }
+  if (row.resolutionMethod === "AI_CONFIRMED") {
+    return `已确认智能建议 ${sku}；保存时已重新校验价格、库存和销售状态。`;
   }
   if (row.quantityMultiplier > 1) {
     return `${row.quantityMultiplier}PCS 已换算为 ${sku}，实际发货 ${row.effectiveQuantity ?? 0} 件。`;

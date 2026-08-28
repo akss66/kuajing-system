@@ -16,26 +16,31 @@ import {
 import { cn } from "@/lib/utils";
 
 import type {
+  AiSkuMatchAction,
   EditableImportRow,
   ImportRowAction,
   ImportRowActionState,
 } from "./import-row-model";
+import { AiSkuSuggestionPanel } from "./ai-sku-suggestion-panel";
 
 const INITIAL_STATE: ImportRowActionState = { status: "idle" };
 const NO_SIBLING_SELECTED = "__none__";
 
 export function ImportRowOverrideForm({
   action,
+  aiRejectAction,
   batchId,
   row,
 }: {
   action: ImportRowAction;
+  aiRejectAction?: AiSkuMatchAction;
   batchId: string;
   row: EditableImportRow;
 }) {
   const router = useRouter();
   const inputId = useId();
   const [skuCode, setSkuCode] = useState(row.resolvedSku?.skuCode ?? "");
+  const [selectedAiSkuId, setSelectedAiSkuId] = useState<string | null>(null);
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
   const systemSkuEditable = row.fulfillmentMode === "SYSTEM_SKU";
 
@@ -44,10 +49,26 @@ export function ImportRowOverrideForm({
   }, [router, state.status]);
 
   return (
-    <form action={formAction} className="rounded-[var(--radius-control)] border border-border bg-surface/45 p-3">
+    <div className="space-y-3">
+      {row.aiSuggestion && aiRejectAction ? (
+        <AiSkuSuggestionPanel
+          action={aiRejectAction}
+          batchId={batchId}
+          onSelect={(candidate) => {
+            setSelectedAiSkuId(candidate.skuId);
+            setSkuCode(candidate.skuCode);
+          }}
+          selectedSkuId={selectedAiSkuId}
+          suggestion={row.aiSuggestion}
+        />
+      ) : null}
+      <form action={formAction} className="rounded-[var(--radius-control)] border border-border bg-surface/45 p-3">
       <input name="batchId" type="hidden" value={batchId} />
       <input name="rowId" type="hidden" value={row.id} />
       <input name="expectedRevision" type="hidden" value={row.revision} />
+      {selectedAiSkuId && row.aiSuggestion ? (
+        <input name="aiSuggestionId" type="hidden" value={row.aiSuggestion.id} />
+      ) : null}
 
       <div
         className={cn(
@@ -71,7 +92,10 @@ export function ImportRowOverrideForm({
                   )
                 }
                 onValueChange={(value) => {
-                  if (value !== NO_SIBLING_SELECTED) setSkuCode(value);
+                  if (value !== NO_SIBLING_SELECTED) {
+                    setSelectedAiSkuId(null);
+                    setSkuCode(value);
+                  }
                 }}
                 value={row.siblingCandidates.some((candidate) => candidate.skuCode === skuCode) ? skuCode : NO_SIBLING_SELECTED}
               >
@@ -106,7 +130,10 @@ export function ImportRowOverrideForm({
                 id={`${inputId}-manual`}
                 maxLength={80}
                 name="skuCode"
-                onChange={(event) => setSkuCode(event.target.value)}
+                onChange={(event) => {
+                  setSelectedAiSkuId(null);
+                  setSkuCode(event.target.value);
+                }}
                 placeholder="精确输入系统 SKU"
                 required
                 value={skuCode}
@@ -133,7 +160,7 @@ export function ImportRowOverrideForm({
           />
         </div>
 
-        <Button className="h-10 w-full lg:w-auto" disabled={pending} type="submit">
+        <Button className="min-h-11 w-full lg:w-auto" disabled={pending} type="submit">
           {pending ? <LoaderCircle className="animate-spin" /> : <Save />}
           {pending ? "正在校验" : "保存并校验"}
         </Button>
@@ -147,6 +174,7 @@ export function ImportRowOverrideForm({
           {state.message}
         </p>
       ) : null}
-    </form>
+      </form>
+    </div>
   );
 }

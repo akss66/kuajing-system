@@ -44,8 +44,16 @@ function systemRow(overrides: Partial<EditableImportRow> = {}): EditableImportRo
 function renderEditor(
   row: EditableImportRow,
   action: React.ComponentProps<typeof ImportRowEditor>["action"] = vi.fn(),
+  aiRejectAction?: React.ComponentProps<typeof ImportRowEditor>["aiRejectAction"],
 ) {
-  return render(<ImportRowEditor action={action} batchId="batch-1" row={row} />);
+  return render(
+    <ImportRowEditor
+      action={action}
+      aiRejectAction={aiRejectAction}
+      batchId="batch-1"
+      row={row}
+    />,
+  );
 }
 
 describe("ImportRowEditor", () => {
@@ -227,5 +235,103 @@ describe("ImportRowEditor", () => {
     await act(async () => {
       finish({ message: "已保存并重新校验。", status: "success" });
     });
+  });
+
+  it("lets the customer select or reject a bounded AI candidate without auto-saving", async () => {
+    const saveAction = vi.fn(async () => ({ status: "idle" as const }));
+    const rejectAction = vi.fn(
+      async (state: unknown, formData: FormData) => {
+        void state;
+        void formData;
+        return {
+          message: "已记录反馈，您可以继续手工填写 SKU。",
+          status: "success" as const,
+        };
+      },
+    );
+    renderEditor(
+      systemRow({
+        aiSuggestion: {
+          candidates: [
+            {
+              available: true,
+              availableQuantity: 8,
+              color: "红色",
+              combination: null,
+              confidence: "HIGH",
+              name: "红色款",
+              productName: "牵引绳",
+              rank: 1,
+              reason: "商品、颜色和规格一致",
+              skuCode: "TZX-RED",
+              skuId: "sku-red",
+              specification: "150×80",
+              unitPriceMilliYuan: 8_000,
+            },
+            {
+              available: false,
+              availableQuantity: 0,
+              color: "黑色",
+              combination: null,
+              confidence: "LOW",
+              name: "黑色款",
+              productName: "牵引绳",
+              rank: 2,
+              reason: "名称相近",
+              skuCode: "TZX-BLACK-WITH-A-VERY-LONG-SKU-CODE",
+              skuId: "sku-black",
+              specification: "150×80",
+              unitPriceMilliYuan: 8_000,
+            },
+          ],
+          id: "ab611461-ec62-46ea-81a1-f60687bbfde7",
+          rowId: "row-1",
+          rowRevision: 3,
+        },
+        resolvedSku: null,
+        status: "UNKNOWN_SKU",
+      }),
+      saveAction,
+      rejectAction,
+    );
+
+    expect(screen.getByText("DeepSeek 智能建议")).toBeVisible();
+    expect(screen.getByRole("button", { name: /使用 TZX-RED/ })).toBeEnabled();
+    expect(
+      screen.getByRole("button", {
+        name: /使用 TZX-BLACK-WITH-A-VERY-LONG-SKU-CODE/,
+      }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /使用 TZX-RED/ }));
+    expect(screen.getByLabelText("手动填写最终 SKU")).toHaveValue("TZX-RED");
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="aiSuggestionId"]'),
+    ).toHaveValue("ab611461-ec62-46ea-81a1-f60687bbfde7");
+    expect(saveAction).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("手动填写最终 SKU"), {
+      target: { value: "TZX-MANUAL" },
+    });
+    expect(
+      document.querySelector('input[name="aiSuggestionId"]'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "这些都不合适" }));
+    await waitFor(() => expect(rejectAction).toHaveBeenCalledTimes(1));
+    expect(Object.fromEntries(rejectAction.mock.calls[0]![1])).toEqual({
+      batchId: "batch-1",
+      suggestionId: "ab611461-ec62-46ea-81a1-f60687bbfde7",
+    });
+  });
+
+  it("explains when a row was confirmed from an AI suggestion", () => {
+    renderEditor(systemRow({ resolutionMethod: "AI_CONFIRMED" }));
+
+    expect(
+      screen.getByText(
+        "已确认智能建议 TZX-024；保存时已重新校验价格、库存和销售状态。",
+      ),
+    ).toBeVisible();
   });
 });
