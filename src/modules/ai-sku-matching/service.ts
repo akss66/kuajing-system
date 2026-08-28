@@ -11,6 +11,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  notExists,
   sql,
 } from "drizzle-orm";
 
@@ -293,6 +294,8 @@ export async function listActiveAiSkuMatchSuggestions(
           eq(orderImportBatches.customerId, customerId),
           eq(orderImportBatches.status, "PREVIEW"),
           eq(orderImportRows.revision, aiSkuMatchSuggestions.rowRevision),
+          eq(orderImportRows.status, "UNKNOWN_SKU"),
+          eq(orderImportRows.fulfillmentMode, "SYSTEM_SKU"),
           gt(orderImportBatches.expiresAt, now),
           gt(aiSkuMatchSuggestions.expiresAt, now),
         ),
@@ -402,6 +405,20 @@ async function prepareGeneration(
         ),
       );
 
+    const activeSuggestionForRow = tx
+      .select({ id: aiSkuMatchSuggestions.id })
+      .from(aiSkuMatchSuggestions)
+      .where(
+        and(
+          eq(aiSkuMatchSuggestions.customerId, input.customerId),
+          eq(aiSkuMatchSuggestions.batchId, batch.id),
+          eq(aiSkuMatchSuggestions.rowId, orderImportRows.id),
+          eq(aiSkuMatchSuggestions.rowRevision, orderImportRows.revision),
+          eq(aiSkuMatchSuggestions.decision, "PENDING"),
+          eq(aiSkuMatchSuggestions.promptVersion, PROMPT_VERSION),
+          gt(aiSkuMatchSuggestions.expiresAt, now),
+        ),
+      );
     const unknownRows = await tx
       .select({
         effectiveQuantity: orderImportRows.effectiveQuantity,
@@ -418,43 +435,29 @@ async function prepareGeneration(
           eq(orderImportRows.batchId, batch.id),
           eq(orderImportRows.fulfillmentMode, "SYSTEM_SKU"),
           eq(orderImportRows.status, "UNKNOWN_SKU"),
+          notExists(activeSuggestionForRow),
         ),
       )
       .orderBy(asc(orderImportRows.rowNumber))
       .limit(MAX_ROWS_PER_RUN);
     if (unknownRows.length === 0) {
+      const [cachedUnknownRow] = await tx
+        .select({ id: orderImportRows.id })
+        .from(orderImportRows)
+        .where(
+          and(
+            eq(orderImportRows.batchId, batch.id),
+            eq(orderImportRows.fulfillmentMode, "SYSTEM_SKU"),
+            eq(orderImportRows.status, "UNKNOWN_SKU"),
+          ),
+        )
+        .limit(1);
+      if (cachedUnknownRow) return { kind: "CACHED" as const };
       throw new AiSkuMatchError(
         "NO_ELIGIBLE_ROWS",
         "当前没有可智能推荐的待匹配行",
       );
     }
-
-    const existing = await tx
-      .select({
-        rowId: aiSkuMatchSuggestions.rowId,
-        rowRevision: aiSkuMatchSuggestions.rowRevision,
-      })
-      .from(aiSkuMatchSuggestions)
-      .where(
-        and(
-          eq(aiSkuMatchSuggestions.customerId, input.customerId),
-          eq(aiSkuMatchSuggestions.batchId, input.batchId),
-          eq(aiSkuMatchSuggestions.decision, "PENDING"),
-          eq(aiSkuMatchSuggestions.promptVersion, PROMPT_VERSION),
-          gt(aiSkuMatchSuggestions.expiresAt, now),
-          inArray(
-            aiSkuMatchSuggestions.rowId,
-            unknownRows.map((row) => row.rowId),
-          ),
-        ),
-      );
-    const cached = new Set(
-      existing.map((row) => `${row.rowId}:${row.rowRevision}`),
-    );
-    const rowsToSend = unknownRows.filter(
-      (row) => !cached.has(`${row.rowId}:${row.revision}`),
-    );
-    if (rowsToSend.length === 0) return { kind: "CACHED" as const };
 
     const windowStart = new Date(now.getTime() - RATE_LIMIT_WINDOW_MS);
     const [recent] = await tx
@@ -476,7 +479,7 @@ async function prepareGeneration(
     const catalog = await loadEligibleCatalog(tx, batch.id);
     const providerCandidates = new Map<string, AiSkuMatchCandidateInput>();
     const preparedRows: PreparedRow[] = [];
-    for (const row of rowsToSend) {
+    for (const row of unknownRows) {
       const effectiveQuantity = row.effectiveQuantity ?? row.quantity;
       if (!effectiveQuantity || effectiveQuantity <= 0) continue;
       const shortlisted = shortlistSkuCandidates(

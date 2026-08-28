@@ -1021,7 +1021,11 @@ export async function updateCustomerImportRowOverride(input: {
       | { candidates: unknown; id: string; rowRevision: number }
       | undefined;
     if (input.aiSuggestionId) {
-      if (row.fulfillmentMode !== "SYSTEM_SKU" || !resolvedSkuId) {
+      if (
+        row.fulfillmentMode !== "SYSTEM_SKU" ||
+        row.status !== "UNKNOWN_SKU" ||
+        !resolvedSkuId
+      ) {
         throw new ImportPreviewError(
           "AI_SUGGESTION_INVALID",
           "该智能建议已失效，请重新选择",

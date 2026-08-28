@@ -220,6 +220,52 @@ describe("AI SKU matching service", () => {
     expect(provider.suggest).not.toHaveBeenCalled();
   });
 
+  it("advances past twenty rows that already have current suggestions", async () => {
+    const fixture = await createFixture();
+    const extraRows = await db
+      .insert(orderImportRows)
+      .values(
+        Array.from({ length: 20 }, (_, index) => ({
+          batchId: fixture.batch.id,
+          effectiveQuantity: 1,
+          externalSku: `UNKNOWN-RED-${index + 2}`,
+          productAttributes: "颜色：红色；尺寸：150*80",
+          productName: "反光宠物牵引绳",
+          quantity: 1,
+          rowNumber: index + 3,
+          status: "UNKNOWN_SKU" as const,
+        })),
+      )
+      .returning({ id: orderImportRows.id });
+
+    await generateAiSkuMatchSuggestions(
+      {
+        actorUserId: "customer-user-a",
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+      },
+      { provider: acceptingProvider(fixture.eligibleSku.id) },
+    );
+    const inspectSecondRun = vi.fn();
+
+    const second = await generateAiSkuMatchSuggestions(
+      {
+        actorUserId: "customer-user-a",
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+      },
+      {
+        provider: acceptingProvider(fixture.eligibleSku.id, inspectSecondRun),
+      },
+    );
+
+    expect(second).toMatchObject({ status: "SUCCEEDED", suggestionCount: 1 });
+    expect(inspectSecondRun).toHaveBeenCalledOnce();
+    expect(inspectSecondRun.mock.calls[0]?.[0].rows).toEqual([
+      expect.objectContaining({ rowId: extraRows.at(-1)?.id }),
+    ]);
+  });
+
   it("serializes the per-customer rate limit to three runs per ten minutes", async () => {
     const fixture = await createFixture();
     await db.insert(aiSkuMatchRuns).values(
@@ -349,6 +395,79 @@ describe("AI SKU matching service", () => {
         .from(skuAliases)
         .where(eq(skuAliases.externalSku, "UNKNOWN-RED")),
     ).resolves.toEqual([]);
+  });
+
+  it("hides an AI suggestion after deterministic matching resolves the row", async () => {
+    const fixture = await createFixture();
+    await generateAiSkuMatchSuggestions(
+      {
+        actorUserId: "customer-user-a",
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+      },
+      { provider: acceptingProvider(fixture.eligibleSku.id) },
+    );
+    await db
+      .update(orderImportRows)
+      .set({
+        resolutionMethod: "EXACT",
+        resolvedSkuId: fixture.eligibleSku.id,
+        status: "READY",
+      })
+      .where(eq(orderImportRows.id, fixture.row.id));
+
+    await expect(
+      listActiveAiSkuMatchSuggestions(fixture.customer.id, fixture.batch.id),
+    ).resolves.toEqual([]);
+  });
+
+  it("rejects an AI suggestion after deterministic matching resolves the row", async () => {
+    const fixture = await createFixture();
+    await generateAiSkuMatchSuggestions(
+      {
+        actorUserId: "customer-user-a",
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+      },
+      { provider: acceptingProvider(fixture.eligibleSku.id) },
+    );
+    const [suggestion] = await listActiveAiSkuMatchSuggestions(
+      fixture.customer.id,
+      fixture.batch.id,
+    );
+    await db
+      .update(orderImportRows)
+      .set({
+        resolutionMethod: "EXACT",
+        resolvedSkuId: fixture.eligibleSku.id,
+        status: "READY",
+      })
+      .where(eq(orderImportRows.id, fixture.row.id));
+
+    await expect(
+      updateCustomerImportRowOverride({
+        actorUserId: "customer-user-a",
+        aiSuggestionId: suggestion.id,
+        batchId: fixture.batch.id,
+        customerId: fixture.customer.id,
+        effectiveQuantity: 2,
+        expectedRevision: 0,
+        rowId: fixture.row.id,
+        skuCode: fixture.eligibleSku.skuCode,
+      }),
+    ).rejects.toMatchObject({ code: "AI_SUGGESTION_INVALID" });
+    await expect(
+      db
+        .select({
+          resolutionMethod: orderImportRows.resolutionMethod,
+          revision: orderImportRows.revision,
+          status: orderImportRows.status,
+        })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.id, fixture.row.id)),
+    ).resolves.toEqual([
+      { resolutionMethod: "EXACT", revision: 0, status: "READY" },
+    ]);
   });
 
   it("keeps the row unchanged when suggested inventory changes before confirmation", async () => {
