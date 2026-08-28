@@ -68,6 +68,7 @@ describe("updateCustomerImportRowAction", () => {
 
     expect(serviceMocks.updateCustomerImportRowOverride).toHaveBeenCalledWith({
       actorUserId: "user-from-session",
+      aiSuggestionId: undefined,
       batchId: "43f18cb3-9dc2-4651-94d3-e1ed67d89b15",
       customerId: "customer-from-session",
       effectiveQuantity: 4,
@@ -78,6 +79,21 @@ describe("updateCustomerImportRowAction", () => {
     expect(result).toEqual({ message: "已保存并重新校验。", status: "success" });
     expect(cacheMocks.revalidatePath).toHaveBeenCalledWith(
       "/portal/imports/43f18cb3-9dc2-4651-94d3-e1ed67d89b15",
+    );
+  });
+
+  it("passes a validated AI suggestion without trusting client identity fields", async () => {
+    const data = validForm();
+    data.set("aiSuggestionId", "ab611461-ec62-46ea-81a1-f60687bbfde7");
+    data.set("customerId", "attacker-customer");
+
+    await updateCustomerImportRowAction({ status: "idle" }, data);
+
+    expect(serviceMocks.updateCustomerImportRowOverride).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aiSuggestionId: "ab611461-ec62-46ea-81a1-f60687bbfde7",
+        customerId: "customer-from-session",
+      }),
     );
   });
 
@@ -106,6 +122,7 @@ describe("updateCustomerImportRowAction", () => {
     ["fractional quantity", { effectiveQuantity: "1.5" }],
     ["oversized quantity", { effectiveQuantity: "1000001" }],
     ["oversized SKU", { skuCode: "X".repeat(81) }],
+    ["invalid AI suggestion", { aiSuggestionId: "not-a-uuid" }],
   ])("rejects %s before calling the service", async (_name, override) => {
     const data = validForm();
     for (const [key, value] of Object.entries(override)) data.set(key, value);
@@ -121,6 +138,7 @@ describe("updateCustomerImportRowAction", () => {
     ["IMPORT_ROW_CONFLICT", "该行已被其他操作更新，请刷新后重试。"],
     ["SKU_NOT_AVAILABLE", "SKU 不存在、已下架或不可售，请重新选择。"],
     ["INSUFFICIENT_STOCK", "对应 SKU 库存不足，请更换 SKU 或减少数量。"],
+    ["AI_SUGGESTION_INVALID", "该智能建议已失效，请重新获取或手工填写。"],
   ])("returns a safe row-level message for %s", async (code, message) => {
     serviceMocks.updateCustomerImportRowOverride.mockRejectedValueOnce({ code });
 

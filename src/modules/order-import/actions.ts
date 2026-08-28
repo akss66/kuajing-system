@@ -21,6 +21,13 @@ export type ImportRowOverrideActionState = {
 };
 
 const rowOverrideSchema = z.object({
+  aiSuggestionId: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim().length > 0
+        ? value
+        : undefined,
+    z.string().uuid().optional(),
+  ),
   batchId: z.string().uuid(),
   effectiveQuantity: z.coerce.number().int().min(1).max(1_000_000),
   expectedRevision: z.coerce.number().int().min(0),
@@ -48,6 +55,9 @@ function rowOverrideErrorMessage(error: unknown) {
   if (code === "INSUFFICIENT_STOCK") {
     return "对应 SKU 库存不足，请更换 SKU 或减少数量。";
   }
+  if (code === "AI_SUGGESTION_INVALID") {
+    return "该智能建议已失效，请重新获取或手工填写。";
+  }
   if (error instanceof ImportPreviewError) return error.message;
   return "保存失败，请稍后重试。";
 }
@@ -58,6 +68,7 @@ export async function updateCustomerImportRowAction(
 ): Promise<ImportRowOverrideActionState> {
   const principal = await requireCustomer();
   const parsed = rowOverrideSchema.safeParse({
+    aiSuggestionId: formData.get("aiSuggestionId"),
     batchId: formData.get("batchId"),
     effectiveQuantity: formData.get("effectiveQuantity"),
     expectedRevision: formData.get("expectedRevision"),
@@ -71,6 +82,7 @@ export async function updateCustomerImportRowAction(
   try {
     await updateCustomerImportRowOverride({
       actorUserId: principal.userId,
+      aiSuggestionId: parsed.data.aiSuggestionId,
       batchId: parsed.data.batchId,
       customerId: principal.customerId,
       effectiveQuantity: parsed.data.effectiveQuantity,
