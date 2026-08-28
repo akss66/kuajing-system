@@ -327,6 +327,30 @@ function parseActionErrorBody(responseText: string) {
   }
 }
 
+async function runDiagnosticStep<T>(
+  label: string,
+  operation: () => Promise<T>,
+  timeoutMs = 15_000,
+) {
+  process.stdout.write(`[jifeng-e2e] ${label}: start\n`);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${label} did not complete within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+    process.stdout.write(`[jifeng-e2e] ${label}: done\n`);
+    return result;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
@@ -336,7 +360,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await stopMockJifengServer();
+  await runDiagnosticStep("mock server shutdown", stopMockJifengServer, 5_000);
 });
 
 test.beforeEach(async () => {
@@ -633,16 +657,24 @@ test("resource confirmation is labeled, accessible, and usable without 390px ove
   await screenshotForReview(page, testInfo, "jifeng-resource-confirmation");
 
   actionResponses.push(
-    await submitAndReadAction(page, () =>
-      page.getByRole("button", { name: "确认履约资源" }).click(),
+    await runDiagnosticStep("resource confirmation action response", () =>
+      submitAndReadAction(page, () =>
+        page.getByRole("button", { name: "确认履约资源" }).click(),
+      ),
     ),
   );
-  await expect(page.getByText("已就绪，自动履约未启用")).toBeVisible();
-  await expect.poll(async () => (await db.select().from(jifengConnections))[0]).toMatchObject({
-    logisticsId: 701,
-    status: "READY_DISABLED",
-    warehouseCode: "CA-TOR-01",
-  });
-  await assertMockBoundary();
-  await expectNoSensitiveBrowserState(page, actionResponses, consoleMessages);
+  await runDiagnosticStep("resource confirmation ready status", () =>
+    expect(page.getByText("已就绪，自动履约未启用")).toBeVisible(),
+  );
+  await runDiagnosticStep("resource confirmation database state", () =>
+    expect.poll(async () => (await db.select().from(jifengConnections))[0]).toMatchObject({
+      logisticsId: 701,
+      status: "READY_DISABLED",
+      warehouseCode: "CA-TOR-01",
+    }),
+  );
+  await runDiagnosticStep("resource confirmation mock boundary", assertMockBoundary);
+  await runDiagnosticStep("resource confirmation sensitive state", () =>
+    expectNoSensitiveBrowserState(page, actionResponses, consoleMessages),
+  );
 });

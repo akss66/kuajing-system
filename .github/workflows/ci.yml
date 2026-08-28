@@ -101,7 +101,7 @@ jobs:
             command: npm run test:e2e -- --workers 1 --project=desktop-chromium --project=mobile-chromium
             step_timeout: 35
           - suite: jifeng
-            command: npm run test:e2e -- tests/e2e/jifeng-connection.spec.ts --workers 1
+            command: npm run test:e2e -- tests/e2e/jifeng-connection.spec.ts --workers 1 --global-timeout=300000
             step_timeout: 10
     services:
       postgres:
