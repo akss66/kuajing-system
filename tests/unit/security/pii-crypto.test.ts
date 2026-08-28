@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   decryptPii,
@@ -10,6 +10,10 @@ const key = Buffer.alloc(32, 7).toString("base64");
 const otherKey = Buffer.alloc(32, 8).toString("base64");
 
 describe("PII encryption", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("round-trips structured recipient data without placing plaintext in storage", () => {
     const recipient = {
       name: "匿名收件人",
@@ -50,7 +54,9 @@ describe("PII encryption", () => {
   });
 
   it("requires an exact 32-byte base64 environment key", () => {
-    expect(() => parsePiiEncryptionKey("")).toThrow(
+    vi.stubEnv("PII_ENCRYPTION_KEY", "");
+
+    expect(() => parsePiiEncryptionKey()).toThrow(
       "PII_ENCRYPTION_KEY 未配置",
     );
     expect(() => parsePiiEncryptionKey("not-base64")).toThrow(
