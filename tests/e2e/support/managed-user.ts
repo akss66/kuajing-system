@@ -33,5 +33,14 @@ export async function loginThroughUi(
   await page.goto("/login");
   await page.getByLabel("登录邮箱").fill(credentials.email);
   await page.getByLabel("登录密码").fill(credentials.password);
-  await page.getByRole("button", { name: "登录系统" }).click();
+  const authentication = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/auth/sign-in/email",
+    { timeout: 30_000 },
+  );
+  await Promise.all([
+    authentication,
+    page.getByRole("button", { name: "登录系统" }).click(),
+  ]);
 }
