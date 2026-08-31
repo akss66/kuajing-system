@@ -12,6 +12,7 @@ import {
   inventoryBalances,
   inventoryMovements,
   inventoryReservations,
+  orderImportRowFulfillmentItems,
   products,
   skuAliases,
   skus,
@@ -33,6 +34,9 @@ async function cleanupPhaseFixture() {
     await db.delete(inventoryBalances).where(eq(inventoryBalances.skuId, sku.id));
     await db.delete(skuAliases).where(eq(skuAliases.skuId, sku.id));
     await db.delete(customerSkuPrices).where(eq(customerSkuPrices.skuId, sku.id));
+    await db
+      .delete(orderImportRowFulfillmentItems)
+      .where(eq(orderImportRowFulfillmentItems.resolvedSkuId, sku.id));
     await db.delete(skus).where(eq(skus.id, sku.id));
     await db.delete(products).where(eq(products.id, sku.productId));
   }
