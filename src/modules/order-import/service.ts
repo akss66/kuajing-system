@@ -949,9 +949,13 @@ export async function revalidateBatchInventory(
   for (const row of candidateRows) {
     const unavailableMessage = unavailableMessageByRowId.get(row.id);
     const insufficientMessage = insufficientMessageByRowId.get(row.id);
+    const primaryUnavailable =
+      row.fulfillmentMode === "SYSTEM_SKU" &&
+      row.resolvedSkuId !== null &&
+      unavailableSkuIds.has(row.resolvedSkuId);
     const primaryResolved =
       row.fulfillmentMode === "SYSTEM_SKU"
-        ? row.resolvedSkuId !== null
+        ? row.resolvedSkuId !== null && !primaryUnavailable
         : Boolean(row.finalSkuCode?.trim());
     if (unavailableMessage) {
       await tx
@@ -959,6 +963,7 @@ export async function revalidateBatchInventory(
         .set({
           errorCode: "SKU_UNAVAILABLE",
           errorMessage: unavailableMessage,
+          ...(primaryUnavailable ? { resolvedSkuId: null } : {}),
           status: "UNKNOWN_SKU",
           updatedAt: now,
         })
@@ -1008,6 +1013,7 @@ export async function revalidateBatchInventory(
 
   return {
     insufficientSkuIds,
+    unavailableSkuIds,
     summary: {
       duplicate: count("DUPLICATE"),
       invalid: count("INVALID"),

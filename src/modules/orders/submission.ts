@@ -183,6 +183,13 @@ export async function submitTemuImportBatch(input: {
         message: "订单库存不足，预览已更新，请更换 SKU 或减少数量",
       };
     }
+    if (inventoryValidation.unavailableSkuIds.size > 0) {
+      return {
+        code: "SKU_NOT_SELLABLE",
+        kind: "ERROR",
+        message: "订单中有 SKU 已下架、不可售或缺少拿货价，预览已更新",
+      };
+    }
     if (
       inventoryValidation.summary.unknownSku > 0 ||
       inventoryValidation.summary.invalid > 0
