@@ -717,6 +717,105 @@ describe("customer-scoped TEMU import preview", () => {
     ).rejects.toMatchObject({ code: "PREVIEW_NOT_FOUND" });
   });
 
+  test("keeps an unresolved primary system SKU blocked after adding a fulfillment item", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-unresolved-bundle",
+      buffer: await workbookBuffer([
+        {
+          订单号: "PO-UNRESOLVED-BUNDLE",
+          子订单号: "SUB-UNRESOLVED-BUNDLE",
+          SKU货号: "TZX-NOT-FOUND",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "unresolved-bundle.xlsx",
+      storeId: fixture.store.id,
+    });
+    const row = preview.rows[0];
+    expect(row).toMatchObject({ status: "UNKNOWN_SKU" });
+
+    const updated = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-unresolved-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 1,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: "  CUSTOMER-EXTRA  ",
+    });
+
+    expect(updated).toMatchObject({
+      errorCode: row.errorCode,
+      errorMessage: row.errorMessage,
+      externalSku: "TZX-NOT-FOUND",
+      revision: row.revision + 1,
+      status: "UNKNOWN_SKU",
+    });
+    expect(updated.fulfillmentItems).toEqual([
+      expect.objectContaining({
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        isPrimary: false,
+        skuCode: "CUSTOMER-EXTRA",
+      }),
+    ]);
+
+    const refreshed = await getCustomerImportPreview(fixture.customer.id, preview.batchId);
+    expect(refreshed.summary).toMatchObject({ ready: 0, unknownSku: 1 });
+  });
+
+  test("does not unblock an unresolved primary SKU when child inventory recovers", async () => {
+    const fixture = await createFixture();
+    await db
+      .update(inventoryBalances)
+      .set({ totalQuantity: 0 })
+      .where(eq(inventoryBalances.skuId, fixture.sku.id));
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-unresolved-stock",
+      buffer: await workbookBuffer([
+        {
+          订单号: "PO-UNRESOLVED-STOCK",
+          子订单号: "SUB-UNRESOLVED-STOCK",
+          SKU货号: "TZX-NOT-FOUND-STOCK",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "unresolved-stock.xlsx",
+      storeId: fixture.store.id,
+    });
+    const row = preview.rows[0];
+
+    const withInsufficientChild = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-unresolved-stock",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 1,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: fixture.sku.skuCode,
+    });
+    expect(withInsufficientChild).toMatchObject({
+      errorCode: "INSUFFICIENT_STOCK",
+      revision: row.revision + 1,
+      status: "UNKNOWN_SKU",
+    });
+
+    const restored = await removeCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-unresolved-stock",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      expectedRevision: withInsufficientChild.revision,
+      itemId: withInsufficientChild.fulfillmentItems[0].id,
+      rowId: row.id,
+    });
+    expect(restored).toMatchObject({
+      errorCode: null,
+      revision: row.revision + 2,
+      status: "UNKNOWN_SKU",
+    });
+    expect(restored.fulfillmentItems).toEqual([]);
+  });
+
   test("includes additional system items in aggregate inventory validation", async () => {
     const fixture = await createFixture();
     await db

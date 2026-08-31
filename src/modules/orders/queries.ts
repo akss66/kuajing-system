@@ -150,7 +150,7 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
       })
       .from(orderLines)
       .where(eq(orderLines.orderId, order.id))
-      .orderBy(orderLines.createdAt),
+      .orderBy(orderLines.linePosition, orderLines.createdAt),
     db
       .select({
         amountFen: paymentClaims.amountFen,
@@ -399,7 +399,7 @@ export async function getAdminOrderDetail(orderId: string) {
       })
       .from(orderLines)
       .where(eq(orderLines.orderId, orderId))
-      .orderBy(orderLines.createdAt),
+      .orderBy(orderLines.linePosition, orderLines.createdAt),
     db
       .select({ refundedAt: walletTransactions.createdAt })
       .from(walletTransactions)

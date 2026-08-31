@@ -806,6 +806,7 @@ export async function revalidateBatchInventory(
     .select({
       effectiveQuantity: orderImportRows.effectiveQuantity,
       errorCode: orderImportRows.errorCode,
+      finalSkuCode: orderImportRows.finalSkuCode,
       fulfillmentMode: orderImportRows.fulfillmentMode,
       id: orderImportRows.id,
       resolvedSkuId: orderImportRows.resolvedSkuId,
@@ -909,6 +910,10 @@ export async function revalidateBatchInventory(
   }
   for (const row of candidateRows) {
     const insufficientMessage = insufficientMessageByRowId.get(row.id);
+    const primaryResolved =
+      row.fulfillmentMode === "SYSTEM_SKU"
+        ? row.resolvedSkuId !== null
+        : Boolean(row.finalSkuCode?.trim());
     if (insufficientMessage) {
       await tx
         .update(orderImportRows)
@@ -922,7 +927,12 @@ export async function revalidateBatchInventory(
     } else if (row.errorCode === "INSUFFICIENT_STOCK") {
       await tx
         .update(orderImportRows)
-        .set({ errorCode: null, errorMessage: null, status: "READY", updatedAt: now })
+        .set({
+          errorCode: null,
+          errorMessage: null,
+          status: primaryResolved ? "READY" : "UNKNOWN_SKU",
+          updatedAt: now,
+        })
         .where(eq(orderImportRows.id, row.id));
     }
   }
@@ -1071,7 +1081,12 @@ async function mutateCustomerImportRowFulfillmentItem(
     }
     const [row] = await tx
       .select({
+        errorCode: orderImportRows.errorCode,
+        errorMessage: orderImportRows.errorMessage,
+        finalSkuCode: orderImportRows.finalSkuCode,
+        fulfillmentMode: orderImportRows.fulfillmentMode,
         id: orderImportRows.id,
+        resolvedSkuId: orderImportRows.resolvedSkuId,
         revision: orderImportRows.revision,
         status: orderImportRows.status,
       })
@@ -1171,13 +1186,17 @@ async function mutateCustomerImportRowFulfillmentItem(
       }
     }
 
+    const primaryResolved =
+      row.fulfillmentMode === "SYSTEM_SKU"
+        ? row.resolvedSkuId !== null
+        : Boolean(row.finalSkuCode?.trim());
     const [updated] = await tx
       .update(orderImportRows)
       .set({
-        errorCode: null,
-        errorMessage: null,
+        errorCode: primaryResolved ? null : row.errorCode,
+        errorMessage: primaryResolved ? null : row.errorMessage,
         revision: row.revision + 1,
-        status: "READY",
+        status: primaryResolved ? "READY" : row.status,
         updatedAt: now,
       })
       .where(
