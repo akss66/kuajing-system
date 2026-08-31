@@ -262,8 +262,11 @@ async function seedExportScenario() {
   ]);
 
   return {
+    activeShipmentId: activeShipment.id,
     customerId: customer.id,
     selectedOrderId: selectedOrder.id,
+    skuId: sku.id,
+    storeId: store.id,
     unpaidOrderId: unselectedOrder.id,
   };
 }
@@ -418,5 +421,60 @@ describe("POST /api/admin/orders/jifeng-export", () => {
     expect(exportedText).not.toContain("CANCELLED-");
     expect(exportedText).not.toContain("UNSELECTED-");
     expect(exportedText).not.toContain("SHIPPED-");
+  });
+
+  test("exports one row per bundled item while repeating the immutable uploaded SKU", async () => {
+    const seeded = await seedExportScenario();
+    await db.insert(orderLines).values([
+      {
+        externalSku: "TEMU-BUNDLE-ORIGINAL",
+        lineAmountFen: 1_000,
+        linePosition: 2,
+        orderId: seeded.selectedOrderId,
+        quantity: 2,
+        shipmentId: seeded.activeShipmentId,
+        skuCodeSnapshot: "TZX-BUNDLE-SYSTEM",
+        skuId: seeded.skuId,
+        skuNameSnapshot: "捆绑系统货",
+        storeId: seeded.storeId,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5_000,
+      },
+      {
+        externalSku: "TEMU-BUNDLE-ORIGINAL",
+        lineAmountFen: 0,
+        lineKind: "CUSTOMER_SUPPLIED",
+        linePosition: 3,
+        orderId: seeded.selectedOrderId,
+        quantity: 3,
+        shipmentId: seeded.activeShipmentId,
+        skuCodeSnapshot: "CUSTOM-BUNDLE-ITEM",
+        skuNameSnapshot: "客户自有货",
+        storeId: seeded.storeId,
+        unitPriceFen: 0,
+        unitPriceMilliYuan: 0,
+      },
+    ]);
+    const response = await POST(
+      exportRequest(
+        { orderIds: [seeded.selectedOrderId] },
+        await createSessionCookie({ role: "admin" }),
+      ),
+    );
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await response.arrayBuffer());
+    const worksheet = workbook.getWorksheet("Sheet1")!;
+    const bundledRows = worksheet
+      .getRows(2, worksheet.rowCount - 1)!
+      .filter((row) => row.getCell(5).value === "TEMU-BUNDLE-ORIGINAL");
+
+    expect(bundledRows.map((row) => [
+      row.getCell(5).value,
+      row.getCell(6).value,
+      row.getCell(7).value,
+    ])).toEqual([
+      ["TEMU-BUNDLE-ORIGINAL", "TZX-BUNDLE-SYSTEM", 2],
+      ["TEMU-BUNDLE-ORIGINAL", "CUSTOM-BUNDLE-ITEM", 3],
+    ]);
   });
 });

@@ -160,6 +160,7 @@ export async function exportJifengOrdersToXlsx(input: {
       externalSku: orderLines.externalSku,
       lineCreatedAt: orderLines.createdAt,
       lineId: orderLines.id,
+      linePosition: orderLines.linePosition,
       orderId: fulfillmentOrders.id,
       quantity: orderLines.quantity,
       shipmentCreatedAt: orderShipments.createdAt,
@@ -194,6 +195,7 @@ export async function exportJifengOrdersToXlsx(input: {
     .orderBy(
       asc(orderShipments.createdAt),
       asc(orderLines.createdAt),
+      asc(orderLines.linePosition),
       asc(orderLines.skuCodeSnapshot),
       asc(orderLines.id),
     );
@@ -215,6 +217,8 @@ export async function exportJifengOrdersToXlsx(input: {
     if (shipmentDifference !== 0) return shipmentDifference;
     const lineDifference = left.lineCreatedAt.getTime() - right.lineCreatedAt.getTime();
     if (lineDifference !== 0) return lineDifference;
+    const positionDifference = left.linePosition - right.linePosition;
+    if (positionDifference !== 0) return positionDifference;
     const skuDifference = left.skuCode.localeCompare(right.skuCode);
     return skuDifference !== 0 ? skuDifference : left.lineId.localeCompare(right.lineId);
   });
