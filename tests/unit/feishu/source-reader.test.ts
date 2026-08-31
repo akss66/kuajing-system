@@ -43,6 +43,27 @@ describe("Feishu source reader", () => {
     });
   });
 
+  test("ignores spreadsheet padding rows beyond the supported data boundary", async () => {
+    const client = sourceClient([
+      ["SKU", "商品名称"],
+      ["TZX-001", "测试商品"],
+      ...Array.from({ length: 4_999 }, () => []),
+    ]);
+
+    const snapshot = await readFeishuSourceSnapshot({
+      client,
+      config: {
+        sourceSheetId: "sheet-primary",
+        sourceWikiToken: "wiki-source-token",
+      },
+    });
+
+    expect("values" in snapshot ? snapshot.values : []).toEqual([
+      ["SKU", "商品名称"],
+      ["TZX-001", "测试商品"],
+    ]);
+  });
+
   test("fails closed when source data extends beyond the supported row boundary", async () => {
     const client = sourceClient(
       Array.from({ length: 5_001 }, (_, index) => [`row-${index + 1}`]),

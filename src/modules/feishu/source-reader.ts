@@ -65,6 +65,21 @@ function hashSpreadsheetToken(spreadsheetToken: string) {
   return createHash("sha256").update(spreadsheetToken).digest("hex");
 }
 
+function sourceRowHasContent(row: unknown[]) {
+  return row.some((cell) => {
+    if (cell === null || cell === undefined) return false;
+    if (typeof cell === "string") return cell.trim().length > 0;
+    if (Array.isArray(cell)) return cell.length > 0;
+    return true;
+  });
+}
+
+function trimTrailingBlankRows(rows: unknown[][]) {
+  let end = rows.length;
+  while (end > 0 && !sourceRowHasContent(rows[end - 1]!)) end -= 1;
+  return rows.slice(0, end);
+}
+
 export async function discoverFeishuSourceSheets(input: {
   client: FeishuSourcePort;
   config: Pick<FeishuIntegrationConfig, "sourceWikiToken">;
@@ -154,7 +169,11 @@ export async function readFeishuSourceSnapshot(input: {
     range,
     spreadsheetToken: resolved.spreadsheetToken,
   });
-  if (details.values.length > MAX_FEISHU_SOURCE_ROWS) {
+  if (
+    details.values
+      .slice(MAX_FEISHU_SOURCE_ROWS)
+      .some(sourceRowHasContent)
+  ) {
     throw new Error(
       `飞书源货盘超过 ${MAX_FEISHU_SOURCE_ROWS} 行，为避免截断后误归档或清零库存，本次读取已停止`,
     );
@@ -166,6 +185,8 @@ export async function readFeishuSourceSnapshot(input: {
     selectedSheet: resolved.selectedSheet,
     spreadsheetToken: resolved.spreadsheetToken,
     spreadsheetTokenHash: resolved.spreadsheetTokenHash,
-    values: details.values.slice(0, MAX_FEISHU_SOURCE_ROWS),
+    values: trimTrailingBlankRows(
+      details.values.slice(0, MAX_FEISHU_SOURCE_ROWS),
+    ),
   };
 }
