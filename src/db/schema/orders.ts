@@ -358,6 +358,55 @@ export const orderImportRows = pgTable(
   ],
 );
 
+export const orderImportRowFulfillmentItems = pgTable(
+  "order_import_row_fulfillment_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    rowId: uuid("row_id")
+      .notNull()
+      .references(() => orderImportRows.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    finalSkuCode: varchar("final_sku_code", { length: 160 }).notNull(),
+    effectiveQuantity: integer("effective_quantity").notNull(),
+    fulfillmentMode: orderLineKind("fulfillment_mode").notNull(),
+    resolvedSkuId: uuid("resolved_sku_id").references(() => skus.id, {
+      onDelete: "restrict",
+    }),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("order_import_row_fulfillment_items_row_position_unique").on(
+      table.rowId,
+      table.position,
+    ),
+    check(
+      "order_import_row_fulfillment_items_position_range",
+      sql`${table.position} between 2 and 20`,
+    ),
+    check(
+      "order_import_row_fulfillment_items_sku_not_blank",
+      sql`nullif(trim(${table.finalSkuCode}), '') is not null`,
+    ),
+    check(
+      "order_import_row_fulfillment_items_quantity_positive",
+      sql`${table.effectiveQuantity} > 0`,
+    ),
+    check(
+      "order_import_row_fulfillment_items_mode_consistent",
+      sql`(${table.fulfillmentMode} = 'SYSTEM_SKU' and ${table.resolvedSkuId} is not null) or (${table.fulfillmentMode} = 'CUSTOMER_SUPPLIED' and ${table.resolvedSkuId} is null)`,
+    ),
+    index("order_import_row_fulfillment_items_row_index").on(table.rowId),
+    index("order_import_row_fulfillment_items_sku_index").on(
+      table.resolvedSkuId,
+    ),
+  ],
+);
+
 export const fulfillmentOrders = pgTable(
   "fulfillment_orders",
   {

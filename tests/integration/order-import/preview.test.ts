@@ -17,9 +17,12 @@ import {
   stores,
 } from "@/db/schema";
 import {
+  addCustomerImportRowFulfillmentItem,
   createTemuImportPreview,
   getCustomerImportPreview,
+  removeCustomerImportRowFulfillmentItem,
   refreshActiveImportPreviewsForAlias,
+  updateCustomerImportRowFulfillmentItem,
   updateCustomerImportRowOverride,
 } from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
@@ -591,6 +594,177 @@ describe("customer-scoped TEMU import preview", () => {
         .from(orderImportRows)
         .where(eq(orderImportRows.id, externalRow.id)),
     ).resolves.toEqual([{ externalSku: "QS-OWN" }]);
+  });
+
+  test("adds, updates, and removes independent fulfillment items under one immutable uploaded SKU", async () => {
+    const fixture = await createFixture();
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-bundle",
+      buffer: await workbookBuffer([
+        {
+          订单号: "PO-BUNDLE",
+          子订单号: "SUB-BUNDLE",
+          SKU货号: "SELLER-BUNDLE-ORIGINAL",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "bundle.xlsx",
+      storeId: fixture.store.id,
+    });
+    const row = preview.rows[0];
+
+    const withSystemItem = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 2,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: fixture.sku.skuCode,
+    });
+    expect(withSystemItem).toMatchObject({
+      externalSku: "SELLER-BUNDLE-ORIGINAL",
+      revision: 1,
+      fulfillmentItems: [
+        {
+          effectiveQuantity: 1,
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          isPrimary: true,
+          skuCode: "SELLER-BUNDLE-ORIGINAL",
+        },
+        {
+          effectiveQuantity: 2,
+          fulfillmentMode: "SYSTEM_SKU",
+          isPrimary: false,
+          skuCode: fixture.sku.skuCode,
+        },
+      ],
+    });
+    const systemItem = withSystemItem.fulfillmentItems[1];
+
+    const withCustomerItem = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 3,
+      expectedRevision: 1,
+      rowId: row.id,
+      skuCode: "  SELLER-GIFT  ",
+    });
+    expect(withCustomerItem).toMatchObject({
+      externalSku: "SELLER-BUNDLE-ORIGINAL",
+      revision: 2,
+      fulfillmentItems: [
+        { skuCode: "SELLER-BUNDLE-ORIGINAL" },
+        { skuCode: fixture.sku.skuCode },
+        {
+          effectiveQuantity: 3,
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          skuCode: "SELLER-GIFT",
+        },
+      ],
+    });
+    const customerItem = withCustomerItem.fulfillmentItems[2];
+
+    const updated = await updateCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 4,
+      expectedRevision: 2,
+      itemId: customerItem.id,
+      rowId: row.id,
+      skuCode: "SELLER-GIFT-UPDATED",
+    });
+    expect(updated).toMatchObject({
+      revision: 3,
+      fulfillmentItems: expect.arrayContaining([
+        expect.objectContaining({
+          effectiveQuantity: 4,
+          id: customerItem.id,
+          skuCode: "SELLER-GIFT-UPDATED",
+        }),
+      ]),
+    });
+
+    const removed = await removeCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      expectedRevision: 3,
+      itemId: systemItem.id,
+      rowId: row.id,
+    });
+    expect(removed).toMatchObject({
+      externalSku: "SELLER-BUNDLE-ORIGINAL",
+      revision: 4,
+      fulfillmentItems: [
+        { skuCode: "SELLER-BUNDLE-ORIGINAL" },
+        { skuCode: "SELLER-GIFT-UPDATED" },
+      ],
+    });
+
+    await expect(
+      addCustomerImportRowFulfillmentItem({
+        actorUserId: "auth-other-customer",
+        batchId: preview.batchId,
+        customerId: fixture.otherCustomer.id,
+        effectiveQuantity: 1,
+        expectedRevision: 4,
+        rowId: row.id,
+        skuCode: "ATTACKER-ITEM",
+      }),
+    ).rejects.toMatchObject({ code: "PREVIEW_NOT_FOUND" });
+  });
+
+  test("includes additional system items in aggregate inventory validation", async () => {
+    const fixture = await createFixture();
+    await db
+      .update(inventoryBalances)
+      .set({ totalQuantity: 2 })
+      .where(eq(inventoryBalances.skuId, fixture.sku.id));
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-bundle-stock",
+      buffer: await workbookBuffer([
+        {
+          订单号: "PO-BUNDLE-STOCK",
+          子订单号: "SUB-BUNDLE-STOCK",
+          SKU货号: "SELLER-BUNDLE-STOCK",
+        },
+      ]),
+      customerId: fixture.customer.id,
+      fileName: "bundle-stock.xlsx",
+      storeId: fixture.store.id,
+    });
+    const row = preview.rows[0];
+
+    const insufficient = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle-stock",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 3,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: fixture.sku.skuCode,
+    });
+    expect(insufficient).toMatchObject({
+      errorCode: "INSUFFICIENT_STOCK",
+      errorMessage: expect.stringContaining("需 3 件，可用 2 件"),
+      status: "UNKNOWN_SKU",
+    });
+
+    const restored = await removeCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-bundle-stock",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      expectedRevision: 1,
+      itemId: insufficient.fulfillmentItems[1].id,
+      rowId: row.id,
+    });
+    expect(restored).toMatchObject({
+      errorCode: null,
+      status: "READY",
+    });
   });
 
   test("persists an expired preview before rejecting a row override", async () => {

@@ -246,6 +246,13 @@
       "when": 1788150719240,
       "tag": "0034_faulty_emma_frost",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788151270908,
+      "tag": "0035_crazy_lifeguard",
+      "breakpoints": true
     }
   ]
 }
