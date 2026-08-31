@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { FeishuIntegrationConfig } from "@/integrations/feishu/config";
 
-const MAX_FEISHU_SOURCE_ROWS = 500;
+const MAX_FEISHU_SOURCE_ROWS = 5_000;
 
 export type FeishuSourcePort = {
   resolveWikiSpreadsheet(

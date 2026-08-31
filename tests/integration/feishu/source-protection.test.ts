@@ -309,7 +309,7 @@ describe("Feishu source preflight protection", () => {
     expect(fake.calls.listSheets).toBe(1);
     expect(fake.calls.readRangeDetails).toEqual([
       {
-        range: "sheet-primary!A1:Z501",
+        range: "sheet-primary!A1:Z5001",
         spreadsheetToken: "source-spreadsheet-token",
       },
     ]);

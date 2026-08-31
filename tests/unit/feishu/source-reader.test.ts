@@ -23,9 +23,29 @@ function sourceClient(values: unknown[][]) {
 }
 
 describe("Feishu source reader", () => {
-  test("fails closed when source data extends beyond the supported row boundary", async () => {
+  test("reads sources beyond the former 500-row boundary without truncation", async () => {
     const client = sourceClient(
       Array.from({ length: 501 }, (_, index) => [`row-${index + 1}`]),
+    );
+
+    const snapshot = await readFeishuSourceSnapshot({
+      client,
+      config: {
+        sourceSheetId: "sheet-primary",
+        sourceWikiToken: "wiki-source-token",
+      },
+    });
+
+    expect("values" in snapshot ? snapshot.values : []).toHaveLength(501);
+    expect(client.readRangeDetails).toHaveBeenCalledWith({
+      range: "sheet-primary!A1:Z5001",
+      spreadsheetToken: "source-spreadsheet-token",
+    });
+  });
+
+  test("fails closed when source data extends beyond the supported row boundary", async () => {
+    const client = sourceClient(
+      Array.from({ length: 5_001 }, (_, index) => [`row-${index + 1}`]),
     );
 
     await expect(
@@ -36,10 +56,10 @@ describe("Feishu source reader", () => {
           sourceWikiToken: "wiki-source-token",
         },
       }),
-    ).rejects.toThrow("飞书源货盘超过 500 行");
+    ).rejects.toThrow("飞书源货盘超过 5000 行");
 
     expect(client.readRangeDetails).toHaveBeenCalledWith({
-      range: "sheet-primary!A1:Z501",
+      range: "sheet-primary!A1:Z5001",
       spreadsheetToken: "source-spreadsheet-token",
     });
   });
