@@ -14,6 +14,7 @@ import {
   inventoryMovements,
   inventoryReservations,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
   orderShipments,
@@ -166,6 +167,12 @@ async function seedBatch(input: {
           row.externalSubOrderNo === undefined
             ? `SUB-${input.groupId}-${row.rowNumber}`
             : row.externalSubOrderNo,
+        finalSkuCode:
+          row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+            ? row.externalSku === undefined
+              ? "BULK-SKU"
+              : row.externalSku
+            : null,
         effectiveQuantity:
           row.effectiveQuantity === undefined
             ? row.quantity === undefined
@@ -641,6 +648,98 @@ describe("atomic partial bulk submission", () => {
     expect(await db.select().from(inventoryReservations)).toEqual([
       expect.objectContaining({ quantity: 2, skuId: systemSku.id }),
     ]);
+  });
+
+  test("includes additional fulfillment items in bulk pricing, inventory, and lines", async () => {
+    const fixture = await createDraftFixture(["bundle"]);
+    const systemSku = await createSku({ code: "BUNDLE", stock: 10 });
+    const group = fixture.groups.get("bundle")!;
+    const batch = await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: group.id,
+      rows: [
+        {
+          effectiveQuantity: 1,
+          externalOrderNo: "PO-BULK-BUNDLE",
+          externalSku: "SELLER-BULK-ORIGINAL",
+          externalSubOrderNo: "SUB-BULK-BUNDLE",
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          quantity: 1,
+          resolvedSkuId: null,
+          rowNumber: 2,
+        },
+      ],
+      storeId: group.storeId,
+    });
+    const [row] = await db
+      .select({ id: orderImportRows.id })
+      .from(orderImportRows)
+      .where(eq(orderImportRows.batchId, batch.id));
+    await db.insert(orderImportRowFulfillmentItems).values([
+      {
+        effectiveQuantity: 2,
+        finalSkuCode: systemSku.skuCode,
+        fulfillmentMode: "SYSTEM_SKU",
+        position: 2,
+        resolvedSkuId: systemSku.id,
+        rowId: row.id,
+      },
+      {
+        effectiveQuantity: 3,
+        finalSkuCode: "SELLER-BULK-GIFT",
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        position: 3,
+        resolvedSkuId: null,
+        rowId: row.id,
+      },
+    ]);
+
+    const result = await submitBulkDraft({
+      actorUserId: "bulk-bundle-user",
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+      idempotencyKey: "bulk-bundle-submit",
+      requestedWalletFen: 0,
+      selectedGroupIds: [group.id],
+    });
+
+    expect(result.failedGroups).toEqual([]);
+    expect(result.createdOrders).toHaveLength(1);
+    expect(await db.select().from(fulfillmentOrders)).toEqual([
+      expect.objectContaining({
+        totalAmountFen: 1_500,
+        totalPackageCount: 1,
+        totalQuantity: 6,
+      }),
+    ]);
+    expect(await db.select().from(inventoryReservations)).toEqual([
+      expect.objectContaining({ quantity: 2, skuId: systemSku.id }),
+    ]);
+    expect(
+      (await db.select().from(orderLines)).map((line) => ({
+        finalSku: line.skuCodeSnapshot,
+        originalSku: line.externalSku,
+        quantity: line.quantity,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          finalSku: "SELLER-BULK-ORIGINAL",
+          originalSku: "SELLER-BULK-ORIGINAL",
+          quantity: 1,
+        },
+        {
+          finalSku: systemSku.skuCode,
+          originalSku: "SELLER-BULK-ORIGINAL",
+          quantity: 2,
+        },
+        {
+          finalSku: "SELLER-BULK-GIFT",
+          originalSku: "SELLER-BULK-ORIGINAL",
+          quantity: 3,
+        },
+      ]),
+    );
   });
 
   test("rejects reuse of a customer idempotency key with a different payload", async () => {

@@ -6,6 +6,7 @@ import {
   inventoryBalances,
   inventoryReservations,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
 } from "@/db/schema";
@@ -68,6 +69,7 @@ type LoadedRow = {
   effectiveQuantity: number | null;
   externalSubOrderNo: string | null;
   fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+  id: string;
   quantity: number | null;
   resolvedSkuId: string | null;
   rowNumber: number;
@@ -89,6 +91,7 @@ type GroupWork = {
   invalidRowCount: number;
   quantityBySku: Map<string, number>;
   sameStoreDuplicateCount: number;
+  totalQuantity: number;
   unknownSkuCount: number;
 };
 
@@ -193,6 +196,7 @@ export async function validateBulkDraft(input: {
         invalidRowCount: 0,
         quantityBySku: new Map<string, number>(),
         sameStoreDuplicateCount: 0,
+        totalQuantity: 0,
         unknownSkuCount: 0,
       },
     ]),
@@ -224,6 +228,30 @@ export async function validateBulkDraft(input: {
           )
           .where(inArray(orderImportBatches.storeGroupId, allGroupIds));
 
+  const additionalItems =
+    storedRows.length === 0
+      ? []
+      : await db
+          .select({
+            effectiveQuantity: orderImportRowFulfillmentItems.effectiveQuantity,
+            fulfillmentMode: orderImportRowFulfillmentItems.fulfillmentMode,
+            resolvedSkuId: orderImportRowFulfillmentItems.resolvedSkuId,
+            rowId: orderImportRowFulfillmentItems.rowId,
+          })
+          .from(orderImportRowFulfillmentItems)
+          .where(
+            inArray(
+              orderImportRowFulfillmentItems.rowId,
+              storedRows.flatMap((row) => (row.rowId ? [row.rowId] : [])),
+            ),
+          );
+  const additionalItemsByRowId = new Map<string, typeof additionalItems>();
+  for (const item of additionalItems) {
+    const items = additionalItemsByRowId.get(item.rowId) ?? [];
+    items.push(item);
+    additionalItemsByRowId.set(item.rowId, items);
+  }
+
   for (const row of storedRows) {
     if (!row.groupId) continue;
     const work = loadedGroups.get(row.groupId);
@@ -248,6 +276,7 @@ export async function validateBulkDraft(input: {
         externalSubOrderNo: row.externalSubOrderNo,
         effectiveQuantity: row.effectiveQuantity,
         fulfillmentMode: row.fulfillmentMode!,
+        id: row.rowId,
         quantity: row.quantity,
         resolvedSkuId: row.resolvedSkuId,
         rowNumber: row.rowNumber,
@@ -348,12 +377,23 @@ export async function validateBulkDraft(input: {
         continue;
       }
       work.candidates.push(row);
+      work.totalQuantity += row.effectiveQuantity;
       if (row.fulfillmentMode === "SYSTEM_SKU") {
         work.quantityBySku.set(
           row.resolvedSkuId!,
           (work.quantityBySku.get(row.resolvedSkuId!) ?? 0) +
             row.effectiveQuantity,
         );
+      }
+      for (const item of additionalItemsByRowId.get(row.id) ?? []) {
+        work.totalQuantity += item.effectiveQuantity;
+        if (item.fulfillmentMode === "SYSTEM_SKU" && item.resolvedSkuId) {
+          work.quantityBySku.set(
+            item.resolvedSkuId,
+            (work.quantityBySku.get(item.resolvedSkuId) ?? 0) +
+              item.effectiveQuantity,
+          );
+        }
       }
     }
   }
@@ -434,10 +474,7 @@ export async function validateBulkDraft(input: {
         groupStatus: group.status,
       }),
       storeId: group.storeId,
-      totalQuantity: work.candidates.reduce(
-        (total, row) => total + (row.effectiveQuantity ?? 0),
-        0,
-      ),
+      totalQuantity: work.totalQuantity,
       totalRowCount: work.batches.reduce(
         (total, batch) => total + batch.rows.length,
         0,

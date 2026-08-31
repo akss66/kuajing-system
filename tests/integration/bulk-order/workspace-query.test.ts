@@ -8,6 +8,7 @@ import {
   customers,
   inventoryBalances,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   products,
   skus,
@@ -90,6 +91,10 @@ async function createWorkspaceFixture(
     readyRows.map((row) => ({
       ...row,
       batchId: batch.id,
+      finalSkuCode:
+        row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+          ? row.externalSku
+          : null,
       productAttributes: null,
       productName: null,
       quantity: row.effectiveQuantity,
@@ -101,7 +106,13 @@ async function createWorkspaceFixture(
     })),
   );
 
-  return { customerId: customer.id, draftId: draft.id };
+  return {
+    batchId: batch.id,
+    customerId: customer.id,
+    draftId: draft.id,
+    skuId: sku.id,
+    skuCode: sku.skuCode,
+  };
 }
 
 describe("bulk workspace pricing", () => {
@@ -194,5 +205,50 @@ describe("bulk workspace pricing", () => {
 
     // 2 × ¥5 system merchandise + one package × ¥13 shipping.
     expect(workspace.groups[0]?.totalAmountFen).toBe(2_300);
+  });
+
+  test("includes added fulfillment items without charging shipping twice", async () => {
+    const fixture = await createWorkspaceFixture(() => [
+      {
+        effectiveQuantity: 1,
+        externalOrderNo: "BUNDLE-PACKAGE",
+        externalSku: "UPLOADED-BUNDLE",
+        externalSubOrderNo: "BUNDLE-SUB",
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        resolvedSkuId: null,
+        rowNumber: 2,
+      },
+    ]);
+    const [row] = await db
+      .select({ id: orderImportRows.id })
+      .from(orderImportRows)
+      .where(sql`${orderImportRows.batchId} = ${fixture.batchId}`);
+    await db.insert(orderImportRowFulfillmentItems).values([
+      {
+        effectiveQuantity: 2,
+        finalSkuCode: fixture.skuCode,
+        fulfillmentMode: "SYSTEM_SKU",
+        position: 2,
+        resolvedSkuId: fixture.skuId,
+        rowId: row!.id,
+      },
+      {
+        effectiveQuantity: 3,
+        finalSkuCode: "CUSTOM-BUNDLE-ITEM",
+        fulfillmentMode: "CUSTOMER_SUPPLIED",
+        position: 3,
+        rowId: row!.id,
+      },
+    ]);
+
+    const workspace = await getBulkWorkspaceDraft(
+      fixture.customerId,
+      fixture.draftId,
+    );
+
+    expect(workspace.groups[0]).toMatchObject({
+      totalAmountFen: 2_300,
+      totalQuantity: 6,
+    });
   });
 });

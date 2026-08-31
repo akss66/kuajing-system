@@ -465,7 +465,7 @@ describe("bulk draft validation", () => {
       status: "SUBMITTABLE",
       totalQuantity: 100,
     });
-    expect(selectSpy.mock.calls.length + executeSpy.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(selectSpy.mock.calls.length + executeSpy.mock.calls.length).toBeLessThanOrEqual(7);
   });
 
   test("excludes submitted groups and their active reservations from fresh preview demand", async () => {

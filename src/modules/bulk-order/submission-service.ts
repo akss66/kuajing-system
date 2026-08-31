@@ -12,6 +12,7 @@ import {
   fulfillmentOrders,
   inventoryReservations,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
   orderShipments,
@@ -127,13 +128,16 @@ type LoadedRow = {
   externalOrderNo: string | null;
   externalSku: string | null;
   externalSubOrderNo: string | null;
+  finalSkuCode: string | null;
   id: string;
   fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
   productName: string | null;
   quantity: number | null;
+  linePosition: number;
   recipientPayloadEncrypted: string | null;
   resolvedSkuId: string | null;
   rowNumber: number;
+  sourceRowId: string;
   status: "READY" | "DUPLICATE" | "UNKNOWN_SKU" | "INVALID";
 };
 
@@ -307,21 +311,28 @@ function rowsForGroup(
       (first, second) =>
         batchOrder.get(first.batchId)! - batchOrder.get(second.batchId)! ||
         first.rowNumber - second.rowNumber ||
+        first.linePosition - second.linePosition ||
         first.id.localeCompare(second.id),
     );
   return { groupBatches, groupRows };
 }
 
 function candidateRows(rows: readonly LoadedRow[]) {
-  const firstBySubOrder = new Map<string, LoadedRow>();
+  const firstSourceRowBySubOrder = new Map<string, string>();
   for (const row of rows) {
-    if (!row.externalSubOrderNo || firstBySubOrder.has(row.externalSubOrderNo)) {
+    if (
+      !row.externalSubOrderNo ||
+      firstSourceRowBySubOrder.has(row.externalSubOrderNo)
+    ) {
       continue;
     }
-    firstBySubOrder.set(row.externalSubOrderNo, row);
+    firstSourceRowBySubOrder.set(row.externalSubOrderNo, row.sourceRowId);
   }
-  return [...firstBySubOrder.values()].filter(
-    (row) => row.status !== "DUPLICATE",
+  return rows.filter(
+    (row) =>
+      row.status !== "DUPLICATE" &&
+      row.externalSubOrderNo &&
+      firstSourceRowBySubOrder.get(row.externalSubOrderNo) === row.sourceRowId,
   );
 }
 
@@ -335,7 +346,9 @@ function isReadyRow(row: LoadedRow): row is ReadyRow {
     Number.isSafeInteger(row.effectiveQuantity) &&
     (row.effectiveQuantity ?? 0) > 0 &&
     ((row.fulfillmentMode === "SYSTEM_SKU" && Boolean(row.resolvedSkuId)) ||
-      (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && !row.resolvedSkuId))
+      (row.fulfillmentMode === "CUSTOMER_SUPPLIED" &&
+        !row.resolvedSkuId &&
+        Boolean(row.finalSkuCode)))
   );
 }
 
@@ -684,7 +697,7 @@ export async function submitBulkDraft(
         .orderBy(asc(orderImportBatches.id))
         .for("update");
     }
-    const loadedRows =
+    const baseRows =
       batchIds.length === 0
         ? []
         : await tx
@@ -694,6 +707,7 @@ export async function submitBulkDraft(
               externalOrderNo: orderImportRows.externalOrderNo,
               externalSku: orderImportRows.externalSku,
               externalSubOrderNo: orderImportRows.externalSubOrderNo,
+              finalSkuCode: orderImportRows.finalSkuCode,
               id: orderImportRows.id,
               fulfillmentMode: orderImportRows.fulfillmentMode,
               productName: orderImportRows.productName,
@@ -707,6 +721,54 @@ export async function submitBulkDraft(
             .from(orderImportRows)
             .where(inArray(orderImportRows.batchId, batchIds))
             .orderBy(asc(orderImportRows.id));
+    const additionalItems =
+      baseRows.length === 0
+        ? []
+        : await tx
+            .select({
+              effectiveQuantity: orderImportRowFulfillmentItems.effectiveQuantity,
+              finalSkuCode: orderImportRowFulfillmentItems.finalSkuCode,
+              fulfillmentMode: orderImportRowFulfillmentItems.fulfillmentMode,
+              id: orderImportRowFulfillmentItems.id,
+              position: orderImportRowFulfillmentItems.position,
+              resolvedSkuId: orderImportRowFulfillmentItems.resolvedSkuId,
+              rowId: orderImportRowFulfillmentItems.rowId,
+            })
+            .from(orderImportRowFulfillmentItems)
+            .where(
+              inArray(
+                orderImportRowFulfillmentItems.rowId,
+                baseRows.map((row) => row.id),
+              ),
+            )
+            .orderBy(
+              asc(orderImportRowFulfillmentItems.rowId),
+              asc(orderImportRowFulfillmentItems.position),
+            );
+    const baseRowById = new Map(baseRows.map((row) => [row.id, row]));
+    const loadedRows: LoadedRow[] = [
+      ...baseRows.map((row) => ({
+        ...row,
+        linePosition: 1,
+        sourceRowId: row.id,
+      })),
+      ...additionalItems.flatMap((item) => {
+        const row = baseRowById.get(item.rowId);
+        if (!row) return [];
+        return [
+          {
+            ...row,
+            effectiveQuantity: item.effectiveQuantity,
+            finalSkuCode: item.finalSkuCode,
+            fulfillmentMode: item.fulfillmentMode,
+            id: item.id,
+            linePosition: item.position,
+            resolvedSkuId: item.resolvedSkuId,
+            sourceRowId: row.id,
+          },
+        ];
+      }),
+    ];
 
     const selectedStores = await tx
       .select({ id: stores.id, status: stores.status })
@@ -1173,10 +1235,11 @@ export async function submitBulkDraft(
               externalSubOrderNo: row.externalSubOrderNo,
               lineAmountFen: 0,
               lineKind: "CUSTOMER_SUPPLIED" as const,
+              linePosition: row.linePosition,
               orderId: prepared.orderId,
               quantity: row.effectiveQuantity,
               shipmentId: shipmentIdByOrder.get(row.externalOrderNo)!,
-              skuCodeSnapshot: row.externalSku,
+              skuCodeSnapshot: row.finalSkuCode!,
               skuId: null,
               skuNameSnapshot: row.productName || "客户自有货",
               storeId: prepared.group.storeId,
@@ -1193,6 +1256,7 @@ export async function submitBulkDraft(
               row.effectiveQuantity,
               price.unitPriceMilliYuan,
             ),
+            linePosition: row.linePosition,
             orderId: prepared.orderId,
             lineKind: "SYSTEM_SKU" as const,
             quantity: row.effectiveQuantity,

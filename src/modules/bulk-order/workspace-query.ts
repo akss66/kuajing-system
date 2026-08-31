@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import {
   fulfillmentOrders,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
   skus,
@@ -21,6 +22,7 @@ type WorkspaceRow = {
   externalOrderNo: string | null;
   externalSubOrderNo: string | null;
   fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+  id: string;
   quantity: number | null;
   resolvedSkuId: string | null;
   rowNumber: number;
@@ -68,6 +70,7 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
             externalOrderNo: orderImportRows.externalOrderNo,
             externalSubOrderNo: orderImportRows.externalSubOrderNo,
             fulfillmentMode: orderImportRows.fulfillmentMode,
+            id: orderImportRows.id,
             quantity: orderImportRows.quantity,
             resolvedSkuId: orderImportRows.resolvedSkuId,
             rowNumber: orderImportRows.rowNumber,
@@ -79,7 +82,38 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           .where(inArray(orderImportRows.batchId, batchIds))
           .orderBy(asc(orderImportBatches.createdAt), asc(orderImportRows.rowNumber));
 
-  const skuIds = [...new Set(rows.flatMap((row) => (row.resolvedSkuId ? [row.resolvedSkuId] : [])))];
+  const additionalItems =
+    rows.length === 0
+      ? []
+      : await db
+          .select({
+            effectiveQuantity: orderImportRowFulfillmentItems.effectiveQuantity,
+            fulfillmentMode: orderImportRowFulfillmentItems.fulfillmentMode,
+            resolvedSkuId: orderImportRowFulfillmentItems.resolvedSkuId,
+            rowId: orderImportRowFulfillmentItems.rowId,
+          })
+          .from(orderImportRowFulfillmentItems)
+          .where(
+            inArray(
+              orderImportRowFulfillmentItems.rowId,
+              rows.map((row) => row.id),
+            ),
+          );
+  const additionalItemsByRowId = new Map<string, typeof additionalItems>();
+  for (const item of additionalItems) {
+    const items = additionalItemsByRowId.get(item.rowId) ?? [];
+    items.push(item);
+    additionalItemsByRowId.set(item.rowId, items);
+  }
+
+  const skuIds = [
+    ...new Set([
+      ...rows.flatMap((row) => (row.resolvedSkuId ? [row.resolvedSkuId] : [])),
+      ...additionalItems.flatMap((item) =>
+        item.resolvedSkuId ? [item.resolvedSkuId] : [],
+      ),
+    ]),
+  ];
   const cargoPrices = skuIds.length
     ? await db
         .select({
@@ -159,6 +193,14 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
             row.effectiveQuantity,
             priceBySku.get(row.resolvedSkuId) ?? 0,
           );
+        }
+        for (const item of additionalItemsByRowId.get(row.id) ?? []) {
+          if (item.fulfillmentMode === "SYSTEM_SKU" && item.resolvedSkuId) {
+            merchandiseAmountFen += calculateLineAmountFen(
+              item.effectiveQuantity,
+              priceBySku.get(item.resolvedSkuId) ?? 0,
+            );
+          }
         }
       }
       const { totalAmountFen } = calculateOrderPricing({
