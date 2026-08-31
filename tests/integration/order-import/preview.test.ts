@@ -764,6 +764,79 @@ describe("customer-scoped TEMU import preview", () => {
     expect(refreshed.summary).toMatchObject({ ready: 0, unknownSku: 1 });
   });
 
+  test("keeps a bundled row blocked until every remaining system SKU is sellable and priced", async () => {
+    const fixture = await createFixture();
+    const [staleSku] = await db
+      .insert(skus)
+      .values({
+        cargoUnitPriceMilliYuan: 6_000,
+        defaultUnitPriceFen: 600,
+        name: "稍后失效的附加 SKU",
+        productId: fixture.sku.productId,
+        skuCode: `TZX-STALE-${crypto.randomUUID()}`,
+      })
+      .returning();
+    await db.insert(inventoryBalances).values({
+      skuId: staleSku.id,
+      totalQuantity: 100,
+    });
+    const preview = await createTemuImportPreview({
+      actorUserId: "auth-customer-stale-bundle",
+      buffer: await workbookBuffer([{
+        订单号: "PO-STALE-BUNDLE",
+        子订单号: "SUB-STALE-BUNDLE",
+        SKU货号: "SELLER-STALE-BUNDLE",
+      }]),
+      customerId: fixture.customer.id,
+      fileName: "stale-bundle.xlsx",
+      storeId: fixture.store.id,
+    });
+    const row = preview.rows[0];
+    const withFirstItem = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-stale-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 1,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: fixture.sku.skuCode,
+    });
+    const withSecondItem = await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-stale-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 1,
+      expectedRevision: withFirstItem.revision,
+      rowId: row.id,
+      skuCode: staleSku.skuCode,
+    });
+    await db
+      .update(skus)
+      .set({ saleStatus: "NOT_SELLABLE" })
+      .where(eq(skus.id, staleSku.id));
+
+    const updated = await updateCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-stale-bundle",
+      batchId: preview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 2,
+      expectedRevision: withSecondItem.revision,
+      itemId: withSecondItem.fulfillmentItems[1].id,
+      rowId: row.id,
+      skuCode: fixture.sku.skuCode,
+    });
+
+    expect(updated).toMatchObject({
+      errorCode: "SKU_UNAVAILABLE",
+      status: "UNKNOWN_SKU",
+    });
+    const refreshed = await getCustomerImportPreview(
+      fixture.customer.id,
+      preview.batchId,
+    );
+    expect(refreshed.summary).toMatchObject({ ready: 0, unknownSku: 1 });
+  });
+
   test("does not unblock an unresolved primary SKU when child inventory recovers", async () => {
     const fixture = await createFixture();
     await db

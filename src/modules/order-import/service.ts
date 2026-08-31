@@ -875,9 +875,47 @@ export async function revalidateBatchInventory(
     });
   }
   for (const item of additionalItems) addDemand(item);
+  const demandedSkuIds = [...demandBySku.keys()].sort();
+  const skuStates =
+    demandedSkuIds.length === 0
+      ? []
+      : await tx
+          .select({
+            archivedAt: skus.archivedAt,
+            cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
+            id: skus.id,
+            lifecycleStatus: skus.lifecycleStatus,
+            saleStatus: skus.saleStatus,
+          })
+          .from(skus)
+          .where(inArray(skus.id, demandedSkuIds))
+          .for("share");
+  const usableSkuIds = new Set(
+    skuStates.flatMap((sku) =>
+      sku.lifecycleStatus === "ACTIVE" &&
+      sku.saleStatus === "SELLABLE" &&
+      sku.archivedAt === null &&
+      sku.cargoUnitPriceMilliYuan !== null
+        ? [sku.id]
+        : [],
+    ),
+  );
+  const unavailableSkuIds = new Set(
+    demandedSkuIds.filter((skuId) => !usableSkuIds.has(skuId)),
+  );
+  const unavailableMessageByRowId = new Map<string, string>();
+  for (const skuId of unavailableSkuIds) {
+    for (const rowId of rowIdsBySku.get(skuId) ?? []) {
+      unavailableMessageByRowId.set(
+        rowId,
+        "对应 SKU 已下架、不可售或缺少拿货价，请重新选择或联系管理员处理",
+      );
+    }
+  }
   const insufficientSkuIds = new Set<string>();
   const insufficientMessageByRowId = new Map<string, string>();
-  for (const skuId of [...demandBySku.keys()].sort()) {
+  for (const skuId of demandedSkuIds) {
+    if (unavailableSkuIds.has(skuId)) continue;
     const [balance] = await tx
       .select({ totalQuantity: inventoryBalances.totalQuantity })
       .from(inventoryBalances)
@@ -909,12 +947,23 @@ export async function revalidateBatchInventory(
     }
   }
   for (const row of candidateRows) {
+    const unavailableMessage = unavailableMessageByRowId.get(row.id);
     const insufficientMessage = insufficientMessageByRowId.get(row.id);
     const primaryResolved =
       row.fulfillmentMode === "SYSTEM_SKU"
         ? row.resolvedSkuId !== null
         : Boolean(row.finalSkuCode?.trim());
-    if (insufficientMessage) {
+    if (unavailableMessage) {
+      await tx
+        .update(orderImportRows)
+        .set({
+          errorCode: "SKU_UNAVAILABLE",
+          errorMessage: unavailableMessage,
+          status: "UNKNOWN_SKU",
+          updatedAt: now,
+        })
+        .where(eq(orderImportRows.id, row.id));
+    } else if (insufficientMessage) {
       await tx
         .update(orderImportRows)
         .set({
@@ -924,7 +973,10 @@ export async function revalidateBatchInventory(
           updatedAt: now,
         })
         .where(eq(orderImportRows.id, row.id));
-    } else if (row.errorCode === "INSUFFICIENT_STOCK") {
+    } else if (
+      row.errorCode === "INSUFFICIENT_STOCK" ||
+      row.errorCode === "SKU_UNAVAILABLE"
+    ) {
       await tx
         .update(orderImportRows)
         .set({
