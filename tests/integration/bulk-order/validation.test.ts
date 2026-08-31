@@ -11,6 +11,7 @@ import {
   inventoryBalances,
   inventoryReservations,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
   products,
@@ -90,6 +91,7 @@ async function createSku(input: {
   const [sku] = await db
     .insert(skus)
     .values({
+      cargoUnitPriceMilliYuan: 1_000,
       defaultUnitPriceFen: 100,
       name: `规格-${input.code}`,
       productId: product.id,
@@ -465,7 +467,80 @@ describe("bulk draft validation", () => {
       status: "SUBMITTABLE",
       totalQuantity: 100,
     });
-    expect(selectSpy.mock.calls.length + executeSpy.mock.calls.length).toBeLessThanOrEqual(7);
+    expect(selectSpy.mock.calls.length + executeSpy.mock.calls.length).toBeLessThanOrEqual(8);
+  });
+
+  test("blocks a preview when a primary or bundled system SKU is no longer sellable or priced", async () => {
+    const fixture = await createDraftFixture(["missing-price", "bundled-unavailable"]);
+    const missingPriceGroup = fixture.groups.get("missing-price")!;
+    const bundledGroup = fixture.groups.get("bundled-unavailable")!;
+    const missingPriceSku = await createSku({ code: "NO-PRICE", stock: 10 });
+    const primarySku = await createSku({ code: "PRIMARY", stock: 10 });
+    const bundledSku = await createSku({ code: "BUNDLED", stock: 10 });
+
+    await db
+      .update(skus)
+      .set({ cargoUnitPriceMilliYuan: null })
+      .where(eq(skus.id, missingPriceSku.id));
+    await db
+      .update(skus)
+      .set({ saleStatus: "NOT_SELLABLE" })
+      .where(eq(skus.id, bundledSku.id));
+
+    await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: missingPriceGroup.id,
+      rows: [{
+        externalSubOrderNo: "SUB-NO-PRICE",
+        quantity: 1,
+        resolvedSkuId: missingPriceSku.id,
+        rowNumber: 2,
+      }],
+      storeId: missingPriceGroup.storeId,
+    });
+    const bundledBatch = await seedBatch({
+      customerId: fixture.customer.id,
+      groupId: bundledGroup.id,
+      rows: [{
+        externalSubOrderNo: "SUB-BUNDLED",
+        quantity: 1,
+        resolvedSkuId: primarySku.id,
+        rowNumber: 2,
+      }],
+      storeId: bundledGroup.storeId,
+    });
+    const [bundledRow] = await db
+      .select({ id: orderImportRows.id })
+      .from(orderImportRows)
+      .where(eq(orderImportRows.batchId, bundledBatch.id));
+    await db.insert(orderImportRowFulfillmentItems).values({
+      effectiveQuantity: 2,
+      finalSkuCode: bundledSku.skuCode,
+      fulfillmentMode: "SYSTEM_SKU",
+      position: 2,
+      resolvedSkuId: bundledSku.id,
+      rowId: bundledRow.id,
+    });
+
+    const result = await validateBulkDraft({
+      customerId: fixture.customer.id,
+      draftId: fixture.draft.id,
+    });
+
+    expect(result.groups.get(missingPriceGroup.id)).toMatchObject({
+      deduplicatedOrderCount: 0,
+      errorCodes: ["INVALID_ROW"],
+      invalidRowCount: 1,
+      status: "BLOCKED_INVALID",
+      totalQuantity: 0,
+    });
+    expect(result.groups.get(bundledGroup.id)).toMatchObject({
+      deduplicatedOrderCount: 0,
+      errorCodes: ["INVALID_ROW"],
+      invalidRowCount: 1,
+      status: "BLOCKED_INVALID",
+      totalQuantity: 0,
+    });
   });
 
   test("excludes submitted groups and their active reservations from fresh preview demand", async () => {

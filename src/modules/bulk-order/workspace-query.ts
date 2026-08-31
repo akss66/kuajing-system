@@ -119,6 +119,7 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
         .select({
           id: skus.id,
           lifecycleStatus: skus.lifecycleStatus,
+          saleStatus: skus.saleStatus,
           unitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
         })
         .from(skus)
@@ -126,6 +127,7 @@ export async function getBulkWorkspaceDraft(customerId: string, draftId: string)
           and(
             inArray(skus.id, skuIds),
             eq(skus.lifecycleStatus, "ACTIVE"),
+            eq(skus.saleStatus, "SELLABLE"),
           ),
         )
     : [];

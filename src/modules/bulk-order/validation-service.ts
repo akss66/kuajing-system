@@ -9,6 +9,7 @@ import {
   orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
+  skus,
 } from "@/db/schema";
 
 import {
@@ -173,6 +174,31 @@ async function loadAvailableQuantities(skuIds: readonly string[]) {
     }
   }
   return availableBySku;
+}
+
+async function loadUsableSkuIds(skuIds: readonly string[]) {
+  const usableSkuIds = new Set<string>();
+  for (const skuChunk of chunks([...new Set(skuIds)].sort(), INVENTORY_QUERY_CHUNK_SIZE)) {
+    const rows = await db
+      .select({
+        cargoUnitPriceMilliYuan: skus.cargoUnitPriceMilliYuan,
+        id: skus.id,
+        lifecycleStatus: skus.lifecycleStatus,
+        saleStatus: skus.saleStatus,
+      })
+      .from(skus)
+      .where(inArray(skus.id, skuChunk));
+    for (const row of rows) {
+      if (
+        row.lifecycleStatus === "ACTIVE" &&
+        row.saleStatus === "SELLABLE" &&
+        row.cargoUnitPriceMilliYuan !== null
+      ) {
+        usableSkuIds.add(row.id);
+      }
+    }
+  }
+  return usableSkuIds;
 }
 
 export async function validateBulkDraft(input: {
@@ -383,6 +409,56 @@ export async function validateBulkDraft(input: {
           row.resolvedSkuId!,
           (work.quantityBySku.get(row.resolvedSkuId!) ?? 0) +
             row.effectiveQuantity,
+        );
+      }
+      for (const item of additionalItemsByRowId.get(row.id) ?? []) {
+        work.totalQuantity += item.effectiveQuantity;
+        if (item.fulfillmentMode === "SYSTEM_SKU" && item.resolvedSkuId) {
+          work.quantityBySku.set(
+            item.resolvedSkuId,
+            (work.quantityBySku.get(item.resolvedSkuId) ?? 0) +
+              item.effectiveQuantity,
+          );
+        }
+      }
+    }
+  }
+
+  const referencedSkuIds = draft.groups.flatMap((group) => [
+    ...loadedGroups.get(group.id)!.quantityBySku.keys(),
+  ]);
+  const usableSkuIds = await loadUsableSkuIds(referencedSkuIds);
+  for (const group of draft.groups) {
+    if (!previewGroupIds.has(group.id)) continue;
+    const work = loadedGroups.get(group.id)!;
+    const eligibleCandidates = work.candidates.filter((row) => {
+      const rowSkuIds = [
+        ...(row.fulfillmentMode === "SYSTEM_SKU" && row.resolvedSkuId
+          ? [row.resolvedSkuId]
+          : []),
+        ...(additionalItemsByRowId.get(row.id) ?? []).flatMap((item) =>
+          item.fulfillmentMode === "SYSTEM_SKU" && item.resolvedSkuId
+            ? [item.resolvedSkuId]
+            : [],
+        ),
+      ];
+      if (rowSkuIds.some((skuId) => !usableSkuIds.has(skuId))) {
+        work.invalidRowCount += 1;
+        return false;
+      }
+      return true;
+    });
+
+    work.candidates = eligibleCandidates;
+    work.quantityBySku.clear();
+    work.totalQuantity = 0;
+    for (const row of eligibleCandidates) {
+      work.totalQuantity += row.effectiveQuantity!;
+      if (row.fulfillmentMode === "SYSTEM_SKU") {
+        work.quantityBySku.set(
+          row.resolvedSkuId!,
+          (work.quantityBySku.get(row.resolvedSkuId!) ?? 0) +
+            row.effectiveQuantity!,
         );
       }
       for (const item of additionalItemsByRowId.get(row.id) ?? []) {

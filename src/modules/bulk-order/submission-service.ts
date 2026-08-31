@@ -1087,23 +1087,92 @@ export async function submitBulkDraft(
       }
     }
 
+    const unavailableSkuIds = new Set(
+      skuIds.filter((skuId) => {
+        const sku = skuById.get(skuId);
+        return (
+          !sku ||
+          sku.lifecycleStatus !== "ACTIVE" ||
+          sku.saleStatus !== "SELLABLE" ||
+          !priceBySku.has(skuId)
+        );
+      }),
+    );
+
     const preparedGroups: PreparedGroup[] = [];
     for (const group of selectedGroups) {
       const work = candidateByGroup.get(group.id);
       if (!work) continue;
-      if (
-        work.rows.some((row) => {
-          if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") return false;
-          if (!row.resolvedSkuId) return true;
-          const sku = skuById.get(row.resolvedSkuId);
-          return (
-            !sku ||
-            sku.lifecycleStatus !== "ACTIVE" ||
-            sku.saleStatus !== "SELLABLE" ||
-            !priceBySku.has(row.resolvedSkuId)
+      const affectedRows = work.rows.filter(
+        (row) =>
+          row.fulfillmentMode === "SYSTEM_SKU" &&
+          (!row.resolvedSkuId || unavailableSkuIds.has(row.resolvedSkuId)),
+      );
+      if (affectedRows.length > 0) {
+        const sourceRows = [
+          ...new Map(
+            affectedRows.map((row) => [row.sourceRowId, row] as const),
+          ).values(),
+        ];
+        const sourceRowIds = sourceRows.map((row) => row.sourceRowId);
+        const reclassifiedRows = await tx
+          .update(orderImportRows)
+          .set({
+            errorCode: "SKU_UNAVAILABLE",
+            errorMessage: "SKU 已下架、不可售或缺少拿货价，请重新选择或联系管理员处理",
+            status: "UNKNOWN_SKU",
+          })
+          .where(
+            and(
+              eq(orderImportRows.status, "READY"),
+              inArray(orderImportRows.id, sourceRowIds),
+            ),
+          )
+          .returning({
+            batchId: orderImportRows.batchId,
+            id: orderImportRows.id,
+          });
+        if (unavailableSkuIds.size > 0) {
+          await tx
+            .update(orderImportRows)
+            .set({ resolvedSkuId: null })
+            .where(
+              and(
+                inArray(orderImportRows.id, sourceRowIds),
+                inArray(orderImportRows.resolvedSkuId, [...unavailableSkuIds]),
+              ),
+            );
+        }
+        const reclassifiedByBatch = new Map<string, number>();
+        for (const row of reclassifiedRows) {
+          reclassifiedByBatch.set(
+            row.batchId,
+            (reclassifiedByBatch.get(row.batchId) ?? 0) + 1,
           );
-        })
-      ) {
+        }
+        for (const [batchId, count] of reclassifiedByBatch) {
+          await tx
+            .update(orderImportBatches)
+            .set({
+              readyRows: sql`${orderImportBatches.readyRows} - ${count}`,
+              unknownSkuRows: sql`${orderImportBatches.unknownSkuRows} + ${count}`,
+              updatedAt: now,
+            })
+            .where(eq(orderImportBatches.id, batchId));
+          await tx.insert(auditLogs).values({
+            action: "TEMU_IMPORT_PREVIEW_RECLASSIFIED",
+            actorId: input.actorUserId,
+            actorType: "CUSTOMER",
+            afterJson: {
+              affectedRows: count,
+              reason: "SKU_UNAVAILABLE",
+            },
+            beforeJson: { status: "READY" },
+            entityId: batchId,
+            entityType: "ORDER_IMPORT_BATCH",
+            reason: "批量提交时发现 SKU 已下架、不可售或缺少拿货价，阻止创建拿货单",
+          });
+        }
         failedByGroup.set(group.id, "INVALID");
         continue;
       }

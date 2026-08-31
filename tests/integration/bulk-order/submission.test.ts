@@ -935,7 +935,7 @@ describe("atomic partial bulk submission", () => {
       .set({ status: "DISABLED" })
       .where(eq(stores.id, disabled.storeId));
     const notSellable = fixture.groups.get("not-sellable")!;
-    await seedBatch({
+    const notSellableBatch = await seedBatch({
       customerId: fixture.customer.id,
       groupId: notSellable.id,
       rows: [{ resolvedSkuId: disabledSku.id, rowNumber: 2 }],
@@ -991,6 +991,26 @@ describe("atomic partial bulk submission", () => {
     expect(statusByGroup.get(notSellable.id)).toBe("INVALID");
     expect(statusByGroup.get(expired.id)).toBe("EXPIRED");
     expect(statusByGroup.get(malformedReady.id)).toBe("INVALID");
+    await expect(
+      db
+        .select({
+          errorCode: orderImportRows.errorCode,
+          status: orderImportRows.status,
+        })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.batchId, notSellableBatch.id)),
+    ).resolves.toEqual([
+      { errorCode: "SKU_UNAVAILABLE", status: "UNKNOWN_SKU" },
+    ]);
+    await expect(
+      db
+        .select({
+          readyRows: orderImportBatches.readyRows,
+          unknownSkuRows: orderImportBatches.unknownSkuRows,
+        })
+        .from(orderImportBatches)
+        .where(eq(orderImportBatches.id, notSellableBatch.id)),
+    ).resolves.toEqual([{ readyRows: 0, unknownSkuRows: 1 }]);
     expect(await db.select().from(settlementBatches)).toEqual([]);
     expect(await db.select().from(inventoryReservations)).toEqual([]);
     expect(await db.select().from(fulfillmentOrders)).toHaveLength(1);
