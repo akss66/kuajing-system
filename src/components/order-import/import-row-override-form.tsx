@@ -22,24 +22,34 @@ import type {
   ImportRowActionState,
 } from "./import-row-model";
 import { AiSkuSuggestionPanel } from "./ai-sku-suggestion-panel";
+import { ImportRowFulfillmentItemsEditor } from "./import-row-fulfillment-items-editor";
 
 const INITIAL_STATE: ImportRowActionState = { status: "idle" };
 const NO_SIBLING_SELECTED = "__none__";
 
 export function ImportRowOverrideForm({
   action,
+  addItemAction,
   aiRejectAction,
   batchId,
+  removeItemAction,
   row,
+  updateItemAction,
 }: {
   action: ImportRowAction;
+  addItemAction: ImportRowAction;
   aiRejectAction?: AiSkuMatchAction;
   batchId: string;
+  removeItemAction: ImportRowAction;
   row: EditableImportRow;
+  updateItemAction: ImportRowAction;
 }) {
   const router = useRouter();
   const inputId = useId();
-  const [skuCode, setSkuCode] = useState(row.resolvedSku?.skuCode ?? "");
+  const primaryItem = row.fulfillmentItems.find((item) => item.isPrimary);
+  const [skuCode, setSkuCode] = useState(
+    primaryItem?.skuCode ?? row.resolvedSku?.skuCode ?? row.externalSku ?? "",
+  );
   const [selectedAiSkuId, setSelectedAiSkuId] = useState<string | null>(null);
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
   const systemSkuEditable = row.fulfillmentMode === "SYSTEM_SKU";
@@ -75,7 +85,7 @@ export function ImportRowOverrideForm({
           "grid gap-3 lg:items-end",
           systemSkuEditable
             ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_9rem_auto]"
-            : "lg:grid-cols-[9rem_auto] lg:justify-end",
+            : "lg:grid-cols-[minmax(0,1fr)_9rem_auto]",
         )}
       >
         {systemSkuEditable ? (
@@ -119,28 +129,29 @@ export function ImportRowOverrideForm({
               </Select>
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-ink" htmlFor={`${inputId}-manual`}>
-                手动填写最终 SKU
-              </label>
-              <Input
-                autoComplete="off"
-                className="mt-1 min-h-11 text-base sm:text-sm"
-                disabled={pending}
-                id={`${inputId}-manual`}
-                maxLength={80}
-                name="skuCode"
-                onChange={(event) => {
-                  setSelectedAiSkuId(null);
-                  setSkuCode(event.target.value);
-                }}
-                placeholder="精确输入系统 SKU"
-                required
-                value={skuCode}
-              />
-            </div>
           </>
         ) : null}
+
+        <div>
+          <label className="text-xs font-medium text-ink" htmlFor={`${inputId}-manual`}>
+            手动填写最终 SKU
+          </label>
+          <Input
+            autoComplete="off"
+            className="mt-1 min-h-11 text-base sm:text-sm"
+            disabled={pending}
+            id={`${inputId}-manual`}
+            maxLength={160}
+            name="skuCode"
+            onChange={(event) => {
+              setSelectedAiSkuId(null);
+              setSkuCode(event.target.value);
+            }}
+            placeholder="TZX 系统 SKU 或自有货 SKU"
+            required
+            value={skuCode}
+          />
+        </div>
 
         <div>
           <label className="text-xs font-medium text-ink" htmlFor={`${inputId}-quantity`}>
@@ -175,6 +186,13 @@ export function ImportRowOverrideForm({
         </p>
       ) : null}
       </form>
+      <ImportRowFulfillmentItemsEditor
+        addAction={addItemAction}
+        batchId={batchId}
+        removeAction={removeItemAction}
+        row={row}
+        updateAction={updateItemAction}
+      />
     </div>
   );
 }

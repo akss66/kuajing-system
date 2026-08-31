@@ -21,6 +21,19 @@ function row(overrides: Partial<EditableImportRow> = {}): EditableImportRow {
     externalSku: "TZX-014-3-lk",
     externalSubOrderNo: "SUB-1",
     fulfillmentMode: "SYSTEM_SKU",
+    fulfillmentItems: [
+      {
+        availableQuantity: 505,
+        effectiveQuantity: 1,
+        fulfillmentMode: "SYSTEM_SKU",
+        id: "row-1",
+        isPrimary: true,
+        position: 1,
+        resolvedSkuId: "sku-14-3",
+        skuCode: "TZX-014-3",
+        unitPriceMilliYuan: 8_000,
+      },
+    ],
     id: "row-1",
     quantity: 1,
     quantityMultiplier: 1,
@@ -44,7 +57,9 @@ describe("ImportReviewTable", () => {
     render(
       <ImportReviewTable
         action={vi.fn()}
+        addItemAction={vi.fn()}
         batchId="batch-1"
+        removeItemAction={vi.fn()}
         rows={[
           row(),
           row({
@@ -57,6 +72,7 @@ describe("ImportReviewTable", () => {
             status: "UNKNOWN_SKU",
           }),
         ]}
+        updateItemAction={vi.fn()}
       />,
     );
 
@@ -95,8 +111,10 @@ describe("ImportReviewTable", () => {
     render(
       <ImportReviewTable
         action={vi.fn()}
+        addItemAction={vi.fn()}
         aiSkuMatching={{ generateAction, rejectAction: vi.fn() }}
         batchId="43f18cb3-9dc2-4651-94d3-e1ed67d89b15"
+        removeItemAction={vi.fn()}
         rows={[
           row({
             id: "row-unknown",
@@ -104,6 +122,7 @@ describe("ImportReviewTable", () => {
             status: "UNKNOWN_SKU",
           }),
         ]}
+        updateItemAction={vi.fn()}
       />,
     );
 

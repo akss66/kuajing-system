@@ -37,6 +37,17 @@ export type EditableImportRow = {
   externalOrderNo: string | null;
   externalSubOrderNo: string | null;
   externalSku: string | null;
+  fulfillmentItems: Array<{
+    availableQuantity: number | null;
+    effectiveQuantity: number;
+    fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+    id: string;
+    isPrimary: boolean;
+    position: number;
+    resolvedSkuId: string | null;
+    skuCode: string;
+    unitPriceMilliYuan: number | null;
+  }>;
   quantity: number | null;
   effectiveQuantity: number | null;
   quantityMultiplier: number;
@@ -79,6 +90,19 @@ export function importRowExplanation(row: EditableImportRow) {
       return "对应 SKU 不可用，请选择同系列替代 SKU、手动输入或调整数量。";
     }
     return row.errorMessage ?? "SKU 不存在、已下架或不可售，请重新选择或手动填写。";
+  }
+  if (row.fulfillmentItems.length > 1) {
+    const systemItemCount = row.fulfillmentItems.filter(
+      (item) => item.fulfillmentMode === "SYSTEM_SKU",
+    ).length;
+    const customerItemCount = row.fulfillmentItems.length - systemItemCount;
+    if (systemItemCount > 0 && customerItemCount > 0) {
+      return "捆绑行包含系统 SKU 和自有货：系统 SKU 收货款并校验库存，自有货商品金额 ¥0；本包裹物流费只收一次 ¥13。";
+    }
+    if (systemItemCount > 0) {
+      return `该上传行将按 ${systemItemCount} 个系统 SKU 发货并分别校验价格、库存；本包裹物流费只收一次 ¥13。`;
+    }
+    return `该上传行包含 ${customerItemCount} 个自有货 SKU，商品金额均为 ¥0；本包裹物流费只收一次 ¥13。`;
   }
   if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
     return "客户自有货：商品金额 ¥0，本包裹仍收物流费 ¥13；正常按平台订单号匹配极风。";

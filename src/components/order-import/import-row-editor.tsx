@@ -35,7 +35,10 @@ function resultMeta(row: EditableImportRow) {
     };
   }
   if (result === "ready") {
-    if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+    const hasSystemSku = row.fulfillmentItems.some(
+      (item) => item.fulfillmentMode === "SYSTEM_SKU",
+    );
+    if (!hasSystemSku) {
       return {
         className: "border-warning/40 bg-warning/5 text-ink",
         icon: Package,
@@ -57,14 +60,20 @@ function resultMeta(row: EditableImportRow) {
 
 export function ImportRowEditor({
   action,
+  addItemAction,
   aiRejectAction,
   batchId,
+  removeItemAction,
   row,
+  updateItemAction,
 }: {
   action: ImportRowAction;
+  addItemAction: ImportRowAction;
   aiRejectAction?: AiSkuMatchAction;
   batchId: string;
+  removeItemAction: ImportRowAction;
   row: EditableImportRow;
+  updateItemAction: ImportRowAction;
 }) {
   const result = resultMeta(row);
   const ResultIcon = result.icon;
@@ -76,19 +85,10 @@ export function ImportRowEditor({
   const [expanded, setExpanded] = useState(
     editable && importRowResult(row) === "failed",
   );
-  const finalSku =
-    row.fulfillmentMode === "CUSTOMER_SUPPLIED"
-      ? row.externalSku ?? "—"
-      : row.resolvedSku?.skuCode ?? "待选择";
-  const availableQuantity = row.resolvedSku
-    ? row.siblingCandidates.find(
-        (candidate) => candidate.id === row.resolvedSku?.id,
-      )?.availableQuantity
-    : undefined;
-  const effectiveQuantity = row.effectiveQuantity ?? row.quantity;
+  const fulfillmentItems = row.fulfillmentItems;
 
   return (
-    <article
+    <div
       aria-label={`Excel 第 ${row.rowNumber} 行`}
       className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgb(0_0_0/0.02)] transition-shadow hover:shadow-lg"
       role="listitem"
@@ -130,25 +130,32 @@ export function ImportRowEditor({
           </div>
         </div>
 
-        <dl className="mt-4 grid gap-3 rounded-xl bg-slate-50/70 p-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(6rem,0.55fr)_minmax(6rem,0.55fr)] sm:p-4">
+        <dl className="mt-4 grid gap-3 rounded-xl bg-slate-50/70 p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,2.2fr)] sm:p-4">
           <div className="min-w-0">
             <dt className="text-xs text-slate-600">原 SKU</dt>
             <dd className="mt-1 break-all text-sm text-ink">{row.externalSku ?? "—"}</dd>
           </div>
           <div className="min-w-0">
-            <dt className="text-xs text-slate-600">最终 SKU</dt>
-            <dd className="mt-1 break-all text-sm font-semibold text-ink">{finalSku}</dd>
-          </div>
-          <div className="tabular-nums">
-            <dt className="text-xs text-slate-600">发货数量</dt>
-            <dd className="mt-1 font-semibold text-ink">{effectiveQuantity ?? "—"}</dd>
-            {row.quantity !== null && effectiveQuantity !== row.quantity ? (
-              <p className="mt-0.5 text-xs text-slate-600">原 {row.quantity}</p>
-            ) : null}
-          </div>
-          <div className="tabular-nums">
-            <dt className="text-xs text-slate-600">可用库存</dt>
-            <dd className="mt-1 text-ink">{row.fulfillmentMode === "CUSTOMER_SUPPLIED" ? "—" : availableQuantity ?? "—"}</dd>
+            <dt className="text-xs text-slate-600">
+              实际发货货品（{fulfillmentItems.length || "待选择"}）
+            </dt>
+            <dd className="mt-1 space-y-1.5">
+              {fulfillmentItems.length ? fulfillmentItems.map((item) => (
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm" key={item.id}>
+                  <span className="min-w-0 break-all font-semibold text-ink">
+                    {item.position}. {item.skuCode}
+                  </span>
+                  <span className="whitespace-nowrap tabular-nums text-ink">
+                    × {item.effectiveQuantity}
+                    <span className="ml-2 text-xs text-muted">
+                      {item.fulfillmentMode === "SYSTEM_SKU" ? `库存 ${item.availableQuantity ?? "—"}` : "仅运费"}
+                    </span>
+                  </span>
+                </div>
+              )) : (
+                <span className="text-sm font-semibold text-ink">待选择</span>
+              )}
+            </dd>
           </div>
         </dl>
         <p className={cn("mt-3 text-xs leading-5", row.status === "READY" ? "text-slate-600" : "text-danger")}>{importRowExplanation(row)}</p>
@@ -162,12 +169,15 @@ export function ImportRowEditor({
         >
           <ImportRowOverrideForm
             action={action}
+            addItemAction={addItemAction}
             aiRejectAction={aiRejectAction}
             batchId={batchId}
+            removeItemAction={removeItemAction}
             row={row}
+            updateItemAction={updateItemAction}
           />
         </div>
       ) : null}
-    </article>
+    </div>
   );
 }

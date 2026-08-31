@@ -6,8 +6,11 @@ import { revalidatePath } from "next/cache";
 import { AccessError, requireCustomer } from "@/modules/identity/guards";
 
 import {
+  addCustomerImportRowFulfillmentItem,
   ImportPreviewError,
   createTemuImportPreview,
+  removeCustomerImportRowFulfillmentItem,
+  updateCustomerImportRowFulfillmentItem,
   updateCustomerImportRowOverride,
 } from "./service";
 import { TemuWorkbookError } from "./temu-parser";
@@ -40,6 +43,22 @@ const rowOverrideSchema = z.object({
     z.string().trim().min(1).max(160).optional(),
   ),
 });
+
+const fulfillmentItemSchema = z.object({
+  batchId: z.string().uuid(),
+  effectiveQuantity: z.coerce.number().int().min(1).max(1_000_000),
+  expectedRevision: z.coerce.number().int().min(0),
+  rowId: z.string().uuid(),
+  skuCode: z.string().trim().min(1).max(160),
+});
+
+const existingFulfillmentItemSchema = fulfillmentItemSchema.extend({
+  itemId: z.string().uuid(),
+});
+
+const removeFulfillmentItemSchema = fulfillmentItemSchema
+  .pick({ batchId: true, expectedRevision: true, rowId: true })
+  .extend({ itemId: z.string().uuid() });
 
 function rowOverrideErrorMessage(error: unknown) {
   const code =
@@ -92,6 +111,87 @@ export async function updateCustomerImportRowAction(
     });
     revalidatePath(`/portal/imports/${parsed.data.batchId}`);
     return { status: "success", message: "已保存并重新校验。" };
+  } catch (error) {
+    return { status: "error", message: rowOverrideErrorMessage(error) };
+  }
+}
+
+function fulfillmentItemValues(formData: FormData) {
+  return {
+    batchId: formData.get("batchId"),
+    effectiveQuantity: formData.get("effectiveQuantity"),
+    expectedRevision: formData.get("expectedRevision"),
+    itemId: formData.get("itemId"),
+    rowId: formData.get("rowId"),
+    skuCode: formData.get("skuCode"),
+  };
+}
+
+export async function addCustomerImportRowFulfillmentItemAction(
+  _previousState: ImportRowOverrideActionState,
+  formData: FormData,
+): Promise<ImportRowOverrideActionState> {
+  const principal = await requireCustomer();
+  const parsed = fulfillmentItemSchema.safeParse(fulfillmentItemValues(formData));
+  if (!parsed.success) {
+    return { status: "error", message: "请填写有效且非空的 SKU 和发货数量。" };
+  }
+  try {
+    await addCustomerImportRowFulfillmentItem({
+      actorUserId: principal.userId,
+      customerId: principal.customerId,
+      ...parsed.data,
+    });
+    revalidatePath(`/portal/imports/${parsed.data.batchId}`);
+    return { status: "success", message: "已添加货品并重新校验。" };
+  } catch (error) {
+    return { status: "error", message: rowOverrideErrorMessage(error) };
+  }
+}
+
+export async function updateCustomerImportRowFulfillmentItemAction(
+  _previousState: ImportRowOverrideActionState,
+  formData: FormData,
+): Promise<ImportRowOverrideActionState> {
+  const principal = await requireCustomer();
+  const parsed = existingFulfillmentItemSchema.safeParse(
+    fulfillmentItemValues(formData),
+  );
+  if (!parsed.success) {
+    return { status: "error", message: "请填写有效且非空的 SKU 和发货数量。" };
+  }
+  try {
+    await updateCustomerImportRowFulfillmentItem({
+      actorUserId: principal.userId,
+      customerId: principal.customerId,
+      ...parsed.data,
+    });
+    revalidatePath(`/portal/imports/${parsed.data.batchId}`);
+    return { status: "success", message: "已更新货品并重新校验。" };
+  } catch (error) {
+    return { status: "error", message: rowOverrideErrorMessage(error) };
+  }
+}
+
+export async function removeCustomerImportRowFulfillmentItemAction(
+  _previousState: ImportRowOverrideActionState,
+  formData: FormData,
+): Promise<ImportRowOverrideActionState> {
+  const principal = await requireCustomer();
+  const parsed = removeFulfillmentItemSchema.safeParse(
+    fulfillmentItemValues(formData),
+  );
+  if (!parsed.success) {
+    return { status: "error", message: "无法识别要删除的货品，请刷新后重试。" };
+  }
+  try {
+    await removeCustomerImportRowFulfillmentItem({
+      actorUserId: principal.userId,
+      customerId: principal.customerId,
+      ...parsed.data,
+    });
+    revalidatePath(`/portal/imports/${parsed.data.batchId}`);
+    return { status: "success", message: "已删除货品并重新校验。" };
   } catch (error) {
     return { status: "error", message: rowOverrideErrorMessage(error) };
   }

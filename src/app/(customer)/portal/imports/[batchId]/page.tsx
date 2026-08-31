@@ -16,7 +16,12 @@ import {
   listActiveAiSkuMatchSuggestions,
 } from "@/modules/ai-sku-matching/service";
 import { requireCustomer } from "@/modules/identity/guards";
-import { updateCustomerImportRowAction } from "@/modules/order-import/actions";
+import {
+  addCustomerImportRowFulfillmentItemAction,
+  removeCustomerImportRowFulfillmentItemAction,
+  updateCustomerImportRowAction,
+  updateCustomerImportRowFulfillmentItemAction,
+} from "@/modules/order-import/actions";
 import { submitImportBatchAction } from "@/modules/orders/actions";
 import { PACKAGE_SHIPPING_FEE_FEN } from "@/modules/orders/pricing";
 import {
@@ -71,15 +76,26 @@ export default async function ImportPreviewPage({
       .filter((value): value is string => Boolean(value)),
   ).size;
   const quantity = readyRows.reduce(
-    (total, row) => total + (row.effectiveQuantity ?? row.quantity ?? 0),
+    (total, row) =>
+      total + row.fulfillmentItems.reduce(
+        (rowTotal, item) => rowTotal + item.effectiveQuantity,
+        0,
+      ),
     0,
   );
   const merchandiseAmountFen = readyRows.reduce((total, row) => {
-    if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") return total;
-    const unitPriceMilliYuan = row.resolvedSku?.unitPriceMilliYuan;
-    const rowQuantity = row.effectiveQuantity ?? row.quantity;
-    if (unitPriceMilliYuan == null || rowQuantity == null) return total;
-    return total + calculateLineAmountFen(rowQuantity, unitPriceMilliYuan);
+    return total + row.fulfillmentItems.reduce((rowTotal, item) => {
+      if (
+        item.fulfillmentMode !== "SYSTEM_SKU" ||
+        item.unitPriceMilliYuan == null
+      ) {
+        return rowTotal;
+      }
+      return rowTotal + calculateLineAmountFen(
+        item.effectiveQuantity,
+        item.unitPriceMilliYuan,
+      );
+    }, 0);
   }, 0);
   const shippingFeeFen = packageCount * PACKAGE_SHIPPING_FEE_FEN;
   const estimatedTotalFen = merchandiseAmountFen + shippingFeeFen;
@@ -138,6 +154,7 @@ export default async function ImportPreviewPage({
 
       <ImportReviewTable
         action={updateCustomerImportRowAction}
+        addItemAction={addCustomerImportRowFulfillmentItemAction}
         aiSkuMatching={
           aiAvailability.enabled
             ? {
@@ -147,10 +164,12 @@ export default async function ImportPreviewPage({
             : undefined
         }
         batchId={preview.batchId}
+        removeItemAction={removeCustomerImportRowFulfillmentItemAction}
         rows={preview.rows.map((row) => ({
           ...row,
           aiSuggestion: aiSuggestionByRow.get(row.id) ?? null,
         }))}
+        updateItemAction={updateCustomerImportRowFulfillmentItemAction}
       />
 
       <section

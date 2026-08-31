@@ -26,17 +26,23 @@ function uniquePackageCount(rows: readonly EditableImportRow[]) {
 
 export function ImportReviewTable({
   action,
+  addItemAction,
   aiSkuMatching,
   batchId,
+  removeItemAction,
   rows,
+  updateItemAction,
 }: {
   action: ImportRowAction;
+  addItemAction: ImportRowAction;
   aiSkuMatching?: {
     generateAction: AiSkuMatchAction;
     rejectAction: AiSkuMatchAction;
   };
   batchId: string;
+  removeItemAction: ImportRowAction;
   rows: EditableImportRow[];
+  updateItemAction: ImportRowAction;
 }) {
   const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
   const attentionCount = rows.filter((row) => importRowResult(row) === "failed").length;
@@ -49,7 +55,11 @@ export function ImportReviewTable({
     ? rows.filter((row) => importRowResult(row) === "failed")
     : rows;
   const quantity = readyRows.reduce(
-    (total, row) => total + (row.effectiveQuantity ?? row.quantity ?? 0),
+    (total, row) =>
+      total + row.fulfillmentItems.reduce(
+        (rowTotal, item) => rowTotal + item.effectiveQuantity,
+        0,
+      ),
     0,
   );
   const metrics = [
@@ -123,10 +133,13 @@ export function ImportReviewTable({
           {visibleRows.map((row) => (
             <ImportRowEditor
               action={action}
+              addItemAction={addItemAction}
               aiRejectAction={aiSkuMatching?.rejectAction}
               batchId={batchId}
               key={`${row.id}:${row.revision}`}
               row={row}
+              removeItemAction={removeItemAction}
+              updateItemAction={updateItemAction}
             />
           ))}
         </div>

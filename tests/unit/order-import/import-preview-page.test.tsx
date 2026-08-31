@@ -71,7 +71,10 @@ vi.mock("@/modules/orders/actions", () => ({
   submitImportBatchAction: vi.fn(),
 }));
 vi.mock("@/modules/order-import/actions", () => ({
+  addCustomerImportRowFulfillmentItemAction: vi.fn(),
+  removeCustomerImportRowFulfillmentItemAction: vi.fn(),
   updateCustomerImportRowAction: vi.fn(),
+  updateCustomerImportRowFulfillmentItemAction: vi.fn(),
 }));
 
 import ImportPreviewPage from "@/app/(customer)/portal/imports/[batchId]/page";
@@ -113,6 +116,7 @@ describe("ImportPreviewPage", () => {
           externalSku: "UNKNOWN-1",
           externalSubOrderNo: "SUB-1",
           fulfillmentMode: "SYSTEM_SKU",
+          fulfillmentItems: [],
           id: "row-1",
           quantity: 1,
           quantityMultiplier: 1,
@@ -167,6 +171,41 @@ describe("ImportPreviewPage", () => {
           externalSku: "SKU-1",
           externalSubOrderNo: "SUB-1",
           fulfillmentMode: "SYSTEM_SKU",
+          fulfillmentItems: [
+            {
+              availableQuantity: 10,
+              effectiveQuantity: 1,
+              fulfillmentMode: "SYSTEM_SKU",
+              id: "row-1",
+              isPrimary: true,
+              position: 1,
+              resolvedSkuId: "sku-1",
+              skuCode: "SKU-1",
+              unitPriceMilliYuan: 1_000,
+            },
+            {
+              availableQuantity: 8,
+              effectiveQuantity: 2,
+              fulfillmentMode: "SYSTEM_SKU",
+              id: "item-2",
+              isPrimary: false,
+              position: 2,
+              resolvedSkuId: "sku-2",
+              skuCode: "TZX-EXTRA",
+              unitPriceMilliYuan: 5_000,
+            },
+            {
+              availableQuantity: null,
+              effectiveQuantity: 3,
+              fulfillmentMode: "CUSTOMER_SUPPLIED",
+              id: "item-3",
+              isPrimary: false,
+              position: 3,
+              resolvedSkuId: null,
+              skuCode: "CUSTOM-EXTRA",
+              unitPriceMilliYuan: null,
+            },
+          ],
           quantity: 1,
           quantityMultiplier: 1,
           resolutionMethod: "EXACT",
@@ -213,12 +252,13 @@ describe("ImportPreviewPage", () => {
     expect(screen.getByText("商品金额")).toBeVisible();
     expect(screen.getByText("物流费")).toBeVisible();
     expect(screen.getByText("预计总额")).toBeVisible();
-    expect(screen.getByText("¥14.00")).toBeVisible();
+    expect(screen.getByText("¥24.00")).toBeVisible();
     expect(workspace).toHaveTextContent("核对结果");
     expect(workspace).toHaveTextContent("可提交1");
     expect(workspace).toHaveTextContent("需处理0");
     expect(workspace).toHaveTextContent("重复跳过0");
     expect(within(workspace).getByRole("list", { name: "订单逐行核对结果" })).toBeVisible();
+    expect(submitBar).toHaveTextContent("1 个包裹 · 6 件商品");
     expect(submitBar).toHaveClass("sticky");
     expect(submitBar).toHaveClass(
       "bottom-[calc(var(--merchant-mobile-dock-height)+env(safe-area-inset-bottom)+0.75rem)]",
@@ -247,6 +287,7 @@ describe("ImportPreviewPage", () => {
           externalSku: "SKU-1",
           externalSubOrderNo: "SUB-1",
           fulfillmentMode: "SYSTEM_SKU",
+          fulfillmentItems: [],
           quantity: 1,
           quantityMultiplier: 1,
           resolutionMethod: "EXACT",

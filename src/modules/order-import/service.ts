@@ -75,6 +75,7 @@ export type ImportPreviewRowView = {
   externalSubOrderNo: string | null;
   externalSku: string | null;
   fulfillmentItems: Array<{
+    availableQuantity: number | null;
     effectiveQuantity: number;
     fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
     id: string;
@@ -82,6 +83,7 @@ export type ImportPreviewRowView = {
     position: number;
     resolvedSkuId: string | null;
     skuCode: string;
+    unitPriceMilliYuan: number | null;
   }>;
   quantity: number | null;
   effectiveQuantity: number | null;
@@ -1676,6 +1678,13 @@ async function enrichPreviewRows(
   const reservedBySku = new Map(
     reservations.map((row) => [row.skuId, row.quantity]),
   );
+  const availableQuantityFor = (skuId: string | null) =>
+    skuId
+      ? Math.max(
+          (totalBySku.get(skuId) ?? 0) - (reservedBySku.get(skuId) ?? 0),
+          0,
+        )
+      : null;
   const siblingsByProduct = new Map<
     string,
     ImportPreviewRowView["siblingCandidates"]
@@ -1712,6 +1721,7 @@ async function enrichPreviewRows(
         ...(row.effectiveQuantity && (resolvedSku || row.finalSkuCode)
           ? [
               {
+                availableQuantity: availableQuantityFor(resolvedSku?.id ?? null),
                 effectiveQuantity: row.effectiveQuantity,
                 fulfillmentMode: row.fulfillmentMode,
                 id: row.id,
@@ -1722,10 +1732,15 @@ async function enrichPreviewRows(
                   row.fulfillmentMode === "CUSTOMER_SUPPLIED"
                     ? row.finalSkuCode!
                     : resolvedSku!.skuCode,
+                unitPriceMilliYuan:
+                  row.fulfillmentMode === "SYSTEM_SKU"
+                    ? resolvedSku!.cargoUnitPriceMilliYuan
+                    : null,
               },
             ]
           : []),
         ...additionalItems.map((item) => ({
+          availableQuantity: availableQuantityFor(item.resolvedSkuId),
           effectiveQuantity: item.effectiveQuantity,
           fulfillmentMode: item.fulfillmentMode,
           id: item.id,
@@ -1736,6 +1751,10 @@ async function enrichPreviewRows(
             item.fulfillmentMode === "CUSTOMER_SUPPLIED"
               ? item.finalSkuCode
               : (anchorById.get(item.resolvedSkuId!)?.skuCode ?? item.finalSkuCode),
+          unitPriceMilliYuan:
+            item.fulfillmentMode === "SYSTEM_SKU"
+              ? (anchorById.get(item.resolvedSkuId!)?.cargoUnitPriceMilliYuan ?? null)
+              : null,
         })),
       ],
       resolvedSku: resolvedSku
