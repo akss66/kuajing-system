@@ -491,7 +491,7 @@ describe("customer-scoped TEMU import preview", () => {
     );
   });
 
-  test("updates rows with CAS while preserving customer-supplied mode", async () => {
+  test("updates rows with CAS while preserving the uploaded SKU across fulfillment modes", async () => {
     const fixture = await createFixture();
     const systemPreview = await createTemuImportPreview({
       actorUserId: "auth-customer-1",
@@ -546,24 +546,51 @@ describe("customer-scoped TEMU import preview", () => {
       effectiveQuantity: 2,
       expectedRevision: externalRow.revision,
       rowId: externalRow.id,
+      skuCode: "  SELLER-CHANGED  ",
     });
     expect(updatedExternal).toMatchObject({
+      externalSku: "QS-OWN",
       effectiveQuantity: 2,
       fulfillmentMode: "CUSTOMER_SUPPLIED",
+      fulfillmentItems: [
+        {
+          effectiveQuantity: 2,
+          fulfillmentMode: "CUSTOMER_SUPPLIED",
+          skuCode: "SELLER-CHANGED",
+        },
+      ],
       resolvedSku: null,
       revision: 1,
     });
+    const updatedToSystem = await updateCustomerImportRowOverride({
+      actorUserId: "auth-customer-1",
+      batchId: externalPreview.batchId,
+      customerId: fixture.customer.id,
+      effectiveQuantity: 3,
+      expectedRevision: 1,
+      rowId: externalRow.id,
+      skuCode: fixture.sku.skuCode,
+    });
+    expect(updatedToSystem).toMatchObject({
+      externalSku: "QS-OWN",
+      effectiveQuantity: 3,
+      fulfillmentMode: "SYSTEM_SKU",
+      fulfillmentItems: [
+        {
+          effectiveQuantity: 3,
+          fulfillmentMode: "SYSTEM_SKU",
+          skuCode: fixture.sku.skuCode,
+        },
+      ],
+      resolvedSku: { id: fixture.sku.id },
+      revision: 2,
+    });
     await expect(
-      updateCustomerImportRowOverride({
-        actorUserId: "auth-customer-1",
-        batchId: externalPreview.batchId,
-        customerId: fixture.customer.id,
-        effectiveQuantity: 2,
-        expectedRevision: 1,
-        rowId: externalRow.id,
-        skuCode: fixture.sku.skuCode,
-      }),
-    ).rejects.toMatchObject({ code: "INVALID_ROW_OVERRIDE" });
+      db
+        .select({ externalSku: orderImportRows.externalSku })
+        .from(orderImportRows)
+        .where(eq(orderImportRows.id, externalRow.id)),
+    ).resolves.toEqual([{ externalSku: "QS-OWN" }]);
   });
 
   test("persists an expired preview before rejecting a row override", async () => {

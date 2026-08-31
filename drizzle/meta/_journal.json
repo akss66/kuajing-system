@@ -239,6 +239,13 @@
       "when": 1787898821883,
       "tag": "0033_loose_gamora",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788150719240,
+      "tag": "0034_faulty_emma_frost",
+      "breakpoints": true
     }
   ]
 }

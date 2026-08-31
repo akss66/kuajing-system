@@ -121,7 +121,7 @@ describe("updateCustomerImportRowAction", () => {
     ["zero quantity", { effectiveQuantity: "0" }],
     ["fractional quantity", { effectiveQuantity: "1.5" }],
     ["oversized quantity", { effectiveQuantity: "1000001" }],
-    ["oversized SKU", { skuCode: "X".repeat(81) }],
+    ["oversized SKU", { skuCode: "X".repeat(161) }],
     ["invalid AI suggestion", { aiSuggestionId: "not-a-uuid" }],
   ])("rejects %s before calling the service", async (_name, override) => {
     const data = validForm();

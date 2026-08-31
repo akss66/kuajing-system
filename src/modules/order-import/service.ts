@@ -73,6 +73,14 @@ export type ImportPreviewRowView = {
   externalOrderNo: string | null;
   externalSubOrderNo: string | null;
   externalSku: string | null;
+  fulfillmentItems: Array<{
+    effectiveQuantity: number;
+    fulfillmentMode: "SYSTEM_SKU" | "CUSTOMER_SUPPLIED";
+    id: string;
+    isPrimary: boolean;
+    resolvedSkuId: string | null;
+    skuCode: string;
+  }>;
   quantity: number | null;
   effectiveQuantity: number | null;
   quantityMultiplier: number;
@@ -336,6 +344,8 @@ function classifiedRowsForStorage(
       errorMessage: null,
       externalOrderNo: row.externalOrderNo,
       externalSku: row.externalSku,
+      finalSkuCode:
+        row.fulfillmentMode === "CUSTOMER_SUPPLIED" ? row.externalSku : null,
       externalSubOrderNo: row.externalSubOrderNo,
       productAttributes: row.productAttributes,
       productName: row.productName,
@@ -357,6 +367,7 @@ function classifiedRowsForStorage(
     errorMessage: issue.message,
     externalOrderNo: null,
     externalSku: null,
+    finalSkuCode: null,
     externalSubOrderNo: null,
     productAttributes: null,
     productName: null,
@@ -739,6 +750,7 @@ async function loadStoredPreviewRows(
       externalOrderNo: orderImportRows.externalOrderNo,
       externalSku: orderImportRows.externalSku,
       externalSubOrderNo: orderImportRows.externalSubOrderNo,
+      finalSkuCode: orderImportRows.finalSkuCode,
       fulfillmentMode: orderImportRows.fulfillmentMode,
       id: orderImportRows.id,
       quantity: orderImportRows.quantity,
@@ -938,6 +950,7 @@ export async function updateCustomerImportRowOverride(input: {
     const [row] = await tx
       .select({
         effectiveQuantity: orderImportRows.effectiveQuantity,
+        finalSkuCode: orderImportRows.finalSkuCode,
         fulfillmentMode: orderImportRows.fulfillmentMode,
         id: orderImportRows.id,
         resolvedSkuId: orderImportRows.resolvedSkuId,
@@ -972,12 +985,18 @@ export async function updateCustomerImportRowOverride(input: {
       );
     }
 
+    let fulfillmentMode = row.fulfillmentMode;
+    let finalSkuCode = row.finalSkuCode;
     let resolvedSkuId = row.resolvedSkuId;
-    if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
-      if (normalizedSkuCode) {
+    if (normalizedSkuCode) {
+      fulfillmentMode = deriveImportSkuResolution(normalizedSkuCode).fulfillmentMode;
+      finalSkuCode = normalizedSkuCode;
+    }
+    if (fulfillmentMode === "CUSTOMER_SUPPLIED") {
+      if (!finalSkuCode) {
         throw new ImportPreviewError(
           "INVALID_ROW_OVERRIDE",
-          "客户自有货不能绑定系统 SKU",
+          "客户自有货 SKU 不能为空",
         );
       }
       resolvedSkuId = null;
@@ -1011,7 +1030,7 @@ export async function updateCustomerImportRowOverride(input: {
       }
       resolvedSkuId = sku.id;
     }
-    if (row.fulfillmentMode === "SYSTEM_SKU" && !resolvedSkuId) {
+    if (fulfillmentMode === "SYSTEM_SKU" && !resolvedSkuId) {
       throw new ImportPreviewError(
         "SKU_NOT_AVAILABLE",
         "请精确填写一个可售系统 SKU",
@@ -1023,7 +1042,7 @@ export async function updateCustomerImportRowOverride(input: {
       | undefined;
     if (input.aiSuggestionId) {
       if (
-        row.fulfillmentMode !== "SYSTEM_SKU" ||
+        fulfillmentMode !== "SYSTEM_SKU" ||
         row.status !== "UNKNOWN_SKU" ||
         !resolvedSkuId
       ) {
@@ -1076,6 +1095,8 @@ export async function updateCustomerImportRowOverride(input: {
 
     if (
       row.effectiveQuantity === input.effectiveQuantity &&
+      row.finalSkuCode === finalSkuCode &&
+      row.fulfillmentMode === fulfillmentMode &&
       row.resolvedSkuId === resolvedSkuId &&
       !aiSuggestion
     ) {
@@ -1089,8 +1110,10 @@ export async function updateCustomerImportRowOverride(input: {
         effectiveQuantity: input.effectiveQuantity,
         errorCode: null,
         errorMessage: null,
+        finalSkuCode,
+        fulfillmentMode,
         resolutionMethod:
-          row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+          fulfillmentMode === "CUSTOMER_SUPPLIED"
             ? "CUSTOMER_SUPPLIED"
             : aiSuggestion
               ? "AI_CONFIRMED"
@@ -1195,8 +1218,8 @@ export async function updateCustomerImportRowOverride(input: {
 
 type StoredPreviewRow = Omit<
   ImportPreviewRowView,
-  "resolvedSku" | "siblingCandidates"
-> & { resolvedSkuId: string | null };
+  "fulfillmentItems" | "resolvedSku" | "siblingCandidates"
+> & { finalSkuCode: string | null; resolvedSkuId: string | null };
 
 async function enrichPreviewRows(
   tx: Pick<DbTransaction, "select">,
@@ -1312,6 +1335,22 @@ async function enrichPreviewRows(
     }
     return {
       ...row,
+      fulfillmentItems:
+        row.effectiveQuantity && (resolvedSku || row.finalSkuCode)
+          ? [
+              {
+                effectiveQuantity: row.effectiveQuantity,
+                fulfillmentMode: row.fulfillmentMode,
+                id: row.id,
+                isPrimary: true,
+                resolvedSkuId: resolvedSku?.id ?? null,
+                skuCode:
+                  row.fulfillmentMode === "CUSTOMER_SUPPLIED"
+                    ? row.finalSkuCode!
+                    : resolvedSku!.skuCode,
+              },
+            ]
+          : [],
       resolvedSku: resolvedSku
         ? {
             id: resolvedSku.id,

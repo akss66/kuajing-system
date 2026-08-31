@@ -295,6 +295,7 @@ export const orderImportRows = pgTable(
     externalOrderNo: varchar("external_order_no", { length: 160 }),
     externalSubOrderNo: varchar("external_sub_order_no", { length: 160 }),
     externalSku: varchar("external_sku", { length: 160 }),
+    finalSkuCode: varchar("final_sku_code", { length: 160 }),
     productName: text("product_name"),
     productAttributes: text("product_attributes"),
     quantity: integer("quantity"),
@@ -344,7 +345,7 @@ export const orderImportRows = pgTable(
     check("order_import_rows_revision_non_negative", sql`${table.revision} >= 0`),
     check(
       "order_import_rows_mode_resolution_consistent",
-      sql`(${table.fulfillmentMode} = 'SYSTEM_SKU' and ${table.resolutionMethod} <> 'CUSTOMER_SUPPLIED') or (${table.fulfillmentMode} = 'CUSTOMER_SUPPLIED' and ${table.resolutionMethod} = 'CUSTOMER_SUPPLIED' and ${table.resolvedSkuId} is null)`,
+      sql`(${table.fulfillmentMode} = 'SYSTEM_SKU' and ${table.resolutionMethod} <> 'CUSTOMER_SUPPLIED') or (${table.fulfillmentMode} = 'CUSTOMER_SUPPLIED' and ${table.resolutionMethod} = 'CUSTOMER_SUPPLIED' and ${table.resolvedSkuId} is null and nullif(trim(${table.finalSkuCode}), '') is not null)`,
     ),
     check(
       "order_import_rows_ready_fields_consistent",
@@ -831,7 +832,7 @@ export const orderLines = pgTable(
     deduplicationActive: boolean("deduplication_active").default(true).notNull(),
     externalSubOrderNo: varchar("external_sub_order_no", { length: 160 }),
     externalSku: varchar("external_sku", { length: 160 }),
-    skuCodeSnapshot: varchar("sku_code_snapshot", { length: 80 }).notNull(),
+    skuCodeSnapshot: varchar("sku_code_snapshot", { length: 160 }).notNull(),
     skuNameSnapshot: varchar("sku_name_snapshot", { length: 200 }).notNull(),
     quantity: integer("quantity").notNull(),
     unitPriceMilliYuan: integer("unit_price_milli_yuan").default(0).notNull(),

@@ -37,7 +37,7 @@ const rowOverrideSchema = z.object({
       typeof value === "string" && value.trim().length > 0
         ? value
         : undefined,
-    z.string().trim().min(1).max(80).optional(),
+    z.string().trim().min(1).max(160).optional(),
   ),
 });
 
