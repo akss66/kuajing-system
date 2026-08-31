@@ -24,7 +24,10 @@ import {
   walletTransactions,
 } from "@/db/schema";
 import { getAvailableQuantity } from "@/modules/inventory/queries";
-import { createTemuImportPreview } from "@/modules/order-import/service";
+import {
+  addCustomerImportRowFulfillmentItem,
+  createTemuImportPreview,
+} from "@/modules/order-import/service";
 import { TEMU_EXPORT_HEADERS } from "@/modules/order-import/temu-parser";
 import { submitTemuImportBatch } from "@/modules/orders/submission";
 import { cancelFulfillmentOrder } from "@/modules/orders/lifecycle";
@@ -712,6 +715,98 @@ describe("atomic TEMU take-order submission", () => {
       expect.arrayContaining([
         { amount: 1_000, kind: "SYSTEM_SKU", quantity: 2 },
         { amount: 0, kind: "CUSTOMER_SUPPLIED", quantity: 1 },
+      ]),
+    );
+  });
+
+  test("expands one uploaded row into mixed fulfillment lines without duplicating shipping", async () => {
+    const { customer, store } = await createCustomerAndStore();
+    const sku = await createSku({
+      customerId: customer.id,
+      defaultPriceFen: 500,
+      externalSku: "TZX-BUNDLE-SYSTEM",
+      storeId: store.id,
+      totalQuantity: 10,
+    });
+    const preview = await createPreview({
+      customerId: customer.id,
+      storeId: store.id,
+      rows: [
+        {
+          订单号: "PO-BUNDLE-SUBMIT",
+          子订单号: "SUB-BUNDLE-SUBMIT",
+          SKU货号: "SELLER-BUNDLE-ORIGINAL",
+        },
+      ],
+    });
+    const row = preview.rows[0];
+    await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+      effectiveQuantity: 2,
+      expectedRevision: row.revision,
+      rowId: row.id,
+      skuCode: sku.skuCode,
+    });
+    await addCustomerImportRowFulfillmentItem({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+      effectiveQuantity: 3,
+      expectedRevision: 1,
+      rowId: row.id,
+      skuCode: "SELLER-BUNDLE-GIFT",
+    });
+
+    const submitted = await submitTemuImportBatch({
+      actorUserId: "auth-customer-submit",
+      batchId: preview.batchId,
+      customerId: customer.id,
+    });
+
+    expect(submitted).toMatchObject({
+      totalAmountFen: 2_300,
+      totalPackageCount: 1,
+      totalQuantity: 6,
+    });
+    expect(await db.select().from(inventoryReservations)).toEqual([
+      expect.objectContaining({ quantity: 2, skuId: sku.id }),
+    ]);
+    expect(await db.select().from(orderShipments)).toEqual([
+      expect.objectContaining({ shippingFeeFen: 1_300 }),
+    ]);
+    expect(
+      (await db.select().from(orderLines)).map((line) => ({
+        amount: line.lineAmountFen,
+        finalSku: line.skuCodeSnapshot,
+        kind: line.lineKind,
+        originalSku: line.externalSku,
+        quantity: line.quantity,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          amount: 0,
+          finalSku: "SELLER-BUNDLE-ORIGINAL",
+          kind: "CUSTOMER_SUPPLIED",
+          originalSku: "SELLER-BUNDLE-ORIGINAL",
+          quantity: 1,
+        },
+        {
+          amount: 1_000,
+          finalSku: sku.skuCode,
+          kind: "SYSTEM_SKU",
+          originalSku: "SELLER-BUNDLE-ORIGINAL",
+          quantity: 2,
+        },
+        {
+          amount: 0,
+          finalSku: "SELLER-BUNDLE-GIFT",
+          kind: "CUSTOMER_SUPPLIED",
+          originalSku: "SELLER-BUNDLE-ORIGINAL",
+          quantity: 3,
+        },
       ]),
     );
   });

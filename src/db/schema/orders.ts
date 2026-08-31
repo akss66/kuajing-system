@@ -881,6 +881,7 @@ export const orderLines = pgTable(
     deduplicationActive: boolean("deduplication_active").default(true).notNull(),
     externalSubOrderNo: varchar("external_sub_order_no", { length: 160 }),
     externalSku: varchar("external_sku", { length: 160 }),
+    linePosition: integer("line_position").default(1).notNull(),
     skuCodeSnapshot: varchar("sku_code_snapshot", { length: 160 }).notNull(),
     skuNameSnapshot: varchar("sku_name_snapshot", { length: 200 }).notNull(),
     quantity: integer("quantity").notNull(),
@@ -903,10 +904,11 @@ export const orderLines = pgTable(
       foreignColumns: [orderShipments.id, orderShipments.orderId],
     }).onDelete("restrict"),
     uniqueIndex("order_lines_store_external_sub_order_unique")
-      .on(table.storeId, table.externalSubOrderNo)
+      .on(table.storeId, table.externalSubOrderNo, table.linePosition)
       .where(
         sql`${table.externalSubOrderNo} is not null and ${table.deduplicationActive} = true`,
       ),
+    check("order_lines_position_positive", sql`${table.linePosition} > 0`),
     check("order_lines_quantity_positive", sql`${table.quantity} > 0`),
     check(
       "order_lines_unit_price_milli_yuan_non_negative",

@@ -6,6 +6,7 @@ import {
   fulfillmentOrders,
   inventoryReservations,
   orderImportBatches,
+  orderImportRowFulfillmentItems,
   orderImportRows,
   orderLines,
   orderShipments,
@@ -198,7 +199,9 @@ export async function submitTemuImportBatch(input: {
         externalSku: orderImportRows.externalSku,
         externalSubOrderNo: orderImportRows.externalSubOrderNo,
         effectiveQuantity: orderImportRows.effectiveQuantity,
+        finalSkuCode: orderImportRows.finalSkuCode,
         fulfillmentMode: orderImportRows.fulfillmentMode,
+        id: orderImportRows.id,
         productName: orderImportRows.productName,
         quantity: orderImportRows.quantity,
         recipientPayloadEncrypted: orderImportRows.recipientPayloadEncrypted,
@@ -311,6 +314,7 @@ export async function submitTemuImportBatch(input: {
         row.quantity <= 0 ||
         !row.effectiveQuantity ||
         row.effectiveQuantity <= 0 ||
+        (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && !row.finalSkuCode) ||
         (row.fulfillmentMode === "SYSTEM_SKU" && !row.resolvedSkuId) ||
         (row.fulfillmentMode === "CUSTOMER_SUPPLIED" && row.resolvedSkuId)
       ) {
@@ -321,11 +325,56 @@ export async function submitTemuImportBatch(input: {
       }
     }
 
-    const systemRows = readyRows.filter(
-      (row) => row.fulfillmentMode === "SYSTEM_SKU",
+    const additionalItems = await tx
+      .select({
+        effectiveQuantity: orderImportRowFulfillmentItems.effectiveQuantity,
+        finalSkuCode: orderImportRowFulfillmentItems.finalSkuCode,
+        fulfillmentMode: orderImportRowFulfillmentItems.fulfillmentMode,
+        position: orderImportRowFulfillmentItems.position,
+        resolvedSkuId: orderImportRowFulfillmentItems.resolvedSkuId,
+        rowId: orderImportRowFulfillmentItems.rowId,
+      })
+      .from(orderImportRowFulfillmentItems)
+      .where(
+        inArray(
+          orderImportRowFulfillmentItems.rowId,
+          readyRows.map((row) => row.id),
+        ),
+      )
+      .orderBy(
+        asc(orderImportRowFulfillmentItems.rowId),
+        asc(orderImportRowFulfillmentItems.position),
+      )
+      .for("share");
+    const additionalItemsByRowId = new Map<string, typeof additionalItems>();
+    for (const item of additionalItems) {
+      const items = additionalItemsByRowId.get(item.rowId) ?? [];
+      items.push(item);
+      additionalItemsByRowId.set(item.rowId, items);
+    }
+    const readyItems = readyRows.flatMap((row) => [
+      {
+        effectiveQuantity: row.effectiveQuantity!,
+        finalSkuCode: row.finalSkuCode,
+        fulfillmentMode: row.fulfillmentMode,
+        position: 1,
+        resolvedSkuId: row.resolvedSkuId,
+        row,
+      },
+      ...(additionalItemsByRowId.get(row.id) ?? []).map((item) => ({
+        effectiveQuantity: item.effectiveQuantity,
+        finalSkuCode: item.finalSkuCode,
+        fulfillmentMode: item.fulfillmentMode,
+        position: item.position,
+        resolvedSkuId: item.resolvedSkuId,
+        row,
+      })),
+    ]);
+    const systemRows = readyItems.filter(
+      (item) => item.fulfillmentMode === "SYSTEM_SKU",
     );
     const skuIds = [
-      ...new Set(systemRows.map((row) => row.resolvedSkuId!)),
+      ...new Set(systemRows.map((item) => item.resolvedSkuId!)),
     ].sort();
     const skuRows = await tx
       .select({
@@ -350,22 +399,41 @@ export async function submitTemuImportBatch(input: {
       );
     });
     if (unavailableSkuIds.length > 0) {
+      const affectedRowIds = [
+        ...new Set(
+          readyItems
+            .filter(
+              (item) =>
+                item.resolvedSkuId &&
+                unavailableSkuIds.includes(item.resolvedSkuId),
+            )
+            .map((item) => item.row.id),
+        ),
+      ];
       const reclassifiedRows = await tx
         .update(orderImportRows)
         .set({
           errorCode: "SKU_UNAVAILABLE",
           errorMessage: "SKU 已下架或不可售，请联系管理员处理",
-          resolvedSkuId: null,
           status: "UNKNOWN_SKU",
         })
         .where(
           and(
             eq(orderImportRows.batchId, batch.id),
             eq(orderImportRows.status, "READY"),
-            inArray(orderImportRows.resolvedSkuId, unavailableSkuIds),
+            inArray(orderImportRows.id, affectedRowIds),
           ),
         )
         .returning({ rowNumber: orderImportRows.rowNumber });
+      await tx
+        .update(orderImportRows)
+        .set({ resolvedSkuId: null })
+        .where(
+          and(
+            eq(orderImportRows.batchId, batch.id),
+            inArray(orderImportRows.resolvedSkuId, unavailableSkuIds),
+          ),
+        );
       if (reclassifiedRows.length > 0) {
         await tx
           .update(orderImportBatches)
@@ -411,11 +479,11 @@ export async function submitTemuImportBatch(input: {
     const quantityBySkuId = new Map<string, number>();
     let merchandiseAmountFen = 0;
     let totalQuantity = 0;
-    for (const row of readyRows) {
-      const quantity = row.effectiveQuantity!;
+    for (const item of readyItems) {
+      const quantity = item.effectiveQuantity;
       totalQuantity = safeAdd(totalQuantity, quantity);
-      if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") continue;
-      const skuId = row.resolvedSkuId!;
+      if (item.fulfillmentMode === "CUSTOMER_SUPPLIED") continue;
+      const skuId = item.resolvedSkuId!;
       const price = priceBySkuId.get(skuId)!;
       quantityBySkuId.set(
         skuId,
@@ -531,17 +599,19 @@ export async function submitTemuImportBatch(input: {
     );
 
     await tx.insert(orderLines).values(
-      readyRows.map((row) => {
-        if (row.fulfillmentMode === "CUSTOMER_SUPPLIED") {
+      readyItems.map((item) => {
+        const row = item.row;
+        if (item.fulfillmentMode === "CUSTOMER_SUPPLIED") {
           return {
             externalSku: row.externalSku!,
             externalSubOrderNo: row.externalSubOrderNo!,
             lineAmountFen: 0,
             lineKind: "CUSTOMER_SUPPLIED" as const,
+            linePosition: item.position,
             orderId,
-            quantity: row.effectiveQuantity!,
+            quantity: item.effectiveQuantity,
             shipmentId: shipmentIdByExternalOrder.get(row.externalOrderNo!)!,
-            skuCodeSnapshot: row.externalSku!,
+            skuCodeSnapshot: item.finalSkuCode!,
             skuId: null,
             skuNameSnapshot: row.productName || "客户自有货",
             storeId: batch.storeId,
@@ -549,18 +619,19 @@ export async function submitTemuImportBatch(input: {
             unitPriceMilliYuan: 0,
           };
         }
-        const sku = skuById.get(row.resolvedSkuId!)!;
+        const sku = skuById.get(item.resolvedSkuId!)!;
         const price = priceBySkuId.get(sku.id)!;
         return {
           externalSku: row.externalSku!,
           externalSubOrderNo: row.externalSubOrderNo!,
           lineAmountFen: calculateLineAmountFen(
-            row.effectiveQuantity!,
+            item.effectiveQuantity,
             price.unitPriceMilliYuan,
           ),
+          linePosition: item.position,
           orderId,
           lineKind: "SYSTEM_SKU" as const,
-          quantity: row.effectiveQuantity!,
+          quantity: item.effectiveQuantity,
           shipmentId: shipmentIdByExternalOrder.get(row.externalOrderNo!)!,
           skuCodeSnapshot: sku.skuCode,
           skuId: sku.id,
