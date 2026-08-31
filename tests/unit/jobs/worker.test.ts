@@ -20,6 +20,14 @@ const configMocks = vi.hoisted(() => ({
 const aiSkuMatchMocks = vi.hoisted(() => ({
   deleteExpiredAiSkuMatchRecords: vi.fn(async () => 0),
 }));
+const workerHealthMocks = vi.hoisted(() => ({
+  areExpectedWorkersActive: vi.fn(() => true),
+  heartbeat: vi.fn(),
+  markReady: vi.fn(),
+  markStopping: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+}));
 
 vi.mock("pg-boss", () => ({
   PgBoss: class MockPgBoss {
@@ -77,6 +85,17 @@ vi.mock("@/modules/orders/lifecycle", () => ({
 }));
 
 vi.mock("@/modules/ai-sku-matching/service", () => aiSkuMatchMocks);
+
+vi.mock("@/jobs/worker-health", () => ({
+  areExpectedWorkersActive: workerHealthMocks.areExpectedWorkersActive,
+  createWorkerHealthMonitor: vi.fn(() => ({
+    heartbeat: workerHealthMocks.heartbeat,
+    markReady: workerHealthMocks.markReady,
+    markStopping: workerHealthMocks.markStopping,
+    start: workerHealthMocks.start,
+    stop: workerHealthMocks.stop,
+  })),
+}));
 
 vi.mock("@/modules/reports/stock-coverage", () => ({
   createDailyStockCoverageAlerts: vi.fn(async () => 0),
@@ -144,6 +163,12 @@ describe("worker Feishu bootstrap", () => {
     configMocks.readFeishuApiBaseUrl.mockClear();
     configMocks.readFeishuConfig.mockClear();
     aiSkuMatchMocks.deleteExpiredAiSkuMatchRecords.mockClear();
+    workerHealthMocks.areExpectedWorkersActive.mockClear();
+    workerHealthMocks.heartbeat.mockClear();
+    workerHealthMocks.markReady.mockClear();
+    workerHealthMocks.markStopping.mockClear();
+    workerHealthMocks.start.mockClear();
+    workerHealthMocks.stop.mockClear();
     replaceProcessEnv({
       DATABASE_URL: "postgres://tongzhouxing:tongzhouxing@127.0.0.1:5432/tongzhouxing_test",
     });
