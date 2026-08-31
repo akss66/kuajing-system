@@ -527,6 +527,99 @@ describe("offline payment and order lifecycle", () => {
     });
   });
 
+  test("customer order detail keeps bundled lines grouped by uploaded sub-order", async () => {
+    const { customer, order, sku, store } = await createOrder();
+    const [shipmentA, shipmentB] = await db
+      .insert(orderShipments)
+      .values([
+        {
+          externalOrderNo: "PACKAGE-A",
+          orderId: order.id,
+          recipientPayloadEncrypted: "encrypted-a",
+          storeId: store.id,
+        },
+        {
+          externalOrderNo: "PACKAGE-B",
+          orderId: order.id,
+          recipientPayloadEncrypted: "encrypted-b",
+          storeId: store.id,
+        },
+      ])
+      .returning();
+    const createdAt = new Date("2026-08-12T10:01:00.000Z");
+    await db.insert(orderLines).values([
+      {
+        createdAt,
+        externalSubOrderNo: "SUB-A",
+        lineAmountFen: 500,
+        linePosition: 1,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipmentA.id,
+        skuCodeSnapshot: "A-1",
+        skuId: sku.id,
+        skuNameSnapshot: "A primary",
+        storeId: store.id,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5_000,
+      },
+      {
+        createdAt,
+        externalSubOrderNo: "SUB-B",
+        lineAmountFen: 500,
+        linePosition: 1,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipmentB.id,
+        skuCodeSnapshot: "B-1",
+        skuId: sku.id,
+        skuNameSnapshot: "B primary",
+        storeId: store.id,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5_000,
+      },
+      {
+        createdAt,
+        externalSubOrderNo: "SUB-A",
+        lineAmountFen: 500,
+        linePosition: 2,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipmentA.id,
+        skuCodeSnapshot: "A-2",
+        skuId: sku.id,
+        skuNameSnapshot: "A bundled",
+        storeId: store.id,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5_000,
+      },
+      {
+        createdAt,
+        externalSubOrderNo: "SUB-B",
+        lineAmountFen: 500,
+        linePosition: 2,
+        orderId: order.id,
+        quantity: 1,
+        shipmentId: shipmentB.id,
+        skuCodeSnapshot: "B-2",
+        skuId: sku.id,
+        skuNameSnapshot: "B bundled",
+        storeId: store.id,
+        unitPriceFen: 500,
+        unitPriceMilliYuan: 5_000,
+      },
+    ]);
+
+    const detail = await getCustomerOrderDetail(customer.id, order.id);
+
+    expect(detail?.lines.map((line) => line.skuCode)).toEqual([
+      "A-1",
+      "A-2",
+      "B-1",
+      "B-2",
+    ]);
+  });
+
   test("customer order detail returns each order allocation from a mixed settlement batch", async () => {
     const first = await createOrder({
       paymentMode: "MIXED",

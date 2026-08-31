@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -149,8 +149,15 @@ export async function getCustomerOrderDetail(customerId: string, orderId: string
         unitPriceMilliYuan: orderLines.unitPriceMilliYuan,
       })
       .from(orderLines)
+      .leftJoin(orderShipments, eq(orderShipments.id, orderLines.shipmentId))
       .where(eq(orderLines.orderId, order.id))
-      .orderBy(orderLines.linePosition, orderLines.createdAt),
+      .orderBy(
+        asc(orderShipments.externalOrderNo),
+        asc(orderLines.externalSubOrderNo),
+        asc(orderLines.linePosition),
+        asc(orderLines.createdAt),
+        asc(orderLines.id),
+      ),
     db
       .select({
         amountFen: paymentClaims.amountFen,
@@ -398,8 +405,15 @@ export async function getAdminOrderDetail(orderId: string) {
         unitPriceMilliYuan: orderLines.unitPriceMilliYuan,
       })
       .from(orderLines)
+      .leftJoin(orderShipments, eq(orderShipments.id, orderLines.shipmentId))
       .where(eq(orderLines.orderId, orderId))
-      .orderBy(orderLines.linePosition, orderLines.createdAt),
+      .orderBy(
+        asc(orderShipments.externalOrderNo),
+        asc(orderLines.externalSubOrderNo),
+        asc(orderLines.linePosition),
+        asc(orderLines.createdAt),
+        asc(orderLines.id),
+      ),
     db
       .select({ refundedAt: walletTransactions.createdAt })
       .from(walletTransactions)
