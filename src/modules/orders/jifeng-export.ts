@@ -22,6 +22,7 @@ export const JIFENG_EXPORT_HEADERS = [
   "个人姓名",
   "店铺名称",
   "商品中文名称",
+  "原SKU货号",
   "SKU货号",
   "应履约件数",
   "申报单价",
@@ -37,11 +38,11 @@ export const JIFENG_EXPORT_HEADERS = [
 ] as const;
 
 const TEMPLATE_COLUMN_WIDTHS = [
-  24.625, 11.875, 11.875, 17.375, 12.625, 14.625, 12.625, 14.625,
-  14.625, 14.625, 15.125, 14.625, 14.625, 14.625, 17.375, 24,
+  24.625, 11.875, 11.875, 17.375, 17.375, 12.625, 14.625, 12.625,
+  14.625, 14.625, 14.625, 15.125, 14.625, 14.625, 14.625, 17.375, 24,
 ] as const;
 
-const REQUIRED_HEADER_COLUMNS = new Set([2, 3, 4, 5, 6, 15]);
+const REQUIRED_HEADER_COLUMNS = new Set([2, 3, 4, 5, 6, 7, 16]);
 
 const recipientSchema = z.object({
   addressLine1: z.string(),
@@ -64,6 +65,7 @@ export type JifengExportRow = {
   customerName: string;
   declarationUnitPriceFen: number | null;
   externalOrderNo: string;
+  externalSku: string | null;
   logisticsProductCode: string;
   phone: string;
   postalCode: string;
@@ -113,7 +115,7 @@ export async function buildJifengExportWorkbook(
       size: 14,
     };
   });
-  header.getCell(6).numFmt = "0_ ";
+  header.getCell(7).numFmt = "0_ ";
 
   for (const row of rows) {
     const worksheetRow = worksheet.addRow([
@@ -121,6 +123,7 @@ export async function buildJifengExportWorkbook(
       row.customerName,
       row.storeName,
       row.skuName,
+      row.externalSku ?? "",
       row.skuCode,
       row.quantity,
       row.declarationUnitPriceFen === null
@@ -136,8 +139,8 @@ export async function buildJifengExportWorkbook(
       row.addressLine2,
       row.logisticsProductCode,
     ]);
-    worksheetRow.getCell(6).numFmt = "0";
-    worksheetRow.getCell(7).numFmt = "0.00";
+    worksheetRow.getCell(7).numFmt = "0";
+    worksheetRow.getCell(8).numFmt = "0.00";
   }
 
   return workbook.xlsx.writeBuffer();
@@ -154,6 +157,7 @@ export async function exportJifengOrdersToXlsx(input: {
       customerName: customers.name,
       declarationUnitPriceFen: skus.declarationUnitPriceFen,
       externalOrderNo: orderShipments.externalOrderNo,
+      externalSku: orderLines.externalSku,
       lineCreatedAt: orderLines.createdAt,
       lineId: orderLines.id,
       orderId: fulfillmentOrders.id,
@@ -234,6 +238,7 @@ export async function exportJifengOrdersToXlsx(input: {
       customerName: rawRow.customerContactName?.trim() || rawRow.customerName,
       declarationUnitPriceFen: rawRow.declarationUnitPriceFen,
       externalOrderNo: rawRow.externalOrderNo,
+      externalSku: rawRow.externalSku,
       logisticsProductCode: "",
       phone: recipient.phone,
       postalCode: recipient.postalCode,

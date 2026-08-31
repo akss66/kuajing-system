@@ -11,6 +11,7 @@ const expectedHeaders = [
   "个人姓名",
   "店铺名称",
   "商品中文名称",
+  "原SKU货号",
   "SKU货号",
   "应履约件数",
   "申报单价",
@@ -26,7 +27,7 @@ const expectedHeaders = [
 ] as const;
 
 describe("Jifeng manual shipment workbook", () => {
-  test("matches the supplied 16-column template and emits one row per shipment line", async () => {
+  test("matches the supplied 17-column template and keeps original and matched SKUs distinct", async () => {
     expect(JIFENG_EXPORT_HEADERS).toEqual(expectedHeaders);
 
     const bytes = await buildJifengExportWorkbook([
@@ -38,6 +39,7 @@ describe("Jifeng manual shipment workbook", () => {
         customerName: "陆坤",
         declarationUnitPriceFen: 345,
         externalOrderNo: "PO-OTTAWA-001",
+        externalSku: "TEMU-BLACK-001",
         logisticsProductCode: "",
         phone: "+1 613 555 0100",
         postalCode: "K1A 0B1",
@@ -56,6 +58,7 @@ describe("Jifeng manual shipment workbook", () => {
         customerName: "陆坤",
         declarationUnitPriceFen: 500,
         externalOrderNo: "PO-OTTAWA-001",
+        externalSku: null,
         logisticsProductCode: "",
         phone: "+1 613 555 0100",
         postalCode: "K1A 0B1",
@@ -73,7 +76,7 @@ describe("Jifeng manual shipment workbook", () => {
     const worksheet = workbook.getWorksheet("Sheet1");
 
     expect(worksheet).toBeDefined();
-    expect(worksheet?.columnCount).toBe(16);
+    expect(worksheet?.columnCount).toBe(17);
     expect(worksheet?.rowCount).toBe(3);
     expect(worksheet?.getRow(1).values).toEqual([, ...expectedHeaders]);
     expect(worksheet?.getRow(2).values).toEqual([
@@ -82,6 +85,7 @@ describe("Jifeng manual shipment workbook", () => {
       "陆坤",
       "渥太华一店",
       "纯棉收纳袋",
+      "TEMU-BLACK-001",
       "TZX-001",
       2,
       3.45,
@@ -96,12 +100,14 @@ describe("Jifeng manual shipment workbook", () => {
       "",
     ]);
     expect(worksheet?.getRow(3).getCell(1).value).toBe("PO-OTTAWA-001");
-    expect(worksheet?.getRow(3).getCell(5).value).toBe("TZX-002");
-    expect(String(worksheet?.getRow(2).getCell(5).value)).not.toContain("\n");
+    expect(worksheet?.getRow(3).getCell(5).value).toBe("");
+    expect(worksheet?.getRow(3).getCell(6).value).toBe("TZX-002");
+    expect(String(worksheet?.getRow(2).getCell(6).value)).not.toContain("\n");
 
     expect(worksheet?.getRow(1).height).toBe(32);
     expect(worksheet?.getColumn(1).width).toBe(24.625);
-    expect(worksheet?.getColumn(16).width).toBe(24);
+    expect(worksheet?.getColumn(5).width).toBe(17.375);
+    expect(worksheet?.getColumn(17).width).toBe(24);
     expect(worksheet?.getRow(1).getCell(1).font).toMatchObject({
       bold: true,
       name: "宋体",

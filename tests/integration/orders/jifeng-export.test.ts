@@ -201,6 +201,7 @@ async function seedExportScenario() {
       orderId: selectedOrder.id,
       quantity: 2,
       shipmentId: activeShipment.id,
+      externalSku: "TEMU-ORIGINAL-001",
       skuCodeSnapshot: "TZX-001",
       skuId: sku.id,
       skuNameSnapshot: "纯棉收纳袋",
@@ -213,6 +214,7 @@ async function seedExportScenario() {
       orderId: selectedOrder.id,
       quantity: 1,
       shipmentId: activeShipment.id,
+      externalSku: "TEMU-ORIGINAL-002",
       skuCodeSnapshot: "TZX-002",
       skuId: sku.id,
       skuNameSnapshot: "旅行收纳包",
@@ -402,10 +404,13 @@ describe("POST /api/admin/orders/jifeng-export", () => {
     expect(worksheet?.rowCount).toBe(3);
     expect(worksheet?.getRow(2).getCell(1).value).toMatch(/-ACTIVE$/);
     expect(worksheet?.getRow(2).getCell(2).value).toBe("陆坤");
-    expect(worksheet?.getRow(2).getCell(5).value).toBe("TZX-001");
-    expect(worksheet?.getRow(2).getCell(7).value).toBe(3.45);
-    expect(worksheet?.getRow(2).getCell(8).value).toBe("Alice Chen");
-    expect(worksheet?.getRow(3).getCell(5).value).toBe("TZX-002");
+    expect(worksheet?.getRow(1).getCell(5).value).toBe("原SKU货号");
+    expect(worksheet?.getRow(2).getCell(5).value).toBe("TEMU-ORIGINAL-001");
+    expect(worksheet?.getRow(2).getCell(6).value).toBe("TZX-001");
+    expect(worksheet?.getRow(2).getCell(8).value).toBe(3.45);
+    expect(worksheet?.getRow(2).getCell(9).value).toBe("Alice Chen");
+    expect(worksheet?.getRow(3).getCell(5).value).toBe("TEMU-ORIGINAL-002");
+    expect(worksheet?.getRow(3).getCell(6).value).toBe("TZX-002");
 
     const exportedText = JSON.stringify(
       worksheet?.getRows(1, worksheet.rowCount)?.map((row) => row.values),
